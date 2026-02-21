@@ -12,6 +12,7 @@ import type {
   FlyMachine,
   FlyMachineConfig,
   FlyVolume,
+  FlyVolumeSnapshot,
   CreateVolumeRequest,
   CreateMachineRequest,
   FlyWaitableState,
@@ -237,6 +238,15 @@ export async function deleteVolume(config: FlyClientConfig, volumeId: string): P
   await assertOk(resp, 'deleteVolume');
 }
 
+export async function listVolumeSnapshots(
+  config: FlyClientConfig,
+  volumeId: string
+): Promise<FlyVolumeSnapshot[]> {
+  const resp = await flyFetch(config, `/volumes/${volumeId}/snapshots`);
+  await assertOk(resp, 'listVolumeSnapshots');
+  return resp.json();
+}
+
 /**
  * Check if an error is a Fly API 404 (resource not found / already deleted).
  * Used by reconciliation to distinguish "gone" from transient failures.
@@ -347,7 +357,7 @@ export async function execCommand(
   config: FlyClientConfig,
   machineId: string,
   command: string[],
-  timeout = 10
+  timeout = 60
 ): Promise<MachineExecResponse> {
   const body: MachineExecRequest = { command, timeout };
   const resp = await flyFetch(config, `/machines/${machineId}/exec`, {
