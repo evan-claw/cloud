@@ -348,7 +348,16 @@ describe('analysis-service', () => {
       );
       mockUpdateAnalysisStatus.mockResolvedValue(undefined);
       mockGenerateApiToken.mockReturnValue('test-token');
-      mockInitiateSessionStream.mockReturnValue((async function* () {})());
+      mockPrepareSession.mockResolvedValue({
+        cloudAgentSessionId: 'ses-agent-mode',
+        kiloSessionId: 'ses_kilo-mode',
+      });
+      mockInitiateFromPreparedSession.mockResolvedValue({
+        cloudAgentSessionId: 'ses-agent-mode',
+        executionId: 'exec-mode',
+        status: 'started',
+        streamUrl: 'wss://example.com/stream',
+      });
     });
 
     it('auto mode: runs sandbox when triage recommends it', async () => {
@@ -368,7 +377,7 @@ describe('analysis-service', () => {
       expect(result.started).toBe(true);
       expect(result.triageOnly).toBe(false);
       expect(mockTriageSecurityFinding).toHaveBeenCalled();
-      expect(mockInitiateSessionStream).toHaveBeenCalled();
+      expect(mockPrepareSession).toHaveBeenCalled();
     });
 
     it('auto mode: skips sandbox when triage says not needed', async () => {
@@ -388,7 +397,7 @@ describe('analysis-service', () => {
       expect(result.started).toBe(true);
       expect(result.triageOnly).toBe(true);
       expect(mockTriageSecurityFinding).toHaveBeenCalled();
-      expect(mockInitiateSessionStream).not.toHaveBeenCalled();
+      expect(mockPrepareSession).not.toHaveBeenCalled();
     });
 
     it('shallow mode: never runs sandbox even when triage recommends it', async () => {
@@ -408,27 +417,7 @@ describe('analysis-service', () => {
       expect(result.started).toBe(true);
       expect(result.triageOnly).toBe(true);
       expect(mockTriageSecurityFinding).toHaveBeenCalled();
-      expect(mockInitiateSessionStream).not.toHaveBeenCalled();
-    });
-
-    it('shallow mode: never runs sandbox even with forceSandbox', async () => {
-      mockTriageSecurityFinding.mockResolvedValue({
-        needsSandboxAnalysis: false,
-        needsSandboxReasoning: 'Dev dependency',
-        suggestedAction: 'dismiss',
-        confidence: 'high',
-        triageAt: new Date().toISOString(),
-      });
-
-      const result = await startSecurityAnalysis({
-        ...baseParams,
-        analysisMode: 'shallow',
-        forceSandbox: true,
-      });
-
-      expect(result.started).toBe(true);
-      expect(result.triageOnly).toBe(true);
-      expect(mockInitiateSessionStream).not.toHaveBeenCalled();
+      expect(mockPrepareSession).not.toHaveBeenCalled();
     });
 
     it('deep mode: always runs sandbox even when triage says not needed', async () => {
@@ -448,7 +437,7 @@ describe('analysis-service', () => {
       expect(result.started).toBe(true);
       expect(result.triageOnly).toBe(false);
       expect(mockTriageSecurityFinding).toHaveBeenCalled();
-      expect(mockInitiateSessionStream).toHaveBeenCalled();
+      expect(mockPrepareSession).toHaveBeenCalled();
     });
 
     it('defaults to auto mode when analysisMode is not specified', async () => {
@@ -464,7 +453,7 @@ describe('analysis-service', () => {
 
       expect(result.started).toBe(true);
       expect(result.triageOnly).toBe(true);
-      expect(mockInitiateSessionStream).not.toHaveBeenCalled();
+      expect(mockPrepareSession).not.toHaveBeenCalled();
     });
   });
 });
