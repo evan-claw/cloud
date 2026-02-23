@@ -76,6 +76,7 @@ jest.mock('@/lib/drizzle', () => {
   const chain = {
     from: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     limit: jest.fn(() => mockDbSelect()),
   };
   return {
@@ -199,7 +200,9 @@ const interruptedPayload = {
 
 // --- Tests ---
 
-let POST: typeof import('./route').POST;
+import type { POST as POSTType } from './route';
+
+let POST: typeof POSTType;
 
 beforeEach(async () => {
   jest.clearAllMocks();
