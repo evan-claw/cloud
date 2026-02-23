@@ -13,9 +13,6 @@ import Link from 'next/link';
 import { Mail, SquareUserRound } from 'lucide-react';
 import type { SignInFormInitialState } from '@/hooks/useSignInFlow';
 import { OAuthProviderIds, ProdNonSSOAuthProviders } from '@/lib/auth/provider-metadata';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 type SignInFormProps = {
   searchParams: Record<string, string>;
@@ -47,7 +44,6 @@ export function SignInForm({
     isSignUp,
     storybookInitialState,
   });
-  const showTermsTooltip = !flow.termsAccepted;
 
   // Show minimal loading state while checking localStorage for returning user hint
   // This prevents flash of "new user" UI before switching to "returning user" UI
@@ -297,59 +293,29 @@ export function SignInForm({
               ) : (
                 // Provider buttons view (initial state)
                 <>
-                  <div className="mb-4 flex items-center space-x-2">
-                    <Checkbox
-                      id="termsAccepted"
-                      checked={flow.termsAccepted}
-                      onCheckedChange={flow.handleTermsAcceptedChange}
-                    />
-                    <Label htmlFor="termsAccepted" className="text-muted-foreground text-sm">
-                      By checking this box, I am agreeing to the{' '}
-                      <a
-                        href="https://kilo.ai/terms"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline"
-                      >
-                        Terms & Conditions
-                      </a>
-                    </Label>
-                  </div>
                   <div className="mx-auto max-w-md space-y-4">
                     {/* OAuth provider buttons - Google first */}
-                    {showTermsTooltip ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex w-full flex-col gap-4">
-                              <AuthProviderButtons
-                                providers={OAuthProviderIds}
-                                onProviderClick={flow.handleOAuthClick}
-                                disabled={true}
-                              />
-                              <SignInButton onClick={flow.handleShowEmailInput} disabled={true}>
-                                <Mail />
-                                Continue with Email
-                              </SignInButton>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Agree to ToS to continue</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      <>
-                        <AuthProviderButtons
-                          providers={OAuthProviderIds}
-                          onProviderClick={flow.handleOAuthClick}
-                          disabled={false}
-                        />
-                        <SignInButton onClick={flow.handleShowEmailInput} disabled={false}>
-                          <Mail />
-                          Continue with Email
-                        </SignInButton>
-                      </>
-                    )}
+                    <AuthProviderButtons
+                      providers={OAuthProviderIds}
+                      onProviderClick={flow.handleOAuthClick}
+                    />
+                    <SignInButton onClick={flow.handleShowEmailInput}>
+                      <Mail />
+                      Continue with Email
+                    </SignInButton>
                   </div>
+
+                  <p className="text-muted-foreground mx-auto mt-4 max-w-md text-sm">
+                    By continuing, you are agreeing to the{' '}
+                    <a
+                      href="https://kilo.ai/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                    >
+                      Terms &amp; Conditions
+                    </a>
+                  </p>
 
                   {/* Divider */}
                   <div className="mx-auto my-6 max-w-md">

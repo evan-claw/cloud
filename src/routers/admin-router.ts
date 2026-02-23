@@ -3,6 +3,7 @@ import { db } from '@/lib/drizzle';
 import {
   user_admin_notes,
   kilocode_users,
+  kilo_pass_subscriptions,
   stytch_fingerprints,
   enrichment_data,
   user_auth_provider,
@@ -38,6 +39,9 @@ import { APP_URL } from '@/lib/constants';
 import { revalidatePath } from 'next/cache';
 import { recomputeUserBalances } from '@/lib/recomputeUserBalances';
 import { getStripeInvoices } from '@/lib/stripe';
+import { client as stripeClient } from '@/lib/stripe-client';
+import { releaseScheduledChangeForSubscription } from '@/lib/kilo-pass/scheduled-change-release';
+import { kilo_pass_scheduled_changes } from '@/db/schema';
 import {
   getKilocodeRepoOpenPullRequestCounts,
   getKilocodeRepoOpenPullRequestsSummary,
@@ -128,6 +132,11 @@ const UpdateModelSchema = z.object({
 
 const GetUserInvoicesSchema = z.object({
   stripe_customer_id: z.string(),
+});
+
+const CancelAndRefundKiloPassSchema = z.object({
+  userId: z.string(),
+  reason: z.string().min(1, 'Reason is required').trim(),
 });
 
 export const adminRouter = createTRPCRouter({
@@ -463,6 +472,176 @@ export const adminRouter = createTRPCRouter({
           );
 
         return { success: true };
+      }),
+
+    cancelAndRefundKiloPass: adminProcedure
+      .input(CancelAndRefundKiloPassSchema)
+      .mutation(async ({ input, ctx }) => {
+        const user = await db.query.kilocode_users.findFirst({
+          columns: {
+            id: true,
+            stripe_customer_id: true,
+            blocked_reason: true,
+          },
+          where: eq(kilocode_users.id, input.userId),
+        });
+
+        if (!user) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+        }
+
+        const subscription = await getKiloPassStateForUser(db, input.userId);
+        if (!subscription) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No Kilo Pass subscription found for this user',
+          });
+        }
+
+        if (subscription.status === 'canceled') {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Kilo Pass subscription is already canceled',
+          });
+        }
+
+        const scheduledChange = await db.query.kilo_pass_scheduled_changes.findFirst({
+          columns: { stripe_schedule_id: true },
+          where: and(
+            eq(
+              kilo_pass_scheduled_changes.stripe_subscription_id,
+              subscription.stripeSubscriptionId
+            ),
+            isNull(kilo_pass_scheduled_changes.deleted_at)
+          ),
+        });
+
+        if (scheduledChange) {
+          await releaseScheduledChangeForSubscription({
+            dbOrTx: db,
+            stripe: stripeClient,
+            stripeSubscriptionId: subscription.stripeSubscriptionId,
+            stripeScheduleIdIfMissingRow: scheduledChange.stripe_schedule_id,
+            kiloUserIdIfMissingRow: input.userId,
+            reason: 'cancel_subscription',
+          });
+        }
+
+        await stripeClient.subscriptions.cancel(subscription.stripeSubscriptionId);
+
+        let refundedAmountCents: number | null = null;
+        const paidInvoices = await stripeClient.invoices.list({
+          subscription: subscription.stripeSubscriptionId,
+          status: 'paid',
+          limit: 1,
+        });
+        const paidInvoice = paidInvoices.data[0];
+        if (paidInvoice) {
+          const payments = await stripeClient.invoicePayments.list({
+            invoice: paidInvoice.id,
+            status: 'paid',
+            limit: 1,
+          });
+          const rawPaymentIntent = payments.data[0]?.payment.payment_intent;
+          const paymentIntentId =
+            typeof rawPaymentIntent === 'string' ? rawPaymentIntent : rawPaymentIntent?.id;
+          if (paymentIntentId) {
+            try {
+              const refund = await stripeClient.refunds.create({
+                payment_intent: paymentIntentId,
+              });
+              refundedAmountCents = refund.amount;
+            } catch (err) {
+              if (
+                !(err instanceof stripeClient.errors.StripeInvalidRequestError) ||
+                err.code !== 'charge_already_refunded'
+              ) {
+                throw err;
+              }
+            }
+          }
+        }
+
+        const balanceResetAmountUsd = await db.transaction(async tx => {
+          await tx
+            .update(kilo_pass_subscriptions)
+            .set({
+              status: 'canceled',
+              cancel_at_period_end: false,
+              ended_at: new Date().toISOString(),
+              current_streak_months: 0,
+            })
+            .where(
+              eq(kilo_pass_subscriptions.stripe_subscription_id, subscription.stripeSubscriptionId)
+            );
+
+          if (!user.blocked_reason) {
+            await tx
+              .update(kilocode_users)
+              .set({ blocked_reason: input.reason })
+              .where(eq(kilocode_users.id, input.userId));
+          }
+
+          const freshUserRows = await tx
+            .select({
+              microdollars_used: kilocode_users.microdollars_used,
+              total_microdollars_acquired: kilocode_users.total_microdollars_acquired,
+            })
+            .from(kilocode_users)
+            .where(eq(kilocode_users.id, input.userId))
+            .for('update')
+            .limit(1);
+          const freshUser = freshUserRows[0];
+          const currentBalanceMicrodollars = freshUser
+            ? freshUser.total_microdollars_acquired - freshUser.microdollars_used
+            : 0;
+
+          let balanceReset: number | null = null;
+          if (currentBalanceMicrodollars > 0 && freshUser) {
+            await tx.insert(credit_transactions).values({
+              kilo_user_id: input.userId,
+              organization_id: null,
+              is_free: true,
+              amount_microdollars: -currentBalanceMicrodollars,
+              credit_category: 'admin-cancel-refund-kilo-pass',
+              description: `Balance zeroed by admin: ${input.reason}`,
+              original_baseline_microdollars_used: freshUser.microdollars_used,
+            });
+            await tx
+              .update(kilocode_users)
+              .set({
+                total_microdollars_acquired: sql`${kilocode_users.total_microdollars_acquired} - ${currentBalanceMicrodollars}`,
+              })
+              .where(eq(kilocode_users.id, input.userId));
+            balanceReset = fromMicrodollars(currentBalanceMicrodollars);
+          }
+
+          const noteParts = [
+            `Kilo Pass cancelled and refunded by admin.`,
+            `Reason: ${input.reason}`,
+            refundedAmountCents != null
+              ? `Refunded: $${(refundedAmountCents / 100).toFixed(2)}`
+              : 'No invoice to refund.',
+            balanceReset != null
+              ? `Balance reset: $${balanceReset.toFixed(2)} zeroed.`
+              : 'Balance was already $0.',
+            !user.blocked_reason ? 'Account blocked.' : 'Account was already blocked.',
+          ];
+          await tx.insert(user_admin_notes).values({
+            kilo_user_id: input.userId,
+            note_content: noteParts.join(' '),
+            admin_kilo_user_id: ctx.user.id,
+          });
+
+          return balanceReset;
+        });
+
+        return {
+          success: true,
+          refundedAmountCents,
+          balanceResetAmountUsd,
+          alreadyBlocked: !!user.blocked_reason,
+        };
       }),
   }),
 

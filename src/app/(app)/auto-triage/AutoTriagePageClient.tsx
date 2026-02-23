@@ -59,7 +59,7 @@ export function AutoTriagePageClient({
           Automatically triage GitHub issues with Al-powered analysis
         </p>
         <a
-          href="https://kilo.ai/docs/advanced-usage/auto-triage"
+          href="https://kilo.ai/docs/automate/auto-triage/overview"
           target="_blank"
           rel="noopener noreferrer"
           className="mt-2 inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"

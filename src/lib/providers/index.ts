@@ -184,7 +184,6 @@ function applyToolChoiceSetting(
     isXaiModel(requestedModel) ||
     isOpenAiModel(requestedModel) ||
     isGeminiModel(requestedModel) ||
-    (isMoonshotModel(requestedModel) && !isReasoningEnabled) ||
     (isHaikuModel(requestedModel) && !isReasoningEnabled)
   ) {
     console.debug('[applyToolChoiceSetting] setting tool_choice required');
