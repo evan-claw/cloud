@@ -243,7 +243,7 @@ export function isMessageStreaming(message: StoredMessage): boolean {
  * Valid mode values for cloud agent sessions.
  * Uses new modes for cloud-agent-next.
  */
-export type AgentMode = 'plan' | 'build';
+export type AgentMode = 'code' | 'plan' | 'debug' | 'orchestrator' | 'ask';
 
 // ============================================================================
 // Stream Event Types
@@ -326,7 +326,7 @@ export type ToolExecution = {
 export type SessionConfig = {
   sessionId: string; // Session identifier (agent_xxx)
   repository: string; // GitHub repo (owner/repo format)
-  mode: string; // Agent mode (code, architect, debug, etc.)
+  mode: string; // Agent mode (code, plan, debug, orchestrator, ask, etc.)
   model: string; // LLM model identifier
 };
 
@@ -337,7 +337,7 @@ export type SessionConfig = {
 export type SessionStartConfig = {
   githubRepo: string;
   prompt: string;
-  mode: 'plan' | 'build';
+  mode: AgentMode;
   model: string;
   githubToken?: string;
   envVars?: Record<string, string>;
