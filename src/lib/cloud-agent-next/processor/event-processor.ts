@@ -44,6 +44,7 @@ const HANDLED_EVENT_TYPES = new Set([
   'session.updated',
   'session.error',
   'session.idle',
+  'session.turn.close',
   'question.asked',
 ]);
 
@@ -386,6 +387,45 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   }
 
   /**
+   * Handle session.turn.close events.
+   * When reason is "error", force-complete all in-flight assistant messages
+   * that never received time.completed from the server.
+   */
+  function handleSessionTurnClose(data: { sessionID?: string; reason?: string }): void {
+    if (data.reason !== 'error') {
+      return;
+    }
+
+    // Force-complete all in-flight assistant messages
+    const now = Date.now();
+    for (const [key, message] of messagesMap) {
+      if (isAssistantMessage(message.info) && !isAssistantMessageComplete(message)) {
+        // Set completed time so isMessageStreaming() returns false
+        message.info = {
+          ...message.info,
+          time: { ...message.info.time, completed: now },
+        };
+
+        const [sessionId, messageId] = key.split(':');
+        const parentSessionId = getParentSessionId(sessionId);
+        callbacks.onMessageCompleted?.(sessionId, messageId, message, parentSessionId);
+        completedMessages.add(key);
+        messagesMap.delete(key);
+      }
+    }
+
+    // Complete any pending user messages too
+    completeUserMessages();
+
+    if (streaming) {
+      streaming = false;
+      callbacks.onStreamingChanged?.(false);
+    }
+
+    callbacks.onError?.('The model failed to generate a response', data.sessionID);
+  }
+
+  /**
    * Process a cloud agent event, dispatching to the appropriate handler.
    */
   function processEvent(event: CloudAgentEvent): void {
@@ -437,6 +477,10 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
 
       case 'session.idle':
         handleSessionIdle();
+        break;
+
+      case 'session.turn.close':
+        handleSessionTurnClose(data as { sessionID?: string; reason?: string });
         break;
 
       case 'question.asked':

@@ -85,6 +85,10 @@ export async function updateCodeReviewStatus(
     startedAt?: Date;
     completedAt?: Date;
     agentVersion?: string;
+    model?: string;
+    totalTokensIn?: number;
+    totalTokensOut?: number;
+    totalCostMusd?: number;
   } = {}
 ): Promise<void> {
   try {
@@ -112,6 +116,19 @@ export async function updateCodeReviewStatus(
     if (updates.agentVersion !== undefined) {
       updateData.agent_version = updates.agentVersion;
     }
+    if (updates.model !== undefined) {
+      updateData.model = updates.model;
+    }
+    if (updates.totalTokensIn !== undefined) {
+      updateData.total_tokens_in = updates.totalTokensIn;
+    }
+    if (updates.totalTokensOut !== undefined) {
+      updateData.total_tokens_out = updates.totalTokensOut;
+    }
+    if (updates.totalCostMusd !== undefined) {
+      updateData.total_cost_musd = updates.totalCostMusd;
+    }
+
     // Auto-set timestamps based on status
     if (status === 'running' && !updates.startedAt) {
       updateData.started_at = new Date().toISOString();
@@ -131,6 +148,49 @@ export async function updateCodeReviewStatus(
     captureException(error, {
       tags: { operation: 'updateCodeReviewStatus' },
       extra: { reviewId, status, updates },
+    });
+    throw error;
+  }
+}
+
+/**
+ * Updates only usage-related columns on a code review, without touching status or timestamps.
+ */
+export async function updateCodeReviewUsage(
+  reviewId: string,
+  usage: {
+    model?: string;
+    totalTokensIn?: number;
+    totalTokensOut?: number;
+    totalCostMusd?: number;
+  }
+): Promise<void> {
+  try {
+    const updateData: Partial<typeof cloud_agent_code_reviews.$inferInsert> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (usage.model !== undefined) {
+      updateData.model = usage.model;
+    }
+    if (usage.totalTokensIn !== undefined) {
+      updateData.total_tokens_in = usage.totalTokensIn;
+    }
+    if (usage.totalTokensOut !== undefined) {
+      updateData.total_tokens_out = usage.totalTokensOut;
+    }
+    if (usage.totalCostMusd !== undefined) {
+      updateData.total_cost_musd = usage.totalCostMusd;
+    }
+
+    await db
+      .update(cloud_agent_code_reviews)
+      .set(updateData)
+      .where(eq(cloud_agent_code_reviews.id, reviewId));
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'updateCodeReviewUsage' },
+      extra: { reviewId, usage },
     });
     throw error;
   }
@@ -311,6 +371,10 @@ export async function resetCodeReviewForRetry(reviewId: string): Promise<void> {
         error_message: null,
         started_at: null,
         completed_at: null,
+        model: null,
+        total_tokens_in: null,
+        total_tokens_out: null,
+        total_cost_musd: null,
         updated_at: new Date().toISOString(),
       })
       .where(eq(cloud_agent_code_reviews.id, reviewId));

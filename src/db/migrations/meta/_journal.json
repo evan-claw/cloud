@@ -155,6 +155,20 @@
       "when": 1771833139369,
       "tag": "0021_cute_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1771839135189,
+      "tag": "0022_broad_frank_castle",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1771839228110,
+      "tag": "0023_slippery_korg",
+      "breakpoints": true
     }
   ]
 }
