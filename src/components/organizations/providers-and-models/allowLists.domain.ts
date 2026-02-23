@@ -1,9 +1,6 @@
 import { isModelAllowedProviderAwareClient } from '@/lib/model-allow.client';
 import { normalizeModelId } from '@/lib/model-utils';
 
-/** Sentinel value representing "no models allowed" in the model allow list. */
-export const MODEL_ALLOW_NONE_SENTINEL = '__none__';
-
 export type OpenRouterModelSlugSnapshot = {
   slug: string;
 };
@@ -95,20 +92,20 @@ export function computeEnabledProviderSlugs(
 
 export function computeAllowedModelIds(
   draftModelAllowList: ReadonlyArray<string>,
+  modelNoneAllowed: boolean,
   openRouterModels: ReadonlyArray<OpenRouterModelSlugSnapshot>,
   openRouterProviders: OpenRouterProviderModelsSnapshot
 ): Set<string> {
   const allowed = new Set<string>();
 
+  if (modelNoneAllowed) {
+    return allowed;
+  }
+
   if (draftModelAllowList.length === 0) {
     for (const model of openRouterModels) {
       allowed.add(normalizeModelId(model.slug));
     }
-    return allowed;
-  }
-
-  // Explicit sentinel check for "no models allowed"
-  if (draftModelAllowList.length === 1 && draftModelAllowList[0] === MODEL_ALLOW_NONE_SENTINEL) {
     return allowed;
   }
 
@@ -186,32 +183,39 @@ export function toggleModelAllowed(params: {
   modelId: string;
   nextAllowed: boolean;
   draftModelAllowList: ReadonlyArray<string>;
+  modelNoneAllowed: boolean;
   allModelIds: ReadonlyArray<string>;
   providerSlugsForModelId: ReadonlyArray<string> | undefined;
   hadAllModelsInitially: boolean;
-}): string[] {
+}): { nextModelAllowList: string[]; nextModelNoneAllowed: boolean } {
   const {
     modelId,
     nextAllowed,
     draftModelAllowList,
+    modelNoneAllowed,
     allModelIds,
     providerSlugsForModelId,
     hadAllModelsInitially,
   } = params;
 
-  // Sentinel means "nothing allowed" (distinct from [] which means "all allowed")
-  if (draftModelAllowList.length === 1 && draftModelAllowList[0] === MODEL_ALLOW_NONE_SENTINEL) {
+  if (modelNoneAllowed) {
     if (nextAllowed) {
-      return canonicalizeModelAllowList([modelId]);
+      return {
+        nextModelAllowList: canonicalizeModelAllowList([modelId]),
+        nextModelNoneAllowed: false,
+      };
     }
-    return [MODEL_ALLOW_NONE_SENTINEL];
+    return { nextModelAllowList: [], nextModelNoneAllowed: true };
   }
 
   if (draftModelAllowList.length === 0) {
     if (nextAllowed) {
-      return [];
+      return { nextModelAllowList: [], nextModelNoneAllowed: false };
     }
-    return canonicalizeModelAllowList(allModelIds.filter(id => id !== modelId));
+    return {
+      nextModelAllowList: canonicalizeModelAllowList(allModelIds.filter(id => id !== modelId)),
+      nextModelNoneAllowed: false,
+    };
   }
 
   const allowSet = new Set(draftModelAllowList);
@@ -228,11 +232,16 @@ export function toggleModelAllowed(params: {
   }
 
   const next = canonicalizeModelAllowList([...allowSet]);
-  if (hadAllModelsInitially && next.length === allModelIds.length) {
-    return [];
+
+  if (!nextAllowed && next.length === 0) {
+    return { nextModelAllowList: [], nextModelNoneAllowed: true };
   }
 
-  return next;
+  if (hadAllModelsInitially && next.length === allModelIds.length) {
+    return { nextModelAllowList: [], nextModelNoneAllowed: false };
+  }
+
+  return { nextModelAllowList: next, nextModelNoneAllowed: false };
 }
 
 export function toggleAllowFutureModelsForProvider(params: {
@@ -289,21 +298,31 @@ export function setAllModelsAllowed(params: {
   nextAllowed: boolean;
   targetModelIds: ReadonlyArray<string>;
   draftModelAllowList: ReadonlyArray<string>;
+  modelNoneAllowed: boolean;
   allModelIds: ReadonlyArray<string>;
   hadAllModelsInitially: boolean;
-}): string[] {
-  const { nextAllowed, targetModelIds, draftModelAllowList, allModelIds, hadAllModelsInitially } =
-    params;
+}): { nextModelAllowList: string[]; nextModelNoneAllowed: boolean } {
+  const {
+    nextAllowed,
+    targetModelIds,
+    draftModelAllowList,
+    modelNoneAllowed,
+    allModelIds,
+    hadAllModelsInitially,
+  } = params;
 
   const targetSet = new Set(targetModelIds);
 
   if (nextAllowed) {
-    // When the draft is the sentinel (nothing allowed), start from scratch with just the targets.
-    if (draftModelAllowList.length === 1 && draftModelAllowList[0] === MODEL_ALLOW_NONE_SENTINEL) {
+    // When nothing is currently allowed, start from scratch with just the targets.
+    if (modelNoneAllowed) {
       if (hadAllModelsInitially && targetSet.size === allModelIds.length) {
-        return [];
+        return { nextModelAllowList: [], nextModelNoneAllowed: false };
       }
-      return canonicalizeModelAllowList([...targetModelIds]);
+      return {
+        nextModelAllowList: canonicalizeModelAllowList([...targetModelIds]),
+        nextModelNoneAllowed: false,
+      };
     }
 
     // Merge targets into the existing allow list.
@@ -314,38 +333,31 @@ export function setAllModelsAllowed(params: {
 
     // If every concrete model ID is now in the set, wildcards are redundant — return empty (= all allowed).
     if (hadAllModelsInitially && allModelIds.every(id => merged.has(id))) {
-      return [];
+      return { nextModelAllowList: [], nextModelNoneAllowed: false };
     }
 
-    return canonicalizeModelAllowList([...merged]);
+    return {
+      nextModelAllowList: canonicalizeModelAllowList([...merged]),
+      nextModelNoneAllowed: false,
+    };
   }
 
   // Deselecting: remove targets from the allow list.
-  if (draftModelAllowList.length === 0) {
+  if (draftModelAllowList.length === 0 && !modelNoneAllowed) {
     // Currently "all allowed" (empty list) — create explicit list of everything except targets.
     const remaining = allModelIds.filter(id => !targetSet.has(id));
     if (remaining.length === 0) {
-      return [MODEL_ALLOW_NONE_SENTINEL];
+      return { nextModelAllowList: [], nextModelNoneAllowed: true };
     }
-    return canonicalizeModelAllowList(remaining);
+    return {
+      nextModelAllowList: canonicalizeModelAllowList(remaining),
+      nextModelNoneAllowed: false,
+    };
   }
 
-  const remaining = draftModelAllowList.filter(
-    entry => !targetSet.has(entry) && entry !== MODEL_ALLOW_NONE_SENTINEL
-  );
-  // Preserve wildcards that don't correspond to a target model ID
+  const remaining = draftModelAllowList.filter(entry => !targetSet.has(entry));
   if (remaining.length === 0) {
-    return [MODEL_ALLOW_NONE_SENTINEL];
+    return { nextModelAllowList: [], nextModelNoneAllowed: true };
   }
-  return canonicalizeModelAllowList(remaining);
-}
-
-/**
- * Sanitizes a model allow list for persistence to the backend.
- * Removes any client-side sentinel values that shouldn't be stored.
- */
-export function sanitizeModelAllowListForPersistence(
-  modelAllowList: ReadonlyArray<string>
-): string[] {
-  return modelAllowList.filter(entry => entry !== MODEL_ALLOW_NONE_SENTINEL);
+  return { nextModelAllowList: canonicalizeModelAllowList(remaining), nextModelNoneAllowed: false };
 }

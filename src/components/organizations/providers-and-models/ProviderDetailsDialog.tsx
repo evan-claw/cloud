@@ -26,7 +26,7 @@ export function ProviderDetailsDialog({
   canEdit,
   infoProvider,
   enabledProviderSlugs,
-  draftModelAllowListLength,
+  allModelsUnrestricted,
   infoProviderAllowsAllModels,
   infoProviderModels,
   allowedModelIds,
@@ -40,7 +40,7 @@ export function ProviderDetailsDialog({
   canEdit: boolean;
   infoProvider: ProviderRow | null;
   enabledProviderSlugs: ReadonlySet<string>;
-  draftModelAllowListLength: number;
+  allModelsUnrestricted: boolean;
   infoProviderAllowsAllModels: boolean;
   infoProviderModels: ReadonlyArray<ProviderModelRow>;
   allowedModelIds: ReadonlySet<string>;
@@ -53,13 +53,14 @@ export function ProviderDetailsDialog({
   const isProviderEnabled = infoProvider
     ? enabledProviderSlugs.has(infoProvider.providerSlug)
     : false;
-  const allowAllModelsChecked =
-    draftModelAllowListLength === 0 ? true : Boolean(infoProvider && infoProviderAllowsAllModels);
+  const allowAllModelsChecked = allModelsUnrestricted
+    ? true
+    : Boolean(infoProvider && infoProviderAllowsAllModels);
 
   const allowAllModelsDisabled =
     !canEdit ||
     !infoProvider ||
-    draftModelAllowListLength === 0 ||
+    allModelsUnrestricted ||
     !enabledProviderSlugs.has(infoProvider.providerSlug);
 
   return (
@@ -115,7 +116,7 @@ export function ProviderDetailsDialog({
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">Allow all models</div>
                     <div className="text-muted-foreground mt-0.5 text-xs">
-                      {draftModelAllowListLength === 0
+                      {allModelsUnrestricted
                         ? 'All models are allowed (no restrictions), so future models are already included.'
                         : 'Allow all current and future models offered by this provider.'}
                     </div>

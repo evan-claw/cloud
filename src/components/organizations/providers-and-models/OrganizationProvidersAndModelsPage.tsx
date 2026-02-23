@@ -29,7 +29,6 @@ import {
   useProvidersAndModelsAllowListsState,
   type ProviderPolicyFilter,
 } from '@/components/organizations/providers-and-models/useProvidersAndModelsAllowListsState';
-import { sanitizeModelAllowListForPersistence } from '@/components/organizations/providers-and-models/allowLists.domain';
 import { preferredModels } from '@/lib/models';
 
 type Props = {
@@ -203,7 +202,7 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
     try {
       await updateOrganizationSettings.mutateAsync({
         organizationId,
-        model_allow_list: sanitizeModelAllowListForPersistence(state.draftModelAllowList),
+        model_allow_list: state.draftModelAllowList,
         provider_allow_list: state.draftProviderAllowList,
       });
 
@@ -540,8 +539,10 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
           canEdit={canEdit}
           infoProvider={infoProvider}
           enabledProviderSlugs={enabledProviderSlugs}
-          draftModelAllowListLength={
-            state.status === 'ready' ? state.draftModelAllowList.length : 0
+          allModelsUnrestricted={
+            state.status === 'ready'
+              ? state.draftModelAllowList.length === 0 && !state.modelNoneAllowed
+              : true
           }
           infoProviderAllowsAllModels={infoProviderAllowsAllModels}
           infoProviderModels={infoProviderModels}

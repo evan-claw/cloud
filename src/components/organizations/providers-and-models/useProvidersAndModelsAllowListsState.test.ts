@@ -1,5 +1,4 @@
 import { describe, expect, test } from '@jest/globals';
-import { MODEL_ALLOW_NONE_SENTINEL } from '@/components/organizations/providers-and-models/allowLists.domain';
 import {
   createProvidersAndModelsAllowListsInitialState,
   providersAndModelsAllowListsReducer,
@@ -36,6 +35,7 @@ describe('providersAndModelsAllowListsReducer', () => {
 
     expect(state.draftModelAllowList).toEqual(state.initialModelAllowList);
     expect(state.draftProviderAllowList).toEqual(state.initialProviderAllowList);
+    expect(state.modelNoneAllowed).toEqual(state.initialModelNoneAllowed);
   });
 
   test('init -> toggle -> mark saved marks clean (draft becomes initial)', () => {
@@ -66,6 +66,7 @@ describe('providersAndModelsAllowListsReducer', () => {
 
     expect(state.initialProviderAllowList).toEqual(state.draftProviderAllowList);
     expect(state.initialModelAllowList).toEqual(state.draftModelAllowList);
+    expect(state.initialModelNoneAllowed).toEqual(state.modelNoneAllowed);
   });
 
   test('SET_ALL_MODELS_ALLOWED(true) selects all models', () => {
@@ -93,6 +94,7 @@ describe('providersAndModelsAllowListsReducer', () => {
     }
 
     expect(state.draftModelAllowList).toEqual(['anthropic/claude-3.5-sonnet', 'openai/gpt-4.1']);
+    expect(state.modelNoneAllowed).toBe(false);
   });
 
   test('SET_ALL_MODELS_ALLOWED(false) deselects all models', () => {
@@ -119,6 +121,7 @@ describe('providersAndModelsAllowListsReducer', () => {
       throw new Error('expected ready state');
     }
 
-    expect(state.draftModelAllowList).toEqual([MODEL_ALLOW_NONE_SENTINEL]);
+    expect(state.draftModelAllowList).toEqual([]);
+    expect(state.modelNoneAllowed).toBe(true);
   });
 });
