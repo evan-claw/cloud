@@ -14,15 +14,15 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 
 type AutoTriagePageClientProps = {
-  userId: string;
-  userName: string;
+  organizationId?: string;
+  organizationName?: string;
   successMessage?: string;
   errorMessage?: string;
 };
 
 export function AutoTriagePageClient({
-  userId: _userId,
-  userName: _userName,
+  organizationId,
+  organizationName,
   successMessage,
   errorMessage,
 }: AutoTriagePageClientProps) {
@@ -30,10 +30,20 @@ export function AutoTriagePageClient({
 
   // Fetch GitHub App installation status
   const { data: statusData, isLoading: isStatusLoading } = useQuery(
-    trpc.personalAutoTriage.getGitHubStatus.queryOptions()
+    organizationId
+      ? trpc.organizations.autoTriage.getGitHubStatus.queryOptions({ organizationId })
+      : trpc.personalAutoTriage.getGitHubStatus.queryOptions()
   );
 
   const isGitHubAppInstalled = statusData?.connected && statusData?.integration?.isValid;
+
+  const githubIntegrationsHref = organizationId
+    ? `/organizations/${organizationId}/integrations/github`
+    : '/integrations/github';
+
+  const subtitle = organizationName
+    ? `Automatically triage GitHub issues with AI-powered analysis for ${organizationName}`
+    : 'Automatically triage GitHub issues with AI-powered analysis';
 
   // Show toast messages from URL params
   useEffect(() => {
@@ -55,9 +65,7 @@ export function AutoTriagePageClient({
           <h1 className="text-3xl font-bold">Auto Triage</h1>
           <Badge variant="beta">beta</Badge>
         </div>
-        <p className="text-muted-foreground">
-          Automatically triage GitHub issues with Al-powered analysis
-        </p>
+        <p className="text-muted-foreground">{subtitle}</p>
         <a
           href="https://kilo.ai/docs/automate/auto-triage/overview"
           target="_blank"
@@ -79,7 +87,7 @@ export function AutoTriagePageClient({
               The Kilo GitHub App must be installed to use Auto Triage. The app automatically
               manages workflows and triggers triage on your issues.
             </p>
-            <Link href="/integrations/github">
+            <Link href={githubIntegrationsHref}>
               <Button variant="default" size="sm">
                 Install GitHub App
                 <ExternalLink className="ml-2 h-3 w-3" />
@@ -108,13 +116,13 @@ export function AutoTriagePageClient({
 
         {/* Configuration Tab */}
         <TabsContent value="config" className="mt-6 space-y-4">
-          <AutoTriageConfigForm />
+          <AutoTriageConfigForm organizationId={organizationId} />
         </TabsContent>
 
         {/* Tickets Tab */}
         <TabsContent value="tickets" className="mt-6 space-y-4">
           {isStatusLoading || isGitHubAppInstalled ? (
-            <AutoTriageTicketsCard />
+            <AutoTriageTicketsCard organizationId={organizationId} />
           ) : (
             <Alert>
               <ListChecks className="h-4 w-4" />

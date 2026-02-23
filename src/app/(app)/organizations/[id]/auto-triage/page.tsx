@@ -1,5 +1,5 @@
 import { OrganizationByPageLayout } from '@/components/organizations/OrganizationByPageLayout';
-import { AutoTriagePageClient } from './AutoTriagePageClient';
+import { AutoTriagePageClient } from '@/components/auto-triage/AutoTriagePageClient';
 
 type AutoTriagePageProps = {
   params: Promise<{ id: string }>;
