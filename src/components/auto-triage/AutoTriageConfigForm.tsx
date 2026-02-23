@@ -11,7 +11,6 @@ import { useTRPC } from '@/lib/trpc/utils';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useState, useEffect } from 'react';
-import { friendlyErrorMessage } from './friendly-error';
 import { useOrganizationModels } from '@/components/cloud-agent/hooks/useOrganizationModels';
 import { ModelCombobox } from '@/components/shared/ModelCombobox';
 import { cn } from '@/lib/utils';
@@ -95,7 +94,8 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
       },
       onError: error => {
         toast.error('Failed to toggle auto triage', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
     })
@@ -109,7 +109,8 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
       },
       onError: error => {
         toast.error('Failed to save configuration', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
     })
@@ -125,7 +126,8 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
       },
       onError: error => {
         toast.error('Failed to toggle auto triage', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
     })
@@ -139,7 +141,8 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
       },
       onError: error => {
         toast.error('Failed to save configuration', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
     })

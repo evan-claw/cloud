@@ -25,7 +25,6 @@ import { useTRPC } from '@/lib/trpc/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-import { friendlyErrorMessage } from './friendly-error';
 
 type AutoTriageTicketsCardProps = {
   organizationId?: string;
@@ -139,7 +138,8 @@ export function AutoTriageTicketsCard({ organizationId }: AutoTriageTicketsCardP
       },
       onError: error => {
         toast.error('Failed to retry ticket', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
       onSettled: () => setRetryingTicketId(null),
@@ -164,7 +164,8 @@ export function AutoTriageTicketsCard({ organizationId }: AutoTriageTicketsCardP
       },
       onError: error => {
         toast.error('Failed to retry ticket', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
       onSettled: () => setRetryingTicketId(null),
@@ -192,7 +193,8 @@ export function AutoTriageTicketsCard({ organizationId }: AutoTriageTicketsCardP
       },
       onError: error => {
         toast.error('Failed to interrupt ticket', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
       onSettled: () => setInterruptingTicketId(null),
@@ -217,7 +219,8 @@ export function AutoTriageTicketsCard({ organizationId }: AutoTriageTicketsCardP
       },
       onError: error => {
         toast.error('Failed to interrupt ticket', {
-          description: friendlyErrorMessage(error),
+          description:
+            'Something went wrong. Please try again or contact support if the problem persists.',
         });
       },
       onSettled: () => setInterruptingTicketId(null),
@@ -501,7 +504,10 @@ export function AutoTriageTicketsCard({ organizationId }: AutoTriageTicketsCardP
                     {/* Error Message */}
                     {ticket.error_message && (
                       <div className="text-destructive mt-1 text-xs">
-                        Error: {friendlyErrorMessage({ message: ticket.error_message })}
+                        Error:{' '}
+                        {
+                          'Something went wrong. Please try again or contact support if the problem persists.'
+                        }
                       </div>
                     )}
 
