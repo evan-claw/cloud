@@ -44,7 +44,7 @@ type OpenRouterUsage = {
   total_tokens: number;
 }; //ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
 
-type VercelProviderMetaData = { gateway?: { routing?: { resolvedProvider?: string } } };
+type VercelProviderMetaData = { gateway?: { routing?: { finalProvider?: string } } };
 
 type MaybeHasVercelProviderMetaData = {
   choices?: {
@@ -776,7 +776,7 @@ export async function parseMicrodollarUsageFromStream(
       const choice = json.choices?.[0];
       inference_provider =
         json.provider ??
-        choice?.delta?.provider_metadata?.gateway?.routing?.resolvedProvider ??
+        choice?.delta?.provider_metadata?.gateway?.routing?.finalProvider ??
         inference_provider;
       finish_reason = choice?.finish_reason ?? finish_reason;
 
@@ -865,7 +865,7 @@ export function parseMicrodollarUsageFromString(
     responseContent: choice?.message.content ?? '',
     inference_provider:
       responseJson?.provider ??
-      choice?.message?.provider_metadata?.gateway?.routing?.resolvedProvider ??
+      choice?.message?.provider_metadata?.gateway?.routing?.finalProvider ??
       null,
     upstream_id: null,
     finish_reason: choice?.finish_reason ?? null,

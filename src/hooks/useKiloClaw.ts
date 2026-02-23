@@ -61,6 +61,16 @@ export function useRefreshDevicePairing() {
   };
 }
 
+export function useKiloClawGatewayStatus(enabled: boolean) {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.gatewayStatus.queryOptions(undefined, {
+      enabled,
+      refetchInterval: enabled ? 30_000 : false,
+    })
+  );
+}
+
 export function useKiloClawMutations() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -93,7 +103,24 @@ export function useKiloClawMutations() {
       })
     ),
     restartGateway: useMutation(
-      trpc.kiloclaw.restartGateway.mutationOptions({ onSuccess: invalidateStatus })
+      trpc.kiloclaw.restartGateway.mutationOptions({
+        onSuccess: async () => {
+          await invalidateStatus();
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.gatewayStatus.queryKey(),
+          });
+        },
+      })
+    ),
+    restartOpenClaw: useMutation(
+      trpc.kiloclaw.restartOpenClaw.mutationOptions({
+        onSuccess: async () => {
+          await invalidateStatus();
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.gatewayStatus.queryKey(),
+          });
+        },
+      })
     ),
     approvePairingRequest: useMutation(
       trpc.kiloclaw.approvePairingRequest.mutationOptions({

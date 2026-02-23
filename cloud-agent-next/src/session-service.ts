@@ -1005,7 +1005,7 @@ export class SessionService {
       kilocodeModel,
       orgId,
       encryptedSecrets,
-      undefined, // createdOnPlatform - not used for initiateFromKiloSession
+      options.createdOnPlatform ?? existingMetadata?.createdOnPlatform,
       existingMetadata?.appendSystemPrompt
     );
 
@@ -1207,7 +1207,7 @@ export class SessionService {
       kilocodeModel,
       orgId,
       metadata?.encryptedSecrets,
-      undefined, // createdOnPlatform - not used for resume
+      metadata?.createdOnPlatform,
       metadata?.appendSystemPrompt
     );
 
@@ -1825,6 +1825,7 @@ type InitiateFromKiloSessionBaseOptions = {
   botId?: string;
   /** GitHub App type for selecting correct slug/bot identity */
   githubAppType?: 'standard' | 'lite';
+  createdOnPlatform?: string;
   /**
    * Existing metadata from prepared session flow.
    * When provided, saveSessionMetadata will merge with it to preserve
