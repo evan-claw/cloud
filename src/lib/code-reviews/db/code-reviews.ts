@@ -84,6 +84,7 @@ export async function updateCodeReviewStatus(
     errorMessage?: string;
     startedAt?: Date;
     completedAt?: Date;
+    agentVersion?: string;
     model?: string;
     totalTokensIn?: number;
     totalTokensOut?: number;
@@ -111,6 +112,9 @@ export async function updateCodeReviewStatus(
     }
     if (updates.completedAt !== undefined) {
       updateData.completed_at = updates.completedAt.toISOString();
+    }
+    if (updates.agentVersion !== undefined) {
+      updateData.agent_version = updates.agentVersion;
     }
     if (updates.model !== undefined) {
       updateData.model = updates.model;

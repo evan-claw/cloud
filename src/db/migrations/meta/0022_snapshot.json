@@ -1,6 +1,6 @@
 {
-  "id": "8ad348e9-9c62-4d5a-a0e4-9d660f2a401f",
-  "prevId": "738259b0-d590-404b-a8ae-842be5ab49cc",
+  "id": "27ff5cde-9527-4504-95a5-81ac6327b265",
+  "prevId": "8ad348e9-9c62-4d5a-a0e4-9d660f2a401f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3024,6 +3024,30 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'v1'"
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_tokens_in": {
+          "name": "total_tokens_in",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_tokens_out": {
+          "name": "total_tokens_out",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_cost_musd": {
+          "name": "total_cost_musd",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "started_at": {
           "name": "started_at",

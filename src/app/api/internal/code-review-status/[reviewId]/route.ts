@@ -3,7 +3,12 @@
  *
  * Called by:
  * - Code Review Orchestrator (for 'running' status and sessionId updates)
- * - Cloud Agent callback (for 'completed' or 'failed' status)
+ * - Cloud-agent-next callback (for 'completed', 'failed', or 'interrupted' status)
+ *
+ * Accepts both legacy format (from orchestrator) and cloud-agent-next callback format:
+ * - Legacy: { status, sessionId?, cliSessionId?, errorMessage? }
+ * - cloud-agent-next: { status, sessionId?, cloudAgentSessionId?, executionId?,
+ *     kiloSessionId?, errorMessage?, lastSeenBranch? }
  *
  * The reviewId is passed in the URL path.
  *
@@ -36,14 +41,64 @@ import { captureException, captureMessage } from '@sentry/nextjs';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { PLATFORM } from '@/lib/integrations/core/constants';
 import { appendUsageFooter } from '@/lib/code-reviews/summary/usage-footer';
-import { z } from 'zod';
 
-const StatusUpdatePayloadSchema = z.object({
-  sessionId: z.string().optional(),
-  cliSessionId: z.string().optional(),
-  status: z.enum(['running', 'completed', 'failed', 'cancelled']),
-  errorMessage: z.string().optional(),
-});
+/**
+ * Payload from the orchestrator DO (legacy format).
+ */
+type OrchestratorPayload = {
+  sessionId?: string;
+  cliSessionId?: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  errorMessage?: string;
+};
+
+/**
+ * Payload from cloud-agent-next callback (ExecutionCallbackPayload).
+ */
+type CloudAgentNextCallbackPayload = {
+  sessionId?: string;
+  cloudAgentSessionId?: string;
+  executionId?: string;
+  kiloSessionId?: string;
+  status: 'completed' | 'failed' | 'interrupted';
+  errorMessage?: string;
+  lastSeenBranch?: string;
+};
+
+type StatusUpdatePayload = OrchestratorPayload | CloudAgentNextCallbackPayload;
+
+/**
+ * Normalize a payload from either the orchestrator or cloud-agent-next callback
+ * into the common format expected by the update logic.
+ */
+function normalizePayload(raw: StatusUpdatePayload): {
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  sessionId?: string;
+  cliSessionId?: string;
+  errorMessage?: string;
+} {
+  // Map cloud-agent-next 'interrupted' → 'cancelled'
+  const status = raw.status === 'interrupted' ? 'cancelled' : raw.status;
+
+  // Map cloud-agent-next 'kiloSessionId' → 'cliSessionId'
+  const cliSessionId =
+    'cliSessionId' in raw
+      ? raw.cliSessionId
+      : 'kiloSessionId' in raw
+        ? raw.kiloSessionId
+        : undefined;
+
+  // Map cloud-agent-next 'cloudAgentSessionId' → 'sessionId' as fallback
+  const sessionId =
+    raw.sessionId ?? ('cloudAgentSessionId' in raw ? raw.cloudAgentSessionId : undefined);
+
+  return {
+    status,
+    sessionId,
+    cliSessionId,
+    errorMessage: raw.errorMessage,
+  };
+}
 
 /**
  * Read a review's usage data, polling with exponential backoff if not yet available.
@@ -79,15 +134,13 @@ export async function POST(
     }
 
     const { reviewId } = await params;
-    const rawPayload = await req.json();
-    const parseResult = StatusUpdatePayloadSchema.safeParse(rawPayload);
-    if (!parseResult.success) {
-      return NextResponse.json(
-        { error: 'Invalid payload', details: parseResult.error.flatten() },
-        { status: 400 }
-      );
+    const rawPayload: StatusUpdatePayload = await req.json();
+    const { status, sessionId, cliSessionId, errorMessage } = normalizePayload(rawPayload);
+
+    // Validate payload
+    if (!status) {
+      return NextResponse.json({ error: 'Missing required field: status' }, { status: 400 });
     }
-    const { sessionId, cliSessionId, status, errorMessage } = parseResult.data;
 
     logExceptInTest('[code-review-status] Received status update', {
       reviewId,
@@ -135,7 +188,10 @@ export async function POST(
       cliSessionId,
       errorMessage,
       startedAt: status === 'running' ? new Date() : undefined,
-      completedAt: status === 'completed' || status === 'failed' ? new Date() : undefined,
+      completedAt:
+        status === 'completed' || status === 'failed' || status === 'cancelled'
+          ? new Date()
+          : undefined,
     });
 
     logExceptInTest('[code-review-status] Updated review status', {
