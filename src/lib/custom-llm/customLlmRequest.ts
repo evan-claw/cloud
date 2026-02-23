@@ -697,12 +697,14 @@ export async function customLlmRequest(
 
   if (inStreamDebugMode) {
     debugSaveLog(JSON.stringify(request, undefined, 2), 'request.gateway.json');
+    debugSaveLog(JSON.stringify(commonParams, undefined, 2), 'request.ai-sdk.json');
     debugSaveLog(JSON.stringify((await result.request).body, undefined, 2), 'request.native.json');
   }
 
   const convertStreamPartToChunk = createStreamPartConverter(modelId);
 
   const debugGatewayChunks = new Array<unknown>();
+  const debugAiSdkChunks = new Array<unknown>();
   const debugNativeChunks = new Array<unknown>();
 
   const encoder = new TextEncoder();
@@ -710,8 +712,12 @@ export async function customLlmRequest(
     async start(controller) {
       try {
         for await (const chunk of result.fullStream) {
-          if (chunk.type === 'raw') {
-            debugNativeChunks.push(chunk.rawValue);
+          if (inStreamDebugMode) {
+            if (chunk.type === 'raw') {
+              debugNativeChunks.push(chunk.rawValue);
+            } else {
+              debugAiSdkChunks.push(chunk);
+            }
           }
 
           const converted = convertStreamPartToChunk(chunk);
@@ -743,6 +749,7 @@ export async function customLlmRequest(
       } finally {
         controller.close();
         debugLogChunks(debugGatewayChunks, 'response.gateway.jsonl');
+        debugLogChunks(debugAiSdkChunks, 'response.ai-sdk.jsonl');
         debugLogChunks(debugNativeChunks, 'response.native.jsonl');
       }
     },
