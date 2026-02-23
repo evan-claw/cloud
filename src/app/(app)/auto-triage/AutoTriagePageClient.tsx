@@ -29,7 +29,9 @@ export function AutoTriagePageClient({
   const trpc = useTRPC();
 
   // Fetch GitHub App installation status
-  const { data: statusData } = useQuery(trpc.personalAutoTriage.getGitHubStatus.queryOptions());
+  const { data: statusData, isLoading: isStatusLoading } = useQuery(
+    trpc.personalAutoTriage.getGitHubStatus.queryOptions()
+  );
 
   const isGitHubAppInstalled = statusData?.connected && statusData?.integration?.isValid;
 
@@ -51,7 +53,7 @@ export function AutoTriagePageClient({
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <h1 className="text-3xl font-bold">Auto Triage</h1>
-          <Badge variant="new">new</Badge>
+          <Badge variant="beta">beta</Badge>
         </div>
         <p className="text-muted-foreground">
           Automatically triage GitHub issues with Al-powered analysis
@@ -68,7 +70,7 @@ export function AutoTriagePageClient({
       </div>
 
       {/* GitHub App Required Alert */}
-      {!isGitHubAppInstalled && (
+      {!isStatusLoading && !isGitHubAppInstalled && (
         <Alert>
           <Rocket className="h-4 w-4" />
           <AlertTitle>GitHub App Required</AlertTitle>
@@ -97,7 +99,7 @@ export function AutoTriagePageClient({
           <TabsTrigger
             value="tickets"
             className="flex items-center gap-2"
-            disabled={!isGitHubAppInstalled}
+            disabled={!isStatusLoading && !isGitHubAppInstalled}
           >
             <ListChecks className="h-4 w-4" />
             Tickets
@@ -111,7 +113,7 @@ export function AutoTriagePageClient({
 
         {/* Tickets Tab */}
         <TabsContent value="tickets" className="mt-6 space-y-4">
-          {isGitHubAppInstalled ? (
+          {isStatusLoading || isGitHubAppInstalled ? (
             <AutoTriageTicketsCard />
           ) : (
             <Alert>
