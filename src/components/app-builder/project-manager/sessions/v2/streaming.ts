@@ -25,7 +25,10 @@ import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import type { V2SessionStore } from './store';
 import type { AppTRPCClient } from '../../types';
 import type { Images } from '@/lib/images-schema';
+import type { WorkerVersion } from '@/lib/app-builder/types';
 import { createLogger } from '../../logging';
+
+type SendMessageResponse = { sessionId: string; workerVersion: WorkerVersion };
 
 export type V2StreamingConfig = {
   projectId: string;
@@ -34,6 +37,8 @@ export type V2StreamingConfig = {
   store: V2SessionStore;
   cloudAgentSessionId: string | null;
   onStreamComplete?: () => void;
+  /** Called when the backend creates a new session (upgrade or GitHub migration) */
+  onSessionChanged?: (newSessionId: string, workerVersion: WorkerVersion) => void;
 };
 
 export type V2StreamingCoordinator = {
@@ -56,7 +61,8 @@ export type V2StreamingCoordinator = {
  * initiate the prepared session, then connects to the WebSocket.
  */
 export function createV2StreamingCoordinator(config: V2StreamingConfig): V2StreamingCoordinator {
-  const { projectId, organizationId, trpcClient, store, onStreamComplete } = config;
+  const { projectId, organizationId, trpcClient, store, onStreamComplete, onSessionChanged } =
+    config;
 
   const logger = createLogger(projectId);
 
@@ -285,7 +291,7 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
     message: string,
     images?: Images,
     model?: string
-  ): Promise<string> {
+  ): Promise<SendMessageResponse> {
     if (organizationId) {
       const result = await trpcClient.organizations.appBuilder.sendMessage.mutate({
         projectId,
@@ -294,7 +300,7 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
         images,
         model,
       });
-      return result.cloudAgentSessionId;
+      return { sessionId: result.cloudAgentSessionId, workerVersion: result.workerVersion };
     } else {
       const result = await trpcClient.appBuilder.sendMessage.mutate({
         projectId,
@@ -302,7 +308,7 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
         images,
         model,
       });
-      return result.cloudAgentSessionId;
+      return { sessionId: result.cloudAgentSessionId, workerVersion: result.workerVersion };
     }
   }
 
@@ -340,11 +346,18 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
 
     void (async () => {
       try {
-        const sessionId = await callSendMessage(message, images, model);
-        logger.log('V2 sendMessage returned', { sessionId });
+        const response = await callSendMessage(message, images, model);
+        const { sessionId, workerVersion } = response;
+        logger.log('V2 sendMessage returned', { sessionId, workerVersion });
 
         if (destroyed || abortSignal.aborted) {
           logger.log('Operation cancelled during V2 message send');
+          return;
+        }
+
+        // Detect session change: backend created a new session (upgrade or GitHub migration)
+        if (sessionId !== config.cloudAgentSessionId && onSessionChanged) {
+          onSessionChanged(sessionId, workerVersion);
           return;
         }
 

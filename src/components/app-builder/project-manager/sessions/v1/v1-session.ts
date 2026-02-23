@@ -5,14 +5,14 @@
 
 import type { CloudMessage } from '@/components/cloud-agent/types';
 import type { Images } from '@/lib/images-schema';
-import type { ProjectSessionInfo, WorkerVersion } from '@/lib/app-builder/types';
+import type { SessionDisplayInfo, WorkerVersion } from '@/lib/app-builder/types';
 import type { AppTRPCClient } from '../../types';
 import type { V1Session } from '../types';
 import { createV1SessionStore } from './store';
 import { createV1StreamingCoordinator, type V1StreamingCoordinator } from './streaming';
 
 export type CreateV1SessionConfig = {
-  info: ProjectSessionInfo;
+  info: SessionDisplayInfo;
   initialMessages: CloudMessage[];
   // Only needed for active sessions:
   projectId?: string;
@@ -82,9 +82,9 @@ export function createV1Session(config: CreateV1SessionConfig): V1Session {
   let messagesLoaded = false;
 
   function loadMessages(): void {
-    if (messagesLoaded) return;
+    if (messagesLoaded || !cloudAgentSessionId) return;
     messagesLoaded = true;
-    connectToExistingSession(info.cloud_agent_session_id);
+    connectToExistingSession(cloudAgentSessionId);
   }
 
   function destroy(): void {

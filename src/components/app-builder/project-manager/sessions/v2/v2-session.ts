@@ -5,14 +5,14 @@
 
 import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import type { Images } from '@/lib/images-schema';
-import type { ProjectSessionInfo } from '@/lib/app-builder/types';
+import type { SessionDisplayInfo, WorkerVersion } from '@/lib/app-builder/types';
 import type { AppTRPCClient } from '../../types';
 import type { V2Session } from '../types';
 import { createV2SessionStore } from './store';
 import { createV2StreamingCoordinator, type V2StreamingCoordinator } from './streaming';
 
 export type CreateV2SessionConfig = {
-  info: ProjectSessionInfo;
+  info: SessionDisplayInfo;
   initialMessages: StoredMessage[];
   // Only needed for active sessions:
   projectId?: string;
@@ -20,6 +20,7 @@ export type CreateV2SessionConfig = {
   trpcClient?: AppTRPCClient;
   cloudAgentSessionId?: string | null;
   onStreamComplete?: () => void;
+  onSessionChanged?: (newSessionId: string, workerVersion: WorkerVersion) => void;
 };
 
 /**
@@ -35,6 +36,7 @@ export function createV2Session(config: CreateV2SessionConfig): V2Session {
     trpcClient,
     cloudAgentSessionId,
     onStreamComplete,
+    onSessionChanged,
   } = config;
 
   const store = createV2SessionStore(initialMessages);
@@ -48,6 +50,7 @@ export function createV2Session(config: CreateV2SessionConfig): V2Session {
       store,
       cloudAgentSessionId: cloudAgentSessionId ?? null,
       onStreamComplete,
+      onSessionChanged,
     });
   }
 
@@ -76,9 +79,9 @@ export function createV2Session(config: CreateV2SessionConfig): V2Session {
   let messagesLoaded = false;
 
   function loadMessages(): void {
-    if (messagesLoaded) return;
+    if (messagesLoaded || !cloudAgentSessionId) return;
     messagesLoaded = true;
-    connectToExistingSession(info.cloud_agent_session_id);
+    connectToExistingSession(cloudAgentSessionId);
   }
 
   function destroy(): void {

@@ -69,14 +69,14 @@ export type WorkerVersion = 'v1' | 'v2';
  * Session info returned with project data.
  * `initiated` and `prepared` are only populated for the active session
  * (the one fetched from the cloud-agent DO). Ended sessions have both as null.
+ *
+ * Used in ProjectManager.buildSessions() for routing decisions; not stored on sessions.
  */
 export type ProjectSessionInfo = {
   id: string;
   cloud_agent_session_id: string;
   worker_version: WorkerVersion;
-  created_at: string;
   ended_at: string | null;
-  reason: string;
   title: string | null;
   /**
    * Whether the cloud agent session has been initiated (agent started executing).
@@ -92,6 +92,17 @@ export type ProjectSessionInfo = {
    * - null: Ended session, unknown, or error state
    */
   prepared: boolean | null;
+};
+
+/**
+ * Subset of session info exposed on SessionBase for UI display and identity.
+ * Routing-only fields (worker_version, initiated, prepared, cloud_agent_session_id)
+ * are consumed in buildSessions() and not stored on the session object.
+ */
+export type SessionDisplayInfo = {
+  id: string;
+  ended_at: string | null;
+  title: string | null;
 };
 
 /**

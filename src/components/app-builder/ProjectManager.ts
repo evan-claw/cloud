@@ -9,6 +9,7 @@ import type {
   DeployProjectResult,
   ProjectSessionInfo,
   ProjectWithMessages,
+  SessionDisplayInfo,
   WorkerVersion,
 } from '@/lib/app-builder/types';
 import type { Images } from '@/lib/images-schema';
@@ -69,10 +70,14 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
 
   // --- Session building ---
 
+  function toDisplayInfo(info: ProjectSessionInfo): SessionDisplayInfo {
+    return { id: info.id, ended_at: info.ended_at, title: info.title };
+  }
+
   function createStaticSession(info: ProjectSessionInfo): AppBuilderSession {
     // Pass streaming config so ended sessions can load messages via WebSocket replay
     const streamingConfig = {
-      info,
+      info: toDisplayInfo(info),
       initialMessages: [] as never[],
       projectId,
       organizationId,
@@ -121,19 +126,20 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
       } else if (info.worker_version === 'v2') {
         sessions.push(
           createV2Session({
-            info,
+            info: toDisplayInfo(info),
             initialMessages: [],
             projectId,
             organizationId,
             trpcClient,
             cloudAgentSessionId: proj.session_id ?? null,
             onStreamComplete: () => startPreviewPollingIfNeeded(),
+            onSessionChanged: handleSessionChanged,
           })
         );
       } else {
         sessions.push(
           createV1Session({
-            info,
+            info: toDisplayInfo(info),
             initialMessages: proj.messages,
             projectId,
             organizationId,
@@ -158,16 +164,10 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
     const currentActive = getActiveSession();
     currentActive?.destroy();
 
-    const newInfo: ProjectSessionInfo = {
+    const newInfo: SessionDisplayInfo = {
       id: newSessionId,
-      cloud_agent_session_id: newSessionId,
-      worker_version: workerVersion,
-      created_at: new Date().toISOString(),
       ended_at: null,
-      reason: workerVersion === 'v1' ? 'github_migration' : 'upgrade',
       title: null,
-      initiated: true,
-      prepared: true,
     };
 
     const newSession =
@@ -180,6 +180,7 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
             trpcClient,
             cloudAgentSessionId: newSessionId,
             onStreamComplete: () => startPreviewPollingIfNeeded(),
+            onSessionChanged: handleSessionChanged,
           })
         : createV1Session({
             info: newInfo,
@@ -229,10 +230,13 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
     subscribeToSession(session);
   }
 
-  // Determine if the active session needs initial streaming from its session info
-  const activeSessionInfo = sessions.length > 0 ? sessions[sessions.length - 1].info : undefined;
+  // Determine if the active session needs initial streaming from the backend session info.
+  // `initiated` lives on ProjectSessionInfo (routing data), not on SessionDisplayInfo.
+  const activeProjectSessionInfo =
+    project.sessions.find(s => s.ended_at === null) ??
+    project.sessions[project.sessions.length - 1];
 
-  if (activeSessionInfo?.initiated === false) {
+  if (activeProjectSessionInfo?.initiated === false) {
     pendingInitialStreamingStart = true;
   } else if (cloudAgentSessionId) {
     pendingReconnect = true;

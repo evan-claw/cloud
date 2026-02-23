@@ -6,7 +6,7 @@
 import type { CloudMessage } from '@/components/cloud-agent/types';
 import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import type { Images } from '@/lib/images-schema';
-import type { ProjectSessionInfo } from '@/lib/app-builder/types';
+import type { SessionDisplayInfo } from '@/lib/app-builder/types';
 import type { SessionState, SessionStore } from './session-store';
 
 export type V1SessionState = SessionState<CloudMessage>;
@@ -17,7 +17,7 @@ export type V2SessionStore = SessionStore<StoredMessage>;
 
 /** Common session shape shared by V1 and V2 */
 export type SessionBase = {
-  info: ProjectSessionInfo;
+  info: SessionDisplayInfo;
   subscribe: (listener: () => void) => () => void;
   sendMessage: (text: string, images: Images | undefined, model: string) => Promise<void>;
   interrupt: () => Promise<void>;

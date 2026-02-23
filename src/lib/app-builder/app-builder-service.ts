@@ -111,7 +111,6 @@ async function getProjectSessions(projectId: string): Promise<ProjectSessionInfo
       worker_version: app_builder_project_sessions.worker_version,
       created_at: app_builder_project_sessions.created_at,
       ended_at: app_builder_project_sessions.ended_at,
-      reason: app_builder_project_sessions.reason,
       v1_title: cliSessions.title,
       v2_title: cli_sessions_v2.title,
     })
@@ -134,9 +133,7 @@ async function getProjectSessions(projectId: string): Promise<ProjectSessionInfo
     id: row.id,
     cloud_agent_session_id: row.cloud_agent_session_id,
     worker_version: parseWorkerVersion(row.worker_version) ?? 'v1',
-    created_at: row.created_at,
     ended_at: row.ended_at,
-    reason: row.reason,
     title: row.v1_title ?? row.v2_title ?? null,
     initiated: null,
     prepared: null,
