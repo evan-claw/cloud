@@ -663,7 +663,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <h1 className="text-3xl font-bold">Security Agent</h1>
-          <Badge variant="new">new</Badge>
+          <Badge variant="beta">Beta</Badge>
         </div>
         <p className="text-muted-foreground">
           Monitor and manage Dependabot security alerts for your repositories
