@@ -2,6 +2,7 @@
 
 import { User, Bot, Scissors, Image, FileText, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import type { AssistantMessage } from '@/types/opencode.gen';
 import type { StoredMessage, Part, CompactionPart } from './types';
 import {
   isUserMessage,
@@ -86,9 +87,7 @@ function getUserTextContent(parts: Part[]): string {
 /**
  * Extract a human-readable error message from an AssistantMessage error field.
  */
-function getAssistantErrorMessage(
-  error: NonNullable<import('@/types/opencode.gen').AssistantMessage['error']>
-): string {
+function getAssistantErrorMessage(error: NonNullable<AssistantMessage['error']>): string {
   if ('data' in error && 'message' in error.data && typeof error.data.message === 'string') {
     return error.data.message;
   }
