@@ -39,8 +39,8 @@ const mockDbSelect = jest.fn<any>();
 let afterPromises: Promise<void>[] = [];
 
 jest.mock('next/server', () => {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   return {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     ...(jest.requireActual('next/server') as Record<string, unknown>),
     after: (fn: () => Promise<void>) => {
       afterPromises.push(fn());
