@@ -1979,8 +1979,8 @@ export const cloud_agent_code_reviews = pgTable(
     status: text().notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
     error_message: text(),
 
-    // Feature flag: when true, this review uses cloud-agent-next instead of cloud-agent
-    use_cloud_agent_next: boolean().default(false),
+    // Which cloud agent backend executed this review: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next)
+    agent_version: text().default('v1'),
 
     // Timestamps
     started_at: timestamp({ withTimezone: true, mode: 'string' }),

@@ -175,10 +175,10 @@ export function CodeReviewStreamView({ reviewId, onComplete }: CodeReviewStreamV
       if (!data?.success) return 2000;
       // Terminal state — stop polling
       if (['completed', 'failed', 'cancelled'].includes(data.status)) return false;
-      // cloud-agent-next mode: stop once we have the cloudAgentSessionId for WebSocket
-      if (data.useCloudAgentNext && data.cloudAgentSessionId) return false;
-      // cloud-agent mode: stop once we have stream info (polling handles the rest)
-      if (!data.useCloudAgentNext) return false;
+      // cloud-agent-next (v2) mode: stop once we have the cloudAgentSessionId for WebSocket
+      if (data.agentVersion === 'v2' && data.cloudAgentSessionId) return false;
+      // cloud-agent (v1) mode: stop once we have stream info (polling handles the rest)
+      if (data.agentVersion !== 'v2') return false;
       return 2000;
     },
     enabled: !!reviewId,
@@ -188,8 +188,8 @@ export function CodeReviewStreamView({ reviewId, onComplete }: CodeReviewStreamV
   const organizationId = streamInfo?.success ? streamInfo.organizationId : undefined;
   const reviewStatus = streamInfo?.success ? streamInfo.status : undefined;
 
-  // Determine mode from the explicit DB flag (set at dispatch time from PostHog feature flag)
-  const useWebSocket = streamInfo?.success ? streamInfo.useCloudAgentNext : false;
+  // Determine mode from the agent version recorded at dispatch time
+  const useWebSocket = streamInfo?.success ? streamInfo.agentVersion === 'v2' : false;
 
   // Mark as complete if the review is already in a terminal state
   useEffect(() => {

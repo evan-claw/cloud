@@ -250,7 +250,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       userId: string;
     };
     skipBalanceCheck?: boolean;
-    useCloudAgentNext?: boolean;
+    agentVersion?: string;
   }): Promise<{ status: CodeReviewStatus }> {
     this.state = {
       reviewId: params.reviewId,
@@ -260,14 +260,14 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       status: 'queued',
       updatedAt: new Date().toISOString(),
       skipBalanceCheck: params.skipBalanceCheck,
-      useCloudAgentNext: params.useCloudAgentNext,
+      agentVersion: params.agentVersion,
     };
     await this.saveState();
 
     console.log('[CodeReviewOrchestrator] Review created and queued', {
       reviewId: params.reviewId,
       owner: params.owner,
-      useCloudAgentNext: params.useCloudAgentNext,
+      agentVersion: params.agentVersion,
     });
 
     // Note: Review execution is triggered via runReview() from the worker
@@ -350,12 +350,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
   /**
    * Interrupt the cloud agent session to stop it from running and posting comments.
-   * Routes to the correct backend based on useCloudAgentNext flag.
+   * Routes to the correct backend based on agentVersion.
    */
   private async interruptCloudAgentSession(sessionId: string): Promise<void> {
-    const baseUrl = this.state.useCloudAgentNext
-      ? this.env.CLOUD_AGENT_NEXT_URL
-      : this.env.CLOUD_AGENT_URL;
+    const baseUrl =
+      this.state.agentVersion === 'v2' ? this.env.CLOUD_AGENT_NEXT_URL : this.env.CLOUD_AGENT_URL;
     const cloudAgentUrl = `${baseUrl}/trpc/interruptSession`;
 
     const response = await fetch(cloudAgentUrl, {
@@ -404,8 +403,8 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       return;
     }
 
-    // Branch based on feature flag
-    if (this.state.useCloudAgentNext) {
+    // Branch based on agent version
+    if (this.state.agentVersion === 'v2') {
       await this.runWithCloudAgentNext();
     } else {
       await this.runWithCloudAgent();

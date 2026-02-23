@@ -1,1 +1,0 @@
-ALTER TABLE "cloud_agent_code_reviews" ADD COLUMN "use_cloud_agent_next" boolean DEFAULT false;

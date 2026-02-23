@@ -188,14 +188,15 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
     platform,
   });
 
-  // 4. Update status to "queued" (no longer pending) and record which agent to use
-  await updateCodeReviewStatus(review.id, 'queued', { useCloudAgentNext });
+  // 4. Update status to "queued" (no longer pending) and record which agent version to use
+  const agentVersion = useCloudAgentNext ? 'v2' : 'v1';
+  await updateCodeReviewStatus(review.id, 'queued', { agentVersion });
 
   // 5. Dispatch to Cloudflare Worker to create CodeReviewOrchestrator DO
   await codeReviewWorkerClient.dispatchReview({
     ...payload,
     skipBalanceCheck: true,
-    useCloudAgentNext,
+    agentVersion,
   });
 
   logExceptInTest('[dispatchReview] Review dispatched successfully', {

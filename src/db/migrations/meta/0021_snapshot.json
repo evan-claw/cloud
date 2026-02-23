@@ -1,5 +1,5 @@
 {
-  "id": "af602c82-e14b-47a2-a767-aa922a0758a7",
+  "id": "8ad348e9-9c62-4d5a-a0e4-9d660f2a401f",
   "prevId": "738259b0-d590-404b-a8ae-842be5ab49cc",
   "version": "7",
   "dialect": "postgresql",
@@ -3018,12 +3018,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "use_cloud_agent_next": {
-          "name": "use_cloud_agent_next",
-          "type": "boolean",
+        "agent_version": {
+          "name": "agent_version",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
-          "default": false
+          "default": "'v1'"
         },
         "started_at": {
           "name": "started_at",

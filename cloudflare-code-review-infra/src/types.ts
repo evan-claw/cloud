@@ -59,8 +59,8 @@ export interface CodeReview {
   updatedAt: string;
   events?: CodeReviewEvent[];
   skipBalanceCheck?: boolean; // Skip balance validation in cloud agent (for OSS sponsorship)
-  /** When true, use cloud-agent-next instead of cloud-agent (feature flag) */
-  useCloudAgentNext?: boolean;
+  /** Which cloud agent backend to use: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next) */
+  agentVersion?: string;
 }
 
 export interface CodeReviewStatusResponse {
@@ -79,8 +79,8 @@ export interface CodeReviewRequest {
   sessionInput: SessionInput;
   owner: Owner;
   skipBalanceCheck?: boolean;
-  /** When true, use cloud-agent-next instead of cloud-agent (feature flag) */
-  useCloudAgentNext?: boolean;
+  /** Which cloud agent backend to use: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next) */
+  agentVersion?: string;
 }
 
 export interface CodeReviewResponse {

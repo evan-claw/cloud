@@ -418,7 +418,7 @@ export const codeReviewRouter = createTRPCRouter({
           cloudAgentSessionId: review.session_id ?? null,
           organizationId: review.owned_by_organization_id ?? undefined,
           status: review.status,
-          useCloudAgentNext: review.use_cloud_agent_next ?? false,
+          agentVersion: review.agent_version ?? 'v1',
         });
       } catch (error) {
         if (error instanceof TRPCError) {
