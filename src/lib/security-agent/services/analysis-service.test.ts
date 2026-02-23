@@ -6,7 +6,7 @@ import type * as tokensModule from '@/lib/tokens';
 import type { User } from '@/db/schema';
 import type { SessionSnapshot } from '@/lib/session-ingest-client';
 import type { startSecurityAnalysis as startSecurityAnalysisType } from './analysis-service';
-import { extractLastAssistantMessage } from './analysis-service';
+import type { extractLastAssistantMessage as extractLastAssistantMessageType } from './analysis-service';
 
 const mockGetSecurityFindingById = jest.fn() as jest.MockedFunction<
   typeof securityFindingsModule.getSecurityFindingById
@@ -66,9 +66,10 @@ jest.mock('./extraction-service', () => ({
 }));
 
 let startSecurityAnalysis: typeof startSecurityAnalysisType;
+let extractLastAssistantMessage: typeof extractLastAssistantMessageType;
 
 beforeAll(async () => {
-  ({ startSecurityAnalysis } = await import('./analysis-service'));
+  ({ startSecurityAnalysis, extractLastAssistantMessage } = await import('./analysis-service'));
 });
 
 describe('analysis-service', () => {
