@@ -74,7 +74,7 @@ const ListSessionsInputSchema = z.object({
   cursor: z.iso.datetime().optional(),
   limit: z.number().min(1).max(50).optional().default(PAGE_SIZE),
   orderBy: z.enum(['created_at', 'updated_at']).optional().default('created_at'),
-  isChild: z.boolean().optional(),
+  includeChildren: z.boolean().optional().default(false),
 });
 
 const GetSessionInputSchema = z.object({
@@ -97,7 +97,7 @@ export const cliSessionsV2Router = createTRPCRouter({
    * List sessions for the current user with cursor-based pagination.
    */
   list: baseProcedure.input(ListSessionsInputSchema).query(async ({ ctx, input }) => {
-    const { cursor, limit, orderBy, isChild } = input;
+    const { cursor, limit, orderBy, includeChildren } = input;
 
     const orderColumn =
       orderBy === 'updated_at' ? cli_sessions_v2.updated_at : cli_sessions_v2.created_at;
@@ -108,9 +108,7 @@ export const cliSessionsV2Router = createTRPCRouter({
       whereConditions.push(lt(orderColumn, cursor));
     }
 
-    if (isChild === true) {
-      whereConditions.push(isNotNull(cli_sessions_v2.parent_session_id));
-    } else if (isChild === false) {
+    if (!includeChildren) {
       whereConditions.push(isNull(cli_sessions_v2.parent_session_id));
     }
 
