@@ -28,7 +28,7 @@ vi.mock('../fly/apps', async () => {
     createApp: vi.fn().mockResolvedValue({ id: 'app-id', created_at: 1234567890 }),
     getApp: vi.fn().mockResolvedValue(null), // default: app doesn't exist yet
     deleteApp: vi.fn().mockResolvedValue(undefined),
-    allocateIP: vi.fn().mockResolvedValue({ address: '::1', type: 'v6' }),
+    allocateIPv6: vi.fn().mockResolvedValue({ address: '::1', type: 'v6' }),
   };
 });
 
@@ -115,11 +115,11 @@ beforeEach(() => {
   // Reset default mock behaviors
   (appsClient.getApp as Mock).mockResolvedValue(null);
   (appsClient.createApp as Mock).mockResolvedValue({ id: 'app-id', created_at: 1234567890 });
-  (appsClient.allocateIP as Mock).mockResolvedValue({ address: '::1', type: 'v6' });
+  (appsClient.allocateIPv6 as Mock).mockResolvedValue({ address: '::1', type: 'v6' });
 });
 
 describe('ensureApp', () => {
-  it('creates app, allocates both IPs, and sets env key on first call', async () => {
+  it('creates app, allocates IPv6, and sets env key on first call', async () => {
     const { appDO, storage } = createAppDO();
 
     const result = await appDO.ensureApp('user-1');
@@ -132,10 +132,8 @@ describe('ensureApp', () => {
       'user-1',
       'kiloclaw_user_id'
     );
-    expect(appsClient.allocateIP).toHaveBeenCalledTimes(2);
-    expect(appsClient.allocateIP).toHaveBeenCalledWith('test-token', result.appName, 'v6');
-    expect(appsClient.allocateIP).toHaveBeenCalledWith('test-token', result.appName, 'shared_v4');
-    expect(storage._store.get('ipv4Allocated')).toBe(true);
+    expect(appsClient.allocateIPv6).toHaveBeenCalledTimes(1);
+    expect(appsClient.allocateIPv6).toHaveBeenCalledWith('test-token', result.appName);
     expect(storage._store.get('ipv6Allocated')).toBe(true);
     // Env key was set
     expect(secretsClient.setAppSecret).toHaveBeenCalledWith(
@@ -154,7 +152,7 @@ describe('ensureApp', () => {
     await appDO.ensureApp('user-1');
 
     expect(appsClient.createApp).not.toHaveBeenCalled();
-    expect(appsClient.allocateIP).toHaveBeenCalledTimes(2);
+    expect(appsClient.allocateIPv6).toHaveBeenCalledTimes(1);
   });
 
   it('is idempotent — second call is a no-op', async () => {
@@ -167,31 +165,13 @@ describe('ensureApp', () => {
     expect(result1.appName).toBe(result2.appName);
     expect(appsClient.createApp).not.toHaveBeenCalled();
     expect(appsClient.getApp).not.toHaveBeenCalled();
-    expect(appsClient.allocateIP).not.toHaveBeenCalled();
+    expect(appsClient.allocateIPv6).not.toHaveBeenCalled();
     expect(secretsClient.setAppSecret).not.toHaveBeenCalled();
-  });
-
-  it('resumes from partial state — IPv6 done, IPv4 pending', async () => {
-    const storage = createFakeStorage();
-    storage._store.set('userId', 'user-1');
-    storage._store.set('flyAppName', 'acct-test');
-    storage._store.set('ipv6Allocated', true);
-    storage._store.set('ipv4Allocated', false);
-
-    // App already exists (since we already created it)
-    (appsClient.getApp as Mock).mockResolvedValue({ id: 'existing', created_at: 100 });
-
-    const { appDO } = createAppDO(storage);
-    await appDO.ensureApp('user-1');
-
-    // Should only allocate IPv4
-    expect(appsClient.allocateIP).toHaveBeenCalledTimes(1);
-    expect(appsClient.allocateIP).toHaveBeenCalledWith('test-token', 'acct-test', 'shared_v4');
   });
 
   it('arms retry alarm and rethrows on partial failure', async () => {
     // IPv6 allocation will fail
-    (appsClient.allocateIP as Mock).mockRejectedValue(new FlyApiError('timeout', 503, 'retry'));
+    (appsClient.allocateIPv6 as Mock).mockRejectedValue(new FlyApiError('timeout', 503, 'retry'));
 
     const { appDO, storage } = createAppDO();
 
@@ -199,28 +179,8 @@ describe('ensureApp', () => {
 
     // App name was persisted (partial state saved before failure)
     expect(storage._store.get('flyAppName')).toMatch(/^acct-/);
-    // IPs NOT allocated
+    // IPv6 NOT allocated
     expect(storage._store.get('ipv6Allocated')).not.toBe(true);
-    expect(storage._store.get('ipv4Allocated')).not.toBe(true);
-    // Retry alarm armed
-    expect(storage._getAlarm()).not.toBeNull();
-  });
-
-  it('arms retry alarm when IPv4 allocation fails after IPv6 succeeds', async () => {
-    let callCount = 0;
-    (appsClient.allocateIP as Mock).mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return Promise.resolve({ address: '::1', type: 'v6' });
-      return Promise.reject(new FlyApiError('rate limit', 429, 'slow down'));
-    });
-
-    const { appDO, storage } = createAppDO();
-
-    await expect(appDO.ensureApp('user-1')).rejects.toThrow('rate limit');
-
-    // IPv6 was persisted, IPv4 was not
-    expect(storage._store.get('ipv6Allocated')).toBe(true);
-    expect(storage._store.get('ipv4Allocated')).not.toBe(true);
     // Retry alarm armed
     expect(storage._getAlarm()).not.toBeNull();
   });
@@ -299,12 +259,11 @@ describe('destroyApp', () => {
 });
 
 describe('alarm retry', () => {
-  it('retries incomplete IP allocation on alarm', async () => {
+  it('retries incomplete IPv6 allocation on alarm', async () => {
     const storage = createFakeStorage();
     storage._store.set('userId', 'user-1');
     storage._store.set('flyAppName', 'acct-test');
-    storage._store.set('ipv6Allocated', true);
-    storage._store.set('ipv4Allocated', false);
+    storage._store.set('ipv6Allocated', false);
 
     // App exists
     (appsClient.getApp as Mock).mockResolvedValue({ id: 'existing', created_at: 100 });
@@ -312,8 +271,8 @@ describe('alarm retry', () => {
     const { appDO } = createAppDO(storage);
     await appDO.alarm();
 
-    expect(appsClient.allocateIP).toHaveBeenCalledWith('test-token', 'acct-test', 'shared_v4');
-    expect(storage._store.get('ipv4Allocated')).toBe(true);
+    expect(appsClient.allocateIPv6).toHaveBeenCalledWith('test-token', 'acct-test');
+    expect(storage._store.get('ipv6Allocated')).toBe(true);
   });
 
   it('reschedules alarm if retry fails', async () => {
@@ -321,7 +280,6 @@ describe('alarm retry', () => {
     storage._store.set('userId', 'user-1');
     storage._store.set('flyAppName', 'acct-test');
     storage._store.set('ipv6Allocated', false);
-    storage._store.set('ipv4Allocated', false);
     storage._store.set('envKeySet', false);
 
     (appsClient.getApp as Mock).mockRejectedValue(new FlyApiError('timeout', 503, 'retry'));
@@ -337,7 +295,6 @@ describe('alarm retry', () => {
     storage._store.set('userId', 'user-1');
     storage._store.set('flyAppName', 'acct-test');
     storage._store.set('ipv6Allocated', true);
-    storage._store.set('ipv4Allocated', true);
     storage._store.set('envKeySet', true);
     storage._store.set('envKey', 'test-key');
 
@@ -345,7 +302,7 @@ describe('alarm retry', () => {
     await appDO.alarm();
 
     expect(appsClient.getApp).not.toHaveBeenCalled();
-    expect(appsClient.allocateIP).not.toHaveBeenCalled();
+    expect(appsClient.allocateIPv6).not.toHaveBeenCalled();
     expect(secretsClient.setAppSecret).not.toHaveBeenCalled();
   });
 
@@ -354,7 +311,6 @@ describe('alarm retry', () => {
     storage._store.set('userId', 'user-1');
     storage._store.set('flyAppName', 'acct-test');
     storage._store.set('ipv6Allocated', true);
-    storage._store.set('ipv4Allocated', true);
     storage._store.set('envKeySet', false);
 
     // App exists
@@ -364,7 +320,7 @@ describe('alarm retry', () => {
     await appDO.alarm();
 
     // Should only set the env key, not allocate IPs
-    expect(appsClient.allocateIP).not.toHaveBeenCalled();
+    expect(appsClient.allocateIPv6).not.toHaveBeenCalled();
     expect(secretsClient.setAppSecret).toHaveBeenCalled();
     expect(storage._store.get('envKeySet')).toBe(true);
   });
@@ -405,7 +361,6 @@ describe('ensureEnvKey', () => {
     const storage = createFakeStorage();
     storage._store.set('userId', 'user-1');
     storage._store.set('flyAppName', 'acct-test');
-    storage._store.set('ipv4Allocated', true);
     storage._store.set('ipv6Allocated', true);
     storage._store.set('envKeySet', false);
 

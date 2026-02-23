@@ -67,7 +67,7 @@ src/
 │   ├── gateway-token.ts              # HMAC-SHA256 derivation for per-sandbox tokens
 │   └── sandbox-id.ts                 # userId <-> sandboxId (base64url, reversible)
 ├── durable-objects/
-│   ├── kiloclaw-app.ts               # DO: per-user Fly App lifecycle (create app, allocate IPs, env key)
+│   ├── kiloclaw-app.ts               # DO: per-user Fly App lifecycle (create app, allocate IPv6, env key)
 │   └── kiloclaw-instance.ts          # DO: lifecycle state machine, reconciliation, two-phase destroy
 ├── fly/
 │   ├── apps.ts                       # Fly Apps + IP allocation REST API (per-user apps)

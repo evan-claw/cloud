@@ -4,7 +4,7 @@ import {
   createApp,
   getApp,
   deleteApp,
-  allocateIP,
+  allocateIPv6,
   AppNameCollisionError,
 } from './apps';
 import { FlyApiError } from './client';
@@ -328,7 +328,7 @@ describe('deleteApp', () => {
 // IP allocation (REST)
 // ============================================================================
 
-describe('allocateIP', () => {
+describe('allocateIPv6', () => {
   it('returns IPAssignment on success', async () => {
     mockFetch(200, {
       ip: '2a09:8280:1::1',
@@ -337,7 +337,7 @@ describe('allocateIP', () => {
       shared: false,
     });
 
-    const result = await allocateIP(TOKEN, 'acct-test', 'v6');
+    const result = await allocateIPv6(TOKEN, 'acct-test');
 
     expect(result.ip).toBe('2a09:8280:1::1');
     expect(result.region).toBe('global');
@@ -349,24 +349,10 @@ describe('allocateIP', () => {
     expect(sentBody).toEqual({ type: 'v6' });
   });
 
-  it('sends shared_v4 type for IPv4', async () => {
-    mockFetch(200, {
-      ip: '137.66.1.1',
-      region: 'global',
-      created_at: '2026-01-01T00:00:00Z',
-      shared: true,
-    });
-
-    await allocateIP(TOKEN, 'acct-test', 'shared_v4');
-
-    const sentBody = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body);
-    expect(sentBody.type).toBe('shared_v4');
-  });
-
   it('treats 409 as success (IP already allocated)', async () => {
     mockFetchText(409, 'already allocated');
 
-    const result = await allocateIP(TOKEN, 'acct-test', 'v6');
+    const result = await allocateIPv6(TOKEN, 'acct-test');
 
     expect(result.shared).toBe(false);
   });
@@ -374,16 +360,16 @@ describe('allocateIP', () => {
   it('treats 422 as success (IP already allocated)', async () => {
     mockFetchText(422, 'already allocated');
 
-    const result = await allocateIP(TOKEN, 'acct-test', 'shared_v4');
+    const result = await allocateIPv6(TOKEN, 'acct-test');
 
-    expect(result.shared).toBe(true);
+    expect(result.shared).toBe(false);
   });
 
   it('throws FlyApiError on 404 (app not found)', async () => {
     mockFetchText(404, 'app not found');
 
     try {
-      await allocateIP(TOKEN, 'acct-nonexistent', 'v6');
+      await allocateIPv6(TOKEN, 'acct-nonexistent');
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(FlyApiError);
@@ -395,7 +381,7 @@ describe('allocateIP', () => {
     mockFetchText(401, 'unauthorized');
 
     try {
-      await allocateIP(TOKEN, 'acct-test', 'v6');
+      await allocateIPv6(TOKEN, 'acct-test');
       expect.fail('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(FlyApiError);
@@ -406,7 +392,7 @@ describe('allocateIP', () => {
   it('throws FlyApiError on 500', async () => {
     mockFetchText(500, 'internal error');
 
-    await expect(allocateIP(TOKEN, 'acct-test', 'v6')).rejects.toThrow(FlyApiError);
+    await expect(allocateIPv6(TOKEN, 'acct-test')).rejects.toThrow(FlyApiError);
   });
 
   it('encodes app name in URL path', async () => {
@@ -417,7 +403,7 @@ describe('allocateIP', () => {
       shared: false,
     });
 
-    await allocateIP(TOKEN, 'acct-test', 'v6');
+    await allocateIPv6(TOKEN, 'acct-test');
 
     const fetchCall = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(fetchCall[0]).toContain('/v1/apps/acct-test/ip_assignments');

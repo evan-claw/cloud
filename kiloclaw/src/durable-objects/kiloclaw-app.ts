@@ -7,9 +7,9 @@
  * Separate from KiloClawInstance to support future multi-instance per user,
  * where one Fly App contains multiple instances (machines + volumes).
  *
- * The App DO ensures that each user has a Fly App with allocated IPs and
- * an encryption key before any machines are created. ensureApp() is idempotent:
- * safe to call multiple times, only creates the app + IPs + key on first call.
+ * The App DO ensures that each user has a Fly App with an allocated IPv6 address
+ * and an encryption key before any machines are created. ensureApp() is idempotent:
+ * safe to call multiple times, only creates the app + IP + key on first call.
  *
  * If setup partially fails, the alarm retries.
  */
@@ -27,6 +27,7 @@ import { METADATA_KEY_USER_ID } from './kiloclaw-instance';
 const AppStateSchema = z.object({
   userId: z.string().default(''),
   flyAppName: z.string().nullable().default(null),
+  // Legacy: ipv4Allocated may still exist in storage for old DOs; parsed but ignored.
   ipv4Allocated: z.boolean().default(false),
   ipv6Allocated: z.boolean().default(false),
   envKeySet: z.boolean().default(false),
@@ -49,7 +50,6 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
   private loaded = false;
   private userId: string | null = null;
   private flyAppName: string | null = null;
-  private ipv4Allocated = false;
   private ipv6Allocated = false;
   private envKeySet = false;
   private envKey: string | null = null;
@@ -65,7 +65,6 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
       const s = parsed.data;
       this.userId = s.userId || null;
       this.flyAppName = s.flyAppName;
-      this.ipv4Allocated = s.ipv4Allocated;
       this.ipv6Allocated = s.ipv6Allocated;
       this.envKeySet = s.envKeySet;
       this.envKey = s.envKey;
@@ -76,11 +75,11 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
 
   /** Check if all setup steps are complete. */
   private isSetupComplete(): boolean {
-    return this.ipv4Allocated && this.ipv6Allocated && this.envKeySet;
+    return this.ipv6Allocated && this.envKeySet;
   }
 
   /**
-   * Ensure a Fly App exists for this user with IPs allocated and env key set.
+   * Ensure a Fly App exists for this user with IPv6 allocated and env key set.
    * Idempotent: creates the app only if it doesn't exist yet.
    * Returns the app name for callers to cache.
    */
@@ -112,7 +111,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
 
     try {
       // Step 1: Create app if it doesn't exist
-      if (!this.ipv4Allocated || !this.ipv6Allocated) {
+      if (!this.ipv6Allocated) {
         const existing = await apps.getApp({ apiToken }, appName);
         if (!existing) {
           await apps.createApp({ apiToken }, appName, orgSlug, userId, METADATA_KEY_USER_ID);
@@ -122,21 +121,13 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
 
       // Step 2: Allocate IPv6 if not done
       if (!this.ipv6Allocated) {
-        await apps.allocateIP(apiToken, appName, 'v6');
+        await apps.allocateIPv6(apiToken, appName);
         this.ipv6Allocated = true;
         await this.ctx.storage.put({ ipv6Allocated: true } satisfies Partial<AppState>);
         console.log('[AppDO] Allocated IPv6 for:', appName);
       }
 
-      // Step 3: Allocate shared IPv4 if not done
-      if (!this.ipv4Allocated) {
-        await apps.allocateIP(apiToken, appName, 'shared_v4');
-        this.ipv4Allocated = true;
-        await this.ctx.storage.put({ ipv4Allocated: true } satisfies Partial<AppState>);
-        console.log('[AppDO] Allocated shared IPv4 for:', appName);
-      }
-
-      // Step 4: Generate and store env encryption key if not done.
+      // Step 3: Generate and store env encryption key if not done.
       // Uses the same locked path as ensureEnvKey() to prevent interleaving.
       if (!this.envKeySet) {
         await this.ensureEnvKey(userId);
@@ -251,7 +242,6 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
 
     this.userId = null;
     this.flyAppName = null;
-    this.ipv4Allocated = false;
     this.ipv6Allocated = false;
     this.envKeySet = false;
     this.envKey = null;

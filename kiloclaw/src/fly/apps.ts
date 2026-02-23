@@ -2,7 +2,7 @@
  * Fly.io Apps + IP allocation REST API.
  *
  * Manages per-user Fly Apps: creation, existence checks, deletion,
- * and IP address allocation (IPv4 shared + IPv6).
+ * and IPv6 address allocation.
  * All calls use the Machines REST API (https://api.machines.dev).
  *
  * App naming: `acct-{first 20 hex chars of SHA-256(userId)}`
@@ -199,24 +199,18 @@ type IPAssignment = {
 };
 
 /**
- * Allocate an IP address for a Fly App.
+ * Allocate an IPv6 address for a Fly App.
  * POST /v1/apps/{app_name}/ip_assignments
- *
- * @param ipType - "v6" for dedicated IPv6, "shared_v4" for shared IPv4
  */
-export async function allocateIP(
-  apiToken: string,
-  appName: string,
-  ipType: 'v6' | 'shared_v4'
-): Promise<IPAssignment> {
+export async function allocateIPv6(apiToken: string, appName: string): Promise<IPAssignment> {
   const resp = await apiFetch(apiToken, `/v1/apps/${encodeURIComponent(appName)}/ip_assignments`, {
     method: 'POST',
-    body: JSON.stringify({ type: ipType }),
+    body: JSON.stringify({ type: 'v6' }),
   });
   // 409/422 = IP already allocated (safe to treat as success during retries)
   if (resp.status === 409 || resp.status === 422) {
-    return { ip: '', region: '', created_at: '', shared: ipType === 'shared_v4' };
+    return { ip: '', region: '', created_at: '', shared: false };
   }
-  await assertOk(resp, 'allocateIP');
+  await assertOk(resp, 'allocateIPv6');
   return resp.json();
 }
