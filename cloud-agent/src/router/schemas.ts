@@ -55,8 +55,7 @@ export function validateGitSource<T extends { githubRepo?: unknown; gitUrl?: unk
 ): boolean {
   const hasGithubRepo = !!data.githubRepo;
   const hasGitUrl = !!data.gitUrl;
-  // Allow zero or one git source (pure prompt sessions need no repo); reject only when both are provided
-  return !(hasGithubRepo && hasGitUrl);
+  return (hasGithubRepo || hasGitUrl) && !(hasGithubRepo && hasGitUrl);
 }
 
 /**
@@ -137,9 +136,25 @@ export const InitiateSessionInput = z
     ),
   })
   .extend(PromptPayload.shape)
-  .refine(validateGitSource, {
-    message: 'Must provide either githubRepo or gitUrl, but not both',
-    path: ['githubRepo'],
+  .superRefine((data, ctx) => {
+    const hasGithubRepo = !!data.githubRepo;
+    const hasGitUrl = !!data.gitUrl;
+    if (hasGithubRepo && hasGitUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Cannot provide both githubRepo and gitUrl',
+        path: ['githubRepo'],
+      });
+    }
+    // In ask mode a repo is optional (pure-prompt sessions).
+    // All other modes require exactly one git source.
+    if (!hasGithubRepo && !hasGitUrl && data.mode !== 'ask') {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Must provide either githubRepo or gitUrl',
+        path: ['githubRepo'],
+      });
+    }
   });
 
 /**
