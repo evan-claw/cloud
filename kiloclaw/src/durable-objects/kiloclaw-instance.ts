@@ -408,7 +408,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.openclawVersion = latest.openclawVersion;
       this.imageVariant = latest.variant;
       this.trackedImageTag = latest.imageTag;
-    } else {
+    } else if (isNew) {
       this.openclawVersion = null;
       this.imageVariant = null;
       this.trackedImageTag = null;
