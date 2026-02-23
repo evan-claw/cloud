@@ -169,15 +169,14 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
   }
 
   // 2. Evaluate feature flag: use cloud-agent-next?
-  const flagDistinctId = owner.type === 'org' ? owner.id : owner.userId;
   const useCloudAgentNext = await isFeatureFlagEnabled(
     'code-review-cloud-agent-next',
-    flagDistinctId
+    owner.userId
   );
 
   logExceptInTest('[dispatchReview] Feature flag evaluated', {
     reviewId: review.id,
-    flagDistinctId,
+    userId: owner.userId,
     useCloudAgentNext,
   });
 
