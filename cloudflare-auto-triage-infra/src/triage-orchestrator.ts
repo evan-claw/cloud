@@ -309,39 +309,51 @@ export class TriageOrchestrator extends DurableObject<Env> {
     let sayText = '';
     let fullText = '';
 
+    // Add timeout protection for duplicate verification (2 minutes)
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error('Duplicate verification timed out - exceeded 2 minute limit')),
+        120_000
+      );
+    });
+
     try {
-      await this.sseProcessor.processStream(response, {
-        onTextContent: (text: string) => {
-          fullText += text;
-        },
-        onKilocodeEvent: payload => {
-          if (
-            payload.type === 'say' &&
-            (payload.say === 'text' || payload.say === 'completion_result')
-          ) {
-            const text =
-              typeof payload.content === 'string'
-                ? payload.content
-                : typeof payload.text === 'string'
-                  ? payload.text
-                  : '';
-            if (text) sayText += text;
-          }
-        },
-        onComplete: () => {
-          console.log('[TriageOrchestrator] Duplicate verification stream completed', {
-            ticketId: this.state.ticketId,
-            sayTextLength: sayText.length,
-            fullTextLength: fullText.length,
-          });
-        },
-        onError: (error: Error) => {
-          console.warn('[TriageOrchestrator] Duplicate verification warning event', {
-            ticketId: this.state.ticketId,
-            error: error.message,
-          });
-        },
-      });
+      await Promise.race([
+        this.sseProcessor.processStream(response, {
+          onTextContent: (text: string) => {
+            fullText += text;
+          },
+          onKilocodeEvent: payload => {
+            if (
+              payload.type === 'say' &&
+              (payload.say === 'text' || payload.say === 'completion_result')
+            ) {
+              const text =
+                typeof payload.content === 'string'
+                  ? payload.content
+                  : typeof payload.text === 'string'
+                    ? payload.text
+                    : '';
+              if (text) sayText += text;
+            }
+          },
+          onComplete: () => {
+            console.log('[TriageOrchestrator] Duplicate verification stream completed', {
+              ticketId: this.state.ticketId,
+              sayTextLength: sayText.length,
+              fullTextLength: fullText.length,
+            });
+          },
+          onError: (error: Error) => {
+            console.warn('[TriageOrchestrator] Duplicate verification warning event', {
+              ticketId: this.state.ticketId,
+              error: error.message,
+            });
+          },
+        }),
+        timeoutPromise,
+      ]);
     } catch (err) {
       console.error(
         '[TriageOrchestrator] AI duplicate verification stream error, falling back to threshold',
@@ -351,6 +363,8 @@ export class TriageOrchestrator extends DurableObject<Env> {
         }
       );
       return this.thresholdDuplicateResult(candidates);
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
     }
 
     const responseText = sayText.length > 0 ? sayText : fullText;
@@ -384,6 +398,23 @@ export class TriageOrchestrator extends DurableObject<Env> {
       reasoning: verification.reasoning,
     });
 
+    if (verification.isDuplicate && verification.confidence < 0.5) {
+      console.log(
+        '[TriageOrchestrator] AI said duplicate but confidence too low, treating as not duplicate',
+        {
+          ticketId: this.state.ticketId,
+          confidence: verification.confidence,
+          reasoning: verification.reasoning,
+        }
+      );
+      return {
+        isDuplicate: false,
+        duplicateOfTicketId: null,
+        similarityScore: null,
+        similarTickets: candidates.similarTickets,
+      };
+    }
+
     if (!verification.isDuplicate) {
       return {
         isDuplicate: false,
@@ -398,17 +429,28 @@ export class TriageOrchestrator extends DurableObject<Env> {
     );
 
     if (!matchedTicket) {
-      console.warn('[TriageOrchestrator] AI claimed duplicate of issue not in candidates', {
-        ticketId: this.state.ticketId,
-        claimedIssueNumber: verification.duplicateOfIssueNumber,
-        candidateIssueNumbers: candidates.similarTickets.map(t => t.issueNumber),
-      });
+      // The AI hallucinated an issue number not in the candidate set — its verdict is
+      // unreliable, so treat this as not-duplicate rather than blaming an arbitrary candidate.
+      console.warn(
+        '[TriageOrchestrator] AI claimed duplicate of issue not in candidates, treating as not duplicate',
+        {
+          ticketId: this.state.ticketId,
+          claimedIssueNumber: verification.duplicateOfIssueNumber,
+          candidateIssueNumbers: candidates.similarTickets.map(t => t.issueNumber),
+        }
+      );
+      return {
+        isDuplicate: false,
+        duplicateOfTicketId: null,
+        similarityScore: null,
+        similarTickets: candidates.similarTickets,
+      };
     }
 
     return {
       isDuplicate: true,
-      duplicateOfTicketId: matchedTicket?.ticketId ?? null,
-      similarityScore: matchedTicket?.similarity ?? null,
+      duplicateOfTicketId: matchedTicket.ticketId,
+      similarityScore: matchedTicket.similarity,
       reasoning: verification.reasoning,
       similarTickets: candidates.similarTickets,
     };
@@ -572,7 +614,8 @@ export class TriageOrchestrator extends DurableObject<Env> {
       ];
 
       if (result.reasoning) {
-        lines.push('', `**AI reasoning:** ${result.reasoning}`);
+        const escapedReasoning = result.reasoning.replace(/([\\*_~`[\]()#>!|])/g, '\\$1');
+        lines.push('', `**AI reasoning:** ${escapedReasoning}`);
       }
 
       lines.push('', '*This comment was generated by Kilo Auto-Triage.*');
