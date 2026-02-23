@@ -24,6 +24,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { KiloClawEnv } from '../types';
 import { sandboxIdFromUserId } from '../auth/sandbox-id';
+import { deriveGatewayToken } from '../auth/gateway-token';
 import { createDatabaseConnection, InstanceStore } from '../db';
 import { buildEnvVars } from '../gateway/env';
 import {
@@ -57,8 +58,52 @@ import type {
 import * as fly from '../fly/client';
 import { appNameFromUserId } from '../fly/apps';
 import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../utils/env-encryption';
+import { z, type ZodType } from 'zod';
+import { resolveLatestVersion } from '../lib/image-version';
 
 type InstanceStatus = PersistedState['status'];
+
+type GatewayProcessStatus = {
+  state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
+  pid: number | null;
+  uptime: number;
+  restarts: number;
+  lastExit: {
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    at: string;
+  } | null;
+};
+
+const GatewayProcessStatusSchema: ZodType<GatewayProcessStatus> = z.object({
+  state: z.enum(['stopped', 'starting', 'running', 'stopping', 'crashed', 'shutting_down']),
+  pid: z.number().int().nullable(),
+  uptime: z.number(),
+  restarts: z.number().int(),
+  lastExit: z
+    .object({
+      code: z.number().int().nullable(),
+      signal: z
+        .custom<NodeJS.Signals>((value): value is NodeJS.Signals => typeof value === 'string')
+        .nullable(),
+      at: z.string(),
+    })
+    .nullable(),
+});
+
+const GatewayCommandResponseSchema = z.object({
+  ok: z.boolean(),
+});
+
+class GatewayControllerError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'GatewayControllerError';
+    this.status = status;
+  }
+}
 
 // Derived from PersistedStateSchema -- single source of truth for DO KV keys.
 const STORAGE_KEYS = Object.keys(PersistedStateSchema.shape);
@@ -110,12 +155,19 @@ function nextAlarmTime(status: InstanceStatus): number {
 
 export const METADATA_KEY_USER_ID = 'kiloclaw_user_id';
 export const METADATA_KEY_SANDBOX_ID = 'kiloclaw_sandbox_id';
+export const METADATA_KEY_OPENCLAW_VERSION = 'kiloclaw_openclaw_version';
+export const METADATA_KEY_IMAGE_VARIANT = 'kiloclaw_image_variant';
 
 // ============================================================================
 // Machine config builder
 // ============================================================================
 
-type MachineIdentity = { userId: string; sandboxId: string };
+type MachineIdentity = {
+  userId: string;
+  sandboxId: string;
+  openclawVersion: string | null;
+  imageVariant: string | null;
+};
 
 function buildMachineConfig(
   registryApp: string,
@@ -138,10 +190,25 @@ function buildMachineConfig(
         autostop: 'off',
       },
     ],
+    checks: {
+      controller: {
+        type: 'http',
+        port: OPENCLAW_PORT,
+        method: 'GET',
+        path: '/_kilo/health',
+        interval: '30s',
+        timeout: '5s',
+        grace_period: '60s',
+      },
+    },
     mounts: flyVolumeId ? [{ volume: flyVolumeId, path: '/root' }] : [],
     metadata: {
       [METADATA_KEY_USER_ID]: identity.userId,
       [METADATA_KEY_SANDBOX_ID]: identity.sandboxId,
+      ...(identity.openclawVersion && {
+        [METADATA_KEY_OPENCLAW_VERSION]: identity.openclawVersion,
+      }),
+      ...(identity.imageVariant && { [METADATA_KEY_IMAGE_VARIANT]: identity.imageVariant }),
     },
   };
 }
@@ -281,6 +348,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private pendingDestroyMachineId: string | null = null;
   private pendingDestroyVolumeId: string | null = null;
   private lastMetadataRecoveryAt: number | null = null;
+  private openclawVersion: string | null = null;
+  private imageVariant: string | null = null;
+  private trackedImageTag: string | null = null;
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
@@ -318,6 +388,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.pendingDestroyMachineId = s.pendingDestroyMachineId;
       this.pendingDestroyVolumeId = s.pendingDestroyVolumeId;
       this.lastMetadataRecoveryAt = s.lastMetadataRecoveryAt;
+      this.openclawVersion = s.openclawVersion;
+      this.imageVariant = s.imageVariant;
+      this.trackedImageTag = s.trackedImageTag;
     } else {
       const hasAnyData = entries.size > 0;
       if (hasAnyData) {
@@ -382,6 +455,20 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       console.log('[DO] Created Fly Volume:', volume.id, 'region:', volume.region);
     }
 
+    // Resolve the latest registered version on every provision (including re-provision).
+    // If the registry isn't populated yet, fields stay null → fallback to FLY_IMAGE_TAG.
+    const variant = 'default'; // hardcoded day 1; future: from config or provision request
+    const latest = await resolveLatestVersion(this.env.KV_CLAW_CACHE, variant);
+    if (latest) {
+      this.openclawVersion = latest.openclawVersion;
+      this.imageVariant = latest.variant;
+      this.trackedImageTag = latest.imageTag;
+    } else if (isNew) {
+      this.openclawVersion = null;
+      this.imageVariant = null;
+      this.trackedImageTag = null;
+    }
+
     const configFields = {
       userId,
       sandboxId,
@@ -396,9 +483,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       machineSize: config.machineSize ?? this.machineSize ?? null,
     } satisfies Partial<PersistedState>;
 
+    const versionFields = {
+      openclawVersion: this.openclawVersion,
+      imageVariant: this.imageVariant,
+      trackedImageTag: this.trackedImageTag,
+    };
+
     const update = isNew
       ? storageUpdate({
           ...configFields,
+          ...versionFields,
           provisionedAt: Date.now(),
           lastStartedAt: null,
           lastStoppedAt: null,
@@ -410,7 +504,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
         })
-      : storageUpdate(configFields);
+      : storageUpdate({ ...configFields, ...versionFields });
 
     await this.ctx.storage.put(update);
 
@@ -788,8 +882,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     const { envVars, minSecretsVersion } = await this.buildUserEnvVars();
     const guest = guestFromSize(this.machineSize);
-    const imageTag = this.env.FLY_IMAGE_TAG ?? 'latest';
-    const identity = { userId: this.userId, sandboxId: this.sandboxId };
+    const imageTag = this.resolveImageTag();
+    const identity = {
+      userId: this.userId,
+      sandboxId: this.sandboxId,
+      openclawVersion: this.openclawVersion,
+      imageVariant: this.imageVariant,
+    };
     const machineConfig = buildMachineConfig(
       this.getRegistryApp(),
       imageTag,
@@ -951,6 +1050,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     flyMachineId: string | null;
     flyVolumeId: string | null;
     flyRegion: string | null;
+    openclawVersion: string | null;
+    imageVariant: string | null;
+    trackedImageTag: string | null;
   }> {
     await this.loadState();
 
@@ -981,6 +1083,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       flyMachineId: this.flyMachineId,
       flyVolumeId: this.flyVolumeId,
       flyRegion: this.flyRegion,
+      openclawVersion: this.openclawVersion,
+      imageVariant: this.imageVariant,
+      trackedImageTag: this.trackedImageTag,
     };
   }
 
@@ -1006,6 +1111,127 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return fly.listVolumeSnapshots(flyConfig, this.flyVolumeId);
   }
 
+  private requireGatewayControllerContext(): {
+    appName: string;
+    machineId: string;
+    sandboxId: string;
+  } {
+    if (!this.sandboxId) {
+      throw new GatewayControllerError(404, 'Instance not provisioned');
+    }
+    if (!this.flyMachineId) {
+      throw new GatewayControllerError(409, 'Instance has no machine ID');
+    }
+
+    const appName = this.flyAppName ?? this.env.FLY_APP_NAME;
+    if (!appName) {
+      throw new GatewayControllerError(503, 'No Fly app name for this instance');
+    }
+
+    return {
+      appName,
+      machineId: this.flyMachineId,
+      sandboxId: this.sandboxId,
+    };
+  }
+
+  private async callGatewayController<T>(
+    path: string,
+    method: 'GET' | 'POST',
+    responseSchema: ZodType<T>
+  ): Promise<T> {
+    const { appName, machineId, sandboxId } = this.requireGatewayControllerContext();
+
+    if (!this.env.GATEWAY_TOKEN_SECRET) {
+      throw new GatewayControllerError(503, 'GATEWAY_TOKEN_SECRET is not configured');
+    }
+
+    const gatewayToken = await deriveGatewayToken(sandboxId, this.env.GATEWAY_TOKEN_SECRET);
+    const url = `https://${appName}.fly.dev${path}`;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${gatewayToken}`,
+          Accept: 'application/json',
+          'fly-force-instance-id': machineId,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new GatewayControllerError(503, `Gateway controller request failed: ${message}`);
+    }
+
+    const rawBody = await response.text();
+    let body: unknown = null;
+    if (rawBody.length > 0) {
+      try {
+        body = JSON.parse(rawBody);
+      } catch {
+        body = { error: rawBody };
+      }
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        typeof body === 'object' &&
+        body !== null &&
+        'error' in body &&
+        typeof (body as { error?: unknown }).error === 'string'
+          ? (body as { error: string }).error
+          : `Gateway controller request failed (${response.status})`;
+      throw new GatewayControllerError(response.status, errorMessage);
+    }
+
+    const parsed = responseSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      console.warn(
+        '[DO] Gateway controller returned invalid response payload',
+        JSON.stringify({
+          path,
+          status: response.status,
+          issues: parsed.error.issues.map(issue => ({
+            path: issue.path.join('.'),
+            code: issue.code,
+            message: issue.message,
+          })),
+        })
+      );
+      throw new GatewayControllerError(
+        502,
+        `Gateway controller returned invalid response for ${path}`
+      );
+    }
+
+    return parsed.data;
+  }
+
+  async getGatewayProcessStatus(): Promise<GatewayProcessStatus> {
+    await this.loadState();
+    return this.callGatewayController('/_kilo/gateway/status', 'GET', GatewayProcessStatusSchema);
+  }
+
+  async startGatewayProcess(): Promise<{ ok: boolean }> {
+    await this.loadState();
+    return this.callGatewayController('/_kilo/gateway/start', 'POST', GatewayCommandResponseSchema);
+  }
+
+  async stopGatewayProcess(): Promise<{ ok: boolean }> {
+    await this.loadState();
+    return this.callGatewayController('/_kilo/gateway/stop', 'POST', GatewayCommandResponseSchema);
+  }
+
+  async restartGatewayProcess(): Promise<{ ok: boolean }> {
+    await this.loadState();
+    return this.callGatewayController(
+      '/_kilo/gateway/restart',
+      'POST',
+      GatewayCommandResponseSchema
+    );
+  }
+
   // ========================================================================
   // User-facing operations
   // ========================================================================
@@ -1023,8 +1249,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       const { envVars, minSecretsVersion } = await this.buildUserEnvVars();
       const guest = guestFromSize(this.machineSize);
-      const imageTag = this.env.FLY_IMAGE_TAG ?? 'latest';
-      const identity = { userId: this.userId ?? '', sandboxId: this.sandboxId ?? '' };
+      const imageTag = this.resolveImageTag();
+      const identity = {
+        userId: this.userId ?? '',
+        sandboxId: this.sandboxId ?? '',
+        openclawVersion: this.openclawVersion,
+        imageVariant: this.imageVariant,
+      };
       const machineConfig = buildMachineConfig(
         this.getRegistryApp(),
         imageTag,
@@ -1484,6 +1715,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.pendingDestroyMachineId = null;
     this.pendingDestroyVolumeId = null;
     this.lastMetadataRecoveryAt = null;
+    this.openclawVersion = null;
+    this.imageVariant = null;
+    this.trackedImageTag = null;
     this.loaded = false;
 
     return true;
@@ -1492,6 +1726,19 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   // ========================================================================
   // Infrastructure helpers
   // ========================================================================
+
+  /**
+   * Resolve the Docker image tag for this instance.
+   * Reads from DO state only — no KV on the hot path.
+   * Falls back to FLY_IMAGE_TAG for instances provisioned before tracking was enabled.
+   */
+  private resolveImageTag(): string {
+    if (this.trackedImageTag) {
+      return this.trackedImageTag;
+    }
+    // Fallback for instances provisioned before tracking was enabled
+    return this.env.FLY_IMAGE_TAG ?? 'latest';
+  }
 
   /**
    * Shared Docker image registry app name.
@@ -1773,6 +2020,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
+          openclawVersion: null,
+          imageVariant: null,
+          trackedImageTag: null,
         })
       );
 
@@ -1794,6 +2044,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.pendingDestroyMachineId = null;
       this.pendingDestroyVolumeId = null;
       this.lastMetadataRecoveryAt = null;
+      this.openclawVersion = null;
+      this.imageVariant = null;
+      this.trackedImageTag = null;
       this.loaded = true;
 
       console.log('[DO] Restored from Postgres: sandboxId =', instance.sandboxId);

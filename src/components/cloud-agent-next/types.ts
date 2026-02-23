@@ -227,8 +227,9 @@ export function isPartStreaming(part: Part): boolean {
  * Check if any parts in a message are still streaming.
  */
 export function isMessageStreaming(message: StoredMessage): boolean {
-  // Check if the assistant message has a completed timestamp
-  if (isAssistantMessage(message.info) && !message.info.time.completed) {
+  // Assistant messages without completed time are still streaming,
+  // unless they have an error (failed before producing output)
+  if (isAssistantMessage(message.info) && !message.info.time.completed && !message.info.error) {
     return true;
   }
   // Check if any parts are still streaming

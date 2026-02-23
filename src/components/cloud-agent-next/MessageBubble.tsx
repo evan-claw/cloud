@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback } from 'react';
-import { User, Bot, Scissors, Image, FileText } from 'lucide-react';
+import { User, Bot, Scissors, Image, FileText, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import type { AssistantMessage } from '@/types/opencode.gen';
 import type { StoredMessage, Part, CompactionPart } from './types';
 import {
   isUserMessage,
@@ -95,6 +96,16 @@ function getAssistantTextContent(parts: Part[]): string {
     .map(p => p.text)
     .join('\n\n')
     .trim();
+}
+
+/**
+ * Extract a human-readable error message from an AssistantMessage error field.
+ */
+function getAssistantErrorMessage(error: NonNullable<AssistantMessage['error']>): string {
+  if ('data' in error && 'message' in error.data && typeof error.data.message === 'string') {
+    return error.data.message;
+  }
+  return 'An error occurred while generating a response';
 }
 
 type MessageBubbleProps = {
@@ -208,7 +219,10 @@ export function MessageBubble({
 
   // Assistant message
   if (isAssistantMessage(message.info)) {
-    const { cost, tokens } = message.info;
+    const { cost, tokens, error } = message.info;
+    // Show error when message failed with no output
+    const showError = !isStreaming && error !== undefined;
+    const errorMessage = error ? getAssistantErrorMessage(error) : undefined;
 
     return (
       <div className="group/msg flex items-start gap-2 py-4 md:gap-3">
@@ -230,8 +244,14 @@ export function MessageBubble({
                 Streaming...
               </span>
             )}
+            {showError && (
+              <span className="text-destructive flex items-center gap-1 text-xs">
+                <AlertCircle className="h-3 w-3" />
+                Failed
+              </span>
+            )}
             {/* Cost/token display */}
-            {!isStreaming && (cost !== undefined || tokens !== undefined) && (
+            {!isStreaming && !showError && (cost !== undefined || tokens !== undefined) && (
               <span className="text-muted-foreground text-xs">
                 {tokens !== undefined &&
                   `${(tokens.input + tokens.output).toLocaleString()} tokens`}
@@ -257,6 +277,8 @@ export function MessageBubble({
               />
             ))}
           </div>
+          {/* Inline error message for failed responses */}
+          {showError && errorMessage && <p className="text-destructive text-sm">{errorMessage}</p>}
         </div>
       </div>
     );

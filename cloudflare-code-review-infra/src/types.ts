@@ -57,6 +57,14 @@ export interface CodeReview {
   startedAt?: string;
   completedAt?: string;
   updatedAt: string;
+  /** LLM model used (captured from first api_req_started event) */
+  model?: string;
+  /** Accumulated input tokens across all LLM calls */
+  totalTokensIn?: number;
+  /** Accumulated output tokens across all LLM calls */
+  totalTokensOut?: number;
+  /** Accumulated cost in dollars across all LLM calls */
+  totalCost?: number;
   events?: CodeReviewEvent[];
   skipBalanceCheck?: boolean; // Skip balance validation in cloud agent (for OSS sponsorship)
   /** Which cloud agent backend to use: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next) */
@@ -70,6 +78,14 @@ export interface CodeReviewStatusResponse {
   cliSessionId?: string; // CLI session UUID
   startedAt?: string;
   completedAt?: string;
+  /** LLM model used (captured from first api_req_started event) */
+  model?: string;
+  /** Accumulated input tokens across all LLM calls */
+  totalTokensIn?: number;
+  /** Accumulated output tokens across all LLM calls */
+  totalTokensOut?: number;
+  /** Accumulated cost in dollars across all LLM calls */
+  totalCost?: number;
   errorMessage?: string;
 }
 
