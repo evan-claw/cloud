@@ -350,7 +350,7 @@ describe('createV1StreamingCoordinator', () => {
   });
 
   describe('interrupt', () => {
-    it('calls interruptSession mutation for user projects', async () => {
+    it('does not call interruptSession mutation (handled by ProjectManager)', () => {
       const store = createMockStore();
       const trpcClient = createMockTrpcClient();
 
@@ -365,14 +365,10 @@ describe('createV1StreamingCoordinator', () => {
 
       coordinator.interrupt();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(trpcClient.appBuilder.interruptSession.mutate).toHaveBeenCalledWith({
-        projectId: 'project-1',
-      });
+      expect(trpcClient.appBuilder.interruptSession.mutate).not.toHaveBeenCalled();
     });
 
-    it('calls organization interruptSession for org projects', async () => {
+    it('does not call org interruptSession mutation (handled by ProjectManager)', () => {
       const store = createMockStore();
       const trpcClient = createMockTrpcClient();
 
@@ -387,12 +383,7 @@ describe('createV1StreamingCoordinator', () => {
 
       coordinator.interrupt();
 
-      await new Promise(resolve => setTimeout(resolve, 10));
-
-      expect(trpcClient.organizations.appBuilder.interruptSession.mutate).toHaveBeenCalledWith({
-        projectId: 'project-1',
-        organizationId: 'org-123',
-      });
+      expect(trpcClient.organizations.appBuilder.interruptSession.mutate).not.toHaveBeenCalled();
     });
 
     it('sets isStreaming to false', () => {

@@ -163,7 +163,7 @@ export function createProjectManager(config: ProjectManagerConfig): ProjectManag
       worker_version: 'v2',
       created_at: new Date().toISOString(),
       ended_at: null,
-      reason: 'upgraded',
+      reason: 'upgrade',
       title: null,
       initiated: true,
       prepared: true,

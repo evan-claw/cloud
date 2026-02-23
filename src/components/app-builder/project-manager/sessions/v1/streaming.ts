@@ -340,6 +340,8 @@ export function createV1StreamingCoordinator(config: V1StreamingConfig): V1Strea
 
   /**
    * Interrupts the current stream.
+   * Only disconnects WebSocket and updates local state.
+   * The tRPC interruptSession call is handled by ProjectManager.
    */
   function interrupt(): void {
     if (destroyed) {
@@ -351,19 +353,6 @@ export function createV1StreamingCoordinator(config: V1StreamingConfig): V1Strea
     wsCoordinator?.interrupt();
 
     store.setState({ isStreaming: false });
-
-    // Call the interrupt API
-    if (organizationId) {
-      void trpcClient.organizations.appBuilder.interruptSession
-        .mutate({ projectId, organizationId })
-        .catch((err: Error) => {
-          logger.logError('Failed to interrupt V1 session', err);
-        });
-    } else {
-      void trpcClient.appBuilder.interruptSession.mutate({ projectId }).catch((err: Error) => {
-        logger.logError('Failed to interrupt V1 session', err);
-      });
-    }
   }
 
   /**

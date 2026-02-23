@@ -154,9 +154,8 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
 
       onStreamingChanged: streaming => {
         store.setState({ isStreaming: streaming });
-        if (!streaming) {
-          onStreamComplete?.();
-        }
+        // onStreamComplete is called from onSessionStatusChanged (idle) — not here,
+        // to avoid triggering preview polling twice per stream completion.
       },
     };
   }
@@ -424,6 +423,8 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
 
   /**
    * Interrupts the current stream.
+   * Only disconnects WebSocket and updates local state.
+   * The tRPC interruptSession call is handled by ProjectManager.
    */
   function interrupt(): void {
     if (destroyed) {
@@ -439,19 +440,6 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
     }
     currentCloudSessionId = null;
     store.setState({ isStreaming: false });
-
-    // Call the interrupt API
-    if (organizationId) {
-      void trpcClient.organizations.appBuilder.interruptSession
-        .mutate({ projectId, organizationId })
-        .catch((err: Error) => {
-          logger.logError('Failed to interrupt V2 session', err);
-        });
-    } else {
-      void trpcClient.appBuilder.interruptSession.mutate({ projectId }).catch((err: Error) => {
-        logger.logError('Failed to interrupt V2 session', err);
-      });
-    }
   }
 
   /**
