@@ -3,7 +3,6 @@ import { insertTestUser } from '@/tests/helpers/user.helper';
 import type { User } from '@/db/schema';
 import { db } from '@/lib/drizzle';
 import { kiloclaw_available_versions, kiloclaw_version_pins } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 
 // Mock the internal client to avoid calling the actual worker
 jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => ({
@@ -14,7 +13,7 @@ jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => ({
 
 // Mock cron secret + app url
 jest.mock('@/lib/config.server', () => ({
-  ...jest.requireActual('@/lib/config.server'),
+  ...jest.requireActual<typeof import('@/lib/config.server')>('@/lib/config.server'),
   CRON_SECRET: 'test-cron-secret',
 }));
 
@@ -41,7 +40,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   await db.delete(kiloclaw_version_pins);
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   await db.delete(kiloclaw_available_versions);
 });
 

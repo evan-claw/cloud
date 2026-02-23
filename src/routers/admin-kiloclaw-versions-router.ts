@@ -1,15 +1,10 @@
 import { adminProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { db } from '@/lib/drizzle';
-import {
-  kiloclaw_available_versions,
-  kiloclaw_version_pins,
-  kilocode_users,
-  KiloClawVersionStatus,
-} from '@/db/schema';
+import { kiloclaw_available_versions, kiloclaw_version_pins, kilocode_users } from '@/db/schema';
 import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
-import { eq, and, desc, asc, ilike, sql, count, countDistinct } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, count, countDistinct } from 'drizzle-orm';
 import { CRON_SECRET } from '@/lib/config.server';
 import { APP_URL } from '@/lib/constants';
 

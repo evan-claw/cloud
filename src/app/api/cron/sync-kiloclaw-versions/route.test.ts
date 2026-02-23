@@ -12,7 +12,7 @@ jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => ({
 }));
 
 jest.mock('@/lib/config.server', () => ({
-  ...jest.requireActual('@/lib/config.server'),
+  ...jest.requireActual<typeof import('@/lib/config.server')>('@/lib/config.server'),
   CRON_SECRET: 'test-cron-secret',
   KILOCLAW_API_URL: 'http://localhost:8787',
   KILOCLAW_INTERNAL_API_SECRET: 'test-secret',
@@ -21,6 +21,7 @@ jest.mock('@/lib/config.server', () => ({
 import { GET } from './route';
 
 afterEach(async () => {
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   await db.delete(kiloclaw_available_versions);
   mockListVersions.mockReset();
 });

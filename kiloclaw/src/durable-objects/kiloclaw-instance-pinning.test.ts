@@ -8,7 +8,7 @@
  * - Pinned metadata (version, variant) is passed through correctly
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // -- Mock cloudflare:workers --
 vi.mock('cloudflare:workers', () => ({
@@ -256,7 +256,7 @@ describe('KiloClawInstance version pinning', () => {
   });
 
   it('returns trackedImageDigest in getStatus', async () => {
-    const { instance, storage } = createInstance();
+    const { instance } = createInstance();
 
     await instance.provision(
       'user-1',

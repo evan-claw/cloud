@@ -1,12 +1,7 @@
 import { db } from '@/lib/drizzle';
-import {
-  kiloclaw_available_versions,
-  kiloclaw_version_pins,
-  kiloclaw_instances,
-} from '@/db/schema';
+import { kiloclaw_available_versions, kiloclaw_version_pins } from '@/db/schema';
 import { insertTestUser } from '@/tests/helpers/user.helper';
 import type { User } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 
 // Capture what was passed to provision
 const mockProvision = jest.fn().mockResolvedValue({ sandboxId: 'test-sandbox' });
@@ -70,7 +65,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   await db.delete(kiloclaw_version_pins);
+  // eslint-disable-next-line drizzle/enforce-delete-with-where
   await db.delete(kiloclaw_available_versions);
   mockProvision.mockClear();
 });
