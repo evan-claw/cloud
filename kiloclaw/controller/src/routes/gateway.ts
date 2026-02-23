@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { timingSafeTokenEqual } from '../auth';
 import type { Supervisor } from '../supervisor';
 
 function getBearerToken(header: string | undefined): string | null {
@@ -17,7 +18,7 @@ export function registerGatewayRoutes(
   app.use('/_kilo/gateway/*', async (c, next) => {
     const authHeader = c.req.header('authorization');
     const token = getBearerToken(authHeader);
-    if (!token || token !== expectedToken) {
+    if (!timingSafeTokenEqual(token, expectedToken)) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
     await next();

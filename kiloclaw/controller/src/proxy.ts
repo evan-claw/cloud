@@ -2,6 +2,7 @@ import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Context } from 'hono';
+import { timingSafeTokenEqual } from './auth';
 
 export const DEFAULT_WS_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_WS_HANDSHAKE_TIMEOUT_MS = 5 * 1000;
@@ -31,7 +32,7 @@ function hasValidProxyToken(
   expectedToken: string
 ): boolean {
   if (!requireProxyToken) return true;
-  return token === expectedToken;
+  return timingSafeTokenEqual(token, expectedToken);
 }
 
 export function createHttpProxy(options: ProxyOptions) {
