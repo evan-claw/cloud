@@ -84,6 +84,7 @@ export async function updateCodeReviewStatus(
     errorMessage?: string;
     startedAt?: Date;
     completedAt?: Date;
+    agentVersion?: string;
   } = {}
 ): Promise<void> {
   try {
@@ -108,7 +109,9 @@ export async function updateCodeReviewStatus(
     if (updates.completedAt !== undefined) {
       updateData.completed_at = updates.completedAt.toISOString();
     }
-
+    if (updates.agentVersion !== undefined) {
+      updateData.agent_version = updates.agentVersion;
+    }
     // Auto-set timestamps based on status
     if (status === 'running' && !updates.startedAt) {
       updateData.started_at = new Date().toISOString();
