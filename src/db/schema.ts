@@ -1979,6 +1979,15 @@ export const cloud_agent_code_reviews = pgTable(
     status: text().notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
     error_message: text(),
 
+    // Which cloud agent backend executed this review: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next)
+    agent_version: text().default('v1'),
+
+    // Usage tracking (populated on completion by orchestrator)
+    model: text(), // LLM model slug used (e.g., 'anthropic/claude-sonnet-4.6')
+    total_tokens_in: integer(), // Total input tokens across all LLM calls
+    total_tokens_out: integer(), // Total output tokens across all LLM calls
+    total_cost_musd: integer(), // Total cost in microdollars (for consistency with microdollar_usage)
+
     // Timestamps
     started_at: timestamp({ withTimezone: true, mode: 'string' }),
     completed_at: timestamp({ withTimezone: true, mode: 'string' }),
@@ -2140,6 +2149,7 @@ export const cli_sessions_v2 = pgTable(
     index('IDX_cli_sessions_v2_organization_id').on(table.organization_id),
     index('IDX_cli_sessions_v2_kilo_user_id').on(table.kilo_user_id),
     index('IDX_cli_sessions_v2_created_at').on(table.created_at),
+    index('IDX_cli_sessions_v2_user_updated').on(table.kilo_user_id, table.updated_at),
   ]
 );
 
