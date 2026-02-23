@@ -240,6 +240,7 @@ function convertTools(tools: OpenRouterChatCompletionRequest['tools']): ToolSet 
     if (t.type !== 'function') continue;
     result[t.function.name] = {
       description: t.function.description,
+      strict: (t.type === 'function' && t.function.strict) || undefined,
       inputSchema: jsonSchema(t.function.parameters ?? { type: 'object' }),
     };
   }
@@ -521,6 +522,7 @@ function buildCommonParams(
     tools: convertTools(request.tools),
     toolChoice: convertToolChoice(request.tool_choice),
     maxOutputTokens: request.max_completion_tokens ?? request.max_tokens ?? undefined,
+    temperature: request.temperature ?? undefined,
     headers: {
       'anthropic-beta': 'context-1m-2025-08-07',
     },
