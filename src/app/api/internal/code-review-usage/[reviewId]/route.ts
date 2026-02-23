@@ -11,8 +11,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { updateCodeReviewStatus, getCodeReviewById } from '@/lib/code-reviews/db/code-reviews';
-import { CodeReviewStatusSchema } from '@/lib/code-reviews/core/schemas';
+import { updateCodeReviewUsage, getCodeReviewById } from '@/lib/code-reviews/db/code-reviews';
 import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';
 import { captureException } from '@sentry/nextjs';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
@@ -62,11 +61,7 @@ export async function POST(
     const totalCostMusd =
       typeof payload.totalCost === 'number' ? Math.round(payload.totalCost * 1_000_000) : undefined;
 
-    // Persist usage data on the review record.
-    // We pass the current status (no status change) to just update the usage fields.
-    const status = CodeReviewStatusSchema.parse(review.status);
-
-    await updateCodeReviewStatus(reviewId, status, {
+    await updateCodeReviewUsage(reviewId, {
       model: payload.model,
       totalTokensIn: payload.totalTokensIn,
       totalTokensOut: payload.totalTokensOut,

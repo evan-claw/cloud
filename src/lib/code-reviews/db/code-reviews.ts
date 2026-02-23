@@ -154,6 +154,49 @@ export async function updateCodeReviewStatus(
 }
 
 /**
+ * Updates only usage-related columns on a code review, without touching status or timestamps.
+ */
+export async function updateCodeReviewUsage(
+  reviewId: string,
+  usage: {
+    model?: string;
+    totalTokensIn?: number;
+    totalTokensOut?: number;
+    totalCostMusd?: number;
+  }
+): Promise<void> {
+  try {
+    const updateData: Partial<typeof cloud_agent_code_reviews.$inferInsert> = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (usage.model !== undefined) {
+      updateData.model = usage.model;
+    }
+    if (usage.totalTokensIn !== undefined) {
+      updateData.total_tokens_in = usage.totalTokensIn;
+    }
+    if (usage.totalTokensOut !== undefined) {
+      updateData.total_tokens_out = usage.totalTokensOut;
+    }
+    if (usage.totalCostMusd !== undefined) {
+      updateData.total_cost_musd = usage.totalCostMusd;
+    }
+
+    await db
+      .update(cloud_agent_code_reviews)
+      .set(updateData)
+      .where(eq(cloud_agent_code_reviews.id, reviewId));
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'updateCodeReviewUsage' },
+      extra: { reviewId, usage },
+    });
+    throw error;
+  }
+}
+
+/**
  * Lists code reviews for an owner (org or user)
  * Supports filtering by status and repository
  * Returns reviews sorted by creation date (newest first)
