@@ -25,7 +25,7 @@ import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import type { V2SessionStore } from './store';
 import type { AppTRPCClient } from '../../types';
 import type { Images } from '@/lib/images-schema';
-import { formatStreamError, createLogger } from '../../logging';
+import { createLogger } from '../../logging';
 
 export type V2StreamingConfig = {
   projectId: string;

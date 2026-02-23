@@ -4,11 +4,7 @@
  * Tests for the V1 WebSocket-based streaming coordinator.
  */
 
-import {
-  createV1StreamingCoordinator,
-  type V1StreamingConfig,
-  type V1StreamingCoordinator,
-} from '../sessions/v1/streaming';
+import { createV1StreamingCoordinator, type V1StreamingConfig } from '../sessions/v1/streaming';
 import { formatStreamError } from '../logging';
 import type { V1SessionState } from '../sessions/types';
 import type { CloudMessage } from '@/components/cloud-agent/types';

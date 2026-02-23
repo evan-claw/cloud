@@ -18,7 +18,6 @@ import { useProject } from './ProjectSession';
 import type { CloudMessage } from '@/components/cloud-agent/types';
 import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import { isTextPart } from '@/components/cloud-agent-next/types';
-import type { V1Session, V2Session } from './project-manager/types';
 
 type FeedbackDialogProps = {
   disabled?: boolean;
