@@ -12,6 +12,12 @@ export type ChangelogEntry = {
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-02-23',
+    description: 'Deploy OpenClaw 2026.2.22. Added device pairing support to the dashboard.',
+    category: 'feature',
+    deployHint: 'redeploy_required',
+  },
+  {
+    date: '2026-02-23',
     description:
       'OpenClaw now binds only to the loopback interface and is managed by a Kilo controller.',
     category: 'feature',

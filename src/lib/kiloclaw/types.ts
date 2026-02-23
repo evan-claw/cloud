@@ -73,6 +73,27 @@ export type PairingApproveResponse = {
   message: string;
 };
 
+/** A pending device pairing request (e.g. Control UI or node) */
+export type DevicePairingRequest = {
+  requestId: string;
+  deviceId: string;
+  role?: string;
+  platform?: string;
+  clientId?: string;
+  ts?: number;
+};
+
+/** Response from GET /api/platform/device-pairing */
+export type DevicePairingListResponse = {
+  requests: DevicePairingRequest[];
+};
+
+/** Response from POST /api/platform/device-pairing/approve */
+export type DevicePairingApproveResponse = {
+  success: boolean;
+  message: string;
+};
+
 /** Response from GET /api/platform/status and GET /api/kiloclaw/status */
 export type PlatformStatusResponse = {
   userId: string | null;

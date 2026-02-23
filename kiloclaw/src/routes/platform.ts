@@ -242,6 +242,53 @@ platform.post('/pairing/approve', async c => {
   }
 });
 
+// GET /api/platform/device-pairing?userId=...&refresh=true
+platform.get('/device-pairing', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  const forceRefresh = c.req.query('refresh') === 'true';
+
+  try {
+    const pairing = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.listDevicePairingRequests(forceRefresh),
+      'listDevicePairingRequests'
+    );
+    return c.json(pairing, 200);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[platform] device pairing list failed:', message);
+    return c.json({ error: message }, 500);
+  }
+});
+
+// POST /api/platform/device-pairing/approve
+const DevicePairingApproveSchema = z.object({
+  userId: z.string().min(1),
+  requestId: z.string().uuid(),
+});
+
+platform.post('/device-pairing/approve', async c => {
+  const result = await parseBody(c, DevicePairingApproveSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, requestId } = result.data;
+
+  try {
+    const approved = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.approveDevicePairingRequest(requestId),
+      'approveDevicePairingRequest'
+    );
+    return c.json(approved, approved.success ? 200 : 500);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[platform] device pairing approve failed:', message);
+    return c.json({ error: message }, 500);
+  }
+});
+
 // GET /api/platform/gateway/status?userId=...
 platform.get('/gateway/status', async c => {
   const userId = c.req.query('userId');

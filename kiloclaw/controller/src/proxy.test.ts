@@ -126,8 +126,14 @@ describe('WebSocket proxy', () => {
     expect((socket as unknown as FakeSocket).destroyed).toBe(true);
   });
 
-  it('upgrades with valid token and strips proxy header before forwarding', async () => {
-    const req = createIncomingMessage({ 'x-kiloclaw-proxy-token': 'token-1' });
+  it('upgrades with valid token and rewrites headers for local-looking backend request', async () => {
+    const req = createIncomingMessage({
+      'x-kiloclaw-proxy-token': 'token-1',
+      host: 'acct-xxxx.fly.dev',
+      'x-forwarded-for': '1.2.3.4',
+      'x-real-ip': '1.2.3.4',
+      'x-forwarded-host': 'claw.kilo.ai',
+    });
     const clientSocket = new FakeSocket() as unknown as Duplex;
     const backendSocket = new FakeSocket();
 
@@ -172,6 +178,14 @@ describe('WebSocket proxy', () => {
     expect(handshakeTimeout).toBeDefined();
     const forwarded = forwardedHeaders as http.OutgoingHttpHeaders | undefined;
     expect(forwarded?.['x-kiloclaw-proxy-token']).toBeUndefined();
+    // Host must be rewritten to the backend loopback address so the gateway
+    // sees the connection as local (matching the HTTP proxy path behavior).
+    expect(forwarded?.['host']).toBe('127.0.0.1:3001');
+    // Upstream proxy headers must be stripped so the gateway's
+    // isLocalDirectRequest check doesn't treat the request as proxied/remote.
+    expect(forwarded?.['x-forwarded-for']).toBeUndefined();
+    expect(forwarded?.['x-real-ip']).toBeUndefined();
+    expect(forwarded?.['x-forwarded-host']).toBeUndefined();
     expect((clientSocket as unknown as FakeSocket).pipe).toHaveBeenCalledWith(backendSocket);
     expect(backendSocket.pipe).toHaveBeenCalledWith(clientSocket);
   });

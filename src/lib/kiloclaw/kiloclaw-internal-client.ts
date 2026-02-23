@@ -10,6 +10,8 @@ import type {
   ChannelsPatchResponse,
   PairingListResponse,
   PairingApproveResponse,
+  DevicePairingListResponse,
+  DevicePairingApproveResponse,
   VolumeSnapshotsResponse,
   DoctorResponse,
   GatewayProcessStatusResponse,
@@ -124,6 +126,25 @@ export class KiloClawInternalClient {
     return this.request('/api/platform/pairing/approve', {
       method: 'POST',
       body: JSON.stringify({ userId, channel, code }),
+    });
+  }
+
+  async listDevicePairingRequests(
+    userId: string,
+    refresh = false
+  ): Promise<DevicePairingListResponse> {
+    const params = new URLSearchParams({ userId });
+    if (refresh) params.set('refresh', 'true');
+    return this.request(`/api/platform/device-pairing?${params.toString()}`);
+  }
+
+  async approveDevicePairingRequest(
+    userId: string,
+    requestId: string
+  ): Promise<DevicePairingApproveResponse> {
+    return this.request('/api/platform/device-pairing/approve', {
+      method: 'POST',
+      body: JSON.stringify({ userId, requestId }),
     });
   }
 

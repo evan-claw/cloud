@@ -780,6 +780,146 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     };
   }
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Device pairing (Control UI / node device identity)
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** KV cache key for device pairing requests, scoped to the specific machine. */
+  private devicePairingCacheKey(): string | null {
+    const { flyAppName, flyMachineId } = this;
+    if (!flyAppName || !flyMachineId) return null;
+    return `device-pairing:${flyAppName}:${flyMachineId}`;
+  }
+
+  private static DEVICE_PAIRING_CACHE_TTL_SECONDS = 120;
+
+  /**
+   * List pending device pairing requests via the openclaw-device-pairing-list.js
+   * helper script on the machine.
+   * Results are cached in KV for 2 minutes. Pass forceRefresh to bypass cache.
+   * Requires the machine to be running.
+   */
+  async listDevicePairingRequests(forceRefresh = false): Promise<{
+    requests: Array<{
+      requestId: string;
+      deviceId: string;
+      role?: string;
+      platform?: string;
+      clientId?: string;
+      ts?: number;
+    }>;
+  }> {
+    await this.loadState();
+
+    const { flyMachineId } = this;
+    if (this.status !== 'running' || !flyMachineId) {
+      return { requests: [] };
+    }
+
+    const cacheKey = this.devicePairingCacheKey();
+    if (cacheKey && !forceRefresh) {
+      const cached = await this.env.KV_CLAW_CACHE.get(cacheKey, 'json');
+      if (
+        cached &&
+        typeof cached === 'object' &&
+        'requests' in cached &&
+        Array.isArray(cached.requests)
+      ) {
+        console.log(`[DO] device pairing list served from KV cache (key=${cacheKey})`);
+        return { requests: cached.requests };
+      }
+    }
+
+    const flyConfig = this.getFlyConfig();
+
+    const result = await fly.execCommand(
+      flyConfig,
+      flyMachineId,
+      ['/usr/bin/env', 'HOME=/root', 'node', '/usr/local/bin/openclaw-device-pairing-list.js'],
+      60
+    );
+
+    const empty = {
+      requests: [] as Array<{
+        requestId: string;
+        deviceId: string;
+        role?: string;
+        platform?: string;
+        clientId?: string;
+        ts?: number;
+      }>,
+    };
+
+    if (result.exit_code !== 0) {
+      console.error('[DO] device pairing list failed:', result.stderr);
+      return empty;
+    }
+
+    let pairing = empty;
+    try {
+      const data = JSON.parse(result.stdout.trim());
+      if (Array.isArray(data.requests)) {
+        pairing = { requests: data.requests };
+      }
+    } catch {
+      console.error('[DO] device pairing list parse error:', result.stdout);
+    }
+
+    if (cacheKey) {
+      await this.env.KV_CLAW_CACHE.put(cacheKey, JSON.stringify(pairing), {
+        expirationTtl: KiloClawInstance.DEVICE_PAIRING_CACHE_TTL_SECONDS,
+      });
+    }
+
+    return pairing;
+  }
+
+  /**
+   * Approve a pending device pairing request via `openclaw devices approve` on the machine.
+   * Busts the device pairing KV cache on success.
+   * Requires the machine to be running.
+   */
+  async approveDevicePairingRequest(
+    requestId: string
+  ): Promise<{ success: boolean; message: string }> {
+    await this.loadState();
+
+    const { flyMachineId } = this;
+    if (this.status !== 'running' || !flyMachineId) {
+      return { success: false, message: 'Instance is not running' };
+    }
+
+    const flyConfig = this.getFlyConfig();
+
+    // Validate requestId as a UUID to prevent command injection
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+      return { success: false, message: 'Invalid request ID' };
+    }
+
+    const result = await fly.execCommand(
+      flyConfig,
+      flyMachineId,
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+
+    const success = result.exit_code === 0;
+
+    if (success) {
+      const cacheKey = this.devicePairingCacheKey();
+      if (cacheKey) {
+        await this.env.KV_CLAW_CACHE.delete(cacheKey);
+      }
+    }
+
+    return {
+      success,
+      message: success
+        ? 'Device pairing approved'
+        : result.stderr || result.stdout || 'Approval failed',
+    };
+  }
+
   /**
    * Run `openclaw doctor --fix --non-interactive` on the machine and return the output.
    * Requires the machine to be running.

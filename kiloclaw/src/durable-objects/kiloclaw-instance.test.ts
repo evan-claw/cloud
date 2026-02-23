@@ -50,6 +50,7 @@ vi.mock('../fly/client', async () => {
     getVolume: vi.fn(),
     listMachines: vi.fn().mockResolvedValue([]),
     listVolumeSnapshots: vi.fn().mockResolvedValue([]),
+    execCommand: vi.fn(),
   };
 });
 
@@ -143,6 +144,11 @@ function createFakeEnv() {
       get: vi.fn().mockReturnValue(appStub),
     } as unknown,
     HYPERDRIVE: { connectionString: '' } as unknown,
+    KV_CLAW_CACHE: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as unknown,
   };
 }
 
@@ -1592,5 +1598,145 @@ describe('listVolumeSnapshots', () => {
 
     expect(result).toEqual([]);
     expect(flyClient.listVolumeSnapshots).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Device pairing
+// ============================================================================
+describe('listDevicePairingRequests', () => {
+  it('returns empty when not running', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result).toEqual({ requests: [] });
+  });
+
+  it('calls execCommand and parses JSON output', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    const fakeOutput = JSON.stringify({
+      requests: [
+        { requestId: 'abc-123', deviceId: 'dev-1', role: 'operator', platform: 'MacIntel' },
+      ],
+    });
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: fakeOutput,
+      stderr: '',
+    });
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result.requests).toHaveLength(1);
+    expect(result.requests[0].requestId).toBe('abc-123');
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'node', '/usr/local/bin/openclaw-device-pairing-list.js'],
+      60
+    );
+  });
+
+  it('returns empty on exec failure', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 1,
+      stdout: '',
+      stderr: 'something went wrong',
+    });
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result).toEqual({ requests: [] });
+  });
+});
+
+describe('approveDevicePairingRequest', () => {
+  it('rejects invalid requestId format', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    const result = await instance.approveDevicePairingRequest('not-a-uuid');
+
+    expect(result).toEqual({ success: false, message: 'Invalid request ID' });
+    expect(flyClient.execCommand).not.toHaveBeenCalled();
+  });
+
+  it('returns not running when instance is stopped', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
+
+    expect(result).toEqual({ success: false, message: 'Instance is not running' });
+  });
+
+  it('calls openclaw devices approve with the requestId', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: 'approved',
+      stderr: '',
+    });
+
+    const requestId = '58f4ac67-12b4-4f6e-adee-ff3463a7c30c';
+    const result = await instance.approveDevicePairingRequest(requestId);
+
+    expect(result).toEqual({ success: true, message: 'Device pairing approved' });
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+  });
+
+  it('accepts uppercase UUIDs', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: 'approved',
+      stderr: '',
+    });
+
+    const requestId = '58F4AC67-12B4-4F6E-ADEE-FF3463A7C30C';
+    const result = await instance.approveDevicePairingRequest(requestId);
+
+    expect(result).toEqual({ success: true, message: 'Device pairing approved' });
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+  });
+
+  it('returns failure message on exec error', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 1,
+      stdout: '',
+      stderr: 'request not found',
+    });
+
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
+
+    expect(result).toEqual({ success: false, message: 'request not found' });
   });
 });

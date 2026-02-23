@@ -40,6 +40,27 @@ export function useRefreshPairing() {
   };
 }
 
+export function useKiloClawDevicePairing(enabled = true) {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.listDevicePairingRequests.queryOptions(undefined, {
+      enabled,
+      refetchInterval: enabled ? 120_000 : false,
+    })
+  );
+}
+
+export function useRefreshDevicePairing() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return async () => {
+    const fresh = await queryClient.fetchQuery(
+      trpc.kiloclaw.listDevicePairingRequests.queryOptions({ refresh: true })
+    );
+    queryClient.setQueryData(trpc.kiloclaw.listDevicePairingRequests.queryKey(), fresh);
+  };
+}
+
 export function useKiloClawMutations() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -79,6 +100,15 @@ export function useKiloClawMutations() {
         onSuccess: async () => {
           await queryClient.invalidateQueries({
             queryKey: trpc.kiloclaw.listPairingRequests.queryKey(),
+          });
+        },
+      })
+    ),
+    approveDevicePairingRequest: useMutation(
+      trpc.kiloclaw.approveDevicePairingRequest.mutationOptions({
+        onSuccess: async () => {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.listDevicePairingRequests.queryKey(),
           });
         },
       })
