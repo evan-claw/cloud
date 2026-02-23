@@ -709,6 +709,8 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
           githubToken,
           model,
           analysisMode,
+          forceSandbox: input.forceSandbox,
+          retrySandboxOnly: input.retrySandboxOnly,
           organizationId: input.organizationId,
         });
       } catch (error) {

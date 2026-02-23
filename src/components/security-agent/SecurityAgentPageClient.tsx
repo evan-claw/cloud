@@ -550,12 +550,12 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
   }, []);
 
   const handleStartAnalysis = useCallback(
-    (findingId: string) => {
+    (findingId: string, { retrySandboxOnly }: { retrySandboxOnly?: boolean } = {}) => {
       setStartingAnalysisId(findingId);
       if (isOrg && organizationId) {
-        orgStartAnalysisMutate({ organizationId, findingId });
+        orgStartAnalysisMutate({ organizationId, findingId, retrySandboxOnly });
       } else {
-        personalStartAnalysisMutate({ findingId });
+        personalStartAnalysisMutate({ findingId, retrySandboxOnly });
       }
     },
     [isOrg, organizationId, orgStartAnalysisMutate, personalStartAnalysisMutate]

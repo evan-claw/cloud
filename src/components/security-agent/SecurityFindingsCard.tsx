@@ -1,5 +1,17 @@
 'use client';
 
+import { formatDistanceToNow } from 'date-fns';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Loader2,
+  RefreshCw,
+  Settings2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -8,21 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { SecurityFindingRow } from './SecurityFindingRow';
-import { RepositoryFilter } from './RepositoryFilter';
-import {
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight,
-  AlertTriangle,
-  CheckCircle2,
-  Loader2,
-  AlertCircle,
-  Settings2,
-  Clock,
-} from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 import type { SecurityFinding } from '@/db/schema';
+import { RepositoryFilter } from './RepositoryFilter';
+import { SecurityFindingRow } from './SecurityFindingRow';
 
 type Repository = {
   id: number;
@@ -74,7 +74,7 @@ type SecurityFindingsCardProps = {
   hasIntegration: boolean;
   onEnableClick: () => void;
   lastSyncTime?: string | null;
-  onStartAnalysis?: (findingId: string) => void;
+  onStartAnalysis?: (findingId: string, options?: { retrySandboxOnly?: boolean }) => void;
   startingAnalysisId?: string | null;
   isAdmin: boolean;
 };
@@ -188,7 +188,10 @@ export function SecurityFindingsCard({
             {lastSyncTime && (
               <span className="text-muted-foreground flex items-center gap-1 text-xs">
                 <Clock className="h-3 w-3" />
-                Last synced {formatDistanceToNow(new Date(lastSyncTime), { addSuffix: true })}
+                Last synced{' '}
+                {formatDistanceToNow(new Date(lastSyncTime), {
+                  addSuffix: true,
+                })}
               </span>
             )}
             {isAdmin && (

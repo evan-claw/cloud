@@ -19,7 +19,12 @@ import {
 import { generateApiToken } from '@/lib/tokens';
 import { getSecurityFindingById } from '../db/security-findings';
 import { updateAnalysisStatus } from '../db/security-analysis';
-import type { AnalysisMode, SecurityFindingAnalysis, SecurityReviewOwner } from '../core/types';
+import type {
+  AnalysisMode,
+  SecurityFindingAnalysis,
+  SecurityFindingTriage,
+  SecurityReviewOwner,
+} from '../core/types';
 import type { User, SecurityFinding } from '@/db/schema';
 import {
   trackSecurityAgentAnalysisStarted,
@@ -243,6 +248,8 @@ export async function startSecurityAnalysis(params: {
   githubToken?: string;
   model?: string;
   analysisMode?: AnalysisMode;
+  forceSandbox?: boolean;
+  retrySandboxOnly?: boolean;
   organizationId?: string;
 }): Promise<{ started: boolean; error?: string; triageOnly?: boolean }> {
   const {
@@ -252,6 +259,8 @@ export async function startSecurityAnalysis(params: {
     githubToken,
     model = 'anthropic/claude-sonnet-4',
     analysisMode = 'auto',
+    forceSandbox = false,
+    retrySandboxOnly = false,
     organizationId,
   } = params;
 
@@ -268,8 +277,25 @@ export async function startSecurityAnalysis(params: {
     return { started: false, error: 'Analysis already in progress' };
   }
 
-  // Mark as pending
-  await updateAnalysisStatus(findingId, 'pending');
+  // When retrying sandbox only, preserve existing triage data
+  const existingTriage = retrySandboxOnly ? finding.analysis?.triage : undefined;
+  if (retrySandboxOnly && !existingTriage) {
+    log('retrySandboxOnly requested but no existing triage found, falling back to full analysis', {
+      correlationId,
+      findingId,
+    });
+  }
+  const skipTriage = retrySandboxOnly && !!existingTriage;
+
+  // Mark as pending, preserving existing analysis (with triage) when retrying sandbox only.
+  // Coerce null → undefined so updateAnalysisStatus treats it as "not provided" and
+  // does not overwrite the analysis column with null (its `status === 'pending'` branch
+  // only clears `analysis` when `updates.analysis === undefined`).
+  if (skipTriage) {
+    await updateAnalysisStatus(findingId, 'pending', { analysis: finding.analysis ?? undefined });
+  } else {
+    await updateAnalysisStatus(findingId, 'pending');
+  }
 
   const analysisStartTime = Date.now();
 
@@ -277,57 +303,84 @@ export async function startSecurityAnalysis(params: {
     // Generate auth token for LLM calls
     const authToken = generateApiToken(user);
 
-    // =========================================================================
-    // Tier 1: Quick Triage (always runs)
-    // =========================================================================
-    log('Starting Tier 1 triage', { correlationId, findingId, model });
+    let triage: SecurityFindingTriage;
 
-    trackSecurityAgentAnalysisStarted({
-      distinctId: user.id,
-      userId: user.id,
-      organizationId,
-      findingId,
-      model,
-      analysisMode,
-    });
-
-    const tier1Start = performance.now();
-    const triage = await triageSecurityFinding({
-      finding,
-      authToken,
-      model,
-      correlationId,
-      userId: user.id,
-      organizationId,
-    });
-    const tier1DurationMs = Math.round(performance.now() - tier1Start);
-
-    log('Triage complete', {
-      correlationId,
-      findingId,
-      durationMs: tier1DurationMs,
-      suggestedAction: triage.suggestedAction,
-      confidence: triage.confidence,
-      needsSandboxAnalysis: triage.needsSandboxAnalysis,
-    });
-
-    addBreadcrumb({
-      category: 'security-agent.triage',
-      message: `Triage outcome: ${triage.suggestedAction}`,
-      level: 'info',
-      data: {
+    if (skipTriage) {
+      // =========================================================================
+      // Reuse existing triage (sandbox-only retry)
+      // =========================================================================
+      triage = existingTriage;
+      log('Skipping Tier 1 triage, reusing existing triage for sandbox retry', {
         correlationId,
         findingId,
         suggestedAction: triage.suggestedAction,
         confidence: triage.confidence,
-        needsSandbox: triage.needsSandboxAnalysis,
-        durationMs: tier1DurationMs,
-      },
-    });
+      });
 
-    // Decide whether to run sandbox analysis based on analysis mode
+      trackSecurityAgentAnalysisStarted({
+        distinctId: user.id,
+        userId: user.id,
+        organizationId,
+        findingId,
+        model,
+        analysisMode,
+      });
+    } else {
+      // =========================================================================
+      // Tier 1: Quick Triage (always runs)
+      // =========================================================================
+      log('Starting Tier 1 triage', { correlationId, findingId, model });
+
+      trackSecurityAgentAnalysisStarted({
+        distinctId: user.id,
+        userId: user.id,
+        organizationId,
+        findingId,
+        model,
+        analysisMode,
+      });
+
+      const tier1Start = performance.now();
+      triage = await triageSecurityFinding({
+        finding,
+        authToken,
+        model,
+        correlationId,
+        userId: user.id,
+        organizationId,
+      });
+      const tier1DurationMs = Math.round(performance.now() - tier1Start);
+
+      log('Triage complete', {
+        correlationId,
+        findingId,
+        durationMs: tier1DurationMs,
+        suggestedAction: triage.suggestedAction,
+        confidence: triage.confidence,
+        needsSandboxAnalysis: triage.needsSandboxAnalysis,
+      });
+
+      addBreadcrumb({
+        category: 'security-agent.triage',
+        message: `Triage outcome: ${triage.suggestedAction}`,
+        level: 'info',
+        data: {
+          correlationId,
+          findingId,
+          suggestedAction: triage.suggestedAction,
+          confidence: triage.confidence,
+          needsSandbox: triage.needsSandboxAnalysis,
+          durationMs: tier1DurationMs,
+        },
+      });
+    }
+
+    // Decide whether to run sandbox analysis based on analysis mode and per-request overrides
     const runSandbox =
-      analysisMode === 'deep' || (analysisMode === 'auto' && triage.needsSandboxAnalysis);
+      forceSandbox ||
+      skipTriage ||
+      analysisMode === 'deep' ||
+      (analysisMode === 'auto' && triage.needsSandboxAnalysis);
 
     if (!runSandbox) {
       // =========================================================================
