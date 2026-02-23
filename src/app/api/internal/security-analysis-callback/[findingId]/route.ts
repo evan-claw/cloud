@@ -16,8 +16,11 @@ import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { captureException } from '@sentry/nextjs';
 import { getSecurityFindingById } from '@/lib/security-agent/db/security-findings';
 import { updateAnalysisStatus } from '@/lib/security-agent/db/security-analysis';
-import { finalizeAnalysis } from '@/lib/security-agent/services/analysis-service';
-import { fetchSessionExport, extractLastAssistantMessage } from '@/lib/session-ingest/client';
+import {
+  finalizeAnalysis,
+  extractLastAssistantMessage,
+} from '@/lib/security-agent/services/analysis-service';
+import { fetchSessionSnapshot } from '@/lib/session-ingest-client';
 import { trackSecurityAgentAnalysisCompleted } from '@/lib/security-agent/posthog-tracking';
 import { generateApiToken } from '@/lib/tokens';
 import { db } from '@/lib/drizzle';
@@ -167,7 +170,7 @@ async function handleAnalysisCompleted(
     }
 
     try {
-      const snapshot = await fetchSessionExport(kiloSessionId, triggeredByUserId);
+      const snapshot = await fetchSessionSnapshot(kiloSessionId, triggeredByUserId);
       if (snapshot) {
         rawMarkdown = extractLastAssistantMessage(snapshot);
       }

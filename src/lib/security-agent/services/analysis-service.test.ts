@@ -4,7 +4,9 @@ import type * as securityAnalysisModule from '@/lib/security-agent/db/security-a
 import type * as triageModule from './triage-service';
 import type * as tokensModule from '@/lib/tokens';
 import type { User } from '@/db/schema';
+import type { SessionSnapshot } from '@/lib/session-ingest-client';
 import type { startSecurityAnalysis as startSecurityAnalysisType } from './analysis-service';
+import { extractLastAssistantMessage } from './analysis-service';
 
 const mockGetSecurityFindingById = jest.fn() as jest.MockedFunction<
   typeof securityFindingsModule.getSecurityFindingById
@@ -133,7 +135,6 @@ describe('analysis-service', () => {
     expect(mockPrepareSession).toHaveBeenCalledWith(
       expect.objectContaining({
         kilocodeOrganizationId: organizationId,
-        createdOnPlatform: 'security-agent',
         githubRepo: 'acme/repo',
         githubToken: 'gh-token',
         mode: 'code',
@@ -309,5 +310,109 @@ describe('analysis-service', () => {
     expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(findingId, 'failed', {
       error: 'Sandbox unavailable',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractLastAssistantMessage (pure function, no mocks needed)
+// ---------------------------------------------------------------------------
+
+function makeSnapshot(
+  messages: Array<{
+    role: string;
+    parts: Array<{ type: string; text?: string; id?: string }>;
+  }>
+): SessionSnapshot {
+  return {
+    info: {},
+    messages: messages.map((m, i) => ({
+      info: { id: `msg_${i}`, role: m.role },
+      parts: m.parts.map((p, j) => ({
+        id: p.id ?? `part_${i}_${j}`,
+        type: p.type,
+        ...(p.text !== undefined ? { text: p.text } : {}),
+      })),
+    })),
+  };
+}
+
+describe('extractLastAssistantMessage', () => {
+  it('returns null for empty messages', () => {
+    expect(extractLastAssistantMessage(makeSnapshot([]))).toBeNull();
+  });
+
+  it('returns null when no assistant messages exist', () => {
+    const snapshot = makeSnapshot([{ role: 'user', parts: [{ type: 'text', text: 'hello' }] }]);
+    expect(extractLastAssistantMessage(snapshot)).toBeNull();
+  });
+
+  it('extracts text from a single assistant message', () => {
+    const snapshot = makeSnapshot([
+      { role: 'user', parts: [{ type: 'text', text: 'analyze this' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'The analysis shows...' }] },
+    ]);
+    expect(extractLastAssistantMessage(snapshot)).toBe('The analysis shows...');
+  });
+
+  it('returns the last assistant message when multiple exist', () => {
+    const snapshot = makeSnapshot([
+      { role: 'user', parts: [{ type: 'text', text: 'first question' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'first answer' }] },
+      { role: 'user', parts: [{ type: 'text', text: 'second question' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'second answer' }] },
+    ]);
+    expect(extractLastAssistantMessage(snapshot)).toBe('second answer');
+  });
+
+  it('concatenates multiple text parts', () => {
+    const snapshot = makeSnapshot([
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: 'Part one. ' },
+          { type: 'text', text: 'Part two.' },
+        ],
+      },
+    ]);
+    expect(extractLastAssistantMessage(snapshot)).toBe('Part one. Part two.');
+  });
+
+  it('skips non-text parts (tool calls, step-finish, etc.)', () => {
+    const snapshot = makeSnapshot([
+      {
+        role: 'assistant',
+        parts: [
+          { type: 'tool', text: undefined },
+          { type: 'text', text: 'The result is clear.' },
+          { type: 'step-finish' },
+        ],
+      },
+    ]);
+    expect(extractLastAssistantMessage(snapshot)).toBe('The result is clear.');
+  });
+
+  it('skips assistant messages with empty text and returns earlier one', () => {
+    const snapshot = makeSnapshot([
+      { role: 'assistant', parts: [{ type: 'text', text: 'Earlier answer with content.' }] },
+      { role: 'user', parts: [{ type: 'text', text: 'followup' }] },
+      { role: 'assistant', parts: [{ type: 'tool' }] },
+    ]);
+    expect(extractLastAssistantMessage(snapshot)).toBe('Earlier answer with content.');
+  });
+
+  it('skips parts where text is not a string', () => {
+    const snapshot: SessionSnapshot = {
+      info: {},
+      messages: [
+        {
+          info: { id: 'msg_0', role: 'assistant' },
+          parts: [
+            { id: 'p1', type: 'text', text: undefined as unknown as string },
+            { id: 'p2', type: 'text', text: 'valid text' },
+          ],
+        },
+      ],
+    };
+    expect(extractLastAssistantMessage(snapshot)).toBe('valid text');
   });
 });

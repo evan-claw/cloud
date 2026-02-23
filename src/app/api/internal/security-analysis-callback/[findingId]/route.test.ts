@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import type * as securityFindingsModule from '@/lib/security-agent/db/security-findings';
 import type * as securityAnalysisModule from '@/lib/security-agent/db/security-analysis';
 import type * as analysisServiceModule from '@/lib/security-agent/services/analysis-service';
-import type * as sessionIngestModule from '@/lib/session-ingest/client';
+import type * as sessionIngestModule from '@/lib/session-ingest-client';
 import type * as posthogModule from '@/lib/security-agent/posthog-tracking';
 import type * as tokensModule from '@/lib/tokens';
 import type { SecurityFinding, User } from '@/db/schema';
@@ -20,11 +20,11 @@ const mockUpdateAnalysisStatus = jest.fn() as jest.MockedFunction<
 const mockFinalizeAnalysis = jest.fn() as jest.MockedFunction<
   typeof analysisServiceModule.finalizeAnalysis
 >;
-const mockFetchSessionExport = jest.fn() as jest.MockedFunction<
-  typeof sessionIngestModule.fetchSessionExport
+const mockFetchSessionSnapshot = jest.fn() as jest.MockedFunction<
+  typeof sessionIngestModule.fetchSessionSnapshot
 >;
 const mockExtractLastAssistantMessage = jest.fn() as jest.MockedFunction<
-  typeof sessionIngestModule.extractLastAssistantMessage
+  typeof analysisServiceModule.extractLastAssistantMessage
 >;
 const mockTrackAnalysisCompleted = jest.fn() as jest.MockedFunction<
   typeof posthogModule.trackSecurityAgentAnalysisCompleted
@@ -49,11 +49,11 @@ jest.mock('@/lib/security-agent/db/security-analysis', () => ({
 
 jest.mock('@/lib/security-agent/services/analysis-service', () => ({
   finalizeAnalysis: mockFinalizeAnalysis,
+  extractLastAssistantMessage: mockExtractLastAssistantMessage,
 }));
 
-jest.mock('@/lib/session-ingest/client', () => ({
-  fetchSessionExport: mockFetchSessionExport,
-  extractLastAssistantMessage: mockExtractLastAssistantMessage,
+jest.mock('@/lib/session-ingest-client', () => ({
+  fetchSessionSnapshot: mockFetchSessionSnapshot,
 }));
 
 jest.mock('@/lib/security-agent/posthog-tracking', () => ({
@@ -302,7 +302,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
           },
         ],
       };
-      mockFetchSessionExport.mockResolvedValue(snapshot);
+      mockFetchSessionSnapshot.mockResolvedValue(snapshot);
       mockExtractLastAssistantMessage.mockReturnValue('Analysis result markdown');
 
       const mockUser = { id: 'user-trigger-1', api_token_pepper: 'pepper' } as User;
@@ -315,7 +315,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(response.status).toBe(200);
 
       // Verify session export was fetched with correct args
-      expect(mockFetchSessionExport).toHaveBeenCalledWith('ses_kilo-1', 'user-trigger-1');
+      expect(mockFetchSessionSnapshot).toHaveBeenCalledWith('ses_kilo-1', 'user-trigger-1');
 
       // Verify raw markdown was written to analysis field
       expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(
@@ -347,7 +347,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       });
       mockGetSecurityFindingById.mockResolvedValue(finding);
 
-      mockFetchSessionExport.mockResolvedValue({
+      mockFetchSessionSnapshot.mockResolvedValue({
         info: {},
         messages: [
           {
@@ -390,7 +390,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(FINDING_ID, 'failed', {
         error: 'Cannot process callback — triggeredByUserId missing from analysis context',
       });
-      expect(mockFetchSessionExport).not.toHaveBeenCalled();
+      expect(mockFetchSessionSnapshot).not.toHaveBeenCalled();
     });
 
     it('marks finding failed when callback payload is missing kiloSessionId', async () => {
@@ -420,7 +420,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       };
 
       // First attempt: no snapshot, second attempt: success
-      mockFetchSessionExport.mockResolvedValueOnce(null).mockResolvedValueOnce(snapshot);
+      mockFetchSessionSnapshot.mockResolvedValueOnce(null).mockResolvedValueOnce(snapshot);
       mockExtractLastAssistantMessage.mockReturnValue('Delayed result');
 
       const mockUser = { id: 'user-trigger-1', api_token_pepper: 'pepper' } as User;
@@ -435,7 +435,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const response = await responsePromise;
       expect(response.status).toBe(200);
-      expect(mockFetchSessionExport).toHaveBeenCalledTimes(2);
+      expect(mockFetchSessionSnapshot).toHaveBeenCalledTimes(2);
       expect(mockFinalizeAnalysis).toHaveBeenCalled();
     });
 
@@ -453,7 +453,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       };
 
       // First attempt throws, second succeeds
-      mockFetchSessionExport
+      mockFetchSessionSnapshot
         .mockRejectedValueOnce(new Error('Ingest service unavailable'))
         .mockResolvedValueOnce(snapshot);
       mockExtractLastAssistantMessage.mockReturnValue('Eventually got it');
@@ -469,7 +469,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const response = await responsePromise;
       expect(response.status).toBe(200);
-      expect(mockFetchSessionExport).toHaveBeenCalledTimes(2);
+      expect(mockFetchSessionSnapshot).toHaveBeenCalledTimes(2);
       expect(mockFinalizeAnalysis).toHaveBeenCalled();
     });
 
@@ -477,7 +477,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       mockGetSecurityFindingById.mockResolvedValue(createMockFinding());
 
       // All 3 attempts return null
-      mockFetchSessionExport.mockResolvedValue(null);
+      mockFetchSessionSnapshot.mockResolvedValue(null);
       mockExtractLastAssistantMessage.mockReturnValue(null);
 
       const req = makeRequest(FINDING_ID, completedPayload);
@@ -488,7 +488,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const response = await responsePromise;
       expect(response.status).toBe(200);
-      expect(mockFetchSessionExport).toHaveBeenCalledTimes(3);
+      expect(mockFetchSessionSnapshot).toHaveBeenCalledTimes(3);
       expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(FINDING_ID, 'failed', {
         error: 'Analysis completed but result could not be retrieved from ingest service',
       });
@@ -498,7 +498,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
     it('marks finding failed when user is not found in DB', async () => {
       mockGetSecurityFindingById.mockResolvedValue(createMockFinding());
 
-      mockFetchSessionExport.mockResolvedValue({
+      mockFetchSessionSnapshot.mockResolvedValue({
         info: {},
         messages: [
           {
@@ -526,7 +526,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       const finding = createMockFinding();
       mockGetSecurityFindingById.mockResolvedValue(finding);
 
-      mockFetchSessionExport.mockResolvedValue({
+      mockFetchSessionSnapshot.mockResolvedValue({
         info: {},
         messages: [
           {
@@ -566,7 +566,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       });
       mockGetSecurityFindingById.mockResolvedValue(finding);
 
-      mockFetchSessionExport.mockResolvedValue({
+      mockFetchSessionSnapshot.mockResolvedValue({
         info: {},
         messages: [
           {

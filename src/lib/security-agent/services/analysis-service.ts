@@ -32,6 +32,7 @@ import { maybeAutoDismissAnalysis } from './auto-dismiss-service';
 import { sentryLogger } from '@/lib/utils.server';
 import { APP_URL } from '@/lib/constants';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
+import type { SessionSnapshot } from '@/lib/session-ingest-client';
 
 const log = sentryLogger('security-agent:analysis', 'info');
 const logError = sentryLogger('security-agent:analysis', 'error');
@@ -100,6 +101,29 @@ function buildAnalysisPrompt(finding: SecurityFinding): string {
     manifestPath: finding.manifest_path || 'Unknown',
   };
   return ANALYSIS_PROMPT_TEMPLATE.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? '');
+}
+
+/**
+ * Extract the last assistant message text from a session snapshot.
+ *
+ * Iterates messages in reverse order to find the last assistant message,
+ * then concatenates all text-type parts into a single string.
+ */
+export function extractLastAssistantMessage(snapshot: SessionSnapshot): string | null {
+  for (let i = snapshot.messages.length - 1; i >= 0; i--) {
+    const msg = snapshot.messages[i];
+    if (msg.info.role !== 'assistant') continue;
+
+    let text = '';
+    for (const p of msg.parts) {
+      if (p.type === 'text' && typeof p.text === 'string') {
+        text += p.text;
+      }
+    }
+
+    if (text.length > 0) return text;
+  }
+  return null;
 }
 
 /**
@@ -379,7 +403,6 @@ export async function startSecurityAnalysis(params: {
       prompt,
       mode: 'code',
       model,
-      createdOnPlatform: 'security-agent',
       githubRepo,
       githubToken,
       kilocodeOrganizationId: organizationId,
