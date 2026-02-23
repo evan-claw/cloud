@@ -174,7 +174,7 @@ export function UserAdminKiloPass({ userId }: { userId: string }) {
         {canCancel && (
           <div>
             <Button size="sm" variant="destructive" onClick={() => setCancelDialogOpen(true)}>
-              Cancel & Refund
+              Nuke Pass
             </Button>
           </div>
         )}
@@ -306,7 +306,7 @@ export function UserAdminKiloPass({ userId }: { userId: string }) {
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel & Refund Kilo Pass</DialogTitle>
+            <DialogTitle>Nuke Pass</DialogTitle>
             <DialogDescription>
               This will perform all of the following actions:
               <ul className="mt-2 list-disc pl-4 text-sm">
