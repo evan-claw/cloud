@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import {
   Table,
@@ -23,8 +23,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, RefreshCw, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { formatDistanceToNow, format, parseISO } from 'date-fns';
 import {
   ComposedChart,
@@ -60,69 +61,6 @@ function formatLifespan(minutes: number | null): string {
   if (minutes < 60) return `${Math.round(minutes)}m`;
   if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
   return `${Math.round(minutes / 1440)}d`;
-}
-
-// --- Overview Stats Cards ---
-
-type OverviewData = {
-  totalInstances: number;
-  activeInstances: number;
-  destroyedInstances: number;
-  uniqueUsers: number;
-  last24hCreated: number;
-  last7dCreated: number;
-  activeUsers7d: number;
-  avgLifespanMinutes: number | null;
-};
-
-function OverviewStatsCards({ data }: { data: OverviewData }) {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Total Instances</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{data.totalInstances.toLocaleString()}</div>
-          <p className="text-muted-foreground text-xs">
-            {data.last24hCreated} last 24h &middot; {data.last7dCreated} last 7d
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Active Instances</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{data.activeInstances.toLocaleString()}</div>
-          <p className="text-muted-foreground text-xs">
-            {data.destroyedInstances.toLocaleString()} destroyed
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Unique Users</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{data.uniqueUsers.toLocaleString()}</div>
-          <p className="text-muted-foreground text-xs">{data.activeUsers7d} active in last 7d</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Avg Lifespan</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{formatLifespan(data.avgLifespanMinutes)}</div>
-          <p className="text-muted-foreground text-xs">Average time before destroyed</p>
-        </CardContent>
-      </Card>
-    </div>
-  );
 }
 
 // --- Daily Chart ---
@@ -225,6 +163,7 @@ export function KiloclawInstancesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
   const queryStringState = useMemo(
     () => ({
@@ -239,6 +178,20 @@ export function KiloclawInstancesPage() {
   );
 
   const [searchInput, setSearchInput] = useState(queryStringState.search);
+
+  const { mutateAsync: triggerVersionSync, isPending: isSyncing } = useMutation(
+    trpc.admin.kiloclawVersions.triggerSync.mutationOptions({
+      onSuccess: data => {
+        toast.success(`Version sync complete: ${data.inserted} new, ${data.updated} updated`);
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawVersions.stats.queryKey(),
+        });
+      },
+      onError: err => {
+        toast.error(`Version sync failed: ${err.message}`);
+      },
+    })
+  );
 
   const offset = (queryStringState.page - 1) * queryStringState.limit;
 
@@ -256,6 +209,8 @@ export function KiloclawInstancesPage() {
   const { data: statsData } = useQuery(
     trpc.admin.kiloclawInstances.stats.queryOptions({ days: 30 })
   );
+
+  const { data: versionStats } = useQuery(trpc.admin.kiloclawVersions.stats.queryOptions());
 
   type QueryStringState = typeof queryStringState;
 
@@ -334,13 +289,106 @@ export function KiloclawInstancesPage() {
 
   return (
     <div className="flex w-full flex-col gap-y-6">
-      {/* Dashboard Section */}
-      {statsData && (
-        <>
-          <OverviewStatsCards data={statsData.overview} />
-          {statsData.dailyChart.length > 0 && <DailyChart data={statsData.dailyChart} />}
-        </>
-      )}
+      {/* Sync Versions */}
+      <div className="flex">
+        <Button variant="outline" onClick={() => void triggerVersionSync()} disabled={isSyncing}>
+          {isSyncing ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
+          Sync Versions
+        </Button>
+      </div>
+
+      {/* Stats Overview */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        {statsData && (
+          <>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Total Instances</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {statsData.overview.totalInstances.toLocaleString()}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {statsData.overview.last24hCreated} last 24h &middot;{' '}
+                  {statsData.overview.last7dCreated} last 7d
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Active Instances</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {statsData.overview.activeInstances.toLocaleString()}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {statsData.overview.destroyedInstances.toLocaleString()} destroyed
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Unique Users</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {statsData.overview.uniqueUsers.toLocaleString()}
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {statsData.overview.activeUsers7d} active in last 7d
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Avg Lifespan</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatLifespan(statsData.overview.avgLifespanMinutes)}
+                </div>
+                <p className="text-muted-foreground text-xs">Average time before destroyed</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Available Versions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{versionStats?.versions.active ?? '—'}</div>
+            <p className="text-muted-foreground text-xs">
+              {versionStats
+                ? `${versionStats.versions.total} total · ${versionStats.pins.total} pinned`
+                : 'Loading...'}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Available Variants</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{versionStats?.versions.variants ?? '—'}</div>
+            <p className="text-muted-foreground text-xs">Distinct image variants</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Daily Chart */}
+      {statsData && statsData.dailyChart.length > 0 && <DailyChart data={statsData.dailyChart} />}
 
       {/* Filters */}
       <div className="flex items-center gap-4">

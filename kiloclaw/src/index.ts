@@ -412,21 +412,26 @@ app.all('*', async c => {
   return httpResponse;
 });
 
+let versionRegistered = false;
+
 export default {
   fetch(request: Request, env: KiloClawEnv, ctx: ExecutionContext) {
-    // Self-register the current OpenClaw version in KV on deploy.
-    // Runs after the response is sent. If the very first request after deploy
-    // is a provision(), the KV write races with resolveLatestVersion() —
-    // provision may see the previous latest (or null) and fall back to
-    // FLY_IMAGE_TAG, which is already correct for the new deploy. This is benign.
-    if (env.OPENCLAW_VERSION && env.FLY_IMAGE_TAG) {
+    // Self-register the current OpenClaw version in KV on first request after deploy.
+    // Runs once, then skips for subsequent requests.
+    if (!versionRegistered && env.OPENCLAW_VERSION && env.FLY_IMAGE_TAG) {
+      versionRegistered = true;
+      console.log(
+        `[worker] Version self-registration: ${env.OPENCLAW_VERSION} → ${env.FLY_IMAGE_TAG}` +
+          (env.FLY_IMAGE_DIGEST ? ` (${env.FLY_IMAGE_DIGEST.slice(0, 16)}...)` : '')
+      );
       ctx.waitUntil(
         registerVersionIfNeeded(
           env.KV_CLAW_CACHE,
           env.OPENCLAW_VERSION,
           'default', // variant hardcoded day 1
-          env.FLY_IMAGE_TAG
-        )
+          env.FLY_IMAGE_TAG,
+          env.FLY_IMAGE_DIGEST ?? null
+        ).catch(err => console.error('[worker] Version self-registration failed:', err))
       );
     }
 

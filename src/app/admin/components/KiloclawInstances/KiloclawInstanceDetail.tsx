@@ -24,6 +24,14 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import {
   User,
   Calendar,
   Loader2,
@@ -39,6 +47,8 @@ import {
   Square,
   RotateCcw,
   RefreshCw,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
@@ -123,6 +133,10 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+  const [unpinDialogOpen, setUnpinDialogOpen] = useState(false);
+  const [selectedPinTag, setSelectedPinTag] = useState('');
+  const [pinReason, setPinReason] = useState('');
 
   const { data, isLoading, error } = useQuery(
     trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId })
@@ -223,6 +237,56 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     })
   );
 
+  // Pin management
+  const pinEnabled = !!data?.user_id;
+
+  const { data: pinData, isLoading: pinLoading } = useQuery({
+    ...trpc.admin.kiloclawVersions.getPin.queryOptions({ userId: data?.user_id ?? '' }),
+    enabled: pinEnabled,
+    staleTime: 30_000,
+  });
+
+  const { data: versionsData, isLoading: versionsLoading } = useQuery({
+    ...trpc.admin.kiloclawVersions.listVersions.queryOptions({ status: 'all' }),
+    enabled: pinDialogOpen,
+    staleTime: 60_000,
+  });
+
+  const invalidatePinQueries = () => {
+    if (!data?.user_id) return;
+    void queryClient.invalidateQueries({
+      queryKey: trpc.admin.kiloclawVersions.getPin.queryKey({ userId: data.user_id }),
+    });
+  };
+
+  const { mutateAsync: pinUser, isPending: isPinning } = useMutation(
+    trpc.admin.kiloclawVersions.pinUser.mutationOptions({
+      onSuccess: () => {
+        toast.success('Version pinned successfully');
+        invalidatePinQueries();
+        setPinDialogOpen(false);
+        setSelectedPinTag('');
+        setPinReason('');
+      },
+      onError: err => {
+        toast.error(`Failed to pin version: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: unpinUser, isPending: isUnpinning } = useMutation(
+    trpc.admin.kiloclawVersions.unpinUser.mutationOptions({
+      onSuccess: () => {
+        toast.success('Version unpinned');
+        invalidatePinQueries();
+        setUnpinDialogOpen(false);
+      },
+      onError: err => {
+        toast.error(`Failed to unpin: ${err.message}`);
+      },
+    })
+  );
+
   if (isLoading) {
     return (
       <DetailPageWrapper subtitle={undefined}>
@@ -273,7 +337,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
               <div className="flex items-center gap-3">
                 {isActive ? (
                   <>
-                    <Badge className="bg-green-600">Active</Badge>
+                    <StatusBadge status={data.workerStatus?.status ?? null} />
                     <Button
                       variant="destructive"
                       size="sm"
@@ -330,6 +394,74 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 )}
               </DetailField>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Version Pinning */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Version Pinning</CardTitle>
+                <CardDescription>
+                  Pin this user to a specific image version. Pins apply to the user, not the
+                  instance. Takes effect on next provision.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {pinData?.pin ? (
+                  <Button variant="outline" size="sm" onClick={() => setUnpinDialogOpen(true)}>
+                    <PinOff className="mr-1 h-4 w-4" />
+                    Unpin
+                  </Button>
+                ) : null}
+                <Button variant="outline" size="sm" onClick={() => setPinDialogOpen(true)}>
+                  <Pin className="mr-1 h-4 w-4" />
+                  {pinData?.pin ? 'Change Pin' : 'Pin Version'}
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {pinLoading ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-muted-foreground text-sm">Loading pin status...</span>
+              </div>
+            ) : pinData?.pin ? (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <DetailField label="Pinned Image Tag">
+                  <code className="text-sm">{pinData.pin.image_tag}</code>
+                </DetailField>
+                {pinData.version && (
+                  <>
+                    <DetailField label="OpenClaw Version">
+                      {pinData.version.openclaw_version}
+                    </DetailField>
+                    <DetailField label="Variant">{pinData.version.variant}</DetailField>
+                    {pinData.version.image_digest && (
+                      <DetailField label="Image Digest">
+                        <code className="text-xs">
+                          {pinData.version.image_digest.slice(0, 16)}...
+                        </code>
+                      </DetailField>
+                    )}
+                  </>
+                )}
+                <DetailField label="Pinned At">
+                  <span title={formatAbsoluteTime(pinData.pin.created_at)}>
+                    {formatRelativeTime(pinData.pin.created_at)}
+                  </span>
+                </DetailField>
+                {pinData.pin.reason && (
+                  <DetailField label="Reason">{pinData.pin.reason}</DetailField>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                No version pin active. User will get the latest image on provision.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -691,6 +823,135 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
             </CardContent>
           </Card>
         )}
+        {/* Pin Version Dialog */}
+        <Dialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pin className="h-5 w-5" />
+                Pin Version
+              </DialogTitle>
+              <DialogDescription className="pt-3">
+                Select an image version to pin this user to. The pin takes effect on the next
+                provision (destroy + recreate).
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Image Tag</label>
+                {versionsLoading ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-muted-foreground text-sm">Loading versions...</span>
+                  </div>
+                ) : versionsData?.versions.length === 0 ? (
+                  <div className="rounded-md border p-3">
+                    <p className="text-muted-foreground text-sm">
+                      No versions in catalog. Run &quot;Sync Versions&quot; from the instances page
+                      first, or manually publish a version.
+                    </p>
+                  </div>
+                ) : (
+                  <Select value={selectedPinTag} onValueChange={setSelectedPinTag}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select an image version..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {versionsData?.versions.map(v => (
+                        <SelectItem
+                          key={v.image_tag}
+                          value={v.image_tag}
+                          disabled={v.status === 'disabled'}
+                        >
+                          <span className="flex items-center gap-2">
+                            {v.image_tag} — {v.openclaw_version} ({v.variant})
+                            {v.status !== 'active' && (
+                              <Badge variant="outline" className="text-xs">
+                                {v.status}
+                              </Badge>
+                            )}
+                            {v.is_latest && (
+                              <Badge variant="default" className="bg-blue-600 text-xs">
+                                latest
+                              </Badge>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Reason (optional)</label>
+                <Textarea
+                  placeholder="Why is this user being pinned?"
+                  value={pinReason}
+                  onChange={e => setPinReason(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <DialogClose asChild>
+                <Button variant="secondary" disabled={isPinning}>
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button
+                onClick={() => {
+                  if (!selectedPinTag || !data?.user_id) return;
+                  void pinUser({
+                    userId: data.user_id,
+                    imageTag: selectedPinTag,
+                    reason: pinReason || undefined,
+                  });
+                }}
+                disabled={isPinning || !selectedPinTag}
+              >
+                {isPinning ? 'Pinning...' : 'Pin Version'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Unpin Confirmation Dialog */}
+        <Dialog open={unpinDialogOpen} onOpenChange={setUnpinDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <PinOff className="h-5 w-5" />
+                Unpin Version
+              </DialogTitle>
+              <DialogDescription className="pt-3">
+                Remove the version pin for this user. They will get the latest image on next
+                provision.
+                {pinData?.pin && (
+                  <span className="mt-2 block">
+                    Currently pinned to: <code>{pinData.pin.image_tag}</code>
+                  </span>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <DialogClose asChild>
+                <Button variant="secondary" disabled={isUnpinning}>
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (!data?.user_id) return;
+                  void unpinUser({ userId: data.user_id });
+                }}
+                disabled={isUnpinning}
+              >
+                {isUnpinning ? 'Unpinning...' : 'Remove Pin'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Destroy Confirmation Dialog */}
         <Dialog open={destroyDialogOpen} onOpenChange={setDestroyDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">

@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/oss-monthly-reset",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/sync-kiloclaw-versions",
+      "schedule": "0 */6 * * *"
     }
   ],
   "functions": {

@@ -15,6 +15,9 @@ import {
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
+import { db } from '@/lib/drizzle';
+import { kiloclaw_version_pins, kiloclaw_available_versions } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 const kiloclawProcedure = baseProcedure.use(async ({ ctx, next }) => {
   const isDevelopment = process.env.NODE_ENV === 'development';
@@ -137,6 +140,42 @@ async function provisionInstance(
   });
   const kilocodeApiKeyExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
+  // Check if user has a version pin
+  let pinnedImageTag: string | undefined;
+  let pinnedImageDigest: string | undefined;
+  let pinnedOpenclawVersion: string | undefined;
+  let pinnedVariant: string | undefined;
+
+  try {
+    const pin = await db.query.kiloclaw_version_pins.findFirst({
+      where: eq(kiloclaw_version_pins.user_id, user.id),
+    });
+
+    if (pin) {
+      // Look up catalog entry for metadata
+      const catalogEntry = await db.query.kiloclaw_available_versions.findFirst({
+        where: and(
+          eq(kiloclaw_available_versions.image_tag, pin.image_tag),
+          eq(kiloclaw_available_versions.status, 'active')
+        ),
+      });
+
+      if (catalogEntry) {
+        pinnedImageTag = catalogEntry.image_tag;
+        pinnedImageDigest = catalogEntry.image_digest ?? undefined;
+        pinnedOpenclawVersion = catalogEntry.openclaw_version;
+        pinnedVariant = catalogEntry.variant;
+      } else {
+        console.warn(
+          `[kiloclaw] Pin for user ${user.id} references image_tag "${pin.image_tag}" which is not active in catalog — falling back to latest`
+        );
+      }
+    }
+  } catch (err) {
+    // Graceful degradation if pin tables don't exist yet (pre-migration)
+    console.warn('[kiloclaw] Failed to read version pin:', err);
+  }
+
   const client = new KiloClawInternalClient();
   return client.provision(user.id, {
     envVars: input.envVars,
@@ -146,6 +185,10 @@ async function provisionInstance(
     kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
     kilocodeModels: input.kilocodeModels ?? undefined,
+    pinnedImageTag,
+    pinnedImageDigest,
+    pinnedOpenclawVersion,
+    pinnedVariant,
   });
 }
 

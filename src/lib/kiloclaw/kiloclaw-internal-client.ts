@@ -179,4 +179,29 @@ export class KiloClawInternalClient {
       body: JSON.stringify({ userId }),
     });
   }
+
+  async publishImageVersion(input: {
+    openclawVersion: string;
+    variant?: string;
+    imageTag: string;
+    imageDigest?: string | null;
+    setLatest?: boolean;
+  }): Promise<{ ok: true; setLatest: boolean }> {
+    return this.request('/api/platform/publish-image-version', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async listVersions(): Promise<{
+    versions: Array<{
+      openclawVersion: string;
+      variant: string;
+      imageTag: string;
+      imageDigest: string | null;
+      publishedAt: string;
+    }>;
+  }> {
+    return this.request('/api/platform/versions');
+  }
 }

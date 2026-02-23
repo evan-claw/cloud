@@ -115,23 +115,36 @@ platform.post('/provision', async c => {
     kilocodeModels,
     machineSize,
     region,
+    pinnedImageTag,
+    pinnedImageDigest,
+    pinnedOpenclawVersion,
+    pinnedVariant,
   } = result.data;
 
   try {
     const provision = await withDORetry(
       instanceStubFactory(c.env, userId),
       stub =>
-        stub.provision(userId, {
-          envVars,
-          encryptedSecrets,
-          channels,
-          kilocodeApiKey,
-          kilocodeApiKeyExpiresAt,
-          kilocodeDefaultModel,
-          kilocodeModels,
-          machineSize,
-          region,
-        }),
+        stub.provision(
+          userId,
+          {
+            envVars,
+            encryptedSecrets,
+            channels,
+            kilocodeApiKey,
+            kilocodeApiKeyExpiresAt,
+            kilocodeDefaultModel,
+            kilocodeModels,
+            machineSize,
+            region,
+          },
+          {
+            pinnedImageTag,
+            pinnedImageDigest,
+            pinnedOpenclawVersion,
+            pinnedVariant,
+          }
+        ),
       'provision'
     );
     return c.json(provision, 201);
@@ -519,6 +532,32 @@ platform.get('/volume-snapshots', async c => {
   }
 });
 
+// GET /api/platform/versions — list all registered image versions from KV
+platform.get('/versions', async c => {
+  const kv = c.env.KV_CLAW_CACHE;
+  const result = await kv.list({ prefix: 'image-version:' });
+
+  const versions: Array<{
+    openclawVersion: string;
+    variant: string;
+    imageTag: string;
+    imageDigest: string | null;
+    publishedAt: string;
+  }> = [];
+
+  for (const key of result.keys) {
+    const raw = await kv.get(key.name, 'json');
+    if (!raw) continue;
+    const parsed = ImageVersionEntrySchema.safeParse(raw);
+    if (!parsed.success) continue;
+    // Skip "latest" pointer keys to avoid duplicates
+    if (key.name.includes(':latest:')) continue;
+    versions.push(parsed.data);
+  }
+
+  return c.json({ versions });
+});
+
 // POST /api/platform/publish-image-version
 // Manual fallback for publishing/correcting version entries.
 // Primary registration path is worker self-registration on deploy.
@@ -539,6 +578,30 @@ platform.post('/publish-image-version', async c => {
 
   if (openclawVersion === 'latest') {
     return c.json({ error: '"latest" is reserved and cannot be used as a version' }, 400);
+  }
+
+  // Reject if digest already belongs to a different tag
+  if (imageDigest) {
+    const kv = c.env.KV_CLAW_CACHE;
+    const keys = await kv.list({ prefix: 'image-version:' });
+    for (const key of keys.keys) {
+      if (key.name.includes(':latest:')) continue;
+      const raw = await kv.get(key.name, 'json');
+      if (!raw) continue;
+      const existing = ImageVersionEntrySchema.safeParse(raw);
+      if (
+        existing.success &&
+        existing.data.imageDigest === imageDigest &&
+        existing.data.imageTag !== imageTag
+      ) {
+        return c.json(
+          {
+            error: `Digest already belongs to tag "${existing.data.imageTag}". Same image cannot have two entries.`,
+          },
+          409
+        );
+      }
+    }
   }
 
   const entry = {

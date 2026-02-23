@@ -157,6 +157,8 @@ export const METADATA_KEY_USER_ID = 'kiloclaw_user_id';
 export const METADATA_KEY_SANDBOX_ID = 'kiloclaw_sandbox_id';
 export const METADATA_KEY_OPENCLAW_VERSION = 'kiloclaw_openclaw_version';
 export const METADATA_KEY_IMAGE_VARIANT = 'kiloclaw_image_variant';
+export const METADATA_KEY_IMAGE_TAG = 'kiloclaw_image_tag';
+export const METADATA_KEY_IMAGE_DIGEST = 'kiloclaw_image_digest';
 
 // ============================================================================
 // Machine config builder
@@ -167,6 +169,8 @@ type MachineIdentity = {
   sandboxId: string;
   openclawVersion: string | null;
   imageVariant: string | null;
+  imageTag: string | null;
+  imageDigest: string | null;
 };
 
 function buildMachineConfig(
@@ -209,6 +213,8 @@ function buildMachineConfig(
         [METADATA_KEY_OPENCLAW_VERSION]: identity.openclawVersion,
       }),
       ...(identity.imageVariant && { [METADATA_KEY_IMAGE_VARIANT]: identity.imageVariant }),
+      ...(identity.imageTag && { [METADATA_KEY_IMAGE_TAG]: identity.imageTag }),
+      ...(identity.imageDigest && { [METADATA_KEY_IMAGE_DIGEST]: identity.imageDigest }),
     },
   };
 }
@@ -351,6 +357,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private openclawVersion: string | null = null;
   private imageVariant: string | null = null;
   private trackedImageTag: string | null = null;
+  private trackedImageDigest: string | null = null;
+  private isPinned: boolean = false;
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
@@ -391,6 +399,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.openclawVersion = s.openclawVersion;
       this.imageVariant = s.imageVariant;
       this.trackedImageTag = s.trackedImageTag;
+      this.trackedImageDigest = s.trackedImageDigest;
+      this.isPinned = s.isPinned;
     } else {
       const hasAnyData = entries.size > 0;
       if (hasAnyData) {
@@ -412,7 +422,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    * Provision or update config for a user's instance.
    * Creates a Fly Volume on first provision. Allows re-provisioning (config update).
    */
-  async provision(userId: string, config: InstanceConfig): Promise<{ sandboxId: string }> {
+  async provision(
+    userId: string,
+    config: InstanceConfig,
+    pinOptions?: {
+      pinnedImageTag?: string;
+      pinnedImageDigest?: string;
+      pinnedOpenclawVersion?: string;
+      pinnedVariant?: string;
+    }
+  ): Promise<{ sandboxId: string }> {
     await this.loadState();
 
     if (this.status === 'destroying') {
@@ -455,18 +474,31 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       console.log('[DO] Created Fly Volume:', volume.id, 'region:', volume.region);
     }
 
-    // Resolve the latest registered version on every provision (including re-provision).
-    // If the registry isn't populated yet, fields stay null → fallback to FLY_IMAGE_TAG.
-    const variant = 'default'; // hardcoded day 1; future: from config or provision request
-    const latest = await resolveLatestVersion(this.env.KV_CLAW_CACHE, variant);
-    if (latest) {
-      this.openclawVersion = latest.openclawVersion;
-      this.imageVariant = latest.variant;
-      this.trackedImageTag = latest.imageTag;
-    } else if (isNew) {
-      this.openclawVersion = null;
-      this.imageVariant = null;
-      this.trackedImageTag = null;
+    // Resolve image version: pinned users get exact tag, unpinned users get latest from KV.
+    if (pinOptions?.pinnedImageTag) {
+      // Pinned path: use the exact tag from the cloud-side catalog
+      this.trackedImageTag = pinOptions.pinnedImageTag;
+      this.trackedImageDigest = pinOptions.pinnedImageDigest ?? null;
+      this.openclawVersion = pinOptions.pinnedOpenclawVersion ?? null;
+      this.imageVariant = pinOptions.pinnedVariant ?? null;
+      this.isPinned = true;
+      console.log('[DO] Using pinned image:', pinOptions.pinnedImageTag);
+    } else {
+      // Unpinned path: resolve latest from KV (existing behavior)
+      this.isPinned = false;
+      const variant = 'default';
+      const latest = await resolveLatestVersion(this.env.KV_CLAW_CACHE, variant);
+      if (latest) {
+        this.openclawVersion = latest.openclawVersion;
+        this.imageVariant = latest.variant;
+        this.trackedImageTag = latest.imageTag;
+        this.trackedImageDigest = latest.imageDigest ?? null;
+      } else if (isNew) {
+        this.openclawVersion = null;
+        this.imageVariant = null;
+        this.trackedImageTag = null;
+        this.trackedImageDigest = null;
+      }
     }
 
     const configFields = {
@@ -487,6 +519,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
       trackedImageTag: this.trackedImageTag,
+      trackedImageDigest: this.trackedImageDigest,
+      isPinned: this.isPinned,
     };
 
     const update = isNew
@@ -1028,6 +1062,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       sandboxId: this.sandboxId,
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
+      imageTag: this.trackedImageTag,
+      imageDigest: this.trackedImageDigest,
     };
     const machineConfig = buildMachineConfig(
       this.getRegistryApp(),
@@ -1193,6 +1229,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     openclawVersion: string | null;
     imageVariant: string | null;
     trackedImageTag: string | null;
+    trackedImageDigest: string | null;
+    isPinned: boolean;
   }> {
     await this.loadState();
 
@@ -1226,6 +1264,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
       trackedImageTag: this.trackedImageTag,
+      trackedImageDigest: this.trackedImageDigest,
+      isPinned: this.isPinned,
     };
   }
 
@@ -1395,6 +1435,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         sandboxId: this.sandboxId ?? '',
         openclawVersion: this.openclawVersion,
         imageVariant: this.imageVariant,
+        imageTag: this.trackedImageTag,
+        imageDigest: this.trackedImageDigest,
       };
       const machineConfig = buildMachineConfig(
         this.getRegistryApp(),
@@ -1858,6 +1900,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.openclawVersion = null;
     this.imageVariant = null;
     this.trackedImageTag = null;
+    this.trackedImageDigest = null;
+    this.isPinned = false;
     this.loaded = false;
 
     return true;
@@ -2163,6 +2207,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           openclawVersion: null,
           imageVariant: null,
           trackedImageTag: null,
+          trackedImageDigest: null,
+          isPinned: false,
         })
       );
 

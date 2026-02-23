@@ -14,6 +14,14 @@ export type ProvisionInput = {
   kilocodeApiKeyExpiresAt?: string;
   kilocodeDefaultModel?: string;
   kilocodeModels?: KiloCodeModelEntry[];
+  /** Pinned image tag — bypasses KV latest resolution in the worker DO */
+  pinnedImageTag?: string;
+  /** Pinned image digest — for digest verification on the worker side */
+  pinnedImageDigest?: string;
+  /** Metadata: openclaw version of the pinned image */
+  pinnedOpenclawVersion?: string;
+  /** Metadata: variant of the pinned image */
+  pinnedVariant?: string;
 };
 
 export type KiloCodeModelEntry = {

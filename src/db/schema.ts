@@ -84,6 +84,16 @@ export function enumCheck<T extends Record<string, string>>(
   );
 }
 
+// KiloClaw Version Status enum
+export const KiloClawVersionStatus = {
+  active: 'active',
+  deprecated: 'deprecated',
+  disabled: 'disabled',
+} as const;
+
+export type KiloClawVersionStatus =
+  (typeof KiloClawVersionStatus)[keyof typeof KiloClawVersionStatus];
+
 export const SCHEMA_CHECK_ENUMS = {
   KiloPassTier,
   KiloPassCadence,
@@ -93,6 +103,7 @@ export const SCHEMA_CHECK_ENUMS = {
   KiloPassAuditLogResult,
   KiloPassScheduledChangeStatus,
   CliSessionSharedState,
+  KiloClawVersionStatus,
 } as const;
 
 export const credit_transactions = pgTable(
@@ -2992,3 +3003,70 @@ export const kiloclaw_access_codes = pgTable(
 );
 
 export type KiloClawAccessCode = typeof kiloclaw_access_codes.$inferSelect;
+
+// KiloClaw Available Versions — catalog of known images with openclaw version/variant as metadata
+export const kiloclaw_available_versions = pgTable(
+  'kiloclaw_available_versions',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    openclaw_version: text().notNull(),
+    variant: text().notNull().default('default'),
+    image_tag: text().notNull(),
+    image_digest: text(),
+    is_latest: boolean().notNull().default(false),
+    status: text().$type<KiloClawVersionStatus>().notNull().default('active'),
+    published_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    published_by: text().references(() => kilocode_users.id, {
+      onDelete: 'set null',
+    }),
+    notes: text(),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => sql`now()`),
+  },
+  table => [
+    uniqueIndex('UQ_kiloclaw_available_versions_image_tag').on(table.image_tag),
+    uniqueIndex('UQ_kiloclaw_available_versions_image_digest')
+      .on(table.image_digest)
+      .where(sql`image_digest IS NOT NULL`),
+    uniqueIndex('UQ_kiloclaw_available_versions_latest_variant')
+      .on(table.variant)
+      .where(sql`is_latest = true`),
+    index('IDX_kiloclaw_available_versions_status_variant').on(table.status, table.variant),
+    enumCheck('kiloclaw_available_versions_status_check', table.status, KiloClawVersionStatus),
+  ]
+);
+
+export type KiloClawAvailableVersion = typeof kiloclaw_available_versions.$inferSelect;
+
+// KiloClaw Version Pins — per-user image pins that survive destroy/re-provision
+export const kiloclaw_version_pins = pgTable(
+  'kiloclaw_version_pins',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    user_id: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' }),
+    image_tag: text().notNull(),
+    pinned_by: text().references(() => kilocode_users.id, {
+      onDelete: 'set null',
+    }),
+    reason: text(),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => sql`now()`),
+  },
+  table => [uniqueIndex('UQ_kiloclaw_version_pins_user').on(table.user_id)]
+);
+
+export type KiloClawVersionPin = typeof kiloclaw_version_pins.$inferSelect;

@@ -71,6 +71,10 @@ export const ChannelsPatchSchema = z.object({
 export const ProvisionRequestSchema = z.object({
   userId: z.string().min(1),
   ...InstanceConfigSchema.shape,
+  pinnedImageTag: z.string().optional(),
+  pinnedImageDigest: z.string().optional(),
+  pinnedOpenclawVersion: z.string().optional(),
+  pinnedVariant: z.string().optional(),
 });
 
 export type ProvisionRequest = z.infer<typeof ProvisionRequestSchema>;
@@ -131,6 +135,8 @@ export const PersistedStateSchema = z.object({
   openclawVersion: z.string().nullable().default(null),
   imageVariant: z.string().nullable().default(null),
   trackedImageTag: z.string().nullable().default(null),
+  trackedImageDigest: z.string().nullable().default(null),
+  isPinned: z.boolean().default(false),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

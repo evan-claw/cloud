@@ -31,6 +31,12 @@ docker buildx build \
   --push \
   "$KILOCLAW_DIR"
 
+# Fetch the image digest from the registry
+DIGEST=$(docker manifest inspect "$IMAGE" 2>/dev/null | grep -m1 '"digest"' | sed 's/.*"digest": *"//;s/".*//')
+if [ -z "$DIGEST" ]; then
+  echo "Warning: Could not fetch image digest"
+fi
+
 # Update .dev.vars
 if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
   if grep -q '^FLY_IMAGE_TAG=' "$KILOCLAW_DIR/.dev.vars"; then
@@ -38,7 +44,17 @@ if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
   else
     echo "FLY_IMAGE_TAG=$TAG" >> "$KILOCLAW_DIR/.dev.vars"
   fi
+
+  if [ -n "$DIGEST" ]; then
+    if grep -q '^FLY_IMAGE_DIGEST=' "$KILOCLAW_DIR/.dev.vars"; then
+      sed -i '' "s|^FLY_IMAGE_DIGEST=.*|FLY_IMAGE_DIGEST=$DIGEST|" "$KILOCLAW_DIR/.dev.vars"
+    else
+      echo "FLY_IMAGE_DIGEST=$DIGEST" >> "$KILOCLAW_DIR/.dev.vars"
+    fi
+  fi
+
   echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG"
+  [ -n "$DIGEST" ] && echo "Updated .dev.vars: FLY_IMAGE_DIGEST=$DIGEST"
 else
   echo "No .dev.vars found — set FLY_IMAGE_TAG=$TAG manually"
 fi

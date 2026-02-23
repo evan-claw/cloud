@@ -169,6 +169,13 @@
       "when": 1771839228110,
       "tag": "0023_slippery_korg",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1771882484448,
+      "tag": "0024_thin_scarecrow",
+      "breakpoints": true
     }
   ]
 }

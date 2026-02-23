@@ -76,6 +76,7 @@ describe('database schema', () => {
       KiloPassAuditLogResult: ['success', 'skipped_idempotent', 'failed'],
       KiloPassScheduledChangeStatus: ['not_started', 'active', 'completed', 'released', 'canceled'],
       CliSessionSharedState: ['public', 'organization'],
+      KiloClawVersionStatus: ['active', 'deprecated', 'disabled'],
     };
 
     const actualEnumValues: Record<string, string[]> = {};
