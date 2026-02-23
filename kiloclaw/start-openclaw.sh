@@ -174,9 +174,11 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Multi-tenant: auto-approve devices so users don't need to pair.
-// Worker-level JWT auth is the real access control -- each user's machine
-// is only reachable via their signed token.
+// Allow Control UI connections from localhost without WebCrypto device identity.
+// This is a fallback for insecure HTTP contexts where SubtleCrypto is unavailable.
+// It does NOT bypass device pairing -- pairing is handled separately via the
+// controller proxy's loopback headers (auto-approve for local connections) and
+// the device pairing approval UI for role-upgrade scenarios.
 if (process.env.AUTO_APPROVE_DEVICES === 'true') {
     config.gateway.controlUi = config.gateway.controlUi || {};
     config.gateway.controlUi.allowInsecureAuth = true;

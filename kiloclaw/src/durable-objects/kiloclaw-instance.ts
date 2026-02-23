@@ -892,7 +892,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     const flyConfig = this.getFlyConfig();
 
     // Validate requestId as a UUID to prevent command injection
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
       return { success: false, message: 'Invalid request ID' };
     }
 

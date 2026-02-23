@@ -1701,6 +1701,28 @@ describe('approveDevicePairingRequest', () => {
     );
   });
 
+  it('accepts uppercase UUIDs', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: 'approved',
+      stderr: '',
+    });
+
+    const requestId = '58F4AC67-12B4-4F6E-ADEE-FF3463A7C30C';
+    const result = await instance.approveDevicePairingRequest(requestId);
+
+    expect(result).toEqual({ success: true, message: 'Device pairing approved' });
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+  });
+
   it('returns failure message on exec error', async () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
