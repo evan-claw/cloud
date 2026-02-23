@@ -652,6 +652,7 @@ export class CloudAgentSession extends DurableObject {
     upstreamBranch?: string;
     callbackTarget?: CallbackTarget;
     images?: Images;
+    createdOnPlatform?: string;
     // Workspace metadata (set during prepareSession)
     workspacePath?: string;
     sessionHome?: string;
@@ -1445,6 +1446,7 @@ export class CloudAgentSession extends DurableObject {
           upstreamBranch: request.upstreamBranch,
           botId: request.botId,
           platform: request.platform,
+          createdOnPlatform: request.createdOnPlatform,
         };
 
         const plan = this.buildExecutionPlan({
@@ -1529,6 +1531,7 @@ export class CloudAgentSession extends DurableObject {
           isPreparedSession: true,
           githubAppType: metadata.githubAppType,
           platform: metadata.platform,
+          createdOnPlatform: metadata.createdOnPlatform,
         };
 
         const plan = this.buildExecutionPlan({

@@ -230,7 +230,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         input.model,
         input.kilocodeOrganizationId,
         input.encryptedSecrets,
-        undefined, // createdOnPlatform
+        input.createdOnPlatform,
         input.appendSystemPrompt
       );
 
@@ -311,7 +311,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           ctx.userId,
           ctx.env,
           input.kilocodeOrganizationId,
-          'cloud-agent'
+          input.createdOnPlatform ?? 'cloud-agent'
         );
       } catch (error) {
         logger
@@ -370,6 +370,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           appendSystemPrompt: input.appendSystemPrompt,
           callbackTarget: input.callbackTarget,
           images: input.images,
+          createdOnPlatform: input.createdOnPlatform,
           // Workspace metadata
           workspacePath,
           sessionHome,

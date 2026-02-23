@@ -78,6 +78,8 @@ export type CloudAgentSessionState = {
   userId: string;
   /** Bot/service identifier (if token is for a bot) */
   botId?: string;
+  /** Platform that created this session (e.g. slack, app-builder) */
+  createdOnPlatform?: string;
   /** Kilocode authentication token for CLI (stored securely, never exposed in getSession) */
   kilocodeToken?: string;
   /** Last save timestamp */

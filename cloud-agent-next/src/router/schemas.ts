@@ -190,6 +190,11 @@ export const PrepareSessionInput = z
     images: ImagesSchema.optional().describe(
       'Optional image attachments to download from R2 to the sandbox'
     ),
+    createdOnPlatform: z
+      .string()
+      .max(100)
+      .optional()
+      .describe('Platform that created this session (e.g. slack, app-builder)'),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',
