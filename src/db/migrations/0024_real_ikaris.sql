@@ -1,5 +1,5 @@
 DROP VIEW "public"."microdollar_usage_view";--> statement-breakpoint
-ALTER TABLE "microdollar_usage_metadata" ADD COLUMN IF NOT EXISTS "session_id" text;--> statement-breakpoint
+ALTER TABLE "microdollar_usage_metadata" ADD COLUMN "session_id" text;--> statement-breakpoint
 CREATE VIEW "public"."microdollar_usage_view" AS (
   SELECT
     mu.id,

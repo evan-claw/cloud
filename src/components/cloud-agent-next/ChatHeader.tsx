@@ -116,18 +116,20 @@ export function ChatHeader({
                   </Badge>
                 )}
               </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-gray-400 md:text-sm">
-                <GitBranch className="h-3 w-3 shrink-0" />
-                <span className="truncate">{repository}</span>
-                <a
-                  href={githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 text-blue-400 transition-colors hover:text-blue-300"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
+              {repository && (
+                <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-gray-400 md:text-sm">
+                  <GitBranch className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{repository}</span>
+                  <a
+                    href={githubUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-blue-400 transition-colors hover:text-blue-300"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
             </div>
           </div>
           <div className="hidden items-center gap-2 lg:flex">
