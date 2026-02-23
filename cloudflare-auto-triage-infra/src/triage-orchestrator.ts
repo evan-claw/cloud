@@ -282,7 +282,6 @@ export class TriageOrchestrator extends DurableObject<Env> {
     );
 
     // No githubRepo — the prompt is pure text, no codebase access needed.
-    // Passing githubRepo would trigger an unnecessary (and auth-failing) clone.
     const sessionInput = {
       kilocodeOrganizationId: this.state.owner.type === 'org' ? this.state.owner.id : undefined,
       prompt,
@@ -398,6 +397,14 @@ export class TriageOrchestrator extends DurableObject<Env> {
       t => t.issueNumber === verification.duplicateOfIssueNumber
     );
 
+    if (!matchedTicket) {
+      console.warn('[TriageOrchestrator] AI claimed duplicate of issue not in candidates', {
+        ticketId: this.state.ticketId,
+        claimedIssueNumber: verification.duplicateOfIssueNumber,
+        candidateIssueNumbers: candidates.similarTickets.map(t => t.issueNumber),
+      });
+    }
+
     return {
       isDuplicate: true,
       duplicateOfTicketId: matchedTicket?.ticketId ?? null,
@@ -504,11 +511,10 @@ export class TriageOrchestrator extends DurableObject<Env> {
     );
 
     // No githubRepo — the classification prompt is pure text, no codebase access needed.
-    // Passing githubRepo would trigger an unnecessary (and potentially auth-failing) clone.
     const sessionInput = {
       kilocodeOrganizationId: this.state.owner.type === 'org' ? this.state.owner.id : undefined,
       prompt,
-      mode: 'ask' as const, // Classification is a Q&A task
+      mode: 'ask' as const,
       model: config.model_slug,
       createdOnPlatform: 'auto-triage',
     };

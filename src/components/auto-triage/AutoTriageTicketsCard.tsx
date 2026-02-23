@@ -25,24 +25,7 @@ import { useTRPC } from '@/lib/trpc/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
-
-const USER_FRIENDLY_ERROR =
-  'Something went wrong. Please try again or contact support if the problem persists.';
-
-function friendlyErrorMessage(error: { message?: string }): string {
-  const msg = error.message;
-  if (!msg) return USER_FRIENDLY_ERROR;
-
-  // Only surface messages that look intentionally user-facing (from TRPCError).
-  // Filter out anything that smells like a system error.
-  const isSystemError =
-    /stack|sql|postgres|drizzle|prisma|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|500|Internal Server Error|violates|constraint|fatal|Cannot read propert/i.test(
-      msg
-    );
-  if (isSystemError) return USER_FRIENDLY_ERROR;
-
-  return msg;
-}
+import { friendlyErrorMessage } from './friendly-error';
 
 type AutoTriageTicketsCardProps = {
   organizationId?: string;
