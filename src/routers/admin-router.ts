@@ -544,8 +544,10 @@ export const adminRouter = createTRPCRouter({
             status: 'paid',
             limit: 1,
           });
-          const paymentIntentId = payments.data[0]?.payment.payment_intent;
-          if (paymentIntentId && typeof paymentIntentId === 'string') {
+          const rawPaymentIntent = payments.data[0]?.payment.payment_intent;
+          const paymentIntentId =
+            typeof rawPaymentIntent === 'string' ? rawPaymentIntent : rawPaymentIntent?.id;
+          if (paymentIntentId) {
             try {
               const refund = await stripeClient.refunds.create({
                 payment_intent: paymentIntentId,
