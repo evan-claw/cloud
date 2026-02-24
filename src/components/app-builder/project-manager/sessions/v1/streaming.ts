@@ -19,7 +19,12 @@ import type { V1SessionStore } from './store';
 import type { AppTRPCClient } from '../../types';
 import type { Images } from '@/lib/images-schema';
 import type { WorkerVersion } from '@/lib/app-builder/types';
-import { addUserMessage, addErrorMessage, removeLastUserMessage } from './messages';
+import {
+  addUserMessage,
+  addErrorMessage,
+  removeLastUserMessage,
+  completePartialMessages,
+} from './messages';
 import { formatStreamError, createLogger } from '../../logging';
 
 type SendMessageResponse = { sessionId: string; workerVersion: WorkerVersion };
@@ -368,6 +373,7 @@ export function createV1StreamingCoordinator(config: V1StreamingConfig): V1Strea
 
     wsCoordinator?.interrupt();
 
+    completePartialMessages(store);
     store.setState({ isStreaming: false });
   }
 

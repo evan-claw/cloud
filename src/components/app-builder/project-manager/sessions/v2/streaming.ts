@@ -471,6 +471,10 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
       wsManager = null;
     }
     currentCloudSessionId = null;
+
+    // Force-complete all in-flight messages so they don't appear stuck in streaming state
+    processor?.forceCompleteAll();
+
     store.setState({ isStreaming: false });
   }
 

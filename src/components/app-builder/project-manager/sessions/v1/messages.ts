@@ -62,6 +62,27 @@ export function updateMessage(store: V1SessionStore, message: CloudMessage): voi
 }
 
 /**
+ * Marks all partial (streaming) messages as complete.
+ * Called on session interrupt to prevent orphaned streaming messages.
+ */
+export function completePartialMessages(store: V1SessionStore): void {
+  const messages = store.getState().messages;
+  let hasChanges = false;
+
+  const updated = messages.map(m => {
+    if (m.partial) {
+      hasChanges = true;
+      return { ...m, partial: false };
+    }
+    return m;
+  });
+
+  if (hasChanges) {
+    store.setState({ messages: updated });
+  }
+}
+
+/**
  * Adds a user message to the store.
  */
 export function addUserMessage(store: V1SessionStore, content: string, images?: Images): void {
