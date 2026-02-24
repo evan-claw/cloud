@@ -1060,11 +1060,15 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     } catch (err) {
       if (!fly.isFlyInsufficientResources(err)) throw err;
 
-      // 412: host where the volume lives has no capacity.
+      // Capacity error (403/409/412): host or region has no room.
       // Replace the volume (fork if user data exists, fresh otherwise)
       // and retry machine creation once.
-      console.warn('[DO] Insufficient resources (412), replacing stranded volume');
-      await this.replaceStrandedVolume(flyConfig, 'start_412_recovery');
+      // isFlyInsufficientResources guarantees err is FlyApiError
+      const code = err instanceof fly.FlyApiError ? err.status : 0;
+      console.error(
+        `[DO] Insufficient resources (${code}) in ${this.flyRegion ?? 'unknown'}, replacing stranded volume`
+      );
+      await this.replaceStrandedVolume(flyConfig, `start_${code}_recovery`);
 
       // Rebuild machine config with new volume ID
       const retryConfig = buildMachineConfig(
