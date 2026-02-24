@@ -15,6 +15,7 @@ const recentMessageSchema = z.object({
 
 const CreateCloudAgentFeedbackInputSchema = z.object({
   cloud_agent_session_id: z.string().max(500).optional(),
+  cli_session_id: z.string().max(500).optional(),
   organization_id: z.string().uuid().optional(),
   feedback_text: z.string().min(1).max(10_000),
   model: z.string().max(255).optional(),
@@ -49,8 +50,8 @@ export const cloudAgentNextFeedbackRouter = createTRPCRouter({
 
       // Best-effort Slack notification
       if (SLACK_USER_FEEDBACK_WEBHOOK_URL) {
-        const sessionLink = input.cloud_agent_session_id
-          ? `<https://app.kilo.ai/admin/cloud-agent/${input.cloud_agent_session_id}|${input.cloud_agent_session_id}>`
+        const sessionLink = input.cli_session_id
+          ? `<https://app.kilo.ai/admin/session-traces?sessionId=${input.cli_session_id}|${input.cli_session_id}>`
           : '_unknown_';
 
         const metadataLines = [`• session: ${sessionLink}`];

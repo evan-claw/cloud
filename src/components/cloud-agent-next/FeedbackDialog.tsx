@@ -22,6 +22,7 @@ import {
   sessionConfigAtom,
   sessionOrganizationIdAtom,
 } from './store/atoms';
+import { currentDbSessionIdAtom } from './store/db-session-atoms';
 import type { StoredMessage } from './types';
 import { isTextPart } from './types';
 
@@ -33,6 +34,7 @@ export function FeedbackDialog() {
   const messages = useAtomValue(messagesListAtom);
   const isStreaming = useAtomValue(isStreamingAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
+  const cliSessionId = useAtomValue(currentDbSessionIdAtom);
   const sessionConfig = useAtomValue(sessionConfigAtom);
   const organizationId = useAtomValue(sessionOrganizationIdAtom);
 
@@ -69,6 +71,7 @@ export function FeedbackDialog() {
 
     mutate({
       cloud_agent_session_id: currentSessionId ?? undefined,
+      cli_session_id: cliSessionId ?? undefined,
       organization_id: organizationId ?? undefined,
       feedback_text: feedbackText.trim(),
       model: sessionConfig?.model || undefined,
@@ -80,6 +83,7 @@ export function FeedbackDialog() {
   }, [
     feedbackText,
     currentSessionId,
+    cliSessionId,
     organizationId,
     sessionConfig,
     isStreaming,
