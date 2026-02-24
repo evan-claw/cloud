@@ -11,12 +11,15 @@ jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => ({
   })),
 }));
 
-jest.mock('@/lib/config.server', () => ({
-  ...(jest.requireActual('@/lib/config.server') as Record<string, unknown>),
-  CRON_SECRET: 'test-cron-secret',
-  KILOCLAW_API_URL: 'http://localhost:8787',
-  KILOCLAW_INTERNAL_API_SECRET: 'test-secret',
-}));
+jest.mock('@/lib/config.server', () => {
+  const actual: Record<string, unknown> = jest.requireActual('@/lib/config.server');
+  return {
+    ...actual,
+    CRON_SECRET: 'test-cron-secret',
+    KILOCLAW_API_URL: 'http://localhost:8787',
+    KILOCLAW_INTERNAL_API_SECRET: 'test-secret',
+  };
+});
 
 import { GET } from './route';
 

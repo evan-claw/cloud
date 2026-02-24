@@ -12,10 +12,13 @@ jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => ({
 }));
 
 // Mock cron secret + app url
-jest.mock('@/lib/config.server', () => ({
-  ...(jest.requireActual('@/lib/config.server') as Record<string, unknown>),
-  CRON_SECRET: 'test-cron-secret',
-}));
+jest.mock('@/lib/config.server', () => {
+  const actual: Record<string, unknown> = jest.requireActual('@/lib/config.server');
+  return {
+    ...actual,
+    CRON_SECRET: 'test-cron-secret',
+  };
+});
 
 let adminUser: User;
 let regularUser: User;
