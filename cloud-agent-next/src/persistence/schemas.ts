@@ -162,6 +162,7 @@ export const MetadataSchema = z.object({
     .optional(),
   upstreamBranch: branchNameSchema.optional(),
   kiloSessionId: z.string().optional(),
+  createdOnPlatform: z.string().max(100).optional(),
 
   // Execution params
   prompt: z.string().max(Limits.MAX_PROMPT_LENGTH).optional(),

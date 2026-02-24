@@ -12,6 +12,13 @@ export type ChangelogEntry = {
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-02-23',
+    description:
+      'Redesigned dashboard: live gateway process status, added ability to restart OpenClaw gateway.',
+    category: 'feature',
+    deployHint: null,
+  },
+  {
+    date: '2026-02-23',
     description: 'Deploy OpenClaw 2026.2.22. Added device pairing support to the dashboard.',
     category: 'feature',
     deployHint: 'redeploy_required',
