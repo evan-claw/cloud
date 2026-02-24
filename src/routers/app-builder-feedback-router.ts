@@ -58,10 +58,20 @@ export const appBuilderFeedbackRouter = createTRPCRouter({
 
       // Best-effort Slack notification
       if (SLACK_USER_FEEDBACK_WEBHOOK_URL) {
-        const adminLink = `https://app.kilo.ai/admin/app-builder/${input.project_id}`;
+        const projectLink = `<https://app.kilo.ai/admin/app-builder/${input.project_id}|${input.project_id}>`;
+
+        const metadataLines = [
+          `• user: \`${ctx.user.id}\``,
+          `• project: ${projectLink}`,
+          sessionId ? `• session: \`${sessionId}\`` : null,
+          input.model ? `• model: \`${input.model}\`` : null,
+          input.preview_status ? `• preview: \`${input.preview_status}\`` : null,
+          input.message_count != null ? `• messages: \`${input.message_count}\`` : null,
+        ].filter((line): line is string => line != null);
+
         const trimmedFeedback = input.feedback_text.trim();
-        const wasTruncated = trimmedFeedback.length > 500;
-        const feedbackText = trimmedFeedback.slice(0, 500) + (wasTruncated ? '...' : '');
+        const feedbackText =
+          trimmedFeedback.slice(0, 500) + (trimmedFeedback.length > 500 ? '...' : '');
 
         fetch(SLACK_USER_FEEDBACK_WEBHOOK_URL, {
           method: 'POST',
@@ -73,24 +83,19 @@ export const appBuilderFeedbackRouter = createTRPCRouter({
             blocks: [
               {
                 type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: 'New App Builder feedback :hammer_and_wrench:',
-                },
+                text: { type: 'plain_text', text: 'New App Builder feedback :hammer_and_wrench:' },
               },
               {
                 type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `<${adminLink}|View project>`,
-                },
+                text: { type: 'mrkdwn', text: metadataLines.join('\n') },
               },
               {
                 type: 'section',
-                text: {
-                  type: 'plain_text',
-                  text: feedbackText,
-                },
+                text: { type: 'mrkdwn', text: '• feedback:' },
+              },
+              {
+                type: 'section',
+                text: { type: 'plain_text', text: feedbackText || '<empty>' },
               },
             ],
           }),

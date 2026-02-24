@@ -49,12 +49,22 @@ export const cloudAgentNextFeedbackRouter = createTRPCRouter({
 
       // Best-effort Slack notification
       if (SLACK_USER_FEEDBACK_WEBHOOK_URL) {
-        const adminLink = input.cloud_agent_session_id
-          ? `https://app.kilo.ai/admin/cloud-agent/${input.cloud_agent_session_id}`
-          : 'https://app.kilo.ai/admin/cloud-agent';
+        const sessionLink = input.cloud_agent_session_id
+          ? `<https://app.kilo.ai/admin/cloud-agent/${input.cloud_agent_session_id}|${input.cloud_agent_session_id}>`
+          : '_unknown_';
+
+        const metadataLines = [
+          `• user: \`${ctx.user.id}\``,
+          `• session: ${sessionLink}`,
+          input.model ? `• model: \`${input.model}\`` : null,
+          input.repository ? `• repository: \`${input.repository}\`` : null,
+          input.is_streaming != null ? `• streaming: \`${input.is_streaming}\`` : null,
+          input.message_count != null ? `• messages: \`${input.message_count}\`` : null,
+        ].filter((line): line is string => line != null);
+
         const trimmedFeedback = input.feedback_text.trim();
-        const wasTruncated = trimmedFeedback.length > 500;
-        const feedbackText = trimmedFeedback.slice(0, 500) + (wasTruncated ? '...' : '');
+        const feedbackText =
+          trimmedFeedback.slice(0, 500) + (trimmedFeedback.length > 500 ? '...' : '');
 
         fetch(SLACK_USER_FEEDBACK_WEBHOOK_URL, {
           method: 'POST',
@@ -66,24 +76,19 @@ export const cloudAgentNextFeedbackRouter = createTRPCRouter({
             blocks: [
               {
                 type: 'header',
-                text: {
-                  type: 'plain_text',
-                  text: 'New Cloud Agent feedback :robot_face:',
-                },
+                text: { type: 'plain_text', text: 'New Cloud Agent feedback :robot_face:' },
               },
               {
                 type: 'section',
-                text: {
-                  type: 'mrkdwn',
-                  text: `<${adminLink}|View session>`,
-                },
+                text: { type: 'mrkdwn', text: metadataLines.join('\n') },
               },
               {
                 type: 'section',
-                text: {
-                  type: 'plain_text',
-                  text: feedbackText,
-                },
+                text: { type: 'mrkdwn', text: '• feedback:' },
+              },
+              {
+                type: 'section',
+                text: { type: 'plain_text', text: feedbackText || '<empty>' },
               },
             ],
           }),
