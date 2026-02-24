@@ -39,7 +39,9 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
   // Feature flags
   const isAutoTriageFeatureEnabled = useFeatureFlagEnabled('auto-triage-feature');
   const isDevelopment = process.env.NODE_ENV === 'development';
-  const isKiloClawEnabled = useFeatureFlagEnabled('kiloclaw');
+  // Default to true when PostHog is blocked (e.g. by ad blockers), which returns undefined.
+  // Server-side flag check in the tRPC router still gates actual access.
+  const isKiloClawEnabled = useFeatureFlagEnabled('kiloclaw') ?? true;
 
   // Dashboard group
   const dashboardItems: Array<{
