@@ -650,7 +650,7 @@ describe('router sessionId validation', () => {
             envVars: { API_KEY: 'secret-value', DB_URL: 'postgres://localhost' },
             setupCommands: ['npm install', 'npm run build'],
             mcpServers: {
-              puppeteer: { command: 'npx', args: ['-y', '@mcp/puppeteer'] },
+              puppeteer: { type: 'local', command: ['npx', '-y', '@mcp/puppeteer'] },
             },
             preparedAt: 1700000000000,
             initiatedAt: 1700000001000,

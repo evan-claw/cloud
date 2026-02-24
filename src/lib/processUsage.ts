@@ -33,10 +33,10 @@ import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
 
 const posthogClient = PostHogClient();
 
-type OpenRouterUsage = {
+export type OpenRouterUsage = {
   cost?: number;
   is_byok?: boolean | null;
-  cost_details: { upstream_inference_cost: number };
+  cost_details?: { upstream_inference_cost: number };
   completion_tokens: number;
   completion_tokens_details: { reasoning_tokens: number };
   prompt_tokens: number;
@@ -65,7 +65,7 @@ type MaybeHasOpenRouterUsage = {
   provider?: string | null;
 };
 
-type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
+export type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
   MaybeHasOpenRouterUsage &
   MaybeHasVercelProviderMetaDataChunk;
 
@@ -180,6 +180,8 @@ export type MicrodollarUsageContext = {
   abuse_request_id?: number;
   /** Which product feature generated this API call. NULL if header not sent. */
   feature: FeatureValue | null;
+  /** Client session/task identifier from X-KiloCode-TaskId header. */
+  session_id: string | null;
 };
 
 export type UsageContextInfo = ReturnType<typeof extractUsageContextInfo>;
@@ -200,6 +202,7 @@ export function extractUsageContextInfo(usageContext: MicrodollarUsageContext) {
     is_user_byok: usageContext.user_byok,
     has_tools: usageContext.has_tools,
     feature: usageContext.feature,
+    session_id: usageContext.session_id,
   };
 }
 
@@ -433,6 +436,7 @@ export type UsageMetaData = {
   has_tools: boolean | null;
   machine_id: string | null;
   feature: string | null;
+  session_id: string | null;
 };
 
 export async function insertUsageRecord(
@@ -541,6 +545,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               cancelled,
               has_tools,
               machine_id,
+              session_id,
 
               http_user_agent_id,
               http_ip_id,
@@ -573,6 +578,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               ${metadataFields.cancelled},
               ${metadataFields.has_tools},
               ${metadataFields.machine_id},
+              ${metadataFields.session_id},
 
               (SELECT http_user_agent_id FROM http_user_agent_cte),
               (SELECT http_ip_id FROM http_ip_cte),

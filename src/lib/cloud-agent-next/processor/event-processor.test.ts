@@ -860,6 +860,131 @@ describe('createEventProcessor', () => {
     });
   });
 
+  describe('forceCompleteAll', () => {
+    it('should force-complete in-flight assistant messages', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+        onStreamingChanged: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      // Start streaming
+      processor.processEvent(
+        createKilocodeEvent('session.status', {
+          sessionID: 'session-123',
+          status: { type: 'busy' },
+        })
+      );
+
+      // Create an in-flight assistant message (no completed time)
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('msg-1') })
+      );
+
+      expect(callbacks.onMessageCompleted).not.toHaveBeenCalled();
+
+      processor.forceCompleteAll();
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledWith(
+        'session-123',
+        'msg-1',
+        expect.objectContaining({
+          info: expect.objectContaining({
+            id: 'msg-1',
+            time: expect.objectContaining({ completed: expect.any(Number) }),
+          }),
+        }),
+        null
+      );
+
+      expect(callbacks.onStreamingChanged).toHaveBeenLastCalledWith(false);
+    });
+
+    it('should complete pending user messages', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+        onStreamingChanged: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      // Create a user message
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createUserInfo('user-msg-1') })
+      );
+
+      // Create an assistant message
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('assist-msg-1') })
+      );
+
+      processor.forceCompleteAll();
+
+      // Both should be completed
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not fire onError', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+        onError: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      // Create an in-flight assistant message
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('msg-1') })
+      );
+
+      processor.forceCompleteAll();
+
+      // forceCompleteAll should NOT fire onError (unlike handleSessionTurnClose)
+      expect(callbacks.onError).not.toHaveBeenCalled();
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+    });
+
+    it('should be a no-op when there are no in-flight messages', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageCompleted: jest.fn(),
+        onStreamingChanged: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.forceCompleteAll();
+
+      expect(callbacks.onMessageCompleted).not.toHaveBeenCalled();
+      expect(callbacks.onStreamingChanged).not.toHaveBeenCalled();
+    });
+
+    it('should ignore already-completed assistant messages', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      // Create and complete an assistant message normally
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('msg-1') })
+      );
+      processor.processEvent(
+        createKilocodeEvent('message.updated', {
+          info: createAssistantInfo('msg-1', 'session-123', Date.now()),
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+
+      // forceCompleteAll should not re-complete it
+      processor.forceCompleteAll();
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('invalid events', () => {
     it('should ignore events with unknown types', () => {
       const callbacks: EventProcessorCallbacks = {

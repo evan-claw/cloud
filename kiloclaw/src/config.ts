@@ -31,8 +31,9 @@ export const DEFAULT_MACHINE_GUEST = {
 /** Default Fly Volume size in GB */
 export const DEFAULT_VOLUME_SIZE_GB = 10;
 
-/** Default Fly region priority list when FLY_REGION env var is not set */
-export const DEFAULT_FLY_REGION = 'dfw,yyz,cdg';
+/** Default Fly region priority list when FLY_REGION env var is not set.
+ *  Callers shuffle before selecting so order here doesn't matter. */
+export const DEFAULT_FLY_REGION = 'cdg,arn,yyz,ord,iad,lax';
 
 // Alarm cadence by instance status
 /** Running machines: fast health checks */
@@ -50,3 +51,9 @@ export const SELF_HEAL_THRESHOLD = 5;
 /** Minimum interval between live Fly API checks in getStatus() (30 seconds).
  *  At 10s UI poll interval, only ~1 in 3 polls will hit Fly. */
 export const LIVE_CHECK_THROTTLE_MS = 30 * 1000;
+
+/** Maximum time to wait for the gateway health probe to return 200 after machine starts */
+export const HEALTH_PROBE_TIMEOUT_SECONDS = 60;
+
+/** Interval between health probe retries during startup */
+export const HEALTH_PROBE_INTERVAL_MS = 3_000;

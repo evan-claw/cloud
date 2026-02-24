@@ -12,9 +12,16 @@ export type ChangelogEntry = {
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-02-24',
+<<<<<<< HEAD
     description: 'Fix instance type and size badges.',
     category: 'bugfix',
     deployHint: null,
+=======
+    description:
+      'Improve OpenClaw restart handling when restarts are triggered via the OpenClaw Control UI.',
+    category: 'bugfix',
+    deployHint: 'redeploy_suggested',
+>>>>>>> main
   },
   {
     date: '2026-02-23',

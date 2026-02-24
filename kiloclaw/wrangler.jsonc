@@ -9,6 +9,7 @@
   "observability": {
     "enabled": true,
   },
+  "logpush": true,
   "dev": {
     "port": 8795,
   },

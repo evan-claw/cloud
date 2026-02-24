@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 process.env.HOME = '/root';
 
 (async () => {
-  const { stdout } = await execFileAsync('openclaw', ['devices', 'list', '--json'], {
+  const { stdout } = await execFileAsync('/usr/local/bin/openclaw', ['devices', 'list', '--json'], {
     encoding: 'utf8',
     timeout: 45000,
     env: { ...process.env, HOME: '/root' },
@@ -32,7 +32,9 @@ process.env.HOME = '/root';
 
   console.log(JSON.stringify({ requests }));
 })().catch(err => {
-  process.stderr.write(`[device-pairing-list] fatal: ${err}\n`);
+  const stderr = err && err.stderr ? err.stderr.toString().trim() : '';
+  const msg = stderr || String(err);
+  process.stderr.write(`[device-pairing-list] fatal: ${msg}\n`);
   console.log(JSON.stringify({ requests: [] }));
   process.exitCode = 1;
 });
