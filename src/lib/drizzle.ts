@@ -63,12 +63,15 @@ function getReplicaUrl(): string {
   return postgresUrl;
 }
 
+const statementTimeoutMs = Number.parseInt(POSTGRES_MAX_QUERY_TIME || '20000');
+
 // Primary pool - always points to Frankfurt (writes go here)
 export const pool = new Pool({
   ...getDatabaseClientConfig(postgresUrl),
   max: 100,
   connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
   idleTimeoutMillis: 3000,
+  statement_timeout: statementTimeoutMs,
   application_name: appName,
 });
 
@@ -82,6 +85,7 @@ const replicaPool = usesSeparateReplica
       max: 100,
       connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
       idleTimeoutMillis: 3000,
+      statement_timeout: statementTimeoutMs,
       application_name: `${appName}-replica`,
     })
   : pool; // Reuse primary pool if no separate replica
@@ -105,6 +109,33 @@ if (usesSeparateReplica) {
     console.error('Unexpected error on idle client (replica)', err);
     process.exit(-1);
   });
+}
+
+// --- Pool observability ---
+// Periodic pool metrics (every 30s) — picked up by Vercel log drain → Axiom
+function logPoolMetrics() {
+  const primary = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+  const replica = usesSeparateReplica
+    ? {
+        total: replicaPool.totalCount,
+        idle: replicaPool.idleCount,
+        waiting: replicaPool.waitingCount,
+      }
+    : null;
+  console.log(
+    JSON.stringify({
+      type: 'pool_metrics',
+      region: VERCEL_REGION ?? 'unknown',
+      primary,
+      replica,
+    })
+  );
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  // Log immediately on startup, then every 30s
+  logPoolMetrics();
+  setInterval(logPoolMetrics, 30_000).unref();
 }
 
 /**
