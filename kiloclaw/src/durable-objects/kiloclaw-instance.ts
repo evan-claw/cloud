@@ -865,8 +865,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }>,
     };
 
+    const logCtx = `sandboxId=${this.sandboxId} appId=${this.flyAppName}`;
     if (result.exit_code !== 0) {
-      console.error('[DO] device pairing list failed:', result.stderr);
+      console.error(`[DO] device pairing list failed: ${result.stderr} ${logCtx}`);
       return empty;
     }
 
@@ -877,7 +878,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         pairing = { requests: data.requests };
       }
     } catch {
-      console.error('[DO] device pairing list parse error:', result.stdout);
+      console.error(`[DO] device pairing list parse error: ${result.stdout} ${logCtx}`);
     }
 
     if (cacheKey) {
@@ -1356,6 +1357,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         JSON.stringify({
           path,
           status: response.status,
+          body: rawBody.slice(0, 1024),
           issues: parsed.error.issues.map(issue => ({
             path: issue.path.join('.'),
             code: issue.code,

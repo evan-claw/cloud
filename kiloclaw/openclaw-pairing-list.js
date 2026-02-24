@@ -28,11 +28,15 @@ process.env.HOME = '/root';
 
   const results = await Promise.allSettled(
     channels.map(async channel => {
-      const { stdout } = await execFileAsync('openclaw', ['pairing', 'list', channel, '--json'], {
-        encoding: 'utf8',
-        timeout: 45000,
-        env: { ...process.env, HOME: '/root' },
-      });
+      const { stdout } = await execFileAsync(
+        '/usr/local/bin/openclaw',
+        ['pairing', 'list', channel, '--json'],
+        {
+          encoding: 'utf8',
+          timeout: 45000,
+          env: { ...process.env, HOME: '/root' },
+        }
+      );
       const data = JSON.parse(stdout.trim());
       return (data.requests || []).map(req => ({ ...req, channel }));
     })

@@ -11,6 +11,13 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-02-24',
+    description:
+      'Improve OpenClaw restart handling when restarts are triggered via the OpenClaw Control UI.',
+    category: 'bugfix',
+    deployHint: 'redeploy_suggested',
+  },
+  {
     date: '2026-02-23',
     description:
       'Redesigned dashboard: live gateway process status, added ability to restart OpenClaw gateway.',
