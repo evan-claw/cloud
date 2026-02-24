@@ -29,7 +29,7 @@ export const DEFAULT_MACHINE_GUEST = {
 };
 
 /** Default Fly Volume size in GB */
-export const DEFAULT_VOLUME_SIZE_GB = 20;
+export const DEFAULT_VOLUME_SIZE_GB = 10;
 
 /** Default Fly region priority list when FLY_REGION env var is not set */
 export const DEFAULT_FLY_REGION = 'dfw,yyz,cdg';
