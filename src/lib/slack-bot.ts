@@ -15,7 +15,7 @@ import {
   getAccessTokenFromInstallation,
 } from '@/lib/integrations/slack-service';
 import type { PlatformIntegration } from '@/db/schema';
-import { sendProxiedChatCompletion } from '@/lib/llm-proxy-helpers';
+import { runBot } from '@/lib/bots/core/run-bot';
 import {
   formatGitHubRepositoriesForPrompt,
   getGitHubRepositoryContext,
@@ -329,9 +329,6 @@ async function spawnCloudAgentSession(
   return { response: fallbackResult, sessionId };
 }
 
-type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ChatCompletionResponse = OpenAI.Chat.Completions.ChatCompletion;
-
 /**
  * Process a Kilo Bot message and return the response with metadata.
  * This is the main entry point for generating AI responses with tool support.
@@ -347,7 +344,6 @@ export async function processKiloBotMessage(
   console.log('[SlackBot] Looking up Slack integration for team:', teamId);
 
   // Track metadata for logging
-  const toolCallsMade: string[] = [];
   let cloudAgentSessionId: string | undefined;
 
   // Look up the Slack integration to find the owner
@@ -440,172 +436,67 @@ export async function processKiloBotMessage(
   const systemPrompt =
     KILO_BOT_SYSTEM_PROMPT + slackContextForPrompt + formatGitHubRepositoriesForPrompt(repoContext);
 
-  // Build initial messages array
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: systemPrompt,
-    },
-    {
-      role: 'user',
-      content: userMessage,
-    },
-  ];
-
-  // Tool calling loop - keep calling until we get a final response
-  let finalResponse: string | null = null;
-  let errorMessage: string | undefined;
-  const maxIterations = 5; // Prevent infinite loops
-  let iteration = 0;
-
-  while (finalResponse === null && iteration < maxIterations) {
-    iteration++;
-    console.log(`[SlackBot] Tool loop iteration ${iteration}/${maxIterations}`);
-
-    console.log('[SlackBot] Sending request to chat completions endpoint...');
-    const result = await sendProxiedChatCompletion<ChatCompletionResponse>({
-      authToken,
+  const runResult = await runBot({
+    authToken,
+    model: selectedModel,
+    systemPrompt,
+    userMessage,
+    tools: [SPAWN_CLOUD_AGENT_TOOL],
+    logPrefix: '[SlackBot]',
+    requestOptions: {
       version: SLACK_BOT_VERSION,
       userAgent: SLACK_BOT_USER_AGENT,
-      body: {
-        model: selectedModel,
-        messages,
-        tools: [SPAWN_CLOUD_AGENT_TOOL],
-        tool_choice: 'auto',
-      },
       organizationId: owner.type === 'org' ? owner.id : undefined,
       feature: 'slack',
-    });
-
-    if (!result.ok) {
-      console.error('[SlackBot] API error response:', result.error);
-      finalResponse = `Sorry, there was an error calling the AI service (${result.status}): ${result.error.slice(0, 200)}`;
-      break;
-    }
-
-    const responseBody = result.data;
-    console.log('[SlackBot] Response body parsed, choices count:', responseBody.choices?.length);
-    const choice = responseBody.choices?.[0];
-
-    if (!choice) {
-      console.log('[SlackBot] No choice in response, response body:', JSON.stringify(responseBody));
-      finalResponse = 'Sorry, I could not generate a response.';
-      errorMessage = 'No choice in OpenRouter response';
-      break;
-    }
-
-    const message = choice.message;
-    console.log(
-      '[SlackBot] Message received - content length:',
-      message.content?.length,
-      'tool_calls:',
-      message.tool_calls?.length || 0
-    );
-    console.log('[SlackBot] Message content preview:', message.content?.slice(0, 200));
-
-    // Check if the assistant wants to call a tool
-    if (message.tool_calls && message.tool_calls.length > 0) {
-      console.log('[SlackBot] Tool calls detected:', message.tool_calls.length);
-
-      // Add assistant message to conversation history
-      messages.push({
-        role: 'assistant',
-        content: message.content,
-        tool_calls: message.tool_calls,
-      });
-      console.log(
-        '[SlackBot] Added assistant message to history, total messages:',
-        messages.length
-      );
-
-      // Process each tool call
-      for (const toolCall of message.tool_calls) {
-        console.log(
-          '[SlackBot] Processing tool call:',
-          toolCall.type,
-          toolCall.type === 'function' ? toolCall.function.name : 'N/A'
-        );
-
-        // Skip non-function tool calls
-        if (toolCall.type !== 'function') {
-          console.log('[SlackBot] Skipping non-function tool call');
-          continue;
-        }
-
-        // Track the tool call
-        toolCallsMade.push(toolCall.function.name);
-
-        if (toolCall.function.name === 'spawn_cloud_agent') {
-          console.log(
-            '[SlackBot] spawn_cloud_agent tool call - arguments:',
-            toolCall.function.arguments
-          );
-          try {
-            const args = JSON.parse(toolCall.function.arguments);
-            console.log('[SlackBot] Parsed tool arguments:', JSON.stringify(args, null, 2));
-
-            console.log('[SlackBot] Calling spawnCloudAgentSession...');
-            const toolResult = await spawnCloudAgentSession(
-              args,
-              owner,
-              selectedModel,
-              authToken,
-              slackRequesterInfo
-            );
-            console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
-            console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
-
-            // Track the cloud agent session ID
-            if (toolResult.sessionId) {
-              cloudAgentSessionId = toolResult.sessionId;
-            }
-
-            // Add tool result to conversation history
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: toolResult.response,
-            });
-            console.log(
-              '[SlackBot] Added tool result to history, total messages:',
-              messages.length
-            );
-          } catch (error) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            console.error('[SlackBot] Error executing tool:', errMsg, error);
-            errorMessage = errMsg;
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: `Error executing tool: ${errMsg}`,
-            });
-          }
-        } else {
-          console.log('[SlackBot] Unknown tool:', toolCall.function.name);
-        }
+    },
+    toolExecutor: async toolCall => {
+      if (toolCall.type !== 'function') {
+        console.log('[SlackBot] Skipping non-function tool call');
+        return { content: 'Skipped non-function tool call.' };
       }
-    } else {
-      // No tool calls - we have the final response
-      console.log('[SlackBot] No tool calls, setting final response');
-      finalResponse = message.content ?? 'Sorry, I could not generate a response.';
-    }
-  }
 
-  if (finalResponse === null) {
-    console.log('[SlackBot] Max iterations reached, setting timeout message');
-    finalResponse = 'Sorry, the request took too long to process.';
-    errorMessage = 'Max iterations reached';
-  }
+      if (toolCall.function.name !== 'spawn_cloud_agent') {
+        console.log('[SlackBot] Unknown tool:', toolCall.function.name);
+        return { content: `Error executing tool: Unknown tool ${toolCall.function.name}` };
+      }
 
-  console.log('[SlackBot] Final response length:', finalResponse.length);
-  console.log('[SlackBot] Final response preview:', finalResponse.slice(0, 500));
+      console.log(
+        '[SlackBot] spawn_cloud_agent tool call - arguments:',
+        toolCall.function.arguments
+      );
+      const args = JSON.parse(toolCall.function.arguments);
+      console.log('[SlackBot] Parsed tool arguments:', JSON.stringify(args, null, 2));
+
+      console.log('[SlackBot] Calling spawnCloudAgentSession...');
+      const toolResult = await spawnCloudAgentSession(
+        args,
+        owner,
+        selectedModel,
+        authToken,
+        slackRequesterInfo
+      );
+      console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
+      console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
+
+      return {
+        content: toolResult.response,
+        metadata: toolResult.sessionId ? { cloudAgentSessionId: toolResult.sessionId } : undefined,
+      };
+    },
+    onToolResult: (_toolCall, result) => {
+      const sessionId = result.metadata?.cloudAgentSessionId;
+      if (typeof sessionId === 'string') {
+        cloudAgentSessionId = sessionId;
+      }
+    },
+  });
 
   return {
-    response: finalResponse,
+    response: runResult.response,
     modelUsed: selectedModel,
-    toolCallsMade,
+    toolCallsMade: runResult.toolCallsMade,
     cloudAgentSessionId,
-    error: errorMessage,
+    error: runResult.error,
     installation,
   };
 }
