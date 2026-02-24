@@ -19,7 +19,7 @@ import {
 import { generateApiToken } from '@/lib/tokens';
 import { getSecurityFindingById } from '../db/security-findings';
 import { updateAnalysisStatus } from '../db/security-analysis';
-import type { SecurityFindingAnalysis, SecurityReviewOwner } from '../core/types';
+import type { AnalysisMode, SecurityFindingAnalysis, SecurityReviewOwner } from '../core/types';
 import type { User, SecurityFinding } from '@/db/schema';
 import {
   trackSecurityAgentAnalysisStarted,
@@ -233,7 +233,7 @@ export async function finalizeAnalysis(
  * Start analysis for a security finding using three-tier approach.
  *
  * Tier 1 (Quick Triage): Always runs first. Direct LLM call to analyze metadata.
- * Tier 2 (Sandbox Analysis): Only runs if triage says it's needed OR forceSandbox is true.
+ * Tier 2 (Sandbox Analysis): Controlled by analysisMode — always in 'deep', never in 'shallow', triage-driven in 'auto'.
  * Tier 3 (Structured Extraction): Extracts structured fields from raw markdown output.
  */
 export async function startSecurityAnalysis(params: {
@@ -242,7 +242,7 @@ export async function startSecurityAnalysis(params: {
   githubRepo: string;
   githubToken?: string;
   model?: string;
-  forceSandbox?: boolean;
+  analysisMode?: AnalysisMode;
   organizationId?: string;
 }): Promise<{ started: boolean; error?: string; triageOnly?: boolean }> {
   const {
@@ -251,7 +251,7 @@ export async function startSecurityAnalysis(params: {
     githubRepo,
     githubToken,
     model = 'anthropic/claude-sonnet-4',
-    forceSandbox = false,
+    analysisMode = 'auto',
     organizationId,
   } = params;
 
@@ -288,7 +288,7 @@ export async function startSecurityAnalysis(params: {
       organizationId,
       findingId,
       model,
-      forceSandbox,
+      analysisMode,
     });
 
     const tier1Start = performance.now();
@@ -325,8 +325,9 @@ export async function startSecurityAnalysis(params: {
       },
     });
 
-    // Decide whether to run sandbox analysis
-    const runSandbox = forceSandbox || triage.needsSandboxAnalysis;
+    // Decide whether to run sandbox analysis based on analysis mode
+    const runSandbox =
+      analysisMode === 'deep' || (analysisMode === 'auto' && triage.needsSandboxAnalysis);
 
     if (!runSandbox) {
       // =========================================================================
