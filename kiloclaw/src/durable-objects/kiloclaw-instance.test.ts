@@ -216,6 +216,23 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  // Mock global fetch for waitForHealthy() health probe.
+  // Returns gateway running + root 200 so start() doesn't block.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/_kilo/gateway/status')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ state: 'running' }),
+        });
+      }
+      // Root path probe — return non-502
+      return Promise.resolve({ ok: true, status: 200 });
+    })
+  );
 });
 
 describe('two-phase destroy', () => {

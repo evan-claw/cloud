@@ -1085,7 +1085,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
 
     // Wait for the gateway process inside the container to be healthy
-    await this.waitForHealthy(flyConfig.appName, this.flyMachineId!);
+    if (this.flyMachineId) {
+      await this.waitForHealthy(flyConfig.appName, this.flyMachineId);
+    }
 
     // Update state
     this.status = 'running';
@@ -1943,7 +1945,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           },
         });
         if (res.ok) {
-          const body = (await res.json()) as { state?: string };
+          const body: { state?: string } = await res.json();
           if (body.state === 'running') {
             // Gateway reports running — verify it's actually serving traffic
             // by probing the root path (controller proxies to gateway on :3001)
