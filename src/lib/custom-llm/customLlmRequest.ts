@@ -289,7 +289,7 @@ function createStreamPartConverter(userId: string, taskId: string | undefined, m
                 key: phaseKey(
                   userId,
                   taskId,
-                  item.content.filter(part => part.type === 'output_text').map(part => part.text)
+                  item.content.filter(c => c.type === 'output_text').map(c => c.text)
                 ),
                 value: phase,
               })
