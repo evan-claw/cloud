@@ -153,7 +153,38 @@ export class ReviewCommentWebhookProcessor {
       return;
     }
 
-    // 8. Add eyes reaction to acknowledge the mention
+    // 8. Resolve dispatch owner (org bot user or personal owner)
+    let dispatchOwner: Owner;
+    if (owner.type === 'org') {
+      const botUserId = await getBotUserId(owner.id, 'auto-fix');
+      if (!botUserId) {
+        errorExceptInTest('[ReviewCommentWebhookProcessor] Bot user not found for organization', {
+          organizationId: owner.id,
+        });
+        // Add confused reaction to indicate configuration problem
+        try {
+          await addReactionToPRReviewComment(
+            installationId,
+            repoOwner,
+            repoName,
+            comment.id,
+            'confused'
+          );
+        } catch {
+          // Best-effort reaction
+        }
+        return;
+      }
+      dispatchOwner = {
+        type: 'org',
+        id: owner.id,
+        userId: botUserId,
+      };
+    } else {
+      dispatchOwner = owner;
+    }
+
+    // 9. Add eyes reaction to acknowledge the mention
     try {
       await addReactionToPRReviewComment(installationId, repoOwner, repoName, comment.id, 'eyes');
     } catch (reactionError) {
@@ -164,7 +195,7 @@ export class ReviewCommentWebhookProcessor {
       // Continue — reaction failure is not critical
     }
 
-    // 9. Create fix ticket with review comment context
+    // 10. Create fix ticket with review comment context
     // Populate issue fields with PR-level data to satisfy NOT NULL constraints
     try {
       const ticketId = await createFixTicket({
@@ -192,25 +223,6 @@ export class ReviewCommentWebhookProcessor {
         prNumber: pull_request.number,
         commentId: comment.id,
       });
-
-      // 10. Get bot user ID for dispatch
-      let dispatchOwner: Owner;
-      if (owner.type === 'org') {
-        const botUserId = await getBotUserId(owner.id, 'auto-fix');
-        if (!botUserId) {
-          errorExceptInTest('[ReviewCommentWebhookProcessor] Bot user not found for organization', {
-            organizationId: owner.id,
-          });
-          return;
-        }
-        dispatchOwner = {
-          type: 'org',
-          id: owner.id,
-          userId: botUserId,
-        };
-      } else {
-        dispatchOwner = owner;
-      }
 
       // 11. Dispatch to Auto Fix worker
       await tryDispatchPendingFixes(dispatchOwner);

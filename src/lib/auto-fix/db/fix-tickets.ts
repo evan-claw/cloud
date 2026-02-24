@@ -141,9 +141,9 @@ export async function findExistingFixTicket(
 }
 
 /**
- * Checks if an active (non-terminal) fix ticket already exists for a given repo and review comment ID.
- * Returns the existing ticket if found, null otherwise.
- * Completed/failed/cancelled tickets are ignored so users can re-trigger fixes.
+ * Checks if an active fix ticket already exists for a given repo and review comment ID.
+ * Returns pending/running tickets for webhook deduplication; terminal states are ignored.
+ * Re-runs should reset/retry the existing ticket rather than inserting a new row.
  */
 export async function findExistingReviewCommentFixTicket(
   repoFullName: string,
