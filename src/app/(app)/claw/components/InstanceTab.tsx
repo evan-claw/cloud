@@ -83,9 +83,12 @@ export function InstanceTab({
   }
 
   if (gatewayError) {
+    const isGatewayControllerError = gatewayError.message.includes('GatewayControllerError');
     return (
       <p className="text-muted-foreground text-sm">
-        Failed to load gateway status: {gatewayError.message}
+        {isGatewayControllerError
+          ? 'Gateway control unavailable. Redeploy to update instance to use this feature.'
+          : `Failed to load gateway status: ${gatewayError.message}`}
       </p>
     );
   }
