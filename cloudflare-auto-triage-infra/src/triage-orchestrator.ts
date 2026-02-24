@@ -13,18 +13,13 @@ import type {
   Env,
   TriageTicket,
   TriageRequest,
-  DuplicateCandidates,
   DuplicateResult,
   ClassificationResult,
 } from './types';
 import { parseClassification } from './parsers/classification-parser';
-import { parseDuplicateVerification } from './parsers/duplicate-verification-parser';
 import { SSEStreamProcessor } from './services/sse-stream-processor';
 import { CloudAgentClient } from './services/cloud-agent-client';
-import {
-  buildClassificationPrompt,
-  buildDuplicateVerificationPrompt,
-} from './services/prompt-builder';
+import { buildClassificationPrompt } from './services/prompt-builder';
 import { fetchRepoLabels, DEFAULT_LABELS } from './services/github-labels-service';
 
 export class TriageOrchestrator extends DurableObject<Env> {
@@ -93,20 +88,8 @@ export class TriageOrchestrator extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now() + alarmTimeout);
 
     try {
-      // Step 1a: Get embedding-similarity candidates from Next.js
-      const candidates = await this.checkDuplicates();
-
-      // Step 1b: If there are candidates, use the Cloud Agent to verify semantically
-      if (candidates.similarTickets.length === 0) {
-        console.log('[TriageOrchestrator] No similar tickets found — skipping AI duplicate check', {
-          ticketId: this.state.ticketId,
-        });
-      }
-
-      const duplicateResult =
-        candidates.similarTickets.length > 0
-          ? await this.verifyDuplicatesWithAI(candidates)
-          : { isDuplicate: false, duplicateOfTicketId: null, similarityScore: null };
+      // Step 1: Check for duplicates (embedding similarity + AI verification)
+      const duplicateResult = await this.checkDuplicates();
 
       console.log('[TriageOrchestrator] ── Duplicate detection result ──', {
         ticketId: this.state.ticketId,
@@ -114,7 +97,6 @@ export class TriageOrchestrator extends DurableObject<Env> {
         duplicateOfTicketId: duplicateResult.duplicateOfTicketId,
         similarityScore: duplicateResult.similarityScore,
         reasoning: duplicateResult.reasoning ?? '(none)',
-        candidateCount: candidates.similarTickets.length,
       });
 
       if (duplicateResult.isDuplicate) {
@@ -240,17 +222,19 @@ export class TriageOrchestrator extends DurableObject<Env> {
   }
 
   /**
-   * Fetch embedding-similarity candidates from Next.js.
-   * Does NOT make a duplicate decision — that is done by verifyDuplicatesWithAI().
+   * Check for duplicates via the Next.js endpoint (embedding search + AI verification).
    */
-  private async checkDuplicates(): Promise<DuplicateCandidates> {
+  private async checkDuplicates(): Promise<DuplicateResult> {
     const response = await fetch(`${this.env.API_URL}/api/internal/triage/check-duplicates`, {
       method: 'POST',
       headers: {
         'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ticketId: this.state.ticketId }),
+      body: JSON.stringify({
+        ticketId: this.state.ticketId,
+        authToken: this.state.authToken,
+      }),
     });
 
     if (!response.ok) {
@@ -258,232 +242,6 @@ export class TriageOrchestrator extends DurableObject<Env> {
     }
 
     return await response.json();
-  }
-
-  /**
-   * Use the Cloud Agent to semantically verify whether any of the embedding candidates
-   * is a true duplicate of the current issue.
-   * Falls back to a threshold-based decision (>= 0.9 similarity) if the AI call fails.
-   */
-  private async verifyDuplicatesWithAI(candidates: DuplicateCandidates): Promise<DuplicateResult> {
-    console.log('[TriageOrchestrator] Verifying duplicates with AI', {
-      ticketId: this.state.ticketId,
-      candidateCount: candidates.similarTickets.length,
-      candidates: candidates.similarTickets.map(t => ({
-        issueNumber: t.issueNumber,
-        issueTitle: t.issueTitle,
-        similarity: `${Math.round(t.similarity * 100)}%`,
-      })),
-    });
-
-    const prompt = buildDuplicateVerificationPrompt(
-      {
-        repoFullName: this.state.sessionInput.repoFullName,
-        issueNumber: this.state.sessionInput.issueNumber,
-        issueTitle: this.state.sessionInput.issueTitle,
-        issueBody: this.state.sessionInput.issueBody,
-      },
-      candidates.similarTickets.map(t => ({
-        issueNumber: t.issueNumber,
-        issueTitle: t.issueTitle,
-        similarity: t.similarity,
-      }))
-    );
-
-    // No githubRepo — the prompt is pure text, no codebase access needed.
-    const sessionInput = {
-      kilocodeOrganizationId: this.state.owner.type === 'org' ? this.state.owner.id : undefined,
-      prompt,
-      mode: 'ask' as const,
-      model: this.state.sessionInput.modelSlug,
-      createdOnPlatform: 'auto-triage',
-    };
-
-    const cloudAgentClient = new CloudAgentClient(this.env.CLOUD_AGENT_URL, this.state.authToken);
-
-    let response: Response;
-    try {
-      response = await cloudAgentClient.initiateSession(sessionInput, this.state.ticketId);
-    } catch (err) {
-      console.error(
-        '[TriageOrchestrator] AI duplicate verification failed, falling back to threshold',
-        {
-          ticketId: this.state.ticketId,
-          error: err instanceof Error ? err.message : String(err),
-        }
-      );
-      return this.thresholdDuplicateResult(candidates);
-    }
-
-    let sayText = '';
-    let fullText = '';
-
-    // Add timeout protection for duplicate verification (2 minutes)
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(
-        () => reject(new Error('Duplicate verification timed out - exceeded 2 minute limit')),
-        TriageOrchestrator.DUPLICATE_VERIFICATION_TIMEOUT_MS
-      );
-    });
-
-    try {
-      await Promise.race([
-        this.sseProcessor.processStream(response, {
-          onTextContent: (text: string) => {
-            fullText += text;
-          },
-          onKilocodeEvent: payload => {
-            if (
-              payload.type === 'say' &&
-              (payload.say === 'text' || payload.say === 'completion_result')
-            ) {
-              const text =
-                typeof payload.content === 'string'
-                  ? payload.content
-                  : typeof payload.text === 'string'
-                    ? payload.text
-                    : '';
-              if (text) sayText += text;
-            }
-          },
-          onComplete: () => {
-            console.log('[TriageOrchestrator] Duplicate verification stream completed', {
-              ticketId: this.state.ticketId,
-              sayTextLength: sayText.length,
-              fullTextLength: fullText.length,
-            });
-          },
-          onError: (error: Error) => {
-            console.warn('[TriageOrchestrator] Duplicate verification warning event', {
-              ticketId: this.state.ticketId,
-              error: error.message,
-            });
-          },
-        }),
-        timeoutPromise,
-      ]);
-    } catch (err) {
-      console.error(
-        '[TriageOrchestrator] AI duplicate verification stream error, falling back to threshold',
-        {
-          ticketId: this.state.ticketId,
-          error: err instanceof Error ? err.message : String(err),
-        }
-      );
-      return this.thresholdDuplicateResult(candidates);
-    } finally {
-      if (timeoutId !== null) clearTimeout(timeoutId);
-    }
-
-    const responseText = sayText.length > 0 ? sayText : fullText;
-
-    console.log('[TriageOrchestrator] Raw AI duplicate verification response', {
-      ticketId: this.state.ticketId,
-      source: sayText.length > 0 ? 'sayText' : 'fullText',
-      responseText,
-    });
-
-    let verification;
-    try {
-      verification = parseDuplicateVerification(responseText);
-    } catch (err) {
-      console.error(
-        '[TriageOrchestrator] Failed to parse AI duplicate verification, falling back to threshold',
-        {
-          ticketId: this.state.ticketId,
-          error: err instanceof Error ? err.message : String(err),
-          responseText,
-        }
-      );
-      return this.thresholdDuplicateResult(candidates);
-    }
-
-    console.log('[TriageOrchestrator] ── AI duplicate verification result ──', {
-      ticketId: this.state.ticketId,
-      isDuplicate: verification.isDuplicate,
-      duplicateOfIssueNumber: verification.duplicateOfIssueNumber,
-      confidence: verification.confidence,
-      reasoning: verification.reasoning,
-    });
-
-    if (verification.isDuplicate && verification.confidence < 0.5) {
-      console.log(
-        '[TriageOrchestrator] AI said duplicate but confidence too low, treating as not duplicate',
-        {
-          ticketId: this.state.ticketId,
-          confidence: verification.confidence,
-          reasoning: verification.reasoning,
-        }
-      );
-      return {
-        isDuplicate: false,
-        duplicateOfTicketId: null,
-        similarityScore: null,
-        similarTickets: candidates.similarTickets,
-      };
-    }
-
-    if (!verification.isDuplicate) {
-      return {
-        isDuplicate: false,
-        duplicateOfTicketId: null,
-        similarityScore: null,
-        similarTickets: candidates.similarTickets,
-      };
-    }
-
-    const matchedTicket = candidates.similarTickets.find(
-      t => t.issueNumber === verification.duplicateOfIssueNumber
-    );
-
-    if (!matchedTicket) {
-      // The AI hallucinated an issue number not in the candidate set — its verdict is
-      // unreliable, so treat this as not-duplicate rather than blaming an arbitrary candidate.
-      console.warn(
-        '[TriageOrchestrator] AI claimed duplicate of issue not in candidates, treating as not duplicate',
-        {
-          ticketId: this.state.ticketId,
-          claimedIssueNumber: verification.duplicateOfIssueNumber,
-          candidateIssueNumbers: candidates.similarTickets.map(t => t.issueNumber),
-        }
-      );
-      return {
-        isDuplicate: false,
-        duplicateOfTicketId: null,
-        similarityScore: null,
-        similarTickets: candidates.similarTickets,
-      };
-    }
-
-    return {
-      isDuplicate: true,
-      duplicateOfTicketId: matchedTicket.ticketId,
-      similarityScore: matchedTicket.similarity,
-      reasoning: verification.reasoning,
-      similarTickets: candidates.similarTickets,
-    };
-  }
-
-  /**
-   * Fallback duplicate decision using the original 0.9 similarity threshold.
-   * Used when the AI verification call fails.
-   */
-  private thresholdDuplicateResult(candidates: DuplicateCandidates): DuplicateResult {
-    const top = candidates.similarTickets[0];
-    const isDuplicate = top !== undefined && top.similarity >= 0.9;
-    console.log('[TriageOrchestrator] ── Threshold fallback duplicate result ──', {
-      ticketId: this.state.ticketId,
-      isDuplicate,
-      topSimilarity: top ? `${Math.round(top.similarity * 100)}%` : 'n/a',
-      topIssueNumber: top?.issueNumber ?? 'n/a',
-    });
-    return {
-      isDuplicate,
-      duplicateOfTicketId: isDuplicate ? top.ticketId : null,
-      similarityScore: isDuplicate ? top.similarity : null,
-      similarTickets: candidates.similarTickets,
-    };
   }
 
   /**
