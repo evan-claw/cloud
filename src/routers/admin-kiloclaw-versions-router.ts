@@ -92,19 +92,6 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
     }),
 
   publishVersion: adminProcedure.input(PublishVersionSchema).mutation(async ({ input, ctx }) => {
-    // Reject if digest already belongs to a different tag
-    if (input.imageDigest) {
-      const conflict = await db.query.kiloclaw_available_versions.findFirst({
-        where: eq(kiloclaw_available_versions.image_digest, input.imageDigest),
-      });
-      if (conflict && conflict.image_tag !== input.imageTag) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `Digest "${input.imageDigest.slice(0, 16)}..." already belongs to tag "${conflict.image_tag}". Same image cannot have two catalog entries.`,
-        });
-      }
-    }
-
     // Upsert into catalog by image_tag
     const values = {
       openclaw_version: input.openclawVersion,
@@ -117,6 +104,27 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
     };
 
     const [row] = await db.transaction(async tx => {
+      // Digest conflict check inside transaction with FOR UPDATE to prevent TOCTOU race.
+      // Without this, two concurrent publishes with the same digest but different tags
+      // could both pass the check, resulting in a raw constraint violation.
+      if (input.imageDigest) {
+        const [conflict] = await tx
+          .select({
+            image_tag: kiloclaw_available_versions.image_tag,
+            image_digest: kiloclaw_available_versions.image_digest,
+          })
+          .from(kiloclaw_available_versions)
+          .where(eq(kiloclaw_available_versions.image_digest, input.imageDigest))
+          .for('update');
+
+        if (conflict && conflict.image_tag !== input.imageTag) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `Digest "${input.imageDigest.slice(0, 16)}..." already belongs to tag "${conflict.image_tag}". Same image cannot have two catalog entries.`,
+          });
+        }
+      }
+
       // If setting as latest, lock then clear is_latest for same variant.
       // FOR UPDATE prevents concurrent publishes from both clearing the flag.
       if (input.setLatest) {

@@ -532,10 +532,31 @@ platform.get('/volume-snapshots', async c => {
   }
 });
 
+/**
+ * Paginate through all KV keys matching a prefix.
+ * kv.list() returns at most 1000 keys per call; this helper
+ * follows the cursor until list_complete is true.
+ */
+async function listAllKvKeys(
+  kv: KVNamespace,
+  prefix: string
+): Promise<KVNamespaceListKey<unknown>[]> {
+  const allKeys: KVNamespaceListKey<unknown>[] = [];
+  let cursor: string | undefined;
+
+  do {
+    const result = await kv.list({ prefix, cursor });
+    allKeys.push(...result.keys);
+    cursor = result.list_complete ? undefined : result.cursor;
+  } while (cursor);
+
+  return allKeys;
+}
+
 // GET /api/platform/versions — list all registered image versions from KV
 platform.get('/versions', async c => {
   const kv = c.env.KV_CLAW_CACHE;
-  const result = await kv.list({ prefix: 'image-version:' });
+  const keys = await listAllKvKeys(kv, 'image-version:');
 
   const versions: Array<{
     openclawVersion: string;
@@ -545,7 +566,7 @@ platform.get('/versions', async c => {
     publishedAt: string;
   }> = [];
 
-  for (const key of result.keys) {
+  for (const key of keys) {
     const raw = await kv.get(key.name, 'json');
     if (!raw) continue;
     const parsed = ImageVersionEntrySchema.safeParse(raw);
@@ -583,8 +604,8 @@ platform.post('/publish-image-version', async c => {
   // Reject if digest already belongs to a different tag
   if (imageDigest) {
     const kv = c.env.KV_CLAW_CACHE;
-    const keys = await kv.list({ prefix: 'image-version:' });
-    for (const key of keys.keys) {
+    const keys = await listAllKvKeys(kv, 'image-version:');
+    for (const key of keys) {
       if (key.name.includes(':latest:')) continue;
       const raw = await kv.get(key.name, 'json');
       if (!raw) continue;
