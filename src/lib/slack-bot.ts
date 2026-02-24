@@ -344,7 +344,7 @@ export async function processKiloBotMessage(
   // For organization-owned integrations, use bot user for auth token
   // This ensures usage is tracked at the organization level, not individual users
   const authResult = await getSlackbotAuthTokenForOwner(owner, slackUserEmail);
-  if (!authResult.authToken || !authResult.userId) {
+  if ('error' in authResult) {
     return {
       response: `Error: ${authResult.error}`,
       modelUsed: '',

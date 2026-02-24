@@ -10,10 +10,7 @@ import { getOrganizationMemberByEmail } from '@/lib/organizations/organizations'
 export async function getSlackbotAuthTokenForOwner(
   owner: Owner,
   slackUserEmail?: string
-): Promise<
-  | { authToken: string; userId: string; error?: undefined }
-  | { authToken?: undefined; userId?: undefined; error: string }
-> {
+): Promise<{ authToken: string; userId: string } | { error: string }> {
   let authToken: string | undefined;
   let userId: string | undefined;
   if (owner.type === 'org') {
