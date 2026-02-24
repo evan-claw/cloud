@@ -39,7 +39,11 @@ import {
   manageBranch as mockManageBranch,
   restoreWorkspace as mockRestoreWorkspace,
 } from './workspace.js';
-import { InvalidSessionMetadataError, SessionService } from './session-service.js';
+import {
+  InvalidSessionMetadataError,
+  SessionService,
+  convertMcpServersForCli,
+} from './session-service.js';
 import type { SandboxInstance, SessionId, SessionContext, ExecutionSession } from './types.js';
 import type { PersistenceEnv, CloudAgentSessionState } from './persistence/types.js';
 
@@ -1540,27 +1544,25 @@ describe('SessionService', () => {
     });
   });
 
-  describe('MCP Settings File Writing', () => {
-    it('should create directory and write file to correct path', async () => {
+  describe('MCP Config in KILO_CONFIG_CONTENT', () => {
+    it('should include MCP servers in KILO_CONFIG_CONTENT env var', async () => {
       const fakeSession = {
         exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         writeFile: vi.fn().mockResolvedValue(undefined),
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
-      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
-      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
       const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
+        createSession: sandboxCreateSession,
         mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: sandboxExec,
-        writeFile: sandboxWriteFile,
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
       } as unknown as SandboxInstance;
       const sessionId: SessionId = 'agent_mcp_test';
-      const sessionHome = `/home/${sessionId}`;
       mockedSetupWorkspace.mockResolvedValue({
         workspacePath: `/workspace/org/user/sessions/${sessionId}`,
-        sessionHome,
+        sessionHome: `/home/${sessionId}`,
       });
 
       const service = new SessionService();
@@ -1584,32 +1586,28 @@ describe('SessionService', () => {
         mcpServers,
       });
 
-      // Verify directory creation
-      expect(sandboxExec).toHaveBeenCalledWith(
-        `mkdir -p ${sessionHome}/.kilocode/cli/global/settings`
-      );
-
-      // Verify file write
-      expect(sandboxWriteFile).toHaveBeenCalledWith(
-        `${sessionHome}/.kilocode/cli/global/settings/mcp_settings.json`,
-        expect.stringContaining('"mcpServers"')
-      );
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp).toBeDefined();
+      expect(configContent.mcp.puppeteer).toEqual({
+        type: 'local',
+        command: ['npx', '-y', '@modelcontextprotocol/server-puppeteer'],
+      });
     });
 
-    it('should handle empty mcpServers gracefully', async () => {
+    it('should not include mcp key when mcpServers is empty', async () => {
       const fakeSession = {
         exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         writeFile: vi.fn().mockResolvedValue(undefined),
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
-      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
-      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
       const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
+        createSession: sandboxCreateSession,
         mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: sandboxExec,
-        writeFile: sandboxWriteFile,
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
       } as unknown as SandboxInstance;
       const sessionId: SessionId = 'agent_empty_mcp';
       mockedSetupWorkspace.mockResolvedValue({
@@ -1631,27 +1629,24 @@ describe('SessionService', () => {
         mcpServers: {}, // Empty object
       });
 
-      // Should not attempt to write MCP settings
-      expect(sandboxWriteFile).not.toHaveBeenCalledWith(
-        expect.stringContaining('mcp_settings.json'),
-        expect.anything()
-      );
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp).toBeUndefined();
     });
 
-    it('should write valid JSON with correct structure', async () => {
+    it('should convert stdio, sse, and streamable-http to CLI format', async () => {
       const fakeSession = {
         exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
         writeFile: vi.fn().mockResolvedValue(undefined),
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
-      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
-      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
       const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
+        createSession: sandboxCreateSession,
         mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: sandboxExec,
-        writeFile: sandboxWriteFile,
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
       } as unknown as SandboxInstance;
       const sessionId: SessionId = 'agent_mcp_json';
       mockedSetupWorkspace.mockResolvedValue({
@@ -1665,10 +1660,16 @@ describe('SessionService', () => {
           type: 'stdio' as const,
           command: 'node',
           args: ['server.js'],
+          env: { FOO: 'bar' },
         },
         'server-2': {
           type: 'sse' as const,
           url: 'https://example.com/mcp',
+          headers: { Authorization: 'Bearer tok' },
+        },
+        'server-3': {
+          type: 'streamable-http' as const,
+          url: 'https://example.com/stream',
         },
       };
 
@@ -1685,23 +1686,170 @@ describe('SessionService', () => {
         mcpServers,
       });
 
-      const writtenContent = sandboxWriteFile.mock.calls[0]?.[1] as string;
-      expect(writtenContent).toBeDefined();
-
-      // Should be valid JSON
-      const parsed = JSON.parse(writtenContent);
-      expect(parsed).toHaveProperty('mcpServers');
-      expect(parsed.mcpServers).toHaveProperty('server-1');
-      expect(parsed.mcpServers).toHaveProperty('server-2');
-      expect(parsed.mcpServers['server-1']).toMatchObject({
-        type: 'stdio',
-        command: 'node',
-        args: ['server.js'],
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp['server-1']).toEqual({
+        type: 'local',
+        command: ['node', 'server.js'],
+        environment: { FOO: 'bar' },
       });
-      expect(parsed.mcpServers['server-2']).toMatchObject({
-        type: 'sse',
+      expect(configContent.mcp['server-2']).toEqual({
+        type: 'remote',
         url: 'https://example.com/mcp',
+        headers: { Authorization: 'Bearer tok' },
       });
+      expect(configContent.mcp['server-3']).toEqual({
+        type: 'remote',
+        url: 'https://example.com/stream',
+      });
+    });
+
+    it('should convert alwaysAllow to permission rules', async () => {
+      const fakeSession = {
+        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
+      const sandbox = {
+        createSession: sandboxCreateSession,
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+      const sessionId: SessionId = 'agent_mcp_permissions';
+      mockedSetupWorkspace.mockResolvedValue({
+        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+        sessionHome: `/home/${sessionId}`,
+      });
+
+      const service = new SessionService();
+      const mcpServers = {
+        'my-server': {
+          command: 'test',
+          alwaysAllow: ['tool_a', 'tool_b'],
+        },
+        'wildcard-server': {
+          command: 'test2',
+          alwaysAllow: ['*'],
+        },
+      };
+
+      await service.initiate({
+        sandbox,
+        sandboxId: 'org__user',
+        orgId: 'org',
+        userId: 'user',
+        sessionId,
+        kilocodeToken: 'token',
+        kilocodeModel: 'test-model',
+        githubRepo: 'acme/repo',
+        env: mockEnv,
+        mcpServers,
+      });
+
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      // alwaysAllow tools should become permission rules
+      expect(configContent.permission['my-server_tool_a']).toBe('allow');
+      expect(configContent.permission['my-server_tool_b']).toBe('allow');
+      // Wildcard alwaysAllow should map to server_* permission
+      expect(configContent.permission['wildcard-server_*']).toBe('allow');
+      // Existing external_directory permission should still be there
+      expect(configContent.permission.external_directory).toBeDefined();
+    });
+
+    it('should convert timeout from seconds to milliseconds', async () => {
+      const fakeSession = {
+        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
+      const sandbox = {
+        createSession: sandboxCreateSession,
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+      const sessionId: SessionId = 'agent_mcp_timeout';
+      mockedSetupWorkspace.mockResolvedValue({
+        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+        sessionHome: `/home/${sessionId}`,
+      });
+
+      const service = new SessionService();
+      const mcpServers = {
+        'timeout-server': {
+          command: 'test',
+          timeout: 120,
+        },
+      };
+
+      await service.initiate({
+        sandbox,
+        sandboxId: 'org__user',
+        orgId: 'org',
+        userId: 'user',
+        sessionId,
+        kilocodeToken: 'token',
+        kilocodeModel: 'test-model',
+        githubRepo: 'acme/repo',
+        env: mockEnv,
+        mcpServers,
+      });
+
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp['timeout-server'].timeout).toBe(120000);
+    });
+
+    it('should convert disabled to enabled: false', async () => {
+      const fakeSession = {
+        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
+      const sandbox = {
+        createSession: sandboxCreateSession,
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+      const sessionId: SessionId = 'agent_mcp_disabled';
+      mockedSetupWorkspace.mockResolvedValue({
+        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+        sessionHome: `/home/${sessionId}`,
+      });
+
+      const service = new SessionService();
+      const mcpServers = {
+        'disabled-server': {
+          command: 'test',
+          disabled: true,
+        },
+      };
+
+      await service.initiate({
+        sandbox,
+        sandboxId: 'org__user',
+        orgId: 'org',
+        userId: 'user',
+        sessionId,
+        kilocodeToken: 'token',
+        kilocodeModel: 'test-model',
+        githubRepo: 'acme/repo',
+        env: mockEnv,
+        mcpServers,
+      });
+
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp['disabled-server'].enabled).toBe(false);
     });
   });
 
@@ -1973,7 +2121,7 @@ describe('SessionService', () => {
       expect(fakeSession.exec).toHaveBeenCalledWith('npm run build', expect.any(Object));
     });
 
-    it('should re-write MCP settings from metadata on resume', async () => {
+    it('should include MCP config in KILO_CONFIG_CONTENT on resume', async () => {
       const metadata = {
         version: 123456789,
         sessionId: 'agent_resume_mcp',
@@ -2000,13 +2148,12 @@ describe('SessionService', () => {
         writeFile: vi.fn().mockResolvedValue(undefined),
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
-      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
-      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
       const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
+        createSession: sandboxCreateSession,
         mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: sandboxExec,
-        writeFile: sandboxWriteFile,
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
       } as unknown as SandboxInstance;
 
       const service = new SessionService();
@@ -2021,11 +2168,14 @@ describe('SessionService', () => {
         env: testEnv,
       });
 
-      // Verify MCP settings were re-written (because repo didn't exist, triggering reclone)
-      expect(sandboxWriteFile).toHaveBeenCalledWith(
-        expect.stringContaining('mcp_settings.json'),
-        expect.stringContaining('puppeteer')
-      );
+      // Verify MCP config is in KILO_CONFIG_CONTENT env var
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp).toBeDefined();
+      expect(configContent.mcp.puppeteer).toMatchObject({
+        type: 'local',
+        command: ['npx', '-y', '@modelcontextprotocol/server-puppeteer'],
+      });
     });
 
     it('should restore envVars to context on resume', async () => {
@@ -2106,13 +2256,11 @@ describe('SessionService', () => {
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
       const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
-      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
-      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
       const sandbox = {
         createSession: sandboxCreateSession,
         mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: sandboxExec,
-        writeFile: sandboxWriteFile,
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
       } as unknown as SandboxInstance;
 
       const service = new SessionService();
@@ -2137,11 +2285,14 @@ describe('SessionService', () => {
       // Verify setup commands re-run (because repo didn't exist, triggering reclone)
       expect(fakeSession.exec).toHaveBeenCalledWith('npm install', expect.any(Object));
 
-      // Verify MCP settings re-written (because repo didn't exist, triggering reclone)
-      expect(sandboxWriteFile).toHaveBeenCalledWith(
-        expect.stringContaining('mcp_settings.json'),
-        expect.any(String)
-      );
+      // Verify MCP config in KILO_CONFIG_CONTENT
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      expect(configContent.mcp).toBeDefined();
+      expect(configContent.mcp.test).toMatchObject({
+        type: 'local',
+        command: ['test-server'],
+      });
     });
   });
 
@@ -3296,5 +3447,147 @@ describe('SessionService', () => {
       // git checkout -b should NOT be called (legacy CLI manages its own branch)
       expect(fakeSession.exec).not.toHaveBeenCalledWith(expect.stringContaining('git checkout -b'));
     });
+  });
+});
+
+describe('convertMcpServersForCli', () => {
+  it('converts stdio server to local format', () => {
+    const result = convertMcpServersForCli({
+      myServer: {
+        type: 'stdio',
+        command: 'node',
+        args: ['server.js', '--port', '3000'],
+        env: { NODE_ENV: 'production' },
+        cwd: '/app',
+      },
+    });
+
+    expect(result.mcp.myServer).toEqual({
+      type: 'local',
+      command: ['node', 'server.js', '--port', '3000'],
+      environment: { NODE_ENV: 'production' },
+      cwd: '/app',
+    });
+    expect(result.permission).toEqual({});
+  });
+
+  it('converts stdio server without explicit type', () => {
+    const result = convertMcpServersForCli({
+      myServer: {
+        command: 'npx',
+        args: ['-y', 'some-package'],
+      },
+    });
+
+    expect(result.mcp.myServer).toEqual({
+      type: 'local',
+      command: ['npx', '-y', 'some-package'],
+    });
+  });
+
+  it('converts sse server to remote format', () => {
+    const result = convertMcpServersForCli({
+      remote: {
+        type: 'sse',
+        url: 'https://example.com/mcp',
+        headers: { Authorization: 'Bearer tok123' },
+      },
+    });
+
+    expect(result.mcp.remote).toEqual({
+      type: 'remote',
+      url: 'https://example.com/mcp',
+      headers: { Authorization: 'Bearer tok123' },
+    });
+  });
+
+  it('converts streamable-http server to remote format', () => {
+    const result = convertMcpServersForCli({
+      stream: {
+        type: 'streamable-http',
+        url: 'https://example.com/stream',
+      },
+    });
+
+    expect(result.mcp.stream).toEqual({
+      type: 'remote',
+      url: 'https://example.com/stream',
+    });
+  });
+
+  it('converts alwaysAllow to permission rules with name sanitization', () => {
+    const result = convertMcpServersForCli({
+      'my.server': {
+        command: 'test',
+        alwaysAllow: ['tool.a', 'tool-b'],
+      },
+    });
+
+    expect(result.permission).toEqual({
+      my_server_tool_a: 'allow',
+      'my_server_tool-b': 'allow',
+    });
+  });
+
+  it('converts wildcard alwaysAllow to server_* permission', () => {
+    const result = convertMcpServersForCli({
+      myServer: {
+        command: 'test',
+        alwaysAllow: ['*'],
+      },
+    });
+
+    expect(result.permission).toEqual({
+      'myServer_*': 'allow',
+    });
+  });
+
+  it('converts disabled to enabled: false', () => {
+    const result = convertMcpServersForCli({
+      myServer: {
+        command: 'test',
+        disabled: true,
+      },
+    });
+
+    expect(result.mcp.myServer).toMatchObject({
+      enabled: false,
+    });
+  });
+
+  it('converts timeout from seconds to milliseconds', () => {
+    const result = convertMcpServersForCli({
+      myServer: {
+        command: 'test',
+        timeout: 120,
+      },
+    });
+
+    expect(result.mcp.myServer).toMatchObject({
+      timeout: 120000,
+    });
+  });
+
+  it('omits empty env/headers objects', () => {
+    const result = convertMcpServersForCli({
+      local: {
+        command: 'test',
+        env: {},
+      },
+      remote: {
+        type: 'sse',
+        url: 'https://example.com',
+        headers: {},
+      },
+    });
+
+    expect(result.mcp.local).not.toHaveProperty('environment');
+    expect(result.mcp.remote).not.toHaveProperty('headers');
+  });
+
+  it('returns empty objects for empty input', () => {
+    const result = convertMcpServersForCli({});
+    expect(result.mcp).toEqual({});
+    expect(result.permission).toEqual({});
   });
 });

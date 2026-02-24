@@ -257,35 +257,79 @@ export async function runSetupCommands(
   logger.info('Setup commands completed');
 }
 
-// Write MCP server config to global settings file in the session home.
-export async function writeMCPSettings(
-  sandbox: SandboxInstance,
-  sessionHome: string,
-  mcpServers: Record<string, MCPServerConfig>
-): Promise<void> {
-  if (!mcpServers || Object.keys(mcpServers).length === 0) {
-    return;
+/**
+ * Sanitize a name for use in MCP tool permission keys.
+ * Matches the CLI's sanitization: replace non-alphanumeric/underscore/hyphen chars with underscore.
+ */
+function sanitizeMcpName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/**
+ * Convert worker-format MCP server configs to CLI-native format for KILO_CONFIG_CONTENT.
+ *
+ * Worker format uses "stdio"/"sse"/"streamable-http" transport types.
+ * CLI format uses "local"/"remote" discriminated union.
+ *
+ * Returns { mcp, permission } where:
+ * - mcp: Record<string, CliMcpConfig> for the "mcp" key in config content
+ * - permission: Record<string, "allow"> for alwaysAllow → permission rule conversion
+ */
+export function convertMcpServersForCli(mcpServers: Record<string, MCPServerConfig>): {
+  mcp: Record<string, Record<string, unknown>>;
+  permission: Record<string, string>;
+} {
+  const mcp: Record<string, Record<string, unknown>> = {};
+  const permission: Record<string, string> = {};
+
+  for (const [serverName, config] of Object.entries(mcpServers)) {
+    let cliConfig: Record<string, unknown>;
+
+    if (config.type === 'sse' || config.type === 'streamable-http') {
+      // "sse" and "streamable-http" both map to "remote"
+      cliConfig = {
+        type: 'remote',
+        url: config.url,
+      };
+      if (config.headers && Object.keys(config.headers).length > 0) {
+        cliConfig.headers = config.headers;
+      }
+    } else {
+      // stdio (explicit or default when type is undefined)
+      cliConfig = {
+        type: 'local',
+        command: [config.command, ...(config.args ?? [])],
+      };
+      if (config.env && Object.keys(config.env).length > 0) {
+        cliConfig.environment = config.env;
+      }
+      if (config.cwd) {
+        cliConfig.cwd = config.cwd;
+      }
+    }
+    if (config.disabled) {
+      cliConfig.enabled = false;
+    }
+    if (config.timeout !== undefined) {
+      cliConfig.timeout = config.timeout * 1000;
+    }
+    mcp[serverName] = cliConfig;
+
+    // Convert alwaysAllow to permission rules
+    if (config.alwaysAllow && config.alwaysAllow.length > 0) {
+      const sanitizedServer = sanitizeMcpName(serverName);
+      if (config.alwaysAllow.includes('*')) {
+        permission[`${sanitizedServer}_*`] = 'allow';
+      } else {
+        for (const tool of config.alwaysAllow) {
+          const sanitizedTool = sanitizeMcpName(tool);
+          permission[`${sanitizedServer}_${sanitizedTool}`] = 'allow';
+        }
+      }
+    }
   }
 
-  const settingsDir = `${sessionHome}/.kilocode/cli/global/settings`;
-  const settingsPath = `${settingsDir}/mcp_settings.json`;
-
-  // Ensure directory exists
-  await sandbox.exec(`mkdir -p ${settingsDir}`);
-
-  // Generate settings JSON inline (no need for separate function)
-  const settingsJSON = JSON.stringify({ mcpServers }, null, 2);
-
-  // Write settings file
-  await sandbox.writeFile(settingsPath, settingsJSON);
-
-  const serverNames = Object.keys(mcpServers);
-  logger
-    .withTags({
-      serverCount: serverNames.length,
-      serverNames: serverNames.join(', '),
-    })
-    .info('Configured MCP servers');
+  return { mcp, permission };
 }
 
 // Write Kilo auth file so the CLI's KiloSessions can call session ingest.
@@ -459,7 +503,8 @@ export class SessionService {
     appendSystemPrompt?: string,
     gitUrl?: string,
     gitToken?: string,
-    platform?: 'github' | 'gitlab'
+    platform?: 'github' | 'gitlab',
+    mcpServers?: Record<string, MCPServerConfig>
   ): Record<string, string> {
     // Use override if available, otherwise use original values from API
     const kilocodeToken = env.KILOCODE_TOKEN_OVERRIDE ?? originalToken;
@@ -507,18 +552,30 @@ export class SessionService {
     if (env.KILO_OPENROUTER_BASE) {
       providerOptions.baseURL = env.KILO_OPENROUTER_BASE;
     }
-    const configContent: Record<string, unknown> = {
-      permission: {
-        external_directory: {
-          [`/tmp/attachments/${sessionId}/**`]: 'allow',
-        },
+    const permissionConfig: Record<string, unknown> = {
+      external_directory: {
+        [`/tmp/attachments/${sessionId}/**`]: 'allow',
       },
+    };
+    // Add MCP server configs converted to CLI-native format
+    let mcpConfig: Record<string, Record<string, unknown>> | undefined;
+    if (mcpServers && Object.keys(mcpServers).length > 0) {
+      const { mcp, permission: mcpPermissions } = convertMcpServersForCli(mcpServers);
+      mcpConfig = mcp;
+      // Merge alwaysAllow-derived permission rules with existing permissions
+      Object.assign(permissionConfig, mcpPermissions);
+    }
+    const configContent: Record<string, unknown> = {
+      permission: permissionConfig,
       provider: {
         kilo: {
           options: providerOptions,
         },
       },
     };
+    if (mcpConfig) {
+      configContent.mcp = mcpConfig;
+    }
     if (kilocodeModel && kilocodeModel.trim()) {
       const normalizedModel = kilocodeModel.startsWith('kilo/')
         ? kilocodeModel
@@ -601,7 +658,8 @@ export class SessionService {
     originalOrgId?: string,
     encryptedSecrets?: EncryptedSecrets,
     createdOnPlatform?: string,
-    appendSystemPrompt?: string
+    appendSystemPrompt?: string,
+    mcpServers?: Record<string, MCPServerConfig>
   ) {
     const { sessionId, sessionHome, workspacePath, envVars } = context;
 
@@ -621,7 +679,8 @@ export class SessionService {
       appendSystemPrompt,
       context.gitUrl,
       context.gitToken,
-      context.platform
+      context.platform,
+      mcpServers
     );
 
     const session = await sandbox.createSession({
@@ -721,7 +780,9 @@ export class SessionService {
       kilocodeModel,
       orgId,
       encryptedSecrets,
-      createdOnPlatform
+      createdOnPlatform,
+      undefined, // appendSystemPrompt
+      mcpServers
     );
 
     // Check disk space before clone for observability (logs warning if low)
@@ -764,11 +825,6 @@ export class SessionService {
     // Run setup commands after branch checkout
     if (setupCommands && setupCommands.length > 0) {
       await runSetupCommands(session, context, setupCommands, true); // fail-fast
-    }
-
-    // Write MCP server settings
-    if (mcpServers && Object.keys(mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, mcpServers);
     }
 
     // Write auth file for session ingest
@@ -1006,7 +1062,8 @@ export class SessionService {
       orgId,
       encryptedSecrets,
       options.createdOnPlatform ?? existingMetadata?.createdOnPlatform,
-      existingMetadata?.appendSystemPrompt
+      existingMetadata?.appendSystemPrompt,
+      mcpServers
     );
 
     // Check disk space before clone for observability (logs warning if low)
@@ -1057,11 +1114,6 @@ export class SessionService {
     // Run setup commands (lenient mode since resuming)
     if (setupCommands && setupCommands.length > 0) {
       await runSetupCommands(session, context, setupCommands, false);
-    }
-
-    // Write MCP settings
-    if (mcpServers && Object.keys(mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, mcpServers);
     }
 
     // Write auth file for session ingest
@@ -1208,7 +1260,8 @@ export class SessionService {
       orgId,
       metadata?.encryptedSecrets,
       metadata?.createdOnPlatform,
-      metadata?.appendSystemPrompt
+      metadata?.appendSystemPrompt,
+      metadata?.mcpServers
     );
 
     // Check if workspace repo exists - if not, we may need to reclone
@@ -1310,11 +1363,6 @@ export class SessionService {
     if (metadata.setupCommands && metadata.setupCommands.length > 0) {
       logger.info('Re-running setup commands after fresh clone');
       await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
-    }
-
-    // Re-write MCP settings (fresh clone)
-    if (metadata.mcpServers && Object.keys(metadata.mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, metadata.mcpServers);
     }
 
     // Re-write auth file (fresh clone)

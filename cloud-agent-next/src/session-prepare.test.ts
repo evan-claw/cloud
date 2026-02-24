@@ -72,7 +72,6 @@ vi.mock('./session-service.js', () => ({
   ),
   runSetupCommands: vi.fn().mockResolvedValue(undefined),
   writeAuthFile: vi.fn().mockResolvedValue(undefined),
-  writeMCPSettings: vi.fn().mockResolvedValue(undefined),
   InvalidSessionMetadataError: class InvalidSessionMetadataError extends Error {
     constructor(
       public readonly userId: string,
