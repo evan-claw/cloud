@@ -13,6 +13,7 @@ import {
   extractNormalizedPlatformFromItem,
   extractNormalizedTitleFromItem,
 } from './session-ingest-extractors';
+import { stripIngestBloat } from '../util/strip-ingest-bloat';
 import {
   computeSessionMetrics,
   INACTIVITY_TIMEOUT_MS,
@@ -139,7 +140,8 @@ export class SessionIngestDO extends DurableObject<Env> {
     let hasSessionOpen = false;
     let closeReason: string | undefined;
 
-    for (const item of payload) {
+    for (const raw of payload) {
+      const item = stripIngestBloat(raw);
       const { item_id, item_type } = getItemIdentity(item);
 
       const itemDataJson = JSON.stringify(item.data);
