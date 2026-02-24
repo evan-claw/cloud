@@ -504,7 +504,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           flyMachineId: this.flyMachineId,
           flyVolumeId: this.flyVolumeId,
           flyRegion: this.flyRegion,
-          volumeSizeGb: this.volumeSizeGb,
+          volumeSizeGb: this.flyVolumeId ? this.volumeSizeGb : null,
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
