@@ -9,7 +9,6 @@ type ToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
 
 export type BotToolResult = {
   content: string;
-  metadata?: Record<string, unknown>;
 };
 
 export type BotRunInput = {
