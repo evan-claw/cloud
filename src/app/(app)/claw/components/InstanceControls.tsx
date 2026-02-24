@@ -70,6 +70,7 @@ export function InstanceControls({
         window.clearTimeout(bannerTimeoutRef.current);
         bannerTimeoutRef.current = null;
       }
+      setPhraseIndex(Math.floor(Math.random() * openclawPhrases.length));
       setShowBanner(true);
       return;
     }
@@ -78,12 +79,19 @@ export function InstanceControls({
       return;
     }
 
+    const pickRandomPhrase = () => {
+      const nextIndex = Math.floor(Math.random() * openclawPhrases.length);
+      setPhraseIndex(nextIndex);
+    };
+
+    const phraseInterval = window.setInterval(pickRandomPhrase, 3500);
     bannerTimeoutRef.current = window.setTimeout(() => {
       setShowBanner(false);
       bannerTimeoutRef.current = null;
     }, 5000);
 
     return () => {
+      window.clearInterval(phraseInterval);
       if (bannerTimeoutRef.current !== null) {
         window.clearTimeout(bannerTimeoutRef.current);
         bannerTimeoutRef.current = null;
@@ -105,7 +113,6 @@ export function InstanceControls({
           disabled={!isStopped || mutations.start.isPending || isDestroying}
           onClick={() => {
             posthog?.capture('claw_start_instance_clicked', { instance_status: status.status });
-            setPhraseIndex(prevIndex => (prevIndex + 1) % openclawPhrases.length);
             mutations.start.mutate();
           }}
         >
@@ -161,7 +168,6 @@ export function InstanceControls({
       {showBanner ? (
         <div className="mt-2 flex items-center gap-2">
           <div className="claw-banner text-muted-foreground/90 border-muted-foreground/30 bg-muted/30 relative flex items-center gap-3 overflow-hidden rounded-full border px-3 py-1 text-xs">
-            <span className="text-sm">🦞</span>
             <span className="text-sm">🦀</span>
             <span className="claw-fade" key={openclawPhrases[phraseIndex]}>
               {openclawPhrases[phraseIndex]}
