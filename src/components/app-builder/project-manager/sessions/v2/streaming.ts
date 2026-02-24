@@ -180,6 +180,10 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
         // onStreamComplete is called from onSessionStatusChanged (idle) — not here,
         // to avoid triggering preview polling twice per stream completion.
       },
+
+      onQuestionAsked: (requestId, callId) => {
+        store.setQuestionRequestId(callId, requestId);
+      },
     };
   }
 

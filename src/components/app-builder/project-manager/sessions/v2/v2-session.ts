@@ -108,5 +108,7 @@ export function createV2Session(config: CreateV2SessionConfig): V2Session {
     connectToExistingSession,
     loadMessages,
     destroy,
+    cloudAgentSessionId: cloudAgentSessionId ?? null,
+    organizationId: organizationId ?? null,
   };
 }

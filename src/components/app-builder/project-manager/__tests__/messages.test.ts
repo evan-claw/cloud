@@ -22,6 +22,7 @@ function createMockStore(initialMessages: CloudMessage[] = []): V1SessionStore {
     getState: () => ({
       messages,
       isStreaming: false,
+      questionRequestIds: new Map<string, string>(),
     }),
     setState: jest.fn(partial => {
       if ('messages' in partial && partial.messages) {
@@ -37,6 +38,7 @@ function createMockStore(initialMessages: CloudMessage[] = []): V1SessionStore {
       messages = updater(messages);
       listeners.forEach(l => l());
     }),
+    setQuestionRequestId: jest.fn(),
   };
 }
 

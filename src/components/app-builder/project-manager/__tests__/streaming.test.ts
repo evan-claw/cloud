@@ -30,6 +30,7 @@ function createMockStore(): {
   setState: jest.Mock;
   subscribe: jest.Mock;
   updateMessages: jest.Mock;
+  setQuestionRequestId: jest.Mock;
   stateUpdates: Array<Record<string, unknown>>;
 } {
   const stateUpdates: Array<Record<string, unknown>> = [];
@@ -38,7 +39,7 @@ function createMockStore(): {
 
   return {
     stateUpdates,
-    getState: () => ({ messages, isStreaming }),
+    getState: () => ({ messages, isStreaming, questionRequestIds: new Map<string, string>() }),
     setState: jest.fn((partial: Partial<V1SessionState>) => {
       stateUpdates.push(partial);
       if ('messages' in partial && partial.messages) {
@@ -52,6 +53,7 @@ function createMockStore(): {
     updateMessages: jest.fn((updater: (msgs: CloudMessage[]) => CloudMessage[]) => {
       messages = updater(messages);
     }),
+    setQuestionRequestId: jest.fn(),
   };
 }
 

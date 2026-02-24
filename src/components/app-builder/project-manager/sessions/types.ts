@@ -36,6 +36,8 @@ export type V1Session = SessionBase & {
 export type V2Session = SessionBase & {
   type: 'v2';
   getState: () => V2SessionState;
+  cloudAgentSessionId: string | null;
+  organizationId: string | null;
 };
 
 export type AppBuilderSession = V1Session | V2Session;

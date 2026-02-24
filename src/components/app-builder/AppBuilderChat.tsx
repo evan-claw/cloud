@@ -31,6 +31,7 @@ import type { CloudMessage } from '@/components/cloud-agent/types';
 import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import { isMessageStreaming } from '@/components/cloud-agent-next/types';
 import { MessageBubble as V2MessageBubble } from '@/components/cloud-agent-next/MessageBubble';
+import { QuestionContextProvider } from '@/components/cloud-agent-next/QuestionContext';
 import type { AppBuilderSession, V1Session, V2Session } from './project-manager/types';
 import {
   filterAppBuilderMessages,
@@ -372,11 +373,15 @@ function V2SessionMessages({ session }: { session: V2Session }) {
   }
 
   return (
-    <>
+    <QuestionContextProvider
+      questionRequestIds={sessionState.questionRequestIds}
+      cloudAgentSessionId={session.cloudAgentSessionId}
+      organizationId={session.organizationId}
+    >
       <V2StaticMessages messages={v2Static} />
       <V2DynamicMessages messages={v2Dynamic} />
       {sessionState.isStreaming && v2Dynamic.length === 0 && <TypingIndicator />}
-    </>
+    </QuestionContextProvider>
   );
 }
 

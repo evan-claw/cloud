@@ -22,6 +22,8 @@ import {
   sessionConfigAtom,
   totalCostAtom,
   getChildSessionMessagesAtom,
+  questionRequestIdsAtom,
+  sessionOrganizationIdAtom,
 } from './store/atoms';
 import { buildSessionConfig, needsResumeConfiguration } from './session-config';
 import {
@@ -52,6 +54,7 @@ import { usePreparedSession } from './hooks/usePreparedSession';
 import { buildPrepareSessionRepoParams, extractRepoFromGitUrl } from './utils/git-utils';
 import { useSlashCommandSets } from '@/hooks/useSlashCommandSets';
 import { CloudChatPresentation } from './CloudChatPresentation';
+import { QuestionContextProvider } from './QuestionContext';
 import type { ResumeConfig } from './ResumeConfigModal';
 import type { AgentMode, SessionStartConfig } from './types';
 
@@ -80,6 +83,8 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const sessionConfig = useAtomValue(sessionConfigAtom);
   const totalCost = useAtomValue(totalCostAtom);
+  const questionRequestIds = useAtomValue(questionRequestIdsAtom);
+  const questionOrganizationId = useAtomValue(sessionOrganizationIdAtom);
 
   // Write to atoms
   const setError = useSetAtom(errorAtom);
@@ -906,63 +911,69 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
     : false;
 
   return (
-    <CloudChatPresentation
-      organizationId={organizationId}
-      staticMessages={staticMessages}
-      dynamicMessages={dynamicMessages}
-      sessions={sessions}
-      currentSessionId={currentSessionId}
-      currentDbSessionId={currentDbSessionId}
-      cloudAgentSessionId={cloudAgentSessionId}
-      sessionConfig={sessionConfig}
-      totalCost={totalCost}
-      error={error}
-      isStreaming={isStreaming}
-      isLoadingFromDb={isLoadingFromDb}
-      isStale={isStale}
-      isSessionInitiated={isSessionInitiated}
-      showScrollButton={showScrollButton}
-      mobileSheetOpen={mobileSheetOpen}
-      soundEnabled={soundEnabled}
-      showOrgContextModal={showOrgContextModal}
-      showResumeModal={showResumeModal}
-      pendingSessionForOrgContext={pendingSessionForOrgContext}
-      pendingResumeSession={pendingResumeSession}
-      isNonResumableSession={isNonResumableSession}
-      needsResumeConfig={needsResumeConfig}
-      resumeConfigPersisting={resumeConfigPersisting}
-      resumeConfigFailed={resumeConfigError !== null}
-      resumeConfigError={resumeConfigError}
-      modelOptions={modelOptions}
-      isLoadingModels={isLoadingModels}
-      defaultModel={defaultModel}
-      availableCommands={availableCommands}
-      scrollContainerRef={scrollContainerRef}
-      messagesEndRef={messagesEndRef}
-      persistedResumeConfig={persistedResumeConfig}
-      onSendMessage={handleSendMessage}
-      onStopExecution={handleStopExecution}
-      onRefresh={handleRefreshSession}
-      onNewSession={handleNewSession}
-      onSelectSession={handleSelectSession}
-      onDeleteSession={handleDeleteSession}
-      onDismissError={handleDismissError}
-      onOrgContextConfirm={handleOrgContextConfirm}
-      onOrgContextClose={handleOrgContextClose}
-      onResumeConfirm={handleResumeConfirm}
-      onResumeClose={handleResumeClose}
-      onReopenResumeModal={reopenResumeModal}
-      onScroll={handleScroll}
-      onScrollToBottom={scrollToBottom}
-      onToggleSound={handleToggleSound}
-      onMenuClick={() => setMobileSheetOpen(true)}
-      onMobileSheetOpenChange={setMobileSheetOpen}
-      inputMode={inputMode}
-      inputModel={inputModel}
-      onInputModeChange={handleInputModeChange}
-      onInputModelChange={handleInputModelChange}
-      isOldSession={isOldSession}
-      getChildMessages={getChildSessionMessages}
-    />
+    <QuestionContextProvider
+      questionRequestIds={questionRequestIds}
+      cloudAgentSessionId={currentSessionId}
+      organizationId={questionOrganizationId}
+    >
+      <CloudChatPresentation
+        organizationId={organizationId}
+        staticMessages={staticMessages}
+        dynamicMessages={dynamicMessages}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        currentDbSessionId={currentDbSessionId}
+        cloudAgentSessionId={cloudAgentSessionId}
+        sessionConfig={sessionConfig}
+        totalCost={totalCost}
+        error={error}
+        isStreaming={isStreaming}
+        isLoadingFromDb={isLoadingFromDb}
+        isStale={isStale}
+        isSessionInitiated={isSessionInitiated}
+        showScrollButton={showScrollButton}
+        mobileSheetOpen={mobileSheetOpen}
+        soundEnabled={soundEnabled}
+        showOrgContextModal={showOrgContextModal}
+        showResumeModal={showResumeModal}
+        pendingSessionForOrgContext={pendingSessionForOrgContext}
+        pendingResumeSession={pendingResumeSession}
+        isNonResumableSession={isNonResumableSession}
+        needsResumeConfig={needsResumeConfig}
+        resumeConfigPersisting={resumeConfigPersisting}
+        resumeConfigFailed={resumeConfigError !== null}
+        resumeConfigError={resumeConfigError}
+        modelOptions={modelOptions}
+        isLoadingModels={isLoadingModels}
+        defaultModel={defaultModel}
+        availableCommands={availableCommands}
+        scrollContainerRef={scrollContainerRef}
+        messagesEndRef={messagesEndRef}
+        persistedResumeConfig={persistedResumeConfig}
+        onSendMessage={handleSendMessage}
+        onStopExecution={handleStopExecution}
+        onRefresh={handleRefreshSession}
+        onNewSession={handleNewSession}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+        onDismissError={handleDismissError}
+        onOrgContextConfirm={handleOrgContextConfirm}
+        onOrgContextClose={handleOrgContextClose}
+        onResumeConfirm={handleResumeConfirm}
+        onResumeClose={handleResumeClose}
+        onReopenResumeModal={reopenResumeModal}
+        onScroll={handleScroll}
+        onScrollToBottom={scrollToBottom}
+        onToggleSound={handleToggleSound}
+        onMenuClick={() => setMobileSheetOpen(true)}
+        onMobileSheetOpenChange={setMobileSheetOpen}
+        inputMode={inputMode}
+        inputModel={inputModel}
+        onInputModeChange={handleInputModeChange}
+        onInputModelChange={handleInputModelChange}
+        isOldSession={isOldSession}
+        getChildMessages={getChildSessionMessages}
+      />
+    </QuestionContextProvider>
   );
 }
