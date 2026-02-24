@@ -355,6 +355,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
+  private backfillingVolumeSize = false;
 
   // ---- State loading ----
 
@@ -999,7 +1000,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           console.warn('[DO] Volume not found during region check, clearing');
           this.flyVolumeId = null;
           this.flyRegion = null;
-          await this.ctx.storage.put(storageUpdate({ flyVolumeId: null, flyRegion: null }));
+          this.volumeSizeGb = null;
+          await this.ctx.storage.put(
+            storageUpdate({ flyVolumeId: null, flyRegion: null, volumeSizeGb: null })
+          );
           await this.ensureVolume(flyConfig, 'start');
         }
         // Other errors: proceed with cached region, createMachine will fail
@@ -1216,8 +1220,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Fire-and-forget backfill: if we have a volume but no cached size,
     // fetch it from the Fly API so the next poll returns the real value.
-    if (this.volumeSizeGb === null && this.flyVolumeId) {
-      this.ctx.waitUntil(this.backfillVolumeSizeGb());
+    if (this.volumeSizeGb === null && this.flyVolumeId && !this.backfillingVolumeSize) {
+      this.backfillingVolumeSize = true;
+      this.ctx.waitUntil(
+        this.backfillVolumeSizeGb().finally(() => {
+          this.backfillingVolumeSize = false;
+        })
+      );
     }
 
     return {
@@ -1494,7 +1503,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           old_volume_id: this.flyVolumeId,
         });
         this.flyVolumeId = null;
-        await this.ctx.storage.put(storageUpdate({ flyVolumeId: null }));
+        this.volumeSizeGb = null;
+        await this.ctx.storage.put(storageUpdate({ flyVolumeId: null, volumeSizeGb: null }));
         await this.ensureVolume(flyConfig, reason);
       }
       // Other errors: leave as-is, retry next alarm
@@ -1847,7 +1857,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // Success or 404: clear
     this.pendingDestroyVolumeId = null;
     this.flyVolumeId = null;
-    await this.ctx.storage.put(storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null }));
+    this.volumeSizeGb = null;
+    await this.ctx.storage.put(
+      storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null, volumeSizeGb: null })
+    );
   }
 
   /**
@@ -1885,6 +1898,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.flyMachineId = null;
     this.flyVolumeId = null;
     this.flyRegion = null;
+    this.volumeSizeGb = null;
     this.machineSize = null;
     this.healthCheckFailCount = 0;
     this.pendingDestroyMachineId = null;
@@ -2049,7 +2063,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       // Fresh provision (never started) — no user data to preserve
       this.flyVolumeId = null;
       this.flyRegion = null;
-      await this.ctx.storage.put(storageUpdate({ flyVolumeId: null, flyRegion: null }));
+      this.volumeSizeGb = null;
+      await this.ctx.storage.put(
+        storageUpdate({ flyVolumeId: null, flyRegion: null, volumeSizeGb: null })
+      );
 
       const freshVolume = await fly.createVolumeWithFallback(
         flyConfig,
@@ -2204,6 +2221,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           flyMachineId: null,
           flyVolumeId: null,
           flyRegion: null,
+          volumeSizeGb: null,
           machineSize: null,
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
@@ -2227,6 +2245,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.flyMachineId = null;
       this.flyVolumeId = null;
       this.flyRegion = null;
+      this.volumeSizeGb = null;
       this.machineSize = null;
       this.healthCheckFailCount = 0;
       this.pendingDestroyMachineId = null;
