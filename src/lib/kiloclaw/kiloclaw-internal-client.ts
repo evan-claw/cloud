@@ -10,8 +10,12 @@ import type {
   ChannelsPatchResponse,
   PairingListResponse,
   PairingApproveResponse,
+  DevicePairingListResponse,
+  DevicePairingApproveResponse,
   VolumeSnapshotsResponse,
   DoctorResponse,
+  GatewayProcessStatusResponse,
+  GatewayProcessActionResponse,
 } from './types';
 
 /**
@@ -125,8 +129,52 @@ export class KiloClawInternalClient {
     });
   }
 
+  async listDevicePairingRequests(
+    userId: string,
+    refresh = false
+  ): Promise<DevicePairingListResponse> {
+    const params = new URLSearchParams({ userId });
+    if (refresh) params.set('refresh', 'true');
+    return this.request(`/api/platform/device-pairing?${params.toString()}`);
+  }
+
+  async approveDevicePairingRequest(
+    userId: string,
+    requestId: string
+  ): Promise<DevicePairingApproveResponse> {
+    return this.request('/api/platform/device-pairing/approve', {
+      method: 'POST',
+      body: JSON.stringify({ userId, requestId }),
+    });
+  }
+
   async runDoctor(userId: string): Promise<DoctorResponse> {
     return this.request('/api/platform/doctor', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async getGatewayStatus(userId: string): Promise<GatewayProcessStatusResponse> {
+    return this.request(`/api/platform/gateway/status?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async startGateway(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/start', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async stopGateway(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/stop', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async restartGatewayProcess(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/restart', {
       method: 'POST',
       body: JSON.stringify({ userId }),
     });

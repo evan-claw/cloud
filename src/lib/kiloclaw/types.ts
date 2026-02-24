@@ -73,6 +73,27 @@ export type PairingApproveResponse = {
   message: string;
 };
 
+/** A pending device pairing request (e.g. Control UI or node) */
+export type DevicePairingRequest = {
+  requestId: string;
+  deviceId: string;
+  role?: string;
+  platform?: string;
+  clientId?: string;
+  ts?: number;
+};
+
+/** Response from GET /api/platform/device-pairing */
+export type DevicePairingListResponse = {
+  requests: DevicePairingRequest[];
+};
+
+/** Response from POST /api/platform/device-pairing/approve */
+export type DevicePairingApproveResponse = {
+  success: boolean;
+  message: string;
+};
+
 /** Response from GET /api/platform/status and GET /api/kiloclaw/status */
 export type PlatformStatusResponse = {
   userId: string | null;
@@ -132,6 +153,24 @@ export type RestartGatewayResponse = {
   success: boolean;
   message?: string;
   error?: string;
+};
+
+/** Response from GET /api/platform/gateway/status */
+export type GatewayProcessStatusResponse = {
+  state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
+  pid: number | null;
+  uptime: number;
+  restarts: number;
+  lastExit: {
+    code: number | null;
+    signal: string | null;
+    at: string;
+  } | null;
+};
+
+/** Response from POST /api/platform/gateway/{start|stop|restart} */
+export type GatewayProcessActionResponse = {
+  ok: boolean;
 };
 
 /** Combined status + gateway token returned by tRPC getStatus */

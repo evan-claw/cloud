@@ -106,6 +106,8 @@ export type PrepareSessionInput = {
   images?: Images;
   /** Callback configuration for execution completion events */
   callbackTarget?: CallbackTarget;
+  /** Platform that created this session (e.g. 'security-agent', 'slack', 'app-builder') */
+  createdOnPlatform?: string;
 };
 
 /** Output from prepareSession procedure */

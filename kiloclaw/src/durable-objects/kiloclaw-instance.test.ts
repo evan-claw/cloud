@@ -50,6 +50,7 @@ vi.mock('../fly/client', async () => {
     getVolume: vi.fn(),
     listMachines: vi.fn().mockResolvedValue([]),
     listVolumeSnapshots: vi.fn().mockResolvedValue([]),
+    execCommand: vi.fn(),
   };
 });
 
@@ -143,6 +144,11 @@ function createFakeEnv() {
       get: vi.fn().mockReturnValue(appStub),
     } as unknown,
     HYPERDRIVE: { connectionString: '' } as unknown,
+    KV_CLAW_CACHE: {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as unknown,
   };
 }
 
@@ -622,6 +628,38 @@ describe('createNewMachine: persist ID before waitForState', () => {
     expect(idAtWaitTime).toBe('machine-fresh');
   });
 
+  it('includes Fly HTTP health check config in machine create request', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    (flyClient.createMachine as Mock).mockResolvedValue({
+      id: 'machine-health-check',
+      region: 'iad',
+    });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.start('user-1');
+
+    expect(flyClient.createMachine).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        checks: {
+          controller: {
+            type: 'http',
+            port: 18789,
+            method: 'GET',
+            path: '/_kilo/health',
+            interval: '30s',
+            timeout: '5s',
+            grace_period: '60s',
+          },
+        },
+      }),
+      expect.anything()
+    );
+  });
+
   it('preserves machine ID in storage even if waitForState fails', async () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
@@ -637,6 +675,157 @@ describe('createNewMachine: persist ID before waitForState', () => {
 
     // Machine ID is persisted despite the failure — not orphaned
     expect(storage._store.get('flyMachineId')).toBe('machine-orphan-safe');
+  });
+});
+
+describe('gateway process control via controller', () => {
+  it('allows gateway status calls when machine ID exists even if DO status is stale', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'stopped',
+      flyMachineId: 'machine-1',
+      flyAppName: 'acct-test',
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          state: 'running',
+          pid: 123,
+          uptime: 42,
+          restarts: 1,
+          lastExit: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await instance.getGatewayProcessStatus();
+    expect(status.state).toBe('running');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('calls gateway status through Fly Proxy with controller auth headers', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyMachineId: 'machine-1', flyAppName: 'acct-test' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          state: 'running',
+          pid: 123,
+          uptime: 42,
+          restarts: 1,
+          lastExit: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    const status = await instance.getGatewayProcessStatus();
+
+    expect(status.state).toBe('running');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://acct-test.fly.dev/_kilo/gateway/status',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          'fly-force-instance-id': 'machine-1',
+        }),
+      })
+    );
+
+    const call = fetchSpy.mock.calls[0];
+    const headers = new Headers(call[1]?.headers);
+    expect(headers.get('authorization')).toMatch(/^Bearer [a-f0-9]{64}$/);
+    fetchSpy.mockRestore();
+  });
+
+  it('starts, stops, and restarts the gateway process through controller routes', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyMachineId: 'machine-1', flyAppName: 'acct-test' });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+    await instance.startGatewayProcess();
+    await instance.stopGatewayProcess();
+    await instance.restartGatewayProcess();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('https://acct-test.fly.dev/_kilo/gateway/start');
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe('https://acct-test.fly.dev/_kilo/gateway/stop');
+    expect(fetchSpy.mock.calls[2]?.[0]).toBe('https://acct-test.fly.dev/_kilo/gateway/restart');
+    fetchSpy.mockRestore();
+  });
+
+  it('surfaces controller HTTP status errors', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyMachineId: 'machine-1', flyAppName: 'acct-test' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'Gateway already running or starting' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(instance.startGatewayProcess()).rejects.toSatisfy((err: unknown) => {
+      if (typeof err !== 'object' || err === null) return false;
+      return (
+        'status' in err &&
+        (err as { status: number }).status === 409 &&
+        'message' in err &&
+        (err as { message: string }).message.includes('already running')
+      );
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  it('rejects invalid controller success payload shape', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyMachineId: 'machine-1', flyAppName: 'acct-test' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: 'yes' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(instance.startGatewayProcess()).rejects.toSatisfy((err: unknown) => {
+      if (typeof err !== 'object' || err === null) return false;
+      return (
+        'status' in err &&
+        (err as { status: number }).status === 502 &&
+        'message' in err &&
+        (err as { message: string }).message.includes('invalid response')
+      );
+    });
+
+    fetchSpy.mockRestore();
   });
 });
 
@@ -1409,5 +1598,145 @@ describe('listVolumeSnapshots', () => {
 
     expect(result).toEqual([]);
     expect(flyClient.listVolumeSnapshots).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Device pairing
+// ============================================================================
+describe('listDevicePairingRequests', () => {
+  it('returns empty when not running', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result).toEqual({ requests: [] });
+  });
+
+  it('calls execCommand and parses JSON output', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    const fakeOutput = JSON.stringify({
+      requests: [
+        { requestId: 'abc-123', deviceId: 'dev-1', role: 'operator', platform: 'MacIntel' },
+      ],
+    });
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: fakeOutput,
+      stderr: '',
+    });
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result.requests).toHaveLength(1);
+    expect(result.requests[0].requestId).toBe('abc-123');
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'node', '/usr/local/bin/openclaw-device-pairing-list.js'],
+      60
+    );
+  });
+
+  it('returns empty on exec failure', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 1,
+      stdout: '',
+      stderr: 'something went wrong',
+    });
+
+    const result = await instance.listDevicePairingRequests();
+
+    expect(result).toEqual({ requests: [] });
+  });
+});
+
+describe('approveDevicePairingRequest', () => {
+  it('rejects invalid requestId format', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    const result = await instance.approveDevicePairingRequest('not-a-uuid');
+
+    expect(result).toEqual({ success: false, message: 'Invalid request ID' });
+    expect(flyClient.execCommand).not.toHaveBeenCalled();
+  });
+
+  it('returns not running when instance is stopped', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
+
+    expect(result).toEqual({ success: false, message: 'Instance is not running' });
+  });
+
+  it('calls openclaw devices approve with the requestId', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: 'approved',
+      stderr: '',
+    });
+
+    const requestId = '58f4ac67-12b4-4f6e-adee-ff3463a7c30c';
+    const result = await instance.approveDevicePairingRequest(requestId);
+
+    expect(result).toEqual({ success: true, message: 'Device pairing approved' });
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+  });
+
+  it('accepts uppercase UUIDs', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 0,
+      stdout: 'approved',
+      stderr: '',
+    });
+
+    const requestId = '58F4AC67-12B4-4F6E-ADEE-FF3463A7C30C';
+    const result = await instance.approveDevicePairingRequest(requestId);
+
+    expect(result).toEqual({ success: true, message: 'Device pairing approved' });
+    expect(flyClient.execCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      'machine-1',
+      ['/usr/bin/env', 'HOME=/root', 'openclaw', 'devices', 'approve', requestId],
+      60
+    );
+  });
+
+  it('returns failure message on exec error', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyAppName: 'acct-test' });
+
+    (flyClient.execCommand as Mock).mockResolvedValue({
+      exit_code: 1,
+      stdout: '',
+      stderr: 'request not found',
+    });
+
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
+
+    expect(result).toEqual({ success: false, message: 'request not found' });
   });
 });

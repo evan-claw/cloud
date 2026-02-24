@@ -273,6 +273,30 @@ export const kiloclawRouter = createTRPCRouter({
       return client.approvePairingRequest(ctx.user.id, input.channel, input.code);
     }),
 
+  listDevicePairingRequests: kiloclawProcedure
+    .input(z.object({ refresh: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      return client.listDevicePairingRequests(ctx.user.id, input?.refresh);
+    }),
+
+  approveDevicePairingRequest: kiloclawProcedure
+    .input(z.object({ requestId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      return client.approveDevicePairingRequest(ctx.user.id, input.requestId);
+    }),
+
+  gatewayStatus: kiloclawProcedure.query(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.getGatewayStatus(ctx.user.id);
+  }),
+
+  restartOpenClaw: kiloclawProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.restartGatewayProcess(ctx.user.id);
+  }),
+
   runDoctor: kiloclawProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.runDoctor(ctx.user.id);
