@@ -31,6 +31,7 @@ export async function getBYOKforUser(
     .where(
       and(
         eq(byok_api_keys.kilo_user_id, userId),
+        eq(byok_api_keys.is_enabled, true),
         sql`lower(${byok_api_keys.provider_id}) = lower(${providerId})`
       )
     );
@@ -66,6 +67,7 @@ export async function getBYOKforOrganization(
     .where(
       and(
         eq(byok_api_keys.organization_id, organizationId),
+        eq(byok_api_keys.is_enabled, true),
         sql`lower(${byok_api_keys.provider_id}) = lower(${providerId})`
       )
     );

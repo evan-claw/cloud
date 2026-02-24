@@ -2296,6 +2296,7 @@ export const byok_api_keys = pgTable(
     kilo_user_id: text().references(() => kilocode_users.id, { onDelete: 'cascade' }),
     provider_id: text().notNull(),
     encrypted_api_key: jsonb().$type<EncryptedData>().notNull(),
+    is_enabled: boolean().default(true).notNull(),
     created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
     updated_at: timestamp({ withTimezone: true, mode: 'string' })
       .defaultNow()
