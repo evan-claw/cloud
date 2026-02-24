@@ -7,7 +7,6 @@ import {
   determineBranchName,
   runSetupCommands,
   writeAuthFile,
-  writeMCPSettings,
 } from '../../session-service.js';
 import { InstallationLookupService } from '../../services/installation-lookup-service.js';
 import { GitHubTokenService } from '../../services/github-token-service.js';
@@ -232,7 +231,8 @@ const prepareSessionHandler = internalApiProtectedProcedure
         input.kilocodeOrganizationId,
         input.encryptedSecrets,
         input.createdOnPlatform,
-        input.appendSystemPrompt
+        input.appendSystemPrompt,
+        input.mcpServers
       );
 
       // 6. Clone repository
@@ -275,15 +275,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         await runSetupCommands(session, context, input.setupCommands, true); // fail-fast
       }
 
-      // 9. Write MCP settings
-      if (input.mcpServers && Object.keys(input.mcpServers).length > 0) {
-        logger
-          .withFields({ count: Object.keys(input.mcpServers).length })
-          .info('Writing MCP settings');
-        await writeMCPSettings(sandbox, sessionHome, input.mcpServers);
-      }
-
-      // 9b. Write auth file for session ingest
+      // 9. Write auth file for session ingest
       await writeAuthFile(sandbox, sessionHome, ctx.authToken);
 
       // 10. Start kilo server

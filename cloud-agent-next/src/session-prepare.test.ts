@@ -72,7 +72,6 @@ vi.mock('./session-service.js', () => ({
   ),
   runSetupCommands: vi.fn().mockResolvedValue(undefined),
   writeAuthFile: vi.fn().mockResolvedValue(undefined),
-  writeMCPSettings: vi.fn().mockResolvedValue(undefined),
   InvalidSessionMetadataError: class InvalidSessionMetadataError extends Error {
     constructor(
       public readonly userId: string,
@@ -350,14 +349,13 @@ describe('prepareSession endpoint', () => {
         githubToken: 'ghp_test_token',
         envVars: { API_KEY: 'secret' },
         setupCommands: ['npm install'],
-        mcpServers: { test: { command: 'npx', args: ['test-server'] } },
+        mcpServers: { test: { type: 'local', command: ['npx', 'test-server'] } },
         upstreamBranch: 'feature/test-branch',
         autoCommit: true,
         kilocodeOrganizationId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
       });
 
       // Verify the DO was called with the expected configuration
-      // Note: mcpServers schema adds default values (type, timeout, alwaysAllow, disabledTools)
       expect(doStub.prepare).toHaveBeenCalledTimes(1);
       const callArg = doStub.prepare.mock.calls[0][0];
       expect(callArg.envVars).toEqual({ API_KEY: 'secret' });
@@ -365,8 +363,7 @@ describe('prepareSession endpoint', () => {
       expect(callArg.upstreamBranch).toBe('feature/test-branch');
       expect(callArg.autoCommit).toBe(true);
       expect(callArg.orgId).toBe('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-      expect(callArg.mcpServers.test.command).toBe('npx');
-      expect(callArg.mcpServers.test.args).toEqual(['test-server']);
+      expect(callArg.mcpServers.test).toEqual({ type: 'local', command: ['npx', 'test-server'] });
     });
   });
 
@@ -993,9 +990,9 @@ describe('integration flow tests', () => {
 describe('MCP server count limits', () => {
   it('should reject more than MAX_MCP_SERVERS in PrepareSessionInput', () => {
     // Create an object with MAX_MCP_SERVERS + 1 servers
-    const tooManyServers: Record<string, { command: string }> = {};
+    const tooManyServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i <= schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      tooManyServers[`server${i}`] = { command: 'npx' };
+      tooManyServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.PrepareSessionInput.safeParse({
@@ -1012,9 +1009,9 @@ describe('MCP server count limits', () => {
   });
 
   it('should accept exactly MAX_MCP_SERVERS in PrepareSessionInput', () => {
-    const maxServers: Record<string, { command: string }> = {};
+    const maxServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i < schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      maxServers[`server${i}`] = { command: 'npx' };
+      maxServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.PrepareSessionInput.safeParse({
@@ -1028,9 +1025,9 @@ describe('MCP server count limits', () => {
   });
 
   it('should reject more than MAX_MCP_SERVERS in UpdateSessionInput', () => {
-    const tooManyServers: Record<string, { command: string }> = {};
+    const tooManyServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i <= schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      tooManyServers[`server${i}`] = { command: 'npx' };
+      tooManyServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.UpdateSessionInput.safeParse({

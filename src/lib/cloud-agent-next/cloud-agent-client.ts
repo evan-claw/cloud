@@ -19,37 +19,24 @@ import { INTERNAL_API_SECRET } from '@/lib/config.server';
 // TODO: Update this URL when the new cloud-agent-next worker is deployed
 const CLOUD_AGENT_NEXT_API_URL = getEnvVariable('CLOUD_AGENT_NEXT_API_URL') || '';
 
-// MCP server config types (local definition to avoid importing from cloud-agent)
-// Supports three transport types: stdio, sse, and streamable-http
-type MCPServerBaseConfig = {
-  disabled?: boolean;
+// MCP server config types — CLI-native local/remote format
+type MCPLocalServerConfig = {
+  type: 'local';
+  command: string[];
+  environment?: Record<string, string>;
+  enabled?: boolean;
   timeout?: number;
-  alwaysAllow?: string[];
-  watchPaths?: string[];
-  disabledTools?: string[];
 };
 
-type MCPStdioServerConfig = MCPServerBaseConfig & {
-  type?: 'stdio';
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
-};
-
-type MCPSseServerConfig = MCPServerBaseConfig & {
-  type: 'sse';
+type MCPRemoteServerConfig = {
+  type: 'remote';
   url: string;
   headers?: Record<string, string>;
+  enabled?: boolean;
+  timeout?: number;
 };
 
-type MCPStreamableHttpServerConfig = MCPServerBaseConfig & {
-  type: 'streamable-http';
-  url: string;
-  headers?: Record<string, string>;
-};
-
-type MCPServerConfig = MCPStdioServerConfig | MCPSseServerConfig | MCPStreamableHttpServerConfig;
+type MCPServerConfig = MCPLocalServerConfig | MCPRemoteServerConfig;
 
 /**
  * Type definitions for cloud-agent-next API procedures
