@@ -75,8 +75,8 @@ export const cloudAgentNextFeedbackRouter = createTRPCRouter({
             unfurl_media: false,
             blocks: [
               {
-                type: 'header',
-                text: { type: 'plain_text', text: 'New Cloud Agent feedback :robot_face:' },
+                type: 'section',
+                text: { type: 'mrkdwn', text: '*New Cloud Agent feedback:* :robot_face:' },
               },
               {
                 type: 'section',

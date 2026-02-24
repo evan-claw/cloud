@@ -82,8 +82,8 @@ export const appBuilderFeedbackRouter = createTRPCRouter({
             unfurl_media: false,
             blocks: [
               {
-                type: 'header',
-                text: { type: 'plain_text', text: 'New App Builder feedback :hammer_and_wrench:' },
+                type: 'section',
+                text: { type: 'mrkdwn', text: '*New App Builder feedback:* :hammer_and_wrench:' },
               },
               {
                 type: 'section',
