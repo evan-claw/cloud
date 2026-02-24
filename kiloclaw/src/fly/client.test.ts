@@ -63,6 +63,27 @@ describe('isFlyInsufficientResources', () => {
     expect(isFlyInsufficientResources(err)).toBe(true);
   });
 
+  // -- Confirmed production 403 payload: org quota exceeded --
+
+  it('matches production 403 payload: org memory quota exceeded in region', () => {
+    const body =
+      '{"error":"organization \\"Kilo\\" is using 1970176 MB of memory in dfw which is over the allowed quota. please consider other regions"}';
+    const err = new FlyApiError(`Fly API createMachine failed (403): ${body}`, 403, body);
+    expect(isFlyInsufficientResources(err)).toBe(true);
+  });
+
+  // -- Non-capacity 403s: must NOT trigger recovery --
+
+  it('returns false for auth 403 errors', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const body = '{"error":"forbidden: insufficient permissions"}';
+    const err = new FlyApiError(`Fly API failed (403): ${body}`, 403, body);
+    expect(isFlyInsufficientResources(err)).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
   // -- Non-capacity 409s: must NOT trigger recovery --
 
   it('returns false for non-capacity 409 conflicts', () => {
@@ -105,6 +126,19 @@ describe('isFlyInsufficientResources', () => {
     expect(isFlyInsufficientResources(err)).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(
       '[fly] Unclassified 412 error (not treated as capacity):',
+      body
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('returns false and logs warning for unclassified 403', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const body = '{"error":"some unknown 403 reason"}';
+    const err = new FlyApiError(`Fly API failed (403): ${body}`, 403, body);
+
+    expect(isFlyInsufficientResources(err)).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[fly] Unclassified 403 error (not treated as capacity):',
       body
     );
     warnSpy.mockRestore();

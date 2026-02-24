@@ -1,7 +1,9 @@
 'use client';
 
+import { TriangleAlert } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import { useKiloClawGatewayStatus, useKiloClawMutations } from '@/hooks/useKiloClaw';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGatewayUrl } from '../hooks/useGatewayUrl';
@@ -41,7 +43,16 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         sandboxId={status?.sandboxId || null}
         region={status?.flyRegion || null}
         gatewayUrl={gatewayUrl}
+        gatewayReady={gatewayStatus?.state === 'running'}
       />
+
+      <Alert variant="warning">
+        <TriangleAlert className="size-4" />
+        <AlertDescription>
+          KiloClaw ended up being really popular! We&apos;re working on getting additional capacity.
+          If you have trouble starting a machine, please try again in a few minutes.
+        </AlertDescription>
+      </Alert>
 
       <Card className="mt-6">
         {!instanceStatus ? (

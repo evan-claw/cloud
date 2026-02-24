@@ -47,6 +47,8 @@ import {
   SELF_HEAL_THRESHOLD,
   DEFAULT_FLY_REGION,
   LIVE_CHECK_THROTTLE_MS,
+  HEALTH_PROBE_TIMEOUT_SECONDS,
+  HEALTH_PROBE_INTERVAL_MS,
 } from '../config';
 import type { FlyClientConfig } from '../fly/client';
 import type {
@@ -249,6 +251,17 @@ export function parseRegions(regionList: string): string[] {
     .split(',')
     .map(r => r.trim())
     .filter(Boolean);
+}
+
+/** Fisher-Yates shuffle (in-place). Returns the same array for chaining. */
+export function shuffleRegions(regions: string[]): string[] {
+  for (let i = regions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = regions[i];
+    regions[i] = regions[j];
+    regions[j] = tmp;
+  }
+  return regions;
 }
 
 /**
@@ -458,7 +471,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // with capacity for both the volume and the expected machine spec.
     if (isNew && !this.flyVolumeId) {
       const flyConfig = this.getFlyConfig();
-      const regions = parseRegions(config.region ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION);
+      const regions = shuffleRegions(
+        parseRegions(config.region ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION)
+      );
       const guest = guestFromSize(config.machineSize ?? null);
       const volume = await fly.createVolumeWithFallback(
         flyConfig,
@@ -1083,11 +1098,15 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     } catch (err) {
       if (!fly.isFlyInsufficientResources(err)) throw err;
 
-      // 412: host where the volume lives has no capacity.
+      // Capacity error (403/409/412): host or region has no room.
       // Replace the volume (fork if user data exists, fresh otherwise)
       // and retry machine creation once.
-      console.warn('[DO] Insufficient resources (412), replacing stranded volume');
-      await this.replaceStrandedVolume(flyConfig, 'start_412_recovery');
+      // isFlyInsufficientResources guarantees err is FlyApiError
+      const code = err instanceof fly.FlyApiError ? err.status : 0;
+      console.error(
+        `[DO] Insufficient resources (${code}) in ${this.flyRegion ?? 'unknown'}, replacing stranded volume`
+      );
+      await this.replaceStrandedVolume(flyConfig, `start_${code}_recovery`);
 
       // Rebuild machine config with new volume ID
       const retryConfig = buildMachineConfig(
@@ -1099,6 +1118,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         identity
       );
       await this.createNewMachine(flyConfig, retryConfig, minSecretsVersion);
+    }
+
+    // Wait for the gateway process inside the container to be healthy
+    if (this.flyMachineId) {
+      await this.waitForHealthy(flyConfig.appName, this.flyMachineId);
     }
 
     // Update state
@@ -1449,6 +1473,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       await fly.updateMachine(flyConfig, this.flyMachineId, machineConfig, { minSecretsVersion });
       await fly.waitForState(flyConfig, this.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
+      await this.waitForHealthy(flyConfig.appName, this.flyMachineId);
 
       return { success: true };
     } catch (err) {
@@ -1932,6 +1957,78 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return this.env.FLY_REGISTRY_APP ?? this.env.FLY_APP_NAME ?? 'kiloclaw-machines';
   }
 
+  /**
+   * Poll the gateway status endpoint until the OpenClaw gateway process
+   * reports state === 'running', meaning it's ready to accept WebSocket
+   * connections on port 3001.
+   *
+   * The controller's /_kilo/health returns 200 as soon as the controller
+   * itself is up, which is too early — the gateway process spawns after.
+   * So we check /_kilo/gateway/status and parse the JSON state field.
+   *
+   * On timeout, logs a warning but does NOT throw — the caller proceeds
+   * anyway (the proxy layer catches lingering 502s with a friendly page).
+   */
+  private async waitForHealthy(appName: string, machineId: string): Promise<void> {
+    const url = `https://${appName}.fly.dev/_kilo/gateway/status`;
+    const deadline = Date.now() + HEALTH_PROBE_TIMEOUT_SECONDS * 1000;
+
+    // Derive auth token — gateway controller requires Bearer auth
+    let gatewayToken: string | undefined;
+    if (this.sandboxId && this.env.GATEWAY_TOKEN_SECRET) {
+      gatewayToken = await deriveGatewayToken(this.sandboxId, this.env.GATEWAY_TOKEN_SECRET);
+    }
+
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'fly-force-instance-id': machineId,
+            ...(gatewayToken && { Authorization: `Bearer ${gatewayToken}` }),
+            Accept: 'application/json',
+          },
+        });
+        if (res.ok) {
+          const body: { state?: string } = await res.json();
+          if (body.state === 'running') {
+            // Gateway reports running — verify it's actually serving traffic
+            // by probing the root path (controller proxies to gateway on :3001)
+            const rootUrl = `https://${appName}.fly.dev/`;
+            try {
+              const rootRes = await fetch(rootUrl, {
+                headers: { 'fly-force-instance-id': machineId },
+              });
+              if (rootRes.status !== 502) {
+                console.log(
+                  '[DO] Gateway health probe passed (state: running, root:',
+                  rootRes.status,
+                  ')'
+                );
+                return;
+              }
+              console.log('[DO] Gateway reports running but root returned 502 — retrying');
+            } catch {
+              console.log('[DO] Gateway reports running but root fetch failed — retrying');
+            }
+          } else {
+            console.log('[DO] Gateway state:', body.state, '— retrying');
+          }
+        } else {
+          console.log('[DO] Gateway status returned', res.status, '— retrying');
+        }
+      } catch (err) {
+        console.log('[DO] Gateway status fetch error — retrying:', err);
+      }
+      await new Promise(r => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
+    }
+
+    console.warn(
+      '[DO] Gateway health probe timed out after',
+      HEALTH_PROBE_TIMEOUT_SECONDS,
+      's — proceeding anyway'
+    );
+  }
+
   private getFlyConfig(): FlyClientConfig {
     if (!this.env.FLY_API_TOKEN) {
       throw new Error('FLY_API_TOKEN is not configured');
@@ -1961,7 +2058,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (this.flyVolumeId) return;
     if (!this.sandboxId) return;
 
-    const regions = parseRegions(this.flyRegion ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION);
+    // When flyRegion is set this is a single region — shuffle is a no-op.
+    const regions = shuffleRegions(
+      parseRegions(this.flyRegion ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION)
+    );
     const volume = await fly.createVolumeWithFallback(
       flyConfig,
       {
@@ -1999,7 +2099,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     const oldVolumeId = this.flyVolumeId;
     const oldRegion = this.flyRegion;
     const hasUserData = this.lastStartedAt !== null;
-    const allRegions = parseRegions(this.env.FLY_REGION ?? DEFAULT_FLY_REGION);
+    const allRegions = shuffleRegions(parseRegions(this.env.FLY_REGION ?? DEFAULT_FLY_REGION));
     const regions = deprioritizeRegion(allRegions, oldRegion);
     const compute = guestFromSize(this.machineSize);
 

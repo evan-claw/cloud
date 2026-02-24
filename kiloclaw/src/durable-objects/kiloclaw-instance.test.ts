@@ -216,6 +216,23 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  // Mock global fetch for waitForHealthy() health probe.
+  // Returns gateway running + root 200 so start() doesn't block.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/_kilo/gateway/status')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ state: 'running' }),
+        });
+      }
+      // Root path probe — return non-502
+      return Promise.resolve({ ok: true, status: 200 });
+    })
+  );
 });
 
 describe('two-phase destroy', () => {
@@ -833,7 +850,12 @@ describe('gateway process control via controller', () => {
 // selectRecoveryCandidate (pure function, no mocks needed)
 // ============================================================================
 
-import { selectRecoveryCandidate, parseRegions, deprioritizeRegion } from './kiloclaw-instance';
+import {
+  selectRecoveryCandidate,
+  parseRegions,
+  deprioritizeRegion,
+  shuffleRegions,
+} from './kiloclaw-instance';
 import type { FlyMachine } from '../fly/types';
 
 function fakeMachine(overrides: Partial<FlyMachine>): FlyMachine {
@@ -1082,6 +1104,38 @@ describe('deprioritizeRegion', () => {
   });
 });
 
+describe('shuffleRegions', () => {
+  it('returns the same elements', () => {
+    const input = ['cdg', 'arn', 'yyz', 'ord', 'dfw', 'lax'];
+    const result = shuffleRegions([...input]);
+    expect(result.sort()).toEqual(input.sort());
+  });
+
+  it('returns a single-element array unchanged', () => {
+    expect(shuffleRegions(['dfw'])).toEqual(['dfw']);
+  });
+
+  it('returns an empty array unchanged', () => {
+    expect(shuffleRegions([])).toEqual([]);
+  });
+
+  it('mutates in place and returns the same reference', () => {
+    const arr = ['a', 'b', 'c'];
+    const result = shuffleRegions(arr);
+    expect(result).toBe(arr);
+  });
+
+  it('produces different orderings over many runs', () => {
+    const input = ['cdg', 'arn', 'yyz', 'ord', 'dfw', 'lax'];
+    const orderings = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      orderings.add(shuffleRegions([...input]).join(','));
+    }
+    // With 6 elements (720 permutations), 50 shuffles should produce at least 2 distinct orderings
+    expect(orderings.size).toBeGreaterThan(1);
+  });
+});
+
 // ============================================================================
 // Live check in getStatus()
 // ============================================================================
@@ -1307,14 +1361,15 @@ describe('start: 412 insufficient resources recovery', () => {
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
     // New volume created via fallback with deprioritized regions and compute hint
-    expect(flyClient.createVolumeWithFallback).toHaveBeenCalledWith(
-      expect.anything(),
+    const regions412Call = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
+    expect(regions412Call[1]).toEqual(
       expect.objectContaining({
         compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
-      }),
-      // 'iad' not in FLY_REGION='us,eu', so deprioritizeRegion returns unchanged
-      ['us', 'eu']
+      })
     );
+    // Regions are shuffled, so just check the set (deprioritize is a no-op here
+    // because 'iad' is not in FLY_REGION='us,eu')
+    expect(regions412Call[2].sort()).toEqual(['eu', 'us']);
     // source_volume_id should NOT be set for fresh provision
     const createVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock.calls[0][1];
     expect(createVolumeCall.source_volume_id).toBeUndefined();
@@ -1352,14 +1407,15 @@ describe('start: 412 insufficient resources recovery', () => {
     await instance.start('user-1');
 
     // Volume was forked (source_volume_id set) with compute hint and deprioritized regions
-    expect(flyClient.createVolumeWithFallback).toHaveBeenCalledWith(
-      expect.anything(),
+    const regionsForkCall = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
+    expect(regionsForkCall[1]).toEqual(
       expect.objectContaining({
         source_volume_id: 'vol-1',
         compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
-      }),
-      ['us', 'eu']
+      })
     );
+    // Regions are shuffled — check the set
+    expect(regionsForkCall[2].sort()).toEqual(['eu', 'us']);
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
     // Machine was retried
@@ -1416,14 +1472,15 @@ describe('start: 412 insufficient resources recovery', () => {
     // Old machine was destroyed
     expect(flyClient.destroyMachine).toHaveBeenCalledWith(expect.anything(), 'machine-1');
     // Volume was forked (has user data) with compute hint
-    expect(flyClient.createVolumeWithFallback).toHaveBeenCalledWith(
-      expect.anything(),
+    const regionsUpdateCall = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
+    expect(regionsUpdateCall[1]).toEqual(
       expect.objectContaining({
         source_volume_id: 'vol-1',
         compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
-      }),
-      ['us', 'eu']
+      })
     );
+    // Regions are shuffled then deprioritized — check the set
+    expect(regionsUpdateCall[2].sort()).toEqual(['eu', 'us']);
     // New machine was created
     expect(storage._store.get('flyMachineId')).toBe('machine-new');
     expect(storage._store.get('flyVolumeId')).toBe('vol-new');

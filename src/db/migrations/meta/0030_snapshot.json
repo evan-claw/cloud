@@ -1,6 +1,6 @@
 {
-  "id": "ce1bf059-6c21-44c2-a55e-80328198eb90",
-  "prevId": "b03fd8ce-bacc-4cd6-bf59-73aa6eb7753b",
+  "id": "0e5cf965-d10b-451e-8610-c9534fcad5be",
+  "prevId": "ce1bf059-6c21-44c2-a55e-80328198eb90",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12256,6 +12256,287 @@
           "value": "(\n        (\"webhook_events\".\"owned_by_user_id\" IS NOT NULL AND \"webhook_events\".\"owned_by_organization_id\" IS NULL) OR\n        (\"webhook_events\".\"owned_by_user_id\" IS NULL AND \"webhook_events\".\"owned_by_organization_id\" IS NOT NULL)\n      )"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.kiloclaw_available_versions": {
+      "name": "kiloclaw_available_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "openclaw_version": {
+          "name": "openclaw_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "variant": {
+          "name": "variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
+        "image_tag": {
+          "name": "image_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "image_digest": {
+          "name": "image_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_latest": {
+          "name": "is_latest",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "published_by": {
+          "name": "published_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "UQ_kiloclaw_available_versions_image_tag": {
+          "name": "UQ_kiloclaw_available_versions_image_tag",
+          "columns": [
+            {
+              "expression": "image_tag",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "UQ_kiloclaw_available_versions_image_digest": {
+          "name": "UQ_kiloclaw_available_versions_image_digest",
+          "columns": [
+            {
+              "expression": "image_digest",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "image_digest IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "UQ_kiloclaw_available_versions_latest_variant": {
+          "name": "UQ_kiloclaw_available_versions_latest_variant",
+          "columns": [
+            {
+              "expression": "variant",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "is_latest = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "IDX_kiloclaw_available_versions_status_variant": {
+          "name": "IDX_kiloclaw_available_versions_status_variant",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "variant",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "kiloclaw_available_versions_published_by_kilocode_users_id_fk": {
+          "name": "kiloclaw_available_versions_published_by_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_available_versions",
+          "tableTo": "kilocode_users",
+          "columnsFrom": [
+            "published_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "kiloclaw_available_versions_status_check": {
+          "name": "kiloclaw_available_versions_status_check",
+          "value": "\"kiloclaw_available_versions\".\"status\" IN ('active', 'deprecated', 'disabled')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.kiloclaw_version_pins": {
+      "name": "kiloclaw_version_pins",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "image_tag": {
+          "name": "image_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pinned_by": {
+          "name": "pinned_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "UQ_kiloclaw_version_pins_user": {
+          "name": "UQ_kiloclaw_version_pins_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "kiloclaw_version_pins_user_id_kilocode_users_id_fk": {
+          "name": "kiloclaw_version_pins_user_id_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kilocode_users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk": {
+          "name": "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kilocode_users",
+          "columnsFrom": [
+            "pinned_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

@@ -266,13 +266,20 @@ export async function dismissDependabotAlert(
   const tokenData = await generateGitHubInstallationToken(installationId);
   const octokit = new Octokit({ auth: tokenData.token });
 
+  // GitHub API limits dismissed_comment to 280 characters
+  const MAX_COMMENT_LENGTH = 280;
+  const truncatedComment =
+    dismissedComment && dismissedComment.length > MAX_COMMENT_LENGTH
+      ? dismissedComment.slice(0, MAX_COMMENT_LENGTH - 1) + '\u2026'
+      : dismissedComment;
+
   await octokit.rest.dependabot.updateAlert({
     owner,
     repo,
     alert_number: alertNumber,
     state: 'dismissed',
     dismissed_reason: dismissedReason,
-    dismissed_comment: dismissedComment,
+    dismissed_comment: truncatedComment,
   });
 }
 

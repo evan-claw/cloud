@@ -33,10 +33,10 @@ import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
 
 const posthogClient = PostHogClient();
 
-type OpenRouterUsage = {
+export type OpenRouterUsage = {
   cost?: number;
   is_byok?: boolean | null;
-  cost_details: { upstream_inference_cost: number };
+  cost_details?: { upstream_inference_cost: number };
   completion_tokens: number;
   completion_tokens_details: { reasoning_tokens: number };
   prompt_tokens: number;
@@ -65,7 +65,7 @@ type MaybeHasOpenRouterUsage = {
   provider?: string | null;
 };
 
-type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
+export type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
   MaybeHasOpenRouterUsage &
   MaybeHasVercelProviderMetaDataChunk;
 

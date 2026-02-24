@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Cpu, HardDrive, Play, RefreshCw, RotateCw, Stethoscope } from 'lucide-react';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
@@ -13,6 +13,23 @@ import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { RunDoctorDialog } from './RunDoctorDialog';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
+
+function AnimatedDots() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setCount(c => (c % 3) + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+  // Pad with invisible characters to keep width constant
+  const visible = '.'.repeat(count);
+  const hidden = '.'.repeat(3 - count);
+  return (
+    <span>
+      {visible}
+      <span className="invisible">{hidden}</span>
+    </span>
+  );
+}
 
 export function InstanceControls({
   status,
@@ -59,7 +76,14 @@ export function InstanceControls({
           }}
         >
           <Play className="h-4 w-4" />
-          {mutations.start.isPending ? 'Starting...' : 'Start Machine'}
+          {mutations.start.isPending ? (
+            <>
+              Starting
+              <AnimatedDots />
+            </>
+          ) : (
+            'Start Machine'
+          )}
         </Button>
         <Button
           size="sm"
