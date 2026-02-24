@@ -13,7 +13,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-02-25',
     description:
-      'Adjust tools.exec.security from deny to allowlist. Skills install and agent exec now work with approval prompts in the Control UI.',
+      'Adjust tools.exec.security from deny to allowlist. Asking the agent to exec commands will trigger approval prompts in the Control UI.',
     category: 'feature',
     deployHint: 'redeploy_suggested',
   },
