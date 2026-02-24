@@ -33,6 +33,7 @@ import {
   webhook_events,
   agent_environment_profiles,
   security_findings,
+  security_audit_log,
   auto_triage_tickets,
   auto_fix_tickets,
   slack_bot_requests,
@@ -43,6 +44,7 @@ import {
   user_period_cache,
   user_feedback,
   app_builder_feedback,
+  cloud_agent_feedback,
   free_model_usage,
   kilo_pass_scheduled_changes,
 } from '@/db/schema';
@@ -527,6 +529,13 @@ export async function softDeleteUser(userId: string) {
       .set({ actor_email: null, actor_name: null })
       .where(eq(organization_audit_logs.actor_id, userId));
 
+    // Security audit logs: keep org-owned entries, strip actor PII
+    // (user-owned entries are cascade-deleted via owned_by_user_id FK)
+    await tx
+      .update(security_audit_log)
+      .set({ actor_email: null, actor_name: null })
+      .where(eq(security_audit_log.actor_id, userId));
+
     // Payment methods: soft-delete and strip address/name/IP fields
     await tx
       .update(payment_methods)
@@ -557,6 +566,10 @@ export async function softDeleteUser(userId: string) {
       .update(app_builder_feedback)
       .set({ kilo_user_id: null })
       .where(eq(app_builder_feedback.kilo_user_id, userId));
+    await tx
+      .update(cloud_agent_feedback)
+      .set({ kilo_user_id: null })
+      .where(eq(cloud_agent_feedback.kilo_user_id, userId));
     await tx
       .update(free_model_usage)
       .set({ kilo_user_id: null })

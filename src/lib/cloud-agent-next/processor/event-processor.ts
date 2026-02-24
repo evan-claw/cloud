@@ -93,6 +93,9 @@ export type EventProcessor = {
   /** Process a cloud agent event from WebSocket */
   processEvent: (event: CloudAgentEvent) => void;
 
+  /** Force-complete all in-flight messages. Called on session interrupt. */
+  forceCompleteAll: () => void;
+
   /** Clear all state */
   clear: () => void;
 };
@@ -387,20 +390,14 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   }
 
   /**
-   * Handle session.turn.close events.
-   * When reason is "error", force-complete all in-flight assistant messages
-   * that never received time.completed from the server.
+   * Force-complete all in-flight messages.
+   * Stamps synthetic time.completed on assistant messages and completes user messages.
+   * Sets streaming to false via callback.
    */
-  function handleSessionTurnClose(data: { sessionID?: string; reason?: string }): void {
-    if (data.reason !== 'error') {
-      return;
-    }
-
-    // Force-complete all in-flight assistant messages
+  function forceCompleteAllMessages(): void {
     const now = Date.now();
     for (const [key, message] of messagesMap) {
       if (isAssistantMessage(message.info) && !isAssistantMessageComplete(message)) {
-        // Set completed time so isMessageStreaming() returns false
         message.info = {
           ...message.info,
           time: { ...message.info.time, completed: now },
@@ -414,13 +411,25 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
       }
     }
 
-    // Complete any pending user messages too
     completeUserMessages();
 
     if (streaming) {
       streaming = false;
       callbacks.onStreamingChanged?.(false);
     }
+  }
+
+  /**
+   * Handle session.turn.close events.
+   * When reason is "error", force-complete all in-flight assistant messages
+   * that never received time.completed from the server.
+   */
+  function handleSessionTurnClose(data: { sessionID?: string; reason?: string }): void {
+    if (data.reason !== 'error') {
+      return;
+    }
+
+    forceCompleteAllMessages();
 
     callbacks.onError?.('The model failed to generate a response', data.sessionID);
   }
@@ -502,6 +511,7 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
 
   return {
     processEvent,
+    forceCompleteAll: forceCompleteAllMessages,
     clear,
   };
 }
