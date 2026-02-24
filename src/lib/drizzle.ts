@@ -107,6 +107,33 @@ if (usesSeparateReplica) {
   });
 }
 
+// --- Pool observability ---
+// Periodic pool metrics (every 30s) — picked up by Vercel log drain → Axiom
+function logPoolMetrics() {
+  const primary = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
+  const replica = usesSeparateReplica
+    ? {
+        total: replicaPool.totalCount,
+        idle: replicaPool.idleCount,
+        waiting: replicaPool.waitingCount,
+      }
+    : null;
+  console.log(
+    JSON.stringify({
+      type: 'pool_metrics',
+      region: VERCEL_REGION ?? 'unknown',
+      primary,
+      replica,
+    })
+  );
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  // Log immediately on startup, then every 30s
+  logPoolMetrics();
+  setInterval(logPoolMetrics, 30_000).unref();
+}
+
 /**
  * Primary database instance - use for all writes (INSERT, UPDATE, DELETE)
  * and for reads that require strong consistency (read-after-write).
