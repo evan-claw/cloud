@@ -66,10 +66,9 @@ function getReplicaUrl(): string {
 // Primary pool - always points to Frankfurt (writes go here)
 export const pool = new Pool({
   ...getDatabaseClientConfig(postgresUrl),
-  max: 10,
+  max: 100,
   connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
   idleTimeoutMillis: 3000,
-  statement_timeout: Number.parseInt(POSTGRES_MAX_QUERY_TIME || '20000'),
   application_name: appName,
 });
 
@@ -80,10 +79,9 @@ export const usesSeparateReplica = replicaUrl !== postgresUrl;
 const replicaPool = usesSeparateReplica
   ? new Pool({
       ...getDatabaseClientConfig(replicaUrl),
-      max: 10,
+      max: 100,
       connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
       idleTimeoutMillis: 3000,
-      statement_timeout: Number.parseInt(POSTGRES_MAX_QUERY_TIME || '20000'),
       application_name: `${appName}-replica`,
     })
   : pool; // Reuse primary pool if no separate replica
