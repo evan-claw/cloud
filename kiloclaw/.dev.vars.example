@@ -13,7 +13,7 @@ WORKER_ENV=development
 # KILOCODE_API_BASE_URL=https://api.kilo.ai/api/openrouter/
 
 # Fly.io Machines API
-# Get a token (run: `fly tokens create some-name-for-this-dev-token`)
+# Get a token (run: `fly tokens create org some-name-for-this-dev-token`)
 FLY_API_TOKEN=fo1_...
 # Your Fly org slug (run: `fly orgs list`)
 FLY_ORG_SLUG=personal
