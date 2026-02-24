@@ -123,8 +123,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
 
     openclaw onboard --non-interactive --accept-risk \
         --mode local \
-        --gateway-port 18789 \
-        --gateway-bind lan \
+        --gateway-port 3001 \
+        --gateway-bind loopback \
         --skip-channels \
         --skip-skills \
         --skip-health

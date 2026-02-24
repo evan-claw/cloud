@@ -1349,6 +1349,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         JSON.stringify({
           path,
           status: response.status,
+          body: rawBody.slice(0, 1024),
           issues: parsed.error.issues.map(issue => ({
             path: issue.path.join('.'),
             code: issue.code,
