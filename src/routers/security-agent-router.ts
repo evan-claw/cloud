@@ -683,7 +683,6 @@ export const securityAgentRouter = createTRPCRouter({
         githubToken,
         model,
         analysisMode,
-        forceSandbox: input.forceSandbox,
         retrySandboxOnly: input.retrySandboxOnly,
         // Personal user - no organizationId
       });

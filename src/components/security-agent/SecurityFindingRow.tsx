@@ -1,6 +1,6 @@
 'use client';
 
-import { differenceInDays, differenceInHours, isPast } from 'date-fns';
+import { differenceInDays, differenceInHours, differenceInMinutes, isPast } from 'date-fns';
 import { Brain, CheckCircle2, ChevronRight, Clock, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -28,7 +28,9 @@ function formatCompactDistance(date: Date) {
   const days = Math.abs(differenceInDays(now, date));
   if (days >= 1) return `${days}d`;
   const hours = Math.abs(differenceInHours(now, date));
-  return `${hours}h`;
+  if (hours >= 1) return `${hours}h`;
+  const minutes = Math.abs(differenceInMinutes(now, date));
+  return `${minutes}m`;
 }
 
 function getSlaStatus(slaDueAt: string | null, status: string) {
