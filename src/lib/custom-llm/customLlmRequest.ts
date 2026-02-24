@@ -38,7 +38,7 @@ import { ReasoningFormat } from '@/lib/custom-llm/format';
 import type OpenAI from 'openai';
 import crypto from 'crypto';
 import { db } from '@/lib/drizzle';
-import { eq } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 
 function convertMessages(messages: OpenRouterChatCompletionsInput): ModelMessage[] {
   const toolNameByCallId = new Map<string, string>();
@@ -262,6 +262,20 @@ const FINISH_REASON_MAP: Record<string, string> = {
 
 function phaseKey(userId: string, taskId: string | undefined, content: string[]) {
   return crypto.hash('sha256', [userId, taskId, ...content].join('|'));
+}
+
+function extractMessageTextParts(content: unknown): string[] {
+  if (typeof content === 'string') return [content];
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(
+      (part): part is { type: string; text: string } =>
+        part !== null &&
+        typeof part === 'object' &&
+        (part.type === 'input_text' || part.type === 'output_text') &&
+        typeof part.text === 'string'
+    )
+    .map(part => part.text);
 }
 
 function createStreamPartConverter(userId: string, taskId: string | undefined, model: string) {
@@ -693,31 +707,41 @@ function responseCreateParamsPatchFetch(userId: string, taskId: string | undefin
     if (typeof init?.body === 'string') {
       const json = JSON.parse(init.body) as OpenAI.Responses.ResponseCreateParams;
       if (Array.isArray(json.input)) {
-        for (const message of json.input) {
-          if (!('role' in message) || message.role !== 'assistant') {
-            continue;
-          }
-          const key = phaseKey(
-            userId,
-            taskId,
-            Array.isArray(message.content)
-              ? message.content
-                  .filter(part => part.type === 'input_text' || part.type === 'output_text')
-                  .map(part => part.text)
-              : [message.content]
+        type AssistantMessage = (typeof json.input)[number] & { role: 'assistant' };
+        const assistantMessages = json.input.filter(
+          (message): message is AssistantMessage =>
+            'role' in message && message.role === 'assistant'
+        );
+
+        if (assistantMessages.length > 0) {
+          const keyByMessage = new Map(
+            assistantMessages.map(message => [
+              message,
+              phaseKey(
+                userId,
+                taskId,
+                extractMessageTextParts((message as { content?: unknown }).content)
+              ),
+            ])
           );
-          const phase = (
-            await db
-              .select({ phase: temp_phase.value })
-              .from(temp_phase)
-              .where(eq(temp_phase.key, key))
-          ).at(0)?.phase;
-          if (phase) {
-            Object.assign(message, { phase });
+
+          const keys = [...new Set(keyByMessage.values())];
+          const rows = await db
+            .select({ key: temp_phase.key, phase: temp_phase.value })
+            .from(temp_phase)
+            .where(inArray(temp_phase.key, keys));
+          const phaseByKey = new Map(rows.map(row => [row.key, row.phase]));
+
+          for (const message of assistantMessages) {
+            const phase = phaseByKey.get(keyByMessage.get(message) ?? '');
+            if (phase) {
+              Object.assign(message, { phase });
+            }
           }
+
+          init.body = JSON.stringify(json);
+          debugSaveLog(init.body, 'request.native-patched.json');
         }
-        init.body = JSON.stringify(json);
-        debugSaveLog(init.body, 'request.native-patched.json');
       }
     }
     return await fetch(input, init);
