@@ -190,7 +190,7 @@ describe('admin.kiloclawVersions', () => {
           userId: targetUser.id,
           imageTag: 'does-not-exist',
         })
-      ).rejects.toThrow('not found or not active');
+      ).rejects.toThrow('not found in the version catalog');
     });
 
     it('upserts pin when pinning same user again', async () => {
