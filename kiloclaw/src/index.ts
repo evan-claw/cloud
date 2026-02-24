@@ -88,7 +88,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
     if (!c.env.FLY_API_TOKEN) missing.push('FLY_API_TOKEN');
     if (missing.length > 0) {
       console.error('[CONFIG] Platform route missing bindings:', missing.join(', '));
-      return c.json({ error: 'Configuration error', missing }, 503);
+      return c.json({ error: 'Configuration error' }, 503);
     }
     return next();
   }
@@ -96,15 +96,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
   const missingVars = validateRequiredEnv(c.env);
   if (missingVars.length > 0) {
     console.error('[CONFIG] Missing required environment variables:', missingVars.join(', '));
-    return c.json(
-      {
-        error: 'Configuration error',
-        message: 'Required environment variables are not configured',
-        missing: missingVars,
-        hint: 'Set these using: wrangler secret put <VARIABLE_NAME>',
-      },
-      503
-    );
+    return c.json({ error: 'Configuration error' }, 503);
   }
 
   return next();
