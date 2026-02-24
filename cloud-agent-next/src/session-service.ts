@@ -507,11 +507,17 @@ export class SessionService {
     if (env.KILO_OPENROUTER_BASE) {
       providerOptions.baseURL = env.KILO_OPENROUTER_BASE;
     }
+    const isInteractive =
+      !createdOnPlatform ||
+      createdOnPlatform === 'cloud-agent' ||
+      createdOnPlatform === 'app-builder';
+
     const configContent: Record<string, unknown> = {
       permission: {
         external_directory: {
           [`/tmp/attachments/${sessionId}/**`]: 'allow',
         },
+        ...(!isInteractive && { question: 'deny' }),
       },
       provider: {
         kilo: {
