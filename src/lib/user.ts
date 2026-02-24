@@ -38,6 +38,7 @@ import {
   slack_bot_requests,
   cloud_agent_code_reviews,
   kiloclaw_instances,
+  kiloclaw_version_pins,
   kiloclaw_access_codes,
   user_period_cache,
   user_feedback,
@@ -506,6 +507,7 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(device_auth_requests).where(eq(device_auth_requests.kilo_user_id, userId));
     await tx.delete(auto_top_up_configs).where(eq(auto_top_up_configs.owned_by_user_id, userId));
     await tx.delete(kiloclaw_access_codes).where(eq(kiloclaw_access_codes.kilo_user_id, userId));
+    await tx.delete(kiloclaw_version_pins).where(eq(kiloclaw_version_pins.user_id, userId));
     await tx.delete(kiloclaw_instances).where(eq(kiloclaw_instances.user_id, userId));
     await tx.delete(user_period_cache).where(eq(user_period_cache.kilo_user_id, userId));
     await tx

@@ -66,6 +66,18 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // Check if this tag already exists — needed to enforce insert rate limit
+      // without skipping metadata updates for existing entries.
+      const existing = await db.query.kiloclaw_available_versions.findFirst({
+        where: eq(kiloclaw_available_versions.image_tag, entry.imageTag),
+        columns: { id: true },
+      });
+
+      if (!existing && inserted >= MAX_NEW_PER_SYNC) {
+        // New entry but rate limit reached — skip insert, continue processing updates
+        continue;
+      }
+
       const result = await db
         .insert(kiloclaw_available_versions)
         .values({
@@ -87,12 +99,6 @@ export async function GET(request: NextRequest) {
 
       if (result[0]?.isNew) {
         inserted++;
-        if (inserted >= MAX_NEW_PER_SYNC) {
-          console.log(
-            '[sync-kiloclaw-versions] Rate limit reached, skipping remaining new entries'
-          );
-          break;
-        }
       } else {
         updated++;
       }
