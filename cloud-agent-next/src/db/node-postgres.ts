@@ -15,7 +15,7 @@ types.setTypeParser(types.builtins.INT8, val => parseInt(val, 10));
 
 export const createNodePostgresConnection: CreateDatabaseConnection = connectionString => {
   const createConnectedClient = async (): Promise<Client> => {
-    const client = new Client({ connectionString });
+    const client = new Client({ connectionString, statement_timeout: 10_000 });
     await client.connect();
     return client;
   };

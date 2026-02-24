@@ -14,7 +14,7 @@ export type Database = {
 export function createDatabaseConnection(connectionString: string): Database {
   return {
     query: async <T = unknown>(text: string, values: unknown[] = []): Promise<T[]> => {
-      const client = new Client({ connectionString });
+      const client = new Client({ connectionString, statement_timeout: 10_000 });
       await client.connect();
       try {
         const result = await client.query(text, values);
