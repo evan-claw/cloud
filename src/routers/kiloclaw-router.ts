@@ -1,14 +1,12 @@
 import 'server-only';
 
 import * as z from 'zod';
-import { TRPCError } from '@trpc/server';
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
 import { KILOCLAW_API_URL } from '@/lib/config.server';
-import { isReleaseToggleEnabled } from '@/lib/posthog-feature-flags';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
   ensureActiveInstance,
@@ -18,15 +16,6 @@ import {
 import { db } from '@/lib/drizzle';
 import { kiloclaw_version_pins, kiloclaw_available_versions } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
-
-const kiloclawProcedure = baseProcedure.use(async ({ ctx, next }) => {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  const isEnabled = await isReleaseToggleEnabled('kiloclaw', ctx.user.id);
-  if (!isEnabled && !isDevelopment) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'KiloClaw access restricted' });
-  }
-  return next();
-});
 
 const modelEntrySchema = z.object({ id: z.string(), name: z.string() });
 
@@ -214,7 +203,7 @@ async function patchConfig(
 
 export const kiloclawRouter = createTRPCRouter({
   // Status + gateway token (two internal client calls, merged for the dashboard)
-  getStatus: kiloclawProcedure.query(async ({ ctx }) => {
+  getStatus: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     const status = await client.getStatus(ctx.user.id);
 
@@ -234,18 +223,18 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // Instance lifecycle
-  start: kiloclawProcedure.mutation(async ({ ctx }) => {
+  start: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.start(ctx.user.id);
   }),
 
-  stop: kiloclawProcedure.mutation(async ({ ctx }) => {
+  stop: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.stop(ctx.user.id);
   }),
 
   // Instance lifecycle
-  destroy: kiloclawProcedure.mutation(async ({ ctx }) => {
+  destroy: baseProcedure.mutation(async ({ ctx }) => {
     const destroyedRow = await markActiveInstanceDestroyed(ctx.user.id);
     const client = new KiloClawInternalClient();
     try {
@@ -259,28 +248,26 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // Explicit lifecycle APIs
-  provision: kiloclawProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
+  provision: baseProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
     return provisionInstance(ctx.user, input);
   }),
 
-  patchConfig: kiloclawProcedure
-    .input(updateKiloCodeConfigSchema)
-    .mutation(async ({ ctx, input }) => {
-      return patchConfig(ctx.user, input);
-    }),
+  patchConfig: baseProcedure.input(updateKiloCodeConfigSchema).mutation(async ({ ctx, input }) => {
+    return patchConfig(ctx.user, input);
+  }),
 
   // Backward-compatible aliases.
-  updateConfig: kiloclawProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
+  updateConfig: baseProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
     return provisionInstance(ctx.user, input);
   }),
 
-  updateKiloCodeConfig: kiloclawProcedure
+  updateKiloCodeConfig: baseProcedure
     .input(updateKiloCodeConfigSchema)
     .mutation(async ({ ctx, input }) => {
       return patchConfig(ctx.user, input);
     }),
 
-  patchChannels: kiloclawProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
+  patchChannels: baseProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
     const client = new KiloClawInternalClient();
     return client.patchChannels(ctx.user.id, {
       channels: buildWorkerChannelsPatch(input),
@@ -288,59 +275,59 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // User-facing (user client -- forwards user's short-lived JWT)
-  getConfig: kiloclawProcedure.query(async ({ ctx }) => {
+  getConfig: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawUserClient(
       generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
     );
     return client.getConfig();
   }),
 
-  restartGateway: kiloclawProcedure.mutation(async ({ ctx }) => {
+  restartGateway: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawUserClient(
       generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
     );
     return client.restartGateway();
   }),
 
-  listPairingRequests: kiloclawProcedure
+  listPairingRequests: baseProcedure
     .input(z.object({ refresh: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.listPairingRequests(ctx.user.id, input?.refresh);
     }),
 
-  approvePairingRequest: kiloclawProcedure
+  approvePairingRequest: baseProcedure
     .input(z.object({ channel: z.string().min(1), code: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.approvePairingRequest(ctx.user.id, input.channel, input.code);
     }),
 
-  listDevicePairingRequests: kiloclawProcedure
+  listDevicePairingRequests: baseProcedure
     .input(z.object({ refresh: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.listDevicePairingRequests(ctx.user.id, input?.refresh);
     }),
 
-  approveDevicePairingRequest: kiloclawProcedure
+  approveDevicePairingRequest: baseProcedure
     .input(z.object({ requestId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.approveDevicePairingRequest(ctx.user.id, input.requestId);
     }),
 
-  gatewayStatus: kiloclawProcedure.query(async ({ ctx }) => {
+  gatewayStatus: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.getGatewayStatus(ctx.user.id);
   }),
 
-  restartOpenClaw: kiloclawProcedure.mutation(async ({ ctx }) => {
+  restartOpenClaw: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.restartGatewayProcess(ctx.user.id);
   }),
 
-  runDoctor: kiloclawProcedure.mutation(async ({ ctx }) => {
+  runDoctor: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.runDoctor(ctx.user.id);
   }),

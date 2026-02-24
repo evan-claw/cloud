@@ -1068,6 +1068,90 @@ describe('SessionService', () => {
     });
   });
 
+  describe('Question Tool Permission for Non-Interactive Platforms', () => {
+    const setupForPlatformTest = () => {
+      const fakeSession = {
+        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxCreateSession = vi.fn().mockResolvedValue(fakeSession);
+      const sandbox = {
+        createSession: sandboxCreateSession,
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+      return { sandbox, sandboxCreateSession };
+    };
+
+    const getConfigContent = (sandboxCreateSession: ReturnType<typeof vi.fn>) => {
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      return JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        permission: { question?: string; external_directory?: Record<string, string> };
+      };
+    };
+
+    it.each([undefined, 'cloud-agent', 'app-builder'])(
+      'should NOT include question:deny for interactive platform %s',
+      async createdOnPlatform => {
+        const { sandbox, sandboxCreateSession } = setupForPlatformTest();
+        const sessionId: SessionId = 'agent_interactive_test';
+        mockedSetupWorkspace.mockResolvedValue({
+          workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+          sessionHome: `/home/${sessionId}`,
+        });
+
+        const service = new SessionService();
+        await service.initiate({
+          sandbox,
+          sandboxId: 'org__user',
+          orgId: 'org',
+          userId: 'user',
+          sessionId,
+          kilocodeToken: 'token',
+          kilocodeModel: 'test-model',
+          githubRepo: 'acme/repo',
+          env: mockEnv,
+          createdOnPlatform,
+        });
+
+        const config = getConfigContent(sandboxCreateSession);
+        expect(config.permission).not.toHaveProperty('question');
+      }
+    );
+
+    it.each(['slack', 'security-agent', 'webhook', 'code-review', 'auto-triage', 'autofix'])(
+      'should include question:deny for non-interactive platform %s',
+      async createdOnPlatform => {
+        const { sandbox, sandboxCreateSession } = setupForPlatformTest();
+        const sessionId: SessionId = 'agent_noninteractive_test';
+        mockedSetupWorkspace.mockResolvedValue({
+          workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+          sessionHome: `/home/${sessionId}`,
+        });
+
+        const service = new SessionService();
+        await service.initiate({
+          sandbox,
+          sandboxId: 'org__user',
+          orgId: 'org',
+          userId: 'user',
+          sessionId,
+          kilocodeToken: 'token',
+          kilocodeModel: 'test-model',
+          githubRepo: 'acme/repo',
+          env: mockEnv,
+          createdOnPlatform,
+        });
+
+        const config = getConfigContent(sandboxCreateSession);
+        expect(config.permission.question).toBe('deny');
+      }
+    );
+  });
+
   describe('GH_TOKEN Auto-Setting', () => {
     it('should set GH_TOKEN from githubToken when provided', async () => {
       const fakeSession = {

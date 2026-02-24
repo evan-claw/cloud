@@ -2394,7 +2394,7 @@ export const security_findings = pgTable(
 
     // Agent session tracking (for analysis workflow)
     session_id: text(), // Cloud agent session ID (agent_xxx)
-    cli_session_id: uuid().references(() => cliSessions.session_id, { onDelete: 'set null' }), // CLI session UUID
+    cli_session_id: text(), // Kilo CLI session ID (ses_xxx from cli_sessions_v2)
     analysis_status: text(), // 'pending' | 'running' | 'completed' | 'failed'
     analysis_started_at: timestamp({ withTimezone: true, mode: 'string' }),
     analysis_completed_at: timestamp({ withTimezone: true, mode: 'string' }),

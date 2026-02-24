@@ -39,7 +39,6 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
   // Feature flags
   const isAutoTriageFeatureEnabled = useFeatureFlagEnabled('auto-triage-feature');
   const isDevelopment = process.env.NODE_ENV === 'development';
-  const isKiloClawEnabled = useFeatureFlagEnabled('kiloclaw');
 
   // Dashboard group
   const dashboardItems: Array<{
@@ -128,15 +127,11 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
           },
         ]
       : []),
-    ...(isKiloClawEnabled || isDevelopment
-      ? [
-          {
-            title: 'Claw',
-            icon: KiloCrabIcon,
-            url: '/claw',
-          },
-        ]
-      : []),
+    {
+      title: 'Claw',
+      icon: KiloCrabIcon,
+      url: '/claw',
+    },
   ];
 
   // Account group
