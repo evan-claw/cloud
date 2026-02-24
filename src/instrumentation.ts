@@ -33,8 +33,6 @@ export async function register() {
     // We intentionally only enable the Sentry+OTel custom wiring in Node runtime for now.
     // Edge tracing should rely on Sentry's Edge SDK behavior configured in sentry.edge.config.ts.
     // ref: https://docs.sentry.io/platforms/javascript/guides/nextjs/opentelemetry/custom-setup/
-    const { PgInstrumentation } = await import('@opentelemetry/instrumentation-pg');
-
     const { registerOTel } = await import('@vercel/otel');
     registerOTel({
       serviceName: 'kilocode-app',
@@ -42,7 +40,6 @@ export async function register() {
       spanProcessors: ['auto', new SentrySpanProcessor()],
       propagators: ['auto', new SentryPropagator()],
       contextManager: new SentryContextManager(),
-      instrumentations: [new PgInstrumentation()],
     });
 
     validateOpenTelemetrySetup();
