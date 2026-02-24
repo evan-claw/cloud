@@ -429,12 +429,12 @@ export async function syncAndStoreProviders() {
     );
   }
 
-  const result = await db.transaction(async () => {
-    const results = await db
+  const result = await db.transaction(async tx => {
+    const results = await tx
       .insert(modelsByProvider)
       .values({ data: openrouter_providers, vercel_providers })
       .returning();
-    await db.delete(modelsByProvider).where(lt(modelsByProvider.id, results[0].id));
+    await tx.delete(modelsByProvider).where(lt(modelsByProvider.id, results[0].id));
     return results[0];
   });
 
