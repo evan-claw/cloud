@@ -477,17 +477,12 @@ export async function processKiloBotMessage(
       );
       console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
       console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
+      cloudAgentSessionId = toolResult.sessionId;
 
       return {
         content: toolResult.response,
         metadata: toolResult.sessionId ? { cloudAgentSessionId: toolResult.sessionId } : undefined,
       };
-    },
-    onToolResult: (_toolCall, result) => {
-      const sessionId = result.metadata?.cloudAgentSessionId;
-      if (typeof sessionId === 'string') {
-        cloudAgentSessionId = sessionId;
-      }
     },
   });
 

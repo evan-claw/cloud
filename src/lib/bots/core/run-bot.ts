@@ -19,7 +19,6 @@ export type BotRunInput = {
   userMessage: string;
   tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
   toolExecutor: (toolCall: ToolCall) => Promise<BotToolResult>;
-  onToolResult?: (toolCall: ToolCall, result: BotToolResult) => void | Promise<void>;
   maxIterations?: number;
   logPrefix?: string;
   requestOptions: {
@@ -128,19 +127,12 @@ export async function runBot(input: BotRunInput): Promise<BotRunResult> {
           toolCall.type === 'function' ? toolCall.function.name : 'N/A'
         );
 
-        if (toolCall.type !== 'function') {
-          console.log(`${logPrefix} Skipping non-function tool call`);
-          continue;
-        }
-
-        toolCallsMade.push(toolCall.function.name);
+        toolCallsMade.push(
+          toolCall.type === 'custom' ? toolCall.custom.name : toolCall.function.name
+        );
 
         try {
           const toolResult = await input.toolExecutor(toolCall);
-          if (input.onToolResult) {
-            await input.onToolResult(toolCall, toolResult);
-          }
-
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
