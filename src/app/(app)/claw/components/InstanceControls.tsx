@@ -43,7 +43,7 @@ export function InstanceControls({
           </Badge>
           <Badge variant="outline" className="text-muted-foreground gap-1.5 font-normal">
             <HardDrive className="h-3.5 w-3.5" />
-            20 GB SSD
+            {status.volumeSizeGb ?? 10} GB SSD
           </Badge>
         </div>
       </div>

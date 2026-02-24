@@ -18,6 +18,7 @@ const baseStatus: KiloClawDashboardStatus = {
   flyMachineId: null,
   flyVolumeId: null,
   flyRegion: null,
+  volumeSizeGb: null,
   gatewayToken: 'token',
   workerUrl: 'https://claw.kilo.ai',
 };

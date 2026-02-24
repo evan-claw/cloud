@@ -109,6 +109,7 @@ export type PlatformStatusResponse = {
   flyMachineId: string | null;
   flyVolumeId: string | null;
   flyRegion: string | null;
+  volumeSizeGb: number | null;
 };
 
 /** A Fly volume snapshot. */

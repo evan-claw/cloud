@@ -118,6 +118,8 @@ export const PersistedStateSchema = z.object({
   flyMachineId: z.string().nullable().default(null),
   flyVolumeId: z.string().nullable().default(null),
   flyRegion: z.string().nullable().default(null),
+  // Actual provisioned volume size in GB (backfilled from Fly API for existing instances)
+  volumeSizeGb: z.number().nullable().default(null),
   machineSize: MachineSizeSchema.nullable().default(null),
   // Health check tracking
   healthCheckFailCount: z.number().default(0),

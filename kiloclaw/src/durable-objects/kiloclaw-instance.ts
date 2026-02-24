@@ -343,6 +343,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private flyMachineId: string | null = null;
   private flyVolumeId: string | null = null;
   private flyRegion: string | null = null;
+  private volumeSizeGb: number | null = null;
   private machineSize: MachineSize | null = null;
   private healthCheckFailCount = 0;
   private pendingDestroyMachineId: string | null = null;
@@ -383,6 +384,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.flyMachineId = s.flyMachineId;
       this.flyVolumeId = s.flyVolumeId;
       this.flyRegion = s.flyRegion;
+      this.volumeSizeGb = s.volumeSizeGb;
       this.machineSize = s.machineSize;
       this.healthCheckFailCount = s.healthCheckFailCount;
       this.pendingDestroyMachineId = s.pendingDestroyMachineId;
@@ -452,6 +454,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       this.flyVolumeId = volume.id;
       this.flyRegion = volume.region;
+      this.volumeSizeGb = volume.size_gb;
       console.log('[DO] Created Fly Volume:', volume.id, 'region:', volume.region);
     }
 
@@ -500,6 +503,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           flyMachineId: this.flyMachineId,
           flyVolumeId: this.flyVolumeId,
           flyRegion: this.flyRegion,
+          volumeSizeGb: this.volumeSizeGb,
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
@@ -1190,6 +1194,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     flyMachineId: string | null;
     flyVolumeId: string | null;
     flyRegion: string | null;
+    volumeSizeGb: number | null;
     openclawVersion: string | null;
     imageVariant: string | null;
     trackedImageTag: string | null;
@@ -1209,6 +1214,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.ctx.waitUntil(this.syncStatusFromLiveCheck());
     }
 
+    // Fire-and-forget backfill: if we have a volume but no cached size,
+    // fetch it from the Fly API so the next poll returns the real value.
+    if (this.volumeSizeGb === null && this.flyVolumeId) {
+      this.ctx.waitUntil(this.backfillVolumeSizeGb());
+    }
+
     return {
       userId: this.userId,
       sandboxId: this.sandboxId,
@@ -1223,6 +1234,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       flyMachineId: this.flyMachineId,
       flyVolumeId: this.flyVolumeId,
       flyRegion: this.flyRegion,
+      volumeSizeGb: this.volumeSizeGb,
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
       trackedImageTag: this.trackedImageTag,
@@ -1468,9 +1480,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       return;
     }
 
-    // Verify volume still exists on Fly
+    // Verify volume still exists on Fly (and backfill size if missing)
     try {
-      await fly.getVolume(flyConfig, this.flyVolumeId);
+      const volume = await fly.getVolume(flyConfig, this.flyVolumeId);
+      if (this.volumeSizeGb === null) {
+        this.volumeSizeGb = volume.size_gb;
+        await this.ctx.storage.put(storageUpdate({ volumeSizeGb: volume.size_gb }));
+      }
     } catch (err) {
       if (fly.isFlyNotFound(err)) {
         reconcileLog(reason, 'replace_lost_volume', {
@@ -1681,6 +1697,25 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
       // Transient error — silently fall back to cached state
       console.warn('[DO] Live check failed, using cached status:', err);
+    }
+  }
+
+  /**
+   * Fire-and-forget backfill for volumeSizeGb. Called from getStatus() and
+   * reconcileVolume() when the field is null but a volume exists.
+   */
+  private async backfillVolumeSizeGb(): Promise<void> {
+    if (!this.flyVolumeId) return;
+
+    try {
+      const flyConfig = this.getFlyConfig();
+      const volume = await fly.getVolume(flyConfig, this.flyVolumeId);
+      this.volumeSizeGb = volume.size_gb;
+      await this.ctx.storage.put(storageUpdate({ volumeSizeGb: volume.size_gb }));
+      console.log('[DO] Backfilled volumeSizeGb:', volume.size_gb);
+    } catch (err) {
+      // Non-fatal — will retry on next getStatus() or reconciliation cycle
+      console.warn('[DO] Failed to backfill volumeSizeGb:', err);
     }
   }
 
@@ -1930,7 +1965,14 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     this.flyVolumeId = volume.id;
     this.flyRegion = volume.region;
-    await this.ctx.storage.put(storageUpdate({ flyVolumeId: volume.id, flyRegion: volume.region }));
+    this.volumeSizeGb = volume.size_gb;
+    await this.ctx.storage.put(
+      storageUpdate({
+        flyVolumeId: volume.id,
+        flyRegion: volume.region,
+        volumeSizeGb: volume.size_gb,
+      })
+    );
 
     reconcileLog(reason, 'create_volume', {
       volume_id: volume.id,
@@ -1996,6 +2038,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       this.flyVolumeId = forkedVolume.id;
       this.flyRegion = forkedVolume.region;
+      this.volumeSizeGb = forkedVolume.size_gb;
       reconcileLog(reason, 'fork_stranded_volume', {
         old_volume_id: oldVolumeId,
         old_region: oldRegion,
@@ -2019,6 +2062,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       this.flyVolumeId = freshVolume.id;
       this.flyRegion = freshVolume.region;
+      this.volumeSizeGb = freshVolume.size_gb;
       reconcileLog(reason, 'create_replacement_volume', {
         old_volume_id: oldVolumeId,
         old_region: oldRegion,
@@ -2029,7 +2073,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Persist new volume state
     await this.ctx.storage.put(
-      storageUpdate({ flyVolumeId: this.flyVolumeId, flyRegion: this.flyRegion })
+      storageUpdate({
+        flyVolumeId: this.flyVolumeId,
+        flyRegion: this.flyRegion,
+        volumeSizeGb: this.volumeSizeGb,
+      })
     );
 
     // Delete old volume (best-effort cleanup)
