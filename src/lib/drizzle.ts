@@ -7,8 +7,13 @@ import * as schema from '../db/schema';
 import { computeDatabaseUrl, getDatabaseClientConfig } from './database-url';
 export const { Client, Pool } = pg;
 import { attachDatabasePool } from '@vercel/functions';
-const { POSTGRES_CONNECT_TIMEOUT, POSTGRES_MAX_QUERY_TIME, DEBUG_QUERY_LOGGING, VERCEL_REGION } =
-  process.env;
+const {
+  POSTGRES_CONNECT_TIMEOUT,
+  POSTGRES_MAX_QUERY_TIME,
+  DEBUG_QUERY_LOGGING,
+  VERCEL_REGION,
+  VERCEL_ENV,
+} = process.env;
 
 const POSTGRES_URL = getEnvVariable('POSTGRES_URL');
 
@@ -112,6 +117,50 @@ if (usesSeparateReplica) {
 // instanceId lets us deduplicate readings per instance in Axiom queries.
 const instanceId = `${VERCEL_REGION ?? 'unknown'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+// Pool lifecycle events — low-volume, high-signal logs for connection churn.
+// `connect` = new TCP connection to Postgres created
+// `remove`  = connection destroyed (idle timeout, error, pool shutdown)
+function attachPoolLifecycleLogging(targetPool: pg.Pool, label: 'primary' | 'replica') {
+  targetPool.on('connect', () => {
+    console.log(
+      JSON.stringify({
+        type: 'pool_lifecycle',
+        event: 'connect',
+        pool: label,
+        instanceId,
+        region: VERCEL_REGION ?? 'unknown',
+        total: targetPool.totalCount,
+        idle: targetPool.idleCount,
+        waiting: targetPool.waitingCount,
+      })
+    );
+  });
+
+  targetPool.on('remove', () => {
+    console.log(
+      JSON.stringify({
+        type: 'pool_lifecycle',
+        event: 'remove',
+        pool: label,
+        instanceId,
+        region: VERCEL_REGION ?? 'unknown',
+        total: targetPool.totalCount,
+        idle: targetPool.idleCount,
+        waiting: targetPool.waitingCount,
+      })
+    );
+  });
+}
+
+const IS_PROD = VERCEL_ENV === 'production';
+
+if (IS_PROD) {
+  attachPoolLifecycleLogging(pool, 'primary');
+  if (usesSeparateReplica) {
+    attachPoolLifecycleLogging(replicaPool, 'replica');
+  }
+}
+
 function logPoolMetrics() {
   const primary = { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount };
   const replica = usesSeparateReplica
@@ -132,8 +181,7 @@ function logPoolMetrics() {
   );
 }
 
-if (process.env.NODE_ENV !== 'test') {
-  // Log immediately on startup, then every 30s
+if (IS_PROD) {
   logPoolMetrics();
   setInterval(logPoolMetrics, 30_000).unref();
 }
