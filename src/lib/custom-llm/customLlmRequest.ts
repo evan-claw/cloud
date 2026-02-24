@@ -533,6 +533,8 @@ function buildCommonParams(
         disableParallelToolUse: request.parallel_tool_calls === false || isLegacyExtension,
       } satisfies AnthropicProviderOptions,
       openai: {
+        forceReasoning:
+          (customLlm.reasoning_effort && customLlm.reasoning_effort !== 'none') || undefined,
         reasoningSummary: 'auto',
         textVerbosity: verbosity === 'max' ? 'high' : verbosity,
         reasoningEffort:
