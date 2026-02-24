@@ -92,7 +92,7 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
         setIsEnabled(data.isEnabled);
         await refetch();
       },
-      onError: error => {
+      onError: _error => {
         toast.error('Failed to toggle auto triage', {
           description:
             'Something went wrong. Please try again or contact support if the problem persists.',
@@ -107,7 +107,7 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
         toast.success('Auto triage configuration saved');
         await refetch();
       },
-      onError: error => {
+      onError: _error => {
         toast.error('Failed to save configuration', {
           description:
             'Something went wrong. Please try again or contact support if the problem persists.',
@@ -124,7 +124,7 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
         setIsEnabled(data.isEnabled);
         await refetch();
       },
-      onError: error => {
+      onError: _error => {
         toast.error('Failed to toggle auto triage', {
           description:
             'Something went wrong. Please try again or contact support if the problem persists.',
@@ -139,7 +139,7 @@ export function AutoTriageConfigForm({ organizationId }: AutoTriageConfigFormPro
         toast.success('Auto triage configuration saved');
         await refetch();
       },
-      onError: error => {
+      onError: _error => {
         toast.error('Failed to save configuration', {
           description:
             'Something went wrong. Please try again or contact support if the problem persists.',

@@ -34,6 +34,12 @@ export class TriageOrchestrator extends DurableObject<Env> {
   /** Default classification timeout (5 minutes) - used if not configured */
   private static readonly DEFAULT_CLASSIFICATION_TIMEOUT_MS = 5 * 60 * 1000;
 
+  /** Timeout for AI duplicate verification (2 minutes) */
+  private static readonly DUPLICATE_VERIFICATION_TIMEOUT_MS = 2 * 60 * 1000;
+
+  /** Buffer for non-AI overhead: embedding call, label/comment API calls (~seconds each) */
+  private static readonly OVERHEAD_BUFFER_MS = 30_000;
+
   /**
    * Get classification timeout from config or use default
    */
@@ -78,9 +84,12 @@ export class TriageOrchestrator extends DurableObject<Env> {
     await this.updateStatus('analyzing');
 
     // Set alarm as safety net for stuck tickets. Budget covers the full runTriage
-    // lifecycle: duplicate check + classification + label/comment API calls, plus a
-    // 2-minute buffer on top of the classification timeout for that overhead.
-    const alarmTimeout = this.getClassificationTimeout() + 120_000;
+    // lifecycle: AI duplicate verification + classification + overhead (embedding
+    // call, label/comment API calls).
+    const alarmTimeout =
+      TriageOrchestrator.DUPLICATE_VERIFICATION_TIMEOUT_MS +
+      this.getClassificationTimeout() +
+      TriageOrchestrator.OVERHEAD_BUFFER_MS;
     await this.ctx.storage.setAlarm(Date.now() + alarmTimeout);
 
     try {
@@ -314,7 +323,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(
         () => reject(new Error('Duplicate verification timed out - exceeded 2 minute limit')),
-        120_000
+        TriageOrchestrator.DUPLICATE_VERIFICATION_TIMEOUT_MS
       );
     });
 
