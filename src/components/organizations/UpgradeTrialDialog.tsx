@@ -144,8 +144,8 @@ export function UpgradeTrialDialog({
           {/* Credit Options */}
           <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-4">
             <h3 className="mb-3 text-center text-sm font-semibold text-white">
-              Credits are not included with your subscription. Choose the option that works best for
-              your team.
+              Credits are not included with your subscription. Use what works best for
+              your team no matter what plan you choose.
             </h3>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               {/* Kilo Pass */}
@@ -168,7 +168,15 @@ export function UpgradeTrialDialog({
               <div className="rounded-md border border-gray-600 bg-gray-900/50 p-3">
                 <h4 className="text-sm font-medium text-white">Pay-as-you-go</h4>
                 <p className="mt-1 text-xs text-gray-400">
-                  Purchase credits as needed. Only pay for what you use with no commitments.
+                  Purchase credits as needed. Only pay for what you use with no commitments.{' '}
+                  <a
+                    href="https://app.kilo.ai/credits"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:underline"
+                  >
+                    Learn more
+                  </a>
                 </p>
               </div>
 
@@ -176,7 +184,15 @@ export function UpgradeTrialDialog({
               <div className="rounded-md border border-gray-600 bg-gray-900/50 p-3">
                 <h4 className="text-sm font-medium text-white">Bring Your Own Key</h4>
                 <p className="mt-1 text-xs text-gray-400">
-                  Use API keys from your existing AI provider accounts.
+                  Use API keys from your existing AI provider accounts.{' '}
+                  <a
+                    href="https://kilo.ai/docs/getting-started/byok"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 hover:underline"
+                  >
+                    Learn more
+                  </a>
                 </p>
               </div>
             </div>
