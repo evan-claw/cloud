@@ -736,6 +736,11 @@ function responseCreateParamsPatchFetch(userId: string, taskId: string | undefin
             const phase = phaseByKey.get(keyByMessage.get(message) ?? '');
             if (phase) {
               Object.assign(message, { phase });
+            } else {
+              console.error(
+                `[responseCreateParamsPatchFetch] failed to find phase param for userId: ${userId}, taskId: ${taskId}, message: `,
+                message
+              );
             }
           }
 
