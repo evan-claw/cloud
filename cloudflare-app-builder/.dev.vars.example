@@ -18,10 +18,5 @@ BACKEND_PUSH_NOTIFICATION_URL=http://192.168.0.1:3000/api/app-builder/push-notif
 # Generate with: openssl rand -base64 32
 GIT_JWT_SECRET=your-secret-key-at-least-32-bytes-long
 
-# Dev mode flag - enables preview proxy routing for local development.
-# Normally previews are accessed via subdomains, but in dev env it is tricky.
-# In dev mode previews are accessed using regular app builder url
-DEV_MODE=true
-
 # DB Proxy Worker
 DB_PROXY_URL=http://192.168.1.1:8792

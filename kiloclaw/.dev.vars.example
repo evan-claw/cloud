@@ -55,5 +55,3 @@ OPENCLAW_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8795,http://claw
 # To use a local Postgres instead, add "localConnectionString" to the hyperdrive
 # config in wrangler.jsonc (see https://developers.cloudflare.com/hyperdrive/configuration/local-development/).
 
-# Development
-DEV_MODE=true
