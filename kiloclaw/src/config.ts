@@ -57,3 +57,6 @@ export const HEALTH_PROBE_TIMEOUT_SECONDS = 60;
 
 /** Interval between health probe retries during startup */
 export const HEALTH_PROBE_INTERVAL_MS = 3_000;
+
+/** Auto-destroy provisioned instances that never started after this duration */
+export const STALE_PROVISION_THRESHOLD_MS = 8 * 60 * 60 * 1000; // 8 hours

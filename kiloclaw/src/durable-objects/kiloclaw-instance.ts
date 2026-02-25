@@ -49,6 +49,7 @@ import {
   LIVE_CHECK_THROTTLE_MS,
   HEALTH_PROBE_TIMEOUT_SECONDS,
   HEALTH_PROBE_INTERVAL_MS,
+  STALE_PROVISION_THRESHOLD_MS,
 } from '../config';
 import type { FlyClientConfig } from '../fly/client';
 import type {
@@ -64,6 +65,12 @@ import { z, type ZodType } from 'zod';
 import { resolveLatestVersion } from '../lib/image-version';
 
 type InstanceStatus = PersistedState['status'];
+
+type DestroyResult = {
+  finalized: boolean;
+  destroyedUserId: string | null;
+  destroyedSandboxId: string | null;
+};
 
 type GatewayProcessStatus = {
   state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
@@ -360,6 +367,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private healthCheckFailCount = 0;
   private pendingDestroyMachineId: string | null = null;
   private pendingDestroyVolumeId: string | null = null;
+  private pendingPostgresMarkOnFinalize = false;
   private lastMetadataRecoveryAt: number | null = null;
   private openclawVersion: string | null = null;
   private imageVariant: string | null = null;
@@ -400,6 +408,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = s.healthCheckFailCount;
       this.pendingDestroyMachineId = s.pendingDestroyMachineId;
       this.pendingDestroyVolumeId = s.pendingDestroyVolumeId;
+      this.pendingPostgresMarkOnFinalize = s.pendingPostgresMarkOnFinalize;
       this.lastMetadataRecoveryAt = s.lastMetadataRecoveryAt;
       this.openclawVersion = s.openclawVersion;
       this.imageVariant = s.imageVariant;
@@ -518,6 +527,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
+          pendingPostgresMarkOnFinalize: false,
         })
       : storageUpdate({ ...configFields, ...versionFields });
 
@@ -542,6 +552,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = 0;
       this.pendingDestroyMachineId = null;
       this.pendingDestroyVolumeId = null;
+      this.pendingPostgresMarkOnFinalize = false;
     }
     this.loaded = true;
 
@@ -1161,10 +1172,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    *
    * 1. Persist pendingDestroy IDs + status='destroying'
    * 2. Attempt Fly deletions
-   * 3. Only deleteAll() when BOTH are confirmed deleted
+   * 3. Finalize only after pending Fly deletes clear, and for stale auto-destroy
+   *    also after Postgres mark-destroyed succeeds
    * 4. If either fails, alarm retries cleanup
    */
-  async destroy(): Promise<void> {
+  async destroy(): Promise<DestroyResult> {
     await this.loadState();
 
     if (!this.userId) {
@@ -1191,7 +1203,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Phase 3: Finalize if both cleared, otherwise alarm will retry
     const finalized = await this.finalizeDestroyIfComplete();
-    if (!finalized) {
+    if (!finalized.finalized) {
       console.warn(
         '[DO] Destroy incomplete, alarm will retry. pending machine:',
         this.pendingDestroyMachineId,
@@ -1200,6 +1212,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       await this.scheduleAlarm();
     }
+
+    return finalized;
   }
 
   // ========================================================================
@@ -1503,7 +1517,26 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Machine first: metadata recovery can recover both machine AND volume IDs.
     // Volume second: only creates a new volume if still missing after machine recovery.
-    await this.reconcileMachine(flyConfig, reason);
+    const machineReconciled = await this.reconcileMachine(flyConfig, reason);
+
+    // Auto-destroy stale provisioned instances that never started.
+    // Checked AFTER reconcileMachine so metadata recovery has a chance to
+    // discover a live Fly machine before we decide the instance is abandoned.
+    // Only proceeds when machine reconciliation was conclusive (not skipped
+    // due to cooldown or failed due to a transient Fly API error).
+    const staleProvisionAge = this.staleProvisionAgeMs();
+    if (staleProvisionAge !== null && machineReconciled) {
+      reconcileLog(reason, 'auto_destroy_stale_provision', {
+        user_id: this.userId,
+        provisioned_at: this.provisionedAt,
+        age_hours: Math.round(staleProvisionAge / 3600000),
+      });
+      this.pendingPostgresMarkOnFinalize = true;
+      await this.ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: true }));
+      await this.destroy();
+      return;
+    }
+
     await this.reconcileVolume(flyConfig, reason);
   }
 
@@ -1534,22 +1567,30 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
   // ---- Machine reconciliation ----
 
-  private async reconcileMachine(flyConfig: FlyClientConfig, reason: string): Promise<void> {
+  /**
+   * @returns true if machine state was conclusively determined (Fly API
+   *   responded successfully), false if skipped or inconclusive (transient
+   *   error, cooldown). Callers use this to gate destructive decisions
+   *   like auto-destroy of stale provisions.
+   */
+  private async reconcileMachine(flyConfig: FlyClientConfig, reason: string): Promise<boolean> {
     // If we don't have a machine ID, attempt metadata-based recovery
     if (!this.flyMachineId) {
-      await this.attemptMetadataRecovery(flyConfig, reason);
-      return;
+      return this.attemptMetadataRecovery(flyConfig, reason);
     }
 
     try {
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
       await this.syncStatusWithFly(machine.state, reason);
       await this.reconcileMachineMount(flyConfig, machine, reason);
+      return true;
     } catch (err) {
       if (fly.isFlyNotFound(err)) {
         await this.handleMachineGone(reason);
+        return true; // 404 is conclusive: machine is gone
       }
-      // Other errors: log and retry next alarm
+      // Other errors: inconclusive, retry next alarm
+      return false;
     }
   }
 
@@ -1557,16 +1598,22 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    * Attempt to recover machine (and optionally volume) from Fly metadata.
    * Only runs when flyMachineId is null. Respects a cooldown to avoid
    * hammering listMachines when there's genuinely nothing to recover.
+   *
+   * @returns true if the Fly API responded conclusively (even if no machine
+   *   was found), false if skipped (cooldown) or failed (transient error).
    */
-  private async attemptMetadataRecovery(flyConfig: FlyClientConfig, reason: string): Promise<void> {
-    if (!this.userId) return;
+  private async attemptMetadataRecovery(
+    flyConfig: FlyClientConfig,
+    reason: string
+  ): Promise<boolean> {
+    if (!this.userId) return false;
 
     // Cooldown: skip if we tried recently
     if (
       this.lastMetadataRecoveryAt &&
       Date.now() - this.lastMetadataRecoveryAt < METADATA_RECOVERY_COOLDOWN_MS
     ) {
-      return;
+      return false;
     }
 
     // Record attempt time regardless of outcome
@@ -1589,7 +1636,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
 
       const candidate = selectRecoveryCandidate(machines);
-      if (!candidate) return;
+      if (!candidate) return true; // Conclusive: no machine exists on Fly
 
       reconcileLog(reason, 'recover_machine_from_metadata', {
         machine_id: candidate.id,
@@ -1640,8 +1687,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
 
       await this.ctx.storage.put(storageUpdate(updates));
+      return true; // Conclusive: machine recovered
     } catch (err) {
       console.error('[reconcile] metadata recovery failed:', err);
+      return false; // Inconclusive: transient error
     }
   }
 
@@ -1870,19 +1919,56 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   }
 
   /**
-   * If both pending IDs are cleared, atomically wipe all DO state.
-   * Returns true if finalized, false if still pending.
+   * If both pending IDs are cleared, finalize destroy.
+   * For stale auto-destroy, this includes marking Postgres before wiping DO state.
+   * Returns finalization details for callers that need retry behavior.
    */
-  private async finalizeDestroyIfComplete(): Promise<boolean> {
+  private async finalizeDestroyIfComplete(): Promise<DestroyResult> {
     if (this.pendingDestroyMachineId || this.pendingDestroyVolumeId) {
-      return false;
+      return {
+        finalized: false,
+        destroyedUserId: null,
+        destroyedSandboxId: null,
+      };
+    }
+
+    if (!this.userId || !this.sandboxId) {
+      return {
+        finalized: false,
+        destroyedUserId: null,
+        destroyedSandboxId: null,
+      };
+    }
+
+    const destroyedUserId = this.userId;
+    const destroyedSandboxId = this.sandboxId;
+
+    if (this.pendingPostgresMarkOnFinalize) {
+      const marked = await this.markDestroyedInPostgres(destroyedUserId, destroyedSandboxId);
+      if (!marked) {
+        return {
+          finalized: false,
+          destroyedUserId,
+          destroyedSandboxId,
+        };
+      }
     }
 
     reconcileLog('finalize', 'destroy_complete', {
-      user_id: this.userId,
-      sandbox_id: this.sandboxId,
+      user_id: destroyedUserId,
+      sandbox_id: destroyedSandboxId,
     });
 
+    await this.clearDestroyedState();
+
+    return {
+      finalized: true,
+      destroyedUserId,
+      destroyedSandboxId,
+    };
+  }
+
+  private async clearDestroyedState(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
 
@@ -1908,13 +1994,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.healthCheckFailCount = 0;
     this.pendingDestroyMachineId = null;
     this.pendingDestroyVolumeId = null;
+    this.pendingPostgresMarkOnFinalize = false;
     this.lastMetadataRecoveryAt = null;
     this.openclawVersion = null;
     this.imageVariant = null;
     this.trackedImageTag = null;
     this.loaded = false;
-
-    return true;
   }
 
   // ========================================================================
@@ -2012,6 +2097,23 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       HEALTH_PROBE_TIMEOUT_SECONDS,
       's — proceeding anyway'
     );
+  }
+
+  /**
+   * Returns the age in ms if this instance is a stale abandoned provision
+   * (provisioned, never started, no machine, older than threshold), or null.
+   */
+  private staleProvisionAgeMs(): number | null {
+    if (
+      this.status === 'provisioned' &&
+      !this.flyMachineId &&
+      !this.lastStartedAt &&
+      this.provisionedAt
+    ) {
+      const age = Date.now() - this.provisionedAt;
+      if (age > STALE_PROVISION_THRESHOLD_MS) return age;
+    }
+    return null;
   }
 
   private getFlyConfig(): FlyClientConfig {
@@ -2301,6 +2403,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
+          pendingPostgresMarkOnFinalize: false,
           openclawVersion: null,
           imageVariant: null,
           trackedImageTag: null,
@@ -2324,6 +2427,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = 0;
       this.pendingDestroyMachineId = null;
       this.pendingDestroyVolumeId = null;
+      this.pendingPostgresMarkOnFinalize = false;
       this.lastMetadataRecoveryAt = null;
       this.openclawVersion = null;
       this.imageVariant = null;
@@ -2343,6 +2447,33 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     } catch (err) {
       console.error('[DO] Postgres restore failed:', err);
+    }
+  }
+
+  /**
+   * Mark the Postgres registry row as destroyed during stale auto-destroy
+   * finalization. Returns true when marked (or already marked), false when
+   * a retry is needed.
+   */
+  private async markDestroyedInPostgres(userId: string, sandboxId: string): Promise<boolean> {
+    const connectionString = this.env.HYPERDRIVE?.connectionString;
+    if (!connectionString) {
+      // Hyperdrive not available — skip rather than block finalization forever.
+      // The stale Postgres row is harmless; restoreFromPostgres handles it.
+      console.warn('[DO] HYPERDRIVE not configured, skipping Postgres mark-destroyed');
+      return true;
+    }
+
+    try {
+      const db = createDatabaseConnection(connectionString);
+      const store = new InstanceStore(db);
+      await store.markDestroyed(userId, sandboxId);
+      this.pendingPostgresMarkOnFinalize = false;
+      await this.ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: false }));
+      return true;
+    } catch (err) {
+      console.error('[DO] Failed to mark instance destroyed in Postgres:', err);
+      return false;
     }
   }
 
