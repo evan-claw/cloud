@@ -319,7 +319,7 @@ platform.get('/gateway/status', async c => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const status = statusCodeFromError(err);
-    console.error('[platform] gateway status failed:', message);
+    console.error(`[platform] gateway status failed: ${message} status=${status}`);
     return jsonError(message, status);
   }
 });

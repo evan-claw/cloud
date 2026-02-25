@@ -1,6 +1,6 @@
 {
-  "id": "a77f15af-8a7e-4e2d-987f-6f46baee3812",
-  "prevId": "ce1bf059-6c21-44c2-a55e-80328198eb90",
+  "id": "de6b52b1-047a-4e47-a234-7e05be149d1a",
+  "prevId": "a77f15af-8a7e-4e2d-987f-6f46baee3812",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7902,6 +7902,18 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "openrouter": {
+          "name": "openrouter",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vercel": {
+          "name": "vercel",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

@@ -12,8 +12,8 @@ export type ModelEntry = { id: string; name: string };
 const ModelEntrySchema = z.object({ id: z.string(), name: z.string() });
 
 const MachineSizeSchema = z.object({
-  cpus: z.number(),
-  memory_mb: z.number(),
+  cpus: z.number().int().min(1).max(8),
+  memory_mb: z.number().int().min(256).max(16384),
   cpu_kind: z.enum(['shared', 'performance']).optional(),
 });
 
