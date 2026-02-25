@@ -2453,8 +2453,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private async markDestroyedInPostgres(userId: string, sandboxId: string): Promise<boolean> {
     const connectionString = this.env.HYPERDRIVE?.connectionString;
     if (!connectionString) {
-      console.error('[DO] HYPERDRIVE not configured, cannot mark Postgres row destroyed');
-      return false;
+      // Hyperdrive not available — skip rather than block finalization forever.
+      // The stale Postgres row is harmless; restoreFromPostgres handles it.
+      console.warn('[DO] HYPERDRIVE not configured, skipping Postgres mark-destroyed');
+      return true;
     }
 
     try {
