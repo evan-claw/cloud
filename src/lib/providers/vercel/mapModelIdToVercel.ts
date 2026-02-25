@@ -13,14 +13,14 @@ export function mapModelIdToVercel(modelId: string) {
     return hardcodedVercelId;
   }
 
-  const slashIndex = modelId.indexOf('/');
-  if (slashIndex < 0) {
-    return modelId;
-  }
-
   const internalId =
     kiloFreeModels.find(m => m.public_id === modelId && m.is_enabled && m.gateway === 'openrouter')
       ?.internal_id ?? modelId;
+
+  const slashIndex = internalId.indexOf('/');
+  if (slashIndex < 0) {
+    return internalId;
+  }
 
   const firstPartyProvider = inferVercelFirstPartyInferenceProviderForModel(internalId);
   return firstPartyProvider ? firstPartyProvider + internalId.slice(slashIndex) : internalId;
