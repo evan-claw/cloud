@@ -16,7 +16,7 @@ export const EndpointsSchema = z.object({
 
 export const StoredModelSchema = ModelSchema.and(
   z.object({
-    providers: z.array(EndpointSchema),
+    endpoints: z.array(EndpointSchema),
   })
 );
 

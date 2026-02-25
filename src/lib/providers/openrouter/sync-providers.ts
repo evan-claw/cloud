@@ -51,7 +51,7 @@ async function fetchGatewayModels(gateway: Provider) {
         const endpoints = EndpointsSchema.parse(await endpointsResponse.json());
         result[model.id] = {
           ...model,
-          providers: endpoints.data.endpoints,
+          endpoints: endpoints.data.endpoints,
         };
       })
     )
