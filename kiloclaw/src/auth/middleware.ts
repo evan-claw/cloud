@@ -13,16 +13,8 @@ import { createDatabaseConnection, UserStore } from '../db';
  * 3. Verify HS256 with NEXTAUTH_SECRET; check version and env
  * 4. Validate apiTokenPepper against DB via Hyperdrive
  * 5. Set ctx.userId, ctx.authToken on context
- * 6. DEV_MODE bypass: synthetic userId 'dev@kilocode.ai'
  */
 export async function authMiddleware(c: Context<AppEnv>, next: Next) {
-  // DEV_MODE bypass
-  if (c.env.DEV_MODE === 'true') {
-    c.set('userId', 'dev@kilocode.ai');
-    c.set('authToken', 'dev-token');
-    return next();
-  }
-
   const secret = c.env.NEXTAUTH_SECRET;
   if (!secret) {
     console.error('[auth] NEXTAUTH_SECRET not configured');

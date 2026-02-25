@@ -74,12 +74,8 @@ function isPlatformRoute(c: Context<AppEnv>): boolean {
   return path === '/api/platform' || path.startsWith('/api/platform/');
 }
 
-/** Reject early if required secrets are missing (skip in dev mode). */
+/** Reject early if required secrets are missing. */
 async function requireEnvVars(c: Context<AppEnv>, next: Next) {
-  if (c.env.DEV_MODE === 'true') {
-    return next();
-  }
-
   // Platform routes need infra bindings but not AI provider keys
   if (isPlatformRoute(c)) {
     const missing: string[] = [];

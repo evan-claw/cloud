@@ -77,14 +77,6 @@ describe('authMiddleware', () => {
     app = createTestApp();
   });
 
-  it('allows DEV_MODE bypass with synthetic userId', async () => {
-    const res = await app.request('/protected/whoami', {}, { DEV_MODE: 'true' } as never);
-    expect(res.status).toBe(200);
-    const body = await jsonBody(res);
-    expect(body.userId).toBe('dev@kilocode.ai');
-    expect(body.authToken).toBe('dev-token');
-  });
-
   it('rejects when no NEXTAUTH_SECRET is configured', async () => {
     const res = await app.request('/protected/whoami', {}, {} as never);
     expect(res.status).toBe(500);

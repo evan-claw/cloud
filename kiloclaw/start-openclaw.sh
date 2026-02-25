@@ -169,11 +169,6 @@ if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
 }
 
-if (process.env.OPENCLAW_DEV_MODE === 'true') {
-    config.gateway.controlUi = config.gateway.controlUi || {};
-    config.gateway.controlUi.allowInsecureAuth = true;
-}
-
 // Allow Control UI connections from localhost without WebCrypto device identity.
 // This is a fallback for insecure HTTP contexts where SubtleCrypto is unavailable.
 // It does NOT bypass device pairing -- pairing is handled separately via the

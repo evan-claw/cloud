@@ -70,7 +70,6 @@ export async function buildEnvVars(
   // Layer 1: Worker-level defaults (non-sensitive)
   const plainEnv: Record<string, string> = {};
 
-  if (env.DEV_MODE) plainEnv.OPENCLAW_DEV_MODE = env.DEV_MODE;
   if (env.KILOCODE_API_BASE_URL) plainEnv.KILOCODE_API_BASE_URL = env.KILOCODE_API_BASE_URL;
   plainEnv.KILOCODE_FEATURE = 'kilo-claw';
 

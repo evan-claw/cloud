@@ -59,12 +59,6 @@ describe('buildEnvVars', () => {
     expect(result.env.AUTO_APPROVE_DEVICES).toBe('true');
   });
 
-  it('maps DEV_MODE to OPENCLAW_DEV_MODE in env bucket', async () => {
-    const env = createMockEnv({ DEV_MODE: 'true' });
-    const result = await buildEnvVars(env, SANDBOX_ID, SECRET);
-    expect(result.env.OPENCLAW_DEV_MODE).toBe('true');
-  });
-
   it('passes KILOCODE_API_BASE_URL override in env bucket', async () => {
     const env = createMockEnv({
       KILOCODE_API_BASE_URL: 'https://example.internal/openrouter/',
@@ -91,12 +85,11 @@ describe('buildEnvVars', () => {
   // ─── User config merging (Layers 2-4) ────────────────────────────────
 
   it('merges user plaintext env vars on top of platform defaults', async () => {
-    const env = createMockEnv({ DEV_MODE: 'true' });
+    const env = createMockEnv();
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       envVars: { CUSTOM_VAR: 'custom-value', NODE_ENV: 'production' },
     });
 
-    expect(result.env.OPENCLAW_DEV_MODE).toBe('true');
     expect(result.env.CUSTOM_VAR).toBe('custom-value');
     expect(result.env.NODE_ENV).toBe('production');
   });
