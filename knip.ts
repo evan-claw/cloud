@@ -15,6 +15,7 @@ const config: KnipConfig = {
     '@uiw/react-json-view',
 
     // Used via plugins or extends (detected by custom compiler now)
+    'eslint-config-next',
     'eslint-config-prettier',
 
     // Utility dependencies used in scripts

@@ -18,8 +18,8 @@ const compat = new FlatCompat({
 });
 
 export default defineConfig([
-  eslintPluginNext.configs.recommended,
-  eslintPluginNext.configs['core-web-vitals'],
+  eslintPluginNext.flatConfig.recommended,
+  eslintPluginNext.flatConfig.coreWebVitals,
   ...tanstackQueryPlugin.configs['flat/recommended'],
   {
     ignores: [
