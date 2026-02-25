@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { withAuthenticatedAdminApiRoutes } from './middleware/withAuthenticatedAdminApiRoutes';
 import { withKiloEditorCookie } from './middleware/withKiloEditorCookie';
 
-export function proxy(request: NextRequestWithAuth) {
+function baseProxy(request: NextRequestWithAuth) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-pathname', request.nextUrl.pathname);
   return NextResponse.next({
@@ -13,7 +13,7 @@ export function proxy(request: NextRequestWithAuth) {
   });
 }
 
-export default withAuthenticatedAdminApiRoutes(withKiloEditorCookie(proxy));
+export const proxy = withAuthenticatedAdminApiRoutes(withKiloEditorCookie(baseProxy));
 
 export const config = {
   /*
