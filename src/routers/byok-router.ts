@@ -18,47 +18,60 @@ import {
   type BYOKApiKeyResponse,
 } from '@/lib/byok/types';
 import { VercelUserByokInferenceProviderIdSchema } from '@/lib/providers/openrouter/inference-provider-id';
-import { AUTOCOMPLETE_MODEL } from '@/lib/constants';
+import { unstable_cache } from 'next/cache';
+import { StoredModelSchema } from '@/lib/providers/vercel/types';
+
+const fetchSupportedModels = unstable_cache(
+  async (): Promise<Record<string, string[]>> => {
+    const vercelModelMetadata = z
+      .record(z.string(), StoredModelSchema)
+      .safeParse(
+        (
+          await readDb
+            .select({ vercel: modelsByProvider.vercel })
+            .from(modelsByProvider)
+            .orderBy(desc(modelsByProvider.id))
+            .limit(1)
+        ).at(0)?.vercel
+      );
+
+    if (!vercelModelMetadata.success) {
+      console.error(
+        '[fetchSupportedModels] failed to parse Vercel model metadata',
+        z.treeifyError(vercelModelMetadata.error)
+      );
+      return {};
+    }
+
+    const result: Record<string, string[]> = {};
+
+    result['codestral'] = ['Codestral'];
+
+    for (const model of Object.values(vercelModelMetadata.data)) {
+      if (model.id.includes('codestral')) continue;
+      for (const endpoint of model.endpoints) {
+        const providerParsed = VercelUserByokInferenceProviderIdSchema.safeParse(endpoint.tag);
+        if (!providerParsed.success) continue;
+        const providerId = providerParsed.data;
+        if (!result[providerId]) result[providerId] = [];
+        result[providerId].push(model.name);
+      }
+    }
+
+    for (const models of Object.values(result)) {
+      models.sort();
+    }
+
+    return result;
+  },
+  undefined,
+  { revalidate: 300 }
+);
 
 export const byokRouter = createTRPCRouter({
-  // Returns a map of provider ID → list of supported model names, derived from Vercel metadata.
-  // Codestral is special-cased: its model list comes from Mistral's API, not Vercel.
   listSupportedModels: baseProcedure
-    .output(z.record(z.string(), z.array(z.object({ id: z.string(), name: z.string() }))))
-    .query(async () => {
-      const vercelModelMetadata = (
-        await readDb
-          .select({ vercel: modelsByProvider.vercel })
-          .from(modelsByProvider)
-          .orderBy(desc(modelsByProvider.id))
-          .limit(1)
-      ).at(0)?.vercel;
-
-      const result: Record<string, { id: string; name: string }[]> = {};
-
-      // Codestral is not a Vercel gateway provider — it calls Mistral's API directly for FIM.
-      result['codestral'] = [
-        { id: `mistralai/${AUTOCOMPLETE_MODEL}`, name: 'Codestral (autocomplete)' },
-      ];
-
-      if (vercelModelMetadata) {
-        for (const model of Object.values(vercelModelMetadata)) {
-          for (const endpoint of model.endpoints) {
-            const providerParsed = VercelUserByokInferenceProviderIdSchema.safeParse(endpoint.tag);
-            if (!providerParsed.success) continue;
-            const providerId = providerParsed.data;
-            if (!result[providerId]) result[providerId] = [];
-            result[providerId].push({ id: model.id, name: model.name });
-          }
-        }
-        // Sort models alphabetically within each provider
-        for (const models of Object.values(result)) {
-          models.sort((a, b) => a.name.localeCompare(b.name));
-        }
-      }
-
-      return result;
-    }),
+    .output(z.record(z.string(), z.array(z.string())))
+    .query(fetchSupportedModels),
 
   list: baseProcedure
     .input(ListBYOKKeysInputSchema)

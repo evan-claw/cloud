@@ -62,9 +62,7 @@ function BYOKDescription() {
   );
 }
 
-type SupportedModel = { id: string; name: string };
-
-function SupportedModelsList({ models }: { models: SupportedModel[] }) {
+function SupportedModelsList({ models }: { models: string[] }) {
   const [expanded, setExpanded] = useState(false);
 
   if (models.length === 0) return null;
@@ -81,8 +79,8 @@ function SupportedModelsList({ models }: { models: SupportedModel[] }) {
       </button>
       {expanded && (
         <ul className="text-muted-foreground mt-1 ml-4 space-y-0.5 text-xs">
-          {models.map(m => (
-            <li key={m.id}>{m.name}</li>
+          {models.map(model => (
+            <li key={model}>{model}</li>
           ))}
         </ul>
       )}
@@ -245,7 +243,7 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     return provider?.name || providerId;
   };
 
-  const getProviderModels = (providerId: string): SupportedModel[] => {
+  const getProviderModels = (providerId: string): string[] => {
     return supportedModels?.[providerId] ?? [];
   };
 
@@ -435,9 +433,9 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                   <Label>Supported Models</Label>
                   <div className="text-muted-foreground rounded-md border p-3 text-sm">
                     <ul className="max-h-32 space-y-0.5 overflow-y-auto">
-                      {getProviderModels(selectedProvider).map(m => (
-                        <li key={m.id} className="text-xs">
-                          {m.name}
+                      {getProviderModels(selectedProvider).map(model => (
+                        <li key={model} className="text-xs">
+                          {model}
                         </li>
                       ))}
                     </ul>
