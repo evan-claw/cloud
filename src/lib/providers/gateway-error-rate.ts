@@ -1,11 +1,12 @@
 import { db, sql } from '@/lib/drizzle';
-import { unstable_cache } from 'next/cache';
+import { cacheLife } from 'next/cache';
 import * as z from 'zod';
 
-const getGatewayErrorRate_cached = unstable_cache(
-  async () => {
-    console.debug(`[getGatewayErrorRate_cached] refreshing at ${new Date().toISOString()}`);
-    const { rows } = await db.execute(sql`
+async function getGatewayErrorRate_cached() {
+  'use cache';
+  cacheLife({ revalidate: 60 });
+  console.debug(`[getGatewayErrorRate_cached] refreshing at ${new Date().toISOString()}`);
+  const { rows } = await db.execute(sql`
         select
             provider as "gateway",
             1.0 * count(*) filter(where has_error = true) / count(*) as "errorRate"
@@ -16,18 +17,15 @@ const getGatewayErrorRate_cached = unstable_cache(
             and provider in ('openrouter', 'vercel')
         group by provider
     `);
-    return z
-      .array(
-        z.object({
-          gateway: z.string(),
-          errorRate: z.coerce.number(),
-        })
-      )
-      .parse(rows);
-  },
-  undefined,
-  { revalidate: 60 }
-);
+  return z
+    .array(
+      z.object({
+        gateway: z.string(),
+        errorRate: z.coerce.number(),
+      })
+    )
+    .parse(rows);
+}
 
 export async function getGatewayErrorRate() {
   const start = performance.now();
