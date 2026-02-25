@@ -83,17 +83,19 @@ describe('resolveTemplate', () => {
     });
   });
 
-  it('local roast keys win even when remote provides the same key', () => {
+  it('remote wins for keys that both local and remote define', () => {
     const result = resolveTemplate(remoteTemplateOverridingRoast, localTemplate);
 
-    expect(result.template.styleGuidance?.['roast']).toBe('ROAST MODE ACTIVATED');
+    expect(result.template.styleGuidance?.['roast']).toBe('REMOTE ROAST GUIDANCE');
+    // local-only keys still present
+    expect(result.template.styleGuidance?.['balanced']).toBe('local balanced guidance');
   });
 
-  it('remote wins for non-protected keys that local also defines', () => {
+  it('remote wins for balanced key that local also defines', () => {
     const result = resolveTemplate(remoteTemplateOverridingBalanced, localTemplate);
 
     expect(result.template.styleGuidance?.['balanced']).toBe('REMOTE BALANCED GUIDANCE');
-    // roast is still preserved
+    // local-only keys still present
     expect(result.template.styleGuidance?.['roast']).toBe('ROAST MODE ACTIVATED');
   });
 

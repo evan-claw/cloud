@@ -100,36 +100,24 @@ function getDefaultTemplate(platform: CodeReviewPlatform): PromptTemplate {
   }
 }
 
-// Style keys whose local definitions are protected from PostHog overrides.
-const PROTECTED_STYLE_KEYS = ['roast'] as const;
-
 /**
- * Merges style override records: remote keys win for everything except
- * protected keys (e.g. "roast"), which always come from the local template.
- * This lets PostHog freely update balanced/strict/lenient prompts while
- * guaranteeing roast mode can never be accidentally stripped.
+ * Merges style override records: { ...local, ...remote }.
+ * Remote keys win when both define the same key.
+ * When remote is undefined the local values pass through unchanged.
  */
 function mergeStyleOverrides<V>(
   local: Record<string, V> | undefined,
   remote: Record<string, V> | undefined
 ): Record<string, V> | undefined {
   if (!local && !remote) return undefined;
-  const merged = { ...local, ...remote };
-  if (local) {
-    for (const key of PROTECTED_STYLE_KEYS) {
-      if (key in local) {
-        merged[key] = local[key];
-      }
-    }
-  }
-  return merged;
+  return { ...local, ...remote };
 }
 
 /**
  * Merges a remote (PostHog) template with the local template.
- * Remote wins for all base prompt sections and for non-protected
- * style override keys. Protected keys (like "roast") always come
- * from the local template so PostHog can never strip them.
+ * Remote wins for all base prompt sections and for style override
+ * keys that it explicitly provides. Local style overrides fill in
+ * any keys the remote template doesn't define.
  */
 export function resolveTemplate(
   remoteTemplate: PromptTemplate | undefined,
