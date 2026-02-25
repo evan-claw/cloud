@@ -7,6 +7,7 @@ import { OrganizationUsageSummaryCard } from './OrganizationUsageSummaryCard';
 import { OrganizationDataCollectionCard } from './OrganizationDataCollectionCard';
 import { SeatUsageCard } from './SeatUsageCard';
 import { SSOSignupCard } from './SSOSignupCard';
+import { UsageCsvExportCard } from './UsageCsvExportCard';
 import { LockableContainer } from './LockableContainer';
 import { OrganizationAdminContextProvider } from './OrganizationContextWrapper';
 import { OrganizationPageHeader } from './OrganizationPageHeader';
@@ -156,6 +157,9 @@ export function OrganizationDashboard({ organizationId, role, topupAmount }: Pro
               <LockableContainer>
                 <SSOSignupCard organization={organizationData} role={currentRole} />
               </LockableContainer>
+            )}
+            {(currentRole === 'owner' || currentRole === 'billing_manager') && (
+              <UsageCsvExportCard organizationId={organizationId} />
             )}
             <Card>
               <CardHeader>

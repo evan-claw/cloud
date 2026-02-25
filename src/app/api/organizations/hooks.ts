@@ -530,6 +530,11 @@ export function useOrganizationAIAdoptionTimeseries(
   return { ...data, error, isLoading };
 }
 
+export function useExportUsageCsv() {
+  const trpc = useTRPC();
+  return useMutation(trpc.organizations.usageDetails.exportUsageCsv.mutationOptions());
+}
+
 export function useOrganizationTrialStatus(
   organizationId: string
 ): OrgTrialStatus | 'loading' | 'error' {

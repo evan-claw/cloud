@@ -4,6 +4,7 @@ import { createTRPCRouter } from '@/lib/trpc/init';
 import {
   OrganizationIdInputSchema,
   organizationMemberProcedure,
+  organizationOwnerProcedure,
 } from '@/routers/organizations/utils';
 import { db } from '@/lib/drizzle';
 import { microdollar_usage, kilocode_users } from '@/db/schema';
@@ -114,6 +115,13 @@ const AIAdoptionTimeseriesOutputSchema = z.object({
     })
   ),
   isNewOrganization: z.boolean(), // True if first activity was < 3 days ago
+});
+
+const MAX_EXPORT_ROWS = 10_000;
+
+const ExportUsageCsvInputSchema = OrganizationIdInputSchema.extend({
+  startDate: z.iso.date(),
+  endDate: z.iso.date(),
 });
 
 function daysAgo(days: number): string {
@@ -447,5 +455,41 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
       const isNewOrganization = firstActivityDate ? firstActivityDate > threeDaysAgo : true;
 
       return { timeseries: data, weeklyTrends, userScores, isNewOrganization };
+    }),
+  exportUsageCsv: organizationOwnerProcedure
+    .input(ExportUsageCsvInputSchema)
+    .mutation(async ({ input }) => {
+      const { organizationId, startDate, endDate } = input;
+
+      const rows = await db
+        .select({
+          date: sql<string>`DATE(${microdollar_usage.created_at})`.as('date'),
+          userEmail: kilocode_users.google_user_email,
+          totalCost: sum(microdollar_usage.cost),
+        })
+        .from(microdollar_usage)
+        .innerJoin(kilocode_users, eq(kilocode_users.id, microdollar_usage.kilo_user_id))
+        .where(
+          and(
+            eq(microdollar_usage.organization_id, organizationId),
+            gte(sql`DATE(${microdollar_usage.created_at})`, startDate),
+            lte(sql`DATE(${microdollar_usage.created_at})`, endDate)
+          )
+        )
+        .groupBy(sql`DATE(${microdollar_usage.created_at})`, kilocode_users.google_user_email)
+        .orderBy(sql`DATE(${microdollar_usage.created_at})`)
+        .limit(MAX_EXPORT_ROWS);
+
+      const header = 'date,user_email,model_cost';
+      const csvRows = rows.map(row => {
+        const costDollars = (Number(row.totalCost ?? 0) / 1_000_000).toFixed(2);
+        const escapedEmail = `"${String(row.userEmail).replace(/"/g, '""')}"`;
+        return `${row.date},${escapedEmail},${costDollars}`;
+      });
+
+      return {
+        data: [header, ...csvRows].join('\n'),
+        rowCount: rows.length,
+      };
     }),
 });
