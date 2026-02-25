@@ -389,6 +389,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     ? await customLlmRequest(
         customLlm,
         requestBodyParsed,
+        user.id,
+        taskId,
         !!fraudHeaders.http_user_agent?.startsWith('Kilo-Code/')
       )
     : await openRouterRequest({

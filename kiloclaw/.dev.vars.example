@@ -5,6 +5,9 @@
 NEXTAUTH_SECRET=dev-secret-change-me
 INTERNAL_API_SECRET=dev-internal-secret
 GATEWAY_TOKEN_SECRET=dev-gateway-secret-kiloclaw
+# Override WORKER_ENV to "development" for local dev.
+# Production default is set in wrangler.jsonc. This override disables JWT env
+# claim enforcement and uses "dev-" prefixed Fly app names.
 WORKER_ENV=development
 
 # Optional: Override KiloCode base URL (dev)

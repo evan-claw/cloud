@@ -20,14 +20,16 @@ import {
   isHaikuModel,
 } from '@/lib/providers/anthropic';
 import { applyGigaPotatoProviderSettings } from '@/lib/providers/gigapotato';
-import { getBYOKforOrganization, getBYOKforUser, type BYOKResult } from '@/lib/byok';
+import {
+  getBYOKforOrganization,
+  getBYOKforUser,
+  getModelUserByokProviders,
+  type BYOKResult,
+} from '@/lib/byok';
 import type { CustomLlm } from '@/db/schema';
 import { custom_llm, type User } from '@/db/schema';
 import type { OpenRouterInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
-import {
-  inferUserByokProvidersForModel,
-  OpenRouterInferenceProviderIdSchema,
-} from '@/lib/providers/openrouter/inference-provider-id';
+import { OpenRouterInferenceProviderIdSchema } from '@/lib/providers/openrouter/inference-provider-id';
 import { applyCoreThinkProviderSettings } from '@/lib/providers/corethink';
 import { hasAttemptCompletionTool } from '@/lib/tool-calling';
 import { applyGoogleModelSettings, isGeminiModel } from '@/lib/providers/google';
@@ -92,16 +94,17 @@ export async function getProvider(
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
-): Promise<{ provider: Provider; userByok: BYOKResult | null; customLlm: CustomLlm | null }> {
+): Promise<{ provider: Provider; userByok: BYOKResult[] | null; customLlm: CustomLlm | null }> {
   if (!isAnonymousContext(user)) {
-    const byokProviders = inferUserByokProvidersForModel(requestedModel);
-    for (const modelProvider of byokProviders) {
-      const userByok = organizationId
-        ? await getBYOKforOrganization(db, organizationId, modelProvider)
-        : await getBYOKforUser(db, user.id, modelProvider);
-      if (userByok) {
-        return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok, customLlm: null };
-      }
+    const modelProviders = await getModelUserByokProviders(requestedModel);
+    const userByok =
+      modelProviders.length === 0
+        ? null
+        : organizationId
+          ? await getBYOKforOrganization(db, organizationId, modelProviders)
+          : await getBYOKforUser(db, user.id, modelProviders);
+    if (userByok) {
+      return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok, customLlm: null };
     }
   }
 
@@ -225,7 +228,7 @@ export function applyProviderSpecificLogic(
   requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest,
   extraHeaders: Record<string, string>,
-  userByok: BYOKResult | null
+  userByok: BYOKResult[] | null
 ) {
   const kiloFreeModel = kiloFreeModels.find(m => m.public_id === requestedModel);
   if (kiloFreeModel) {
