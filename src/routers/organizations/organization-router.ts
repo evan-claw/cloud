@@ -56,6 +56,7 @@ import { organizationSlackRouter } from '@/routers/organizations/organization-sl
 import { organizationAutoTriageRouter } from '@/routers/organizations/organization-auto-triage-router';
 import { organizationAutoFixRouter } from '@/routers/organizations/organization-auto-fix-router';
 import { organizationAutoTopUpRouter } from '@/routers/organizations/organization-auto-top-up-router';
+import { organizationChargebackExportRouter } from '@/routers/organizations/organization-chargeback-export-router';
 
 const OrganizationUpdateSchema = OrganizationIdInputSchema.extend({
   name: OrganizationNameSchema,
@@ -112,6 +113,7 @@ export const organizationsRouter = createTRPCRouter({
   autoTriage: organizationAutoTriageRouter,
   autoFix: organizationAutoFixRouter,
   autoTopUp: organizationAutoTopUpRouter,
+  chargebackExport: organizationChargebackExportRouter,
 
   list: baseProcedure.query(async opts => {
     const { user } = opts.ctx;

@@ -35,6 +35,8 @@ import { MetricsSection } from './components/MetricsSection';
 import { ActiveFiltersBar } from './components/ActiveFiltersBar';
 import { FiltersSection } from './FiltersSection';
 import { OrganizationAdminContextProvider } from '@/components/organizations/OrganizationContextWrapper';
+import { useUserOrganizationRole } from '@/components/organizations/OrganizationContext';
+import { ChargebackExport } from './components/ChargebackExport';
 
 // Chart color constant
 const CHART_COLOR = '#3b82f6';
@@ -61,6 +63,8 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
   // Context and session
   const { data: session } = useSession();
   const currentUserEmail = session?.user?.email;
+  const userRole = useUserOrganizationRole();
+  const canExportChargeback = userRole === 'owner' || userRole === 'billing_manager';
 
   // Fetch usage details
   const {
@@ -207,6 +211,8 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
           isLoading={isLoading}
         />
       </div>
+
+      {canExportChargeback && <ChargebackExport organizationId={organizationId} />}
 
       <Tabs value={timePeriod} onValueChange={value => setTimePeriod(value as TimePeriod)}>
         <TabsContent value={timePeriod}>
