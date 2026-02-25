@@ -485,7 +485,7 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
         const costDollars = (Number(row.totalCost ?? 0) / 1_000_000).toFixed(2);
         let email = String(row.userEmail);
         // Prefix formula-triggering characters with single quote to prevent CSV injection
-        if (/^[=+\-@\t\r]/.test(email)) {
+        if (/^[\s=+\-@]/.test(email)) {
           email = "'" + email;
         }
         const escapedEmail = `"${email.replace(/"/g, '""')}"`;
