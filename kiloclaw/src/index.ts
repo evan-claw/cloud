@@ -117,7 +117,14 @@ async function authGuard(c: Context<AppEnv>, next: Next) {
 async function deriveSandboxId(c: Context<AppEnv>, next: Next) {
   const userId = c.get('userId');
   if (userId) {
-    c.set('sandboxId', sandboxIdFromUserId(userId));
+    try {
+      c.set('sandboxId', sandboxIdFromUserId(userId));
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('userId too long')) {
+        return c.text('Invalid user identifier', 400);
+      }
+      throw err;
+    }
   }
   return next();
 }

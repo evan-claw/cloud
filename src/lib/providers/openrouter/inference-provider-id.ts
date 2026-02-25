@@ -87,14 +87,6 @@ const modelPrefixToVercelInferenceProviderMapping = {
   'z-ai': VercelUserByokInferenceProviderIdSchema.enum.zai,
 } as Record<string, VercelInferenceProviderId | undefined>;
 
-export function inferUserByokProviderForModel(model: string): UserByokProviderId | null {
-  return model.startsWith('mistralai/codestral')
-    ? AutocompleteUserByokProviderIdSchema.enum.codestral
-    : (VercelUserByokInferenceProviderIdSchema.safeParse(
-        inferVercelFirstPartyInferenceProviderForModel(model)
-      ).data ?? null);
-}
-
 export function inferVercelFirstPartyInferenceProviderForModel(
   model: string
 ): VercelInferenceProviderId | null {

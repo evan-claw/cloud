@@ -297,7 +297,8 @@ async function handleAnalysisFailed(
       ? `Analysis interrupted: ${payload.errorMessage ?? 'unknown reason'}`
       : (payload.errorMessage ?? 'Analysis failed');
 
-  logError('Analysis failed/interrupted', {
+  const logger = payload.status === 'interrupted' ? log : logError;
+  logger('Analysis failed/interrupted', {
     findingId,
     correlationId,
     status: payload.status,

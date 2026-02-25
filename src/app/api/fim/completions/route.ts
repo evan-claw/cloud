@@ -126,8 +126,8 @@ export async function POST(request: NextRequest) {
   const promptInfo = extractFimPromptInfo(requestBody);
 
   const userByok = organizationId
-    ? await getBYOKforOrganization(readDb, organizationId, 'codestral')
-    : await getBYOKforUser(readDb, user.id, 'codestral');
+    ? await getBYOKforOrganization(readDb, organizationId, ['codestral'])
+    : await getBYOKforUser(readDb, user.id, ['codestral']);
 
   const usageContext: MicrodollarUsageContext = {
     kiloUserId: user.id,
@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${userByok?.decryptedAPIKey ?? MISTRAL_API_KEY}`,
+      Authorization: `Bearer ${userByok?.at(0)?.decryptedAPIKey ?? MISTRAL_API_KEY}`,
     },
     body: JSON.stringify(bodyWithCorrectedModel),
   });
