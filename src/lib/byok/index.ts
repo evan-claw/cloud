@@ -5,6 +5,7 @@ import { desc } from 'drizzle-orm';
 import { decryptApiKey } from '@/lib/byok/encryption';
 import { BYOK_ENCRYPTION_KEY } from '@/lib/config.server';
 import {
+  UserByokProviderIdSchema,
   VercelUserByokInferenceProviderIdSchema,
   type UserByokProviderId,
 } from '@/lib/providers/openrouter/inference-provider-id';
@@ -27,7 +28,8 @@ const getModelUserByokProviders_cached = unstable_cache(
         .limit(1)
     ).at(0)?.vercel;
     if (!vercelModelMetadata) {
-      throw new Error('No Vercel model metadata in the database');
+      console.error('[getModelUserByokProviders_cached] no Vercel model metadata in the database');
+      return [];
     }
     const providers =
       vercelModelMetadata[mapModelIdToVercel(modelId)]?.endpoints
@@ -77,7 +79,7 @@ export async function getBYOKforUser(
 
   return rows.map(row => ({
     decryptedAPIKey: decryptApiKey(row.encrypted_api_key, BYOK_ENCRYPTION_KEY),
-    providerId: row.provider_id as UserByokProviderId,
+    providerId: UserByokProviderIdSchema.parse(row.provider_id),
   }));
 }
 
@@ -107,6 +109,6 @@ export async function getBYOKforOrganization(
 
   return rows.map(row => ({
     decryptedAPIKey: decryptApiKey(row.encrypted_api_key, BYOK_ENCRYPTION_KEY),
-    providerId: row.provider_id as UserByokProviderId,
+    providerId: UserByokProviderIdSchema.parse(row.provider_id),
   }));
 }
