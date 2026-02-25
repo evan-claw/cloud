@@ -73,7 +73,7 @@ function getReplicaUrl(): string {
 // cascade can open 100×N connections simultaneously and overwhelm pgbouncer.
 const max = 10;
 
-const idleTimeoutMillis = 30_000;
+const idleTimeoutMillis = 10_000;
 
 // Primary pool - always points to Frankfurt (writes go here)
 export const pool = new Pool({
