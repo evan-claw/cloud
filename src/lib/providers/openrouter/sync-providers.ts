@@ -15,19 +15,15 @@ import {
 import { modelsByProvider } from '@/db/schema';
 import { db } from '@/lib/drizzle';
 import { lt } from 'drizzle-orm';
-import * as z from 'zod';
 import { PROVIDERS } from '@/lib/providers';
+import type { StoredModel } from '@/lib/providers/vercel/types';
+import { EndpointsSchema, ModelsSchema } from '@/lib/providers/vercel/types';
 
-async function fetchVercelAiGatewayProviders() {
+async function fetchVercelAiGatewayModels() {
   const gateway = PROVIDERS.VERCEL_AI_GATEWAY;
   const headers = {
     authorization: `Bearer ${gateway.apiKey}`,
   };
-
-  const modelsSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
-  const endpointsSchema = z.object({
-    data: z.object({ endpoints: z.array(z.object({ provider_name: z.string() })) }),
-  });
 
   const modelsResponse = await fetch(`${gateway.apiUrl}/models`, {
     method: 'GET',
@@ -36,10 +32,10 @@ async function fetchVercelAiGatewayProviders() {
   if (!modelsResponse.ok) {
     throw new Error(`Fetching models from ${gateway.id} failed: ${modelsResponse.status}`);
   }
-  const models = modelsSchema.parse(await modelsResponse.json());
+  const models = ModelsSchema.parse(await modelsResponse.json());
 
   const limit = pLimit(5);
-  const result: Record<string, string[]> = {};
+  const result: Record<string, StoredModel> = {};
   await Promise.all(
     models.data.map(model =>
       limit(async () => {
@@ -53,8 +49,11 @@ async function fetchVercelAiGatewayProviders() {
             `Fetching model endpoints for ${model.id} failed: ${endpointsResponse.status}`
           );
         }
-        const endpoints = endpointsSchema.parse(await endpointsResponse.json());
-        result[model.id] = endpoints.data.endpoints.map(ep => ep.provider_name);
+        const endpoints = EndpointsSchema.parse(await endpointsResponse.json());
+        result[model.id] = {
+          ...model,
+          providers: endpoints.data.endpoints.map(ep => ep.provider_name),
+        };
       })
     )
   );
@@ -421,18 +420,18 @@ export async function syncAndStoreProviders() {
     );
   }
 
-  const vercel_providers = await fetchVercelAiGatewayProviders();
-  const vercel_provider_count = Object.keys(vercel_providers).length;
-  if (vercel_provider_count < 100) {
+  const vercel_data = await fetchVercelAiGatewayModels();
+  const vercel_model_count = Object.keys(vercel_data).length;
+  if (vercel_model_count < 100) {
     throw new Error(
-      `Suspicious: total number of Vercel AI Gateway models is ${vercel_provider_count} < 100`
+      `Suspicious: total number of Vercel AI Gateway models is ${vercel_model_count} < 100`
     );
   }
 
   const result = await db.transaction(async tx => {
     const results = await tx
       .insert(modelsByProvider)
-      .values({ data: openrouter_providers, vercel_providers })
+      .values({ data: openrouter_providers, vercel_data })
       .returning();
     await tx.delete(modelsByProvider).where(lt(modelsByProvider.id, results[0].id));
     return results[0];
@@ -443,7 +442,7 @@ export async function syncAndStoreProviders() {
     generated_at: result.data.generated_at,
     total_models: result.data.total_models,
     total_providers: result.data.total_providers,
-    vercel_provider_count,
+    vercel_provider_count: vercel_model_count,
     time: performance.now() - startTime,
   };
 }
