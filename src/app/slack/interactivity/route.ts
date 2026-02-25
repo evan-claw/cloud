@@ -1,21 +1,21 @@
 import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-import { verifySlackRequest } from '@/lib/slack/verify-request';
+import { after } from 'next/server';
+import { chat } from '@/lib/chat-bot';
 
 /**
- * Slack Interactivity endpoint handler
+ * Slack Interactivity endpoint handler.
+ *
  * Handles interactive components like buttons, modals, shortcuts, etc.
+ * Delegates to the Chat SDK which handles signature verification and routing.
+ *
+ * Register handlers via chat.onAction(), chat.onModalSubmit(), etc. in @/lib/chat-bot.
+ *
  * @see https://api.slack.com/interactivity/handling
  */
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-  const timestamp = request.headers.get('x-slack-request-timestamp');
-  const signature = request.headers.get('x-slack-signature');
+  console.log('[Slack:Interactivity] POST request received');
 
-  if (!verifySlackRequest(rawBody, timestamp, signature)) {
-    console.error('[Slack:Interactivity] Invalid Slack signature');
-    return new NextResponse('Invalid signature', { status: 401 });
-  }
-
-  return new NextResponse(null, { status: 200 });
+  return chat.webhooks.slack(request, {
+    waitUntil: p => after(() => p),
+  });
 }
