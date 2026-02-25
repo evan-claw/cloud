@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { captureException } from '@sentry/nextjs';
 import { CRON_SECRET, SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL } from '@/lib/config.server';
 import { runFullSync } from '@/lib/security-agent/services/sync-service';
+import { shutdownPosthog } from '@/lib/posthog';
 import { sentryLogger } from '@/lib/utils.server';
 
 export const maxDuration = 800;
@@ -12,6 +13,30 @@ const cronWarn = sentryLogger('cron', 'warning');
 const logError = sentryLogger('security-agent:cron-sync', 'error');
 
 type HeartbeatType = 'success' | 'failure';
+
+async function shutdownPosthogWithTimeout(): Promise<void> {
+  const timeoutMs = 3000;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    await Promise.race([
+      shutdownPosthog(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`PostHog shutdown timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    cronWarn('SECURITY: PostHog shutdown failed in cron sync handler', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 async function sendBetterStackHeartbeat(params: {
   heartbeatUrl: string | undefined;
@@ -147,5 +172,7 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    await shutdownPosthogWithTimeout();
   }
 }

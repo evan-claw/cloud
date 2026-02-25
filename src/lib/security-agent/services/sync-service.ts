@@ -23,7 +23,7 @@ import {
 } from '../core/types';
 import type { Owner } from '@/lib/code-reviews/core';
 import { sentryLogger } from '@/lib/utils.server';
-import { logSecurityAudit, SecurityAuditLogAction } from './audit-log-service';
+import { logSecurityAuditAndWait, SecurityAuditLogAction } from './audit-log-service';
 
 const log = sentryLogger('security-agent:sync', 'info');
 const warn = sentryLogger('security-agent:sync', 'warning');
@@ -416,7 +416,7 @@ export async function runFullSync(): Promise<{
         'organizationId' in config.owner
           ? (config.owner.organizationId ?? 'unknown')
           : (config.owner.userId ?? 'unknown');
-      logSecurityAudit({
+      await logSecurityAuditAndWait({
         owner: config.owner,
         actor_id: null,
         actor_email: null,

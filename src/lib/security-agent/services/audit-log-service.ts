@@ -84,6 +84,17 @@ export function logSecurityAudit(params: CreateSecurityAuditLogParams): void {
   });
 }
 
+export async function logSecurityAuditAndWait(params: CreateSecurityAuditLogParams): Promise<void> {
+  try {
+    await createSecurityAuditLog(params);
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'createSecurityAuditLog' },
+      extra: { action: params.action, resource_type: params.resource_type },
+    });
+  }
+}
+
 /** Replace internal Kilo admin actor details with a generic placeholder for non-admin requestors. */
 export function maskKiloAdminActors<
   T extends { actor_id: string | null; actor_email: string | null; actor_name: string | null },
