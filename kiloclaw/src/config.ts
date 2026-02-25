@@ -33,7 +33,7 @@ export const DEFAULT_VOLUME_SIZE_GB = 10;
 
 /** Default Fly region priority list when FLY_REGION env var is not set.
  *  Callers shuffle before selecting so order here doesn't matter. */
-export const DEFAULT_FLY_REGION = 'ams,fra,lhr,arn,iad,ord,lax,sjc,ewr';
+export const DEFAULT_FLY_REGION = 'us,eu';
 
 // Alarm cadence by instance status
 /** Running machines: fast health checks */
