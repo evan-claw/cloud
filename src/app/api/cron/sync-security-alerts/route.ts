@@ -9,6 +9,7 @@ const log = sentryLogger('security-agent:cron-sync', 'info');
 const cronWarn = sentryLogger('cron', 'warning');
 const logError = sentryLogger('security-agent:cron-sync', 'error');
 
+export const maxDuration = 900;
 /**
  * Vercel Cron Job: Sync Security Alerts
  *
