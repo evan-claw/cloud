@@ -81,6 +81,7 @@ export function SessionTraceViewer() {
     if (sessionIdFromUrl.startsWith(AGENT_PREFIX)) {
       setInputValue(sessionIdFromUrl);
       setPendingAgentId(sessionIdFromUrl);
+      setSearchedSessionId(null);
     } else if (UUID_REGEX.test(sessionIdFromUrl) || sessionIdFromUrl.startsWith(SES_PREFIX)) {
       setInputValue(sessionIdFromUrl);
       setSearchedSessionId(sessionIdFromUrl);
@@ -218,7 +219,7 @@ export function SessionTraceViewer() {
           </CardContent>
         </Card>
 
-        {resolveQuery.isError && (
+        {pendingAgentId && resolveQuery.isError && (
           <Alert variant="destructive">
             <AlertDescription>
               {resolveQuery.error?.message || 'Could not resolve cloud agent session ID'}
