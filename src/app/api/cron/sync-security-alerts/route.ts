@@ -5,7 +5,7 @@ import { CRON_SECRET, SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL } from '@/lib/conf
 import { runFullSync } from '@/lib/security-agent/services/sync-service';
 import { sentryLogger } from '@/lib/utils.server';
 
-export const maxDuration = 900;
+export const maxDuration = 800;
 
 const log = sentryLogger('security-agent:cron-sync', 'info');
 const cronWarn = sentryLogger('cron', 'warning');
