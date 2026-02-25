@@ -94,13 +94,7 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
         channels: buildChannelsPayload(),
       },
       {
-        onSuccess: data => {
-          if (data.autoStartFailed) {
-            toast.warning('Instance created but auto-start failed. Please click Start Machine.');
-          } else {
-            toast.success('Instance created and starting');
-          }
-        },
+        onSuccess: () => toast.success('Instance created and starting'),
         onError: err => toast.error(`Failed to create: ${err.message}`),
       }
     );

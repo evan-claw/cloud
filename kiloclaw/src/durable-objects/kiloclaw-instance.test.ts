@@ -124,6 +124,7 @@ function createFakeStorage() {
 
 function createFakeAppStub() {
   return {
+    ensureApp: vi.fn().mockResolvedValue({ appName: 'claw-user-1' }),
     ensureEnvKey: vi.fn().mockResolvedValue({
       key: 'dGVzdC1rZXktMzItYnl0ZXMtcGFkZGVkLi4uLg==',
       secretsVersion: 1,
@@ -1795,5 +1796,43 @@ describe('approveDevicePairingRequest', () => {
     );
 
     expect(result).toEqual({ success: false, message: 'request not found' });
+  });
+});
+
+// ============================================================================
+// provision: auto-start
+// ============================================================================
+
+describe('provision: auto-start after fresh provision', () => {
+  it('calls start() on fresh provision and ends in running state', async () => {
+    const { instance, storage } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    const result = await instance.provision('user-1', {});
+
+    expect(result.sandboxId).toBeDefined();
+    expect(flyClient.createMachine).toHaveBeenCalled();
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('flyMachineId')).toBe('machine-1');
+  });
+
+  it('skips auto-start on re-provision of existing instance', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage);
+
+    // Re-provision with new config — should NOT call createMachine again
+    (flyClient.createMachine as Mock).mockClear();
+
+    await instance.provision('user-1', { kilocodeApiKey: 'new-key' });
+
+    expect(flyClient.createMachine).not.toHaveBeenCalled();
+    expect(storage._store.get('status')).toBe('running');
   });
 });
