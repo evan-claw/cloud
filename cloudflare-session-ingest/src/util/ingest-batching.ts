@@ -1,5 +1,6 @@
 import type { IngestBatch } from '../types/session-sync';
 import { byteLengthUtf8, MAX_DO_INGEST_CHUNK_BYTES, MAX_INGEST_ITEM_BYTES } from './ingest-limits';
+import { stripIngestBloat } from './strip-ingest-bloat';
 
 export type SplitIngestBatchForDOResult = {
   chunks: IngestBatch[];
@@ -16,7 +17,10 @@ export function splitIngestBatchForDO(items: IngestBatch): SplitIngestBatchForDO
 
   let droppedOversizeItems = 0;
 
-  for (const item of items) {
+  for (const rawItem of items) {
+    // Strip bloated fields (file snapshots, diagnostics) before measuring size
+    // so items that are only oversized due to bloat are not dropped.
+    const item = stripIngestBloat(rawItem);
     const itemJson = JSON.stringify(item);
     const itemBytes = byteLengthUtf8(itemJson) + 1;
 
