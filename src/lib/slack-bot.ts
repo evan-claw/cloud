@@ -155,6 +155,7 @@ const SPAWN_CLOUD_AGENT_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
         },
       },
       required: ['prompt'],
+      oneOf: [{ required: ['githubRepo'] }, { required: ['gitlabProject'] }],
     },
   },
 };
@@ -268,6 +269,14 @@ async function spawnCloudAgentSession(
     };
   }
 
+  // Validate the repo identifier has at least "owner/repo" shape (non-empty segments around a slash)
+  const repoIdentifier = args.githubRepo ?? args.gitlabProject;
+  if (!repoIdentifier || !/\/./.test(repoIdentifier)) {
+    return {
+      response: `Error: Invalid repository identifier "${repoIdentifier ?? ''}". Expected format like "owner/repo".`,
+    };
+  }
+
   let kilocodeOrganizationId: string | undefined;
   if (owner.type === 'org') {
     kilocodeOrganizationId = owner.id;
@@ -289,6 +298,13 @@ async function spawnCloudAgentSession(
         ? await getGitLabTokenForOrganization(owner.id)
         : await getGitLabTokenForUser(owner.id);
 
+    if (!gitlabToken) {
+      return {
+        response:
+          'Error: No GitLab token available. Please ensure a GitLab integration is connected in your Kilo Code settings.',
+      };
+    }
+
     const instanceUrl =
       owner.type === 'org'
         ? await getGitLabInstanceUrlForOrganization(owner.id)
@@ -296,11 +312,12 @@ async function spawnCloudAgentSession(
 
     const gitUrl = buildGitLabCloneUrl(args.gitlabProject, instanceUrl);
 
+    const isSelfHosted = !/^https?:\/\/(www\.)?gitlab\.com(\/|$)/i.test(instanceUrl);
     console.log(
       '[SlackBot] GitLab session - project:',
       args.gitlabProject,
       'instance:',
-      instanceUrl
+      isSelfHosted ? 'self-hosted' : 'gitlab.com'
     );
 
     prepareInput = {
@@ -320,6 +337,13 @@ async function spawnCloudAgentSession(
       owner.type === 'org'
         ? await getGitHubTokenForOrganization(owner.id)
         : await getGitHubTokenForUser(owner.id);
+
+    if (!githubToken) {
+      return {
+        response:
+          'Error: No GitHub token available. Please ensure a GitHub integration is connected in your Kilo Code settings.',
+      };
+    }
 
     prepareInput = {
       githubRepo: args.githubRepo,
