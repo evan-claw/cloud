@@ -26,8 +26,7 @@ import { OpenInEditorButton } from '@/app/share/[shareId]/open-in-editor-button'
 import { cookies } from 'next/headers';
 import { getExtensionUrl } from '@/components/auth/getExtensionUrl';
 import { validate as isValidUUID } from 'uuid';
-
-export const revalidate = 86400;
+import { cacheLife } from 'next/cache';
 
 /**
  * Extracts text content from a blob message based on its type.
@@ -78,22 +77,9 @@ function convertToMessages(cliMessages: AnyBlobMessage[]): Message[] {
   return results;
 }
 
-export default async function SharePage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ shareId: string }>;
-  searchParams: Promise<NextAppSearchParams>;
-}) {
-  const { shareId } = await params;
-  const resolvedSearchParams = await searchParams;
-  const cookieStore = await cookies();
-  const { editor: defaultEditor } = getExtensionUrl(resolvedSearchParams, cookieStore);
-
-  // Validate shareId is a valid UUID before querying the database
-  if (!isValidUUID(shareId)) {
-    return notFound();
-  }
+async function getShareData(shareId: string) {
+  'use cache';
+  cacheLife({ revalidate: 86400 });
 
   const sessionResult = await db
     .select({
@@ -117,7 +103,7 @@ export default async function SharePage({
     .limit(1);
 
   if (sessionResult.length === 0) {
-    return notFound();
+    return null;
   }
 
   const session = sessionResult[0];
@@ -138,6 +124,32 @@ export default async function SharePage({
       extra: { shareId, sessionId: session.sessionId },
     });
   }
+
+  return { session, messages };
+}
+
+export default async function SharePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ shareId: string }>;
+  searchParams: Promise<NextAppSearchParams>;
+}) {
+  const { shareId } = await params;
+  const resolvedSearchParams = await searchParams;
+  const cookieStore = await cookies();
+  const { editor: defaultEditor } = getExtensionUrl(resolvedSearchParams, cookieStore);
+
+  if (!isValidUUID(shareId)) {
+    return notFound();
+  }
+
+  const shareData = await getShareData(shareId);
+  if (!shareData) {
+    return notFound();
+  }
+
+  const { session, messages } = shareData;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">

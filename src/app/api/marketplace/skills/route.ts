@@ -1,32 +1,32 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { cacheLife } from 'next/cache';
 
 const GITHUB_RAW_URL =
   'https://raw.githubusercontent.com/Kilo-Org/kilo-marketplace/main/skills/marketplace.yaml';
 
-export const revalidate = 3600; // 1 hour
+async function fetchMarketplaceYaml() {
+  'use cache';
+  cacheLife({ revalidate: 3600 });
 
-/**
- * Skills Marketplace API Route
- *
- * Fetches skills.yaml directly from kilo-marketplace GitHub repo.
- * Uses Next.js ISR with 1 hour revalidation for caching.
- */
+  const response = await fetch(GITHUB_RAW_URL);
+  if (!response.ok) {
+    console.error(`Failed to fetch skills from GitHub: ${response.status} ${response.statusText}`);
+    return null;
+  }
+  return response.text();
+}
+
 export async function GET(_request: NextRequest) {
   try {
-    const response = await fetch(GITHUB_RAW_URL);
+    const yamlContent = await fetchMarketplaceYaml();
 
-    if (!response.ok) {
-      console.error(
-        `Failed to fetch skills from GitHub: ${response.status} ${response.statusText}`
-      );
+    if (!yamlContent) {
       return new NextResponse('items: []\n', {
-        status: response.status,
+        status: 502,
         headers: { 'Content-Type': 'application/x-yaml' },
       });
     }
-
-    const yamlContent = await response.text();
 
     return new NextResponse(yamlContent, {
       headers: {

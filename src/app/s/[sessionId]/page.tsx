@@ -9,20 +9,11 @@ import { APP_URL } from '@/lib/constants';
 import { OpenInCliButton } from '@/app/share/[shareId]/open-in-cli-button';
 import { OpenInEditorButton } from '@/app/share/[shareId]/open-in-editor-button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cacheLife } from 'next/cache';
 
-export const revalidate = 86400;
-
-export default async function SharedSessionPage({
-  params,
-}: {
-  params: Promise<{ sessionId: string }>;
-}) {
-  const { sessionId } = await params;
-
-  // Validate sessionId is a valid UUID before querying the database
-  if (!isValidUUID(sessionId)) {
-    return notFound();
-  }
+async function getSharedSession(sessionId: string) {
+  'use cache';
+  cacheLife({ revalidate: 86400 });
 
   const sessionResult = await db
     .select({
@@ -34,11 +25,24 @@ export default async function SharedSessionPage({
     .where(eq(cli_sessions_v2.public_id, sessionId))
     .limit(1);
 
-  if (sessionResult.length === 0) {
+  return sessionResult[0] ?? null;
+}
+
+export default async function SharedSessionPage({
+  params,
+}: {
+  params: Promise<{ sessionId: string }>;
+}) {
+  const { sessionId } = await params;
+
+  if (!isValidUUID(sessionId)) {
     return notFound();
   }
 
-  const session = sessionResult[0];
+  const session = await getSharedSession(sessionId);
+  if (!session) {
+    return notFound();
+  }
   const shareUrl = `${APP_URL}/s/${sessionId}`;
   const importCommand = `kilo import ${shareUrl}`;
 
