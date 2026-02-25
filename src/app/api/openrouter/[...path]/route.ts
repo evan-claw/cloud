@@ -64,6 +64,7 @@ import { customLlmRequest } from '@/lib/custom-llm/customLlmRequest';
 import { normalizeModelId } from '@/lib/model-utils';
 import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
+import { isActiveCloudAgentPromo } from '@/lib/promotions/cloud-agent-promo';
 
 const MAX_TOKENS_LIMIT = 99999999999; // GPT4.1 default is ~32k
 
@@ -183,12 +184,14 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     authFailedResponse,
     organizationId: authOrganizationId,
     botId: authBotId,
+    tokenSource: authTokenSource,
   } = await getUserFromAuth({ adminOnly: false });
   authSpan.end();
 
   let user: typeof maybeUser | AnonymousUserContext;
   let organizationId: string | undefined = authOrganizationId;
   let botId: string | undefined = authBotId;
+  let tokenSource: string | undefined = authTokenSource;
 
   if (authFailedResponse) {
     // No valid auth
@@ -232,6 +235,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     user = createAnonymousContext(ipAddress);
     organizationId = undefined;
     botId = undefined;
+    tokenSource = undefined;
   } else {
     user = maybeUser;
   }
@@ -309,6 +313,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     user_byok: !!userByok,
     has_tools: (requestBodyParsed.tools?.length ?? 0) > 0,
     botId,
+    tokenSource,
     feature: validateFeatureHeader(request.headers.get(FEATURE_HEADER)),
     session_id: taskId ?? null,
   };
@@ -325,7 +330,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       balance <= 0 &&
       !isFreeModel(originalModelIdLowerCased) &&
       !userByok &&
-      !isActiveReviewPromo(botId, originalModelIdLowerCased)
+      !isActiveReviewPromo(botId, originalModelIdLowerCased) &&
+      !isActiveCloudAgentPromo(tokenSource, originalModelIdLowerCased)
     ) {
       return await usageLimitExceededResponse(user, balance);
     }
@@ -504,7 +510,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   if (
     provider.id !== 'custom' &&
     (isKiloFreeModel(originalModelIdLowerCased) ||
-      isActiveReviewPromo(botId, originalModelIdLowerCased))
+      isActiveReviewPromo(botId, originalModelIdLowerCased) ||
+      isActiveCloudAgentPromo(tokenSource, originalModelIdLowerCased))
   ) {
     return rewriteFreeModelResponse(response, originalModelIdLowerCased);
   }
