@@ -478,7 +478,7 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
           )
         )
         .groupBy(sql`DATE(${microdollar_usage.created_at})`, kilocode_users.google_user_email)
-        .orderBy(sql`DATE(${microdollar_usage.created_at})`);
+        .orderBy(sql`DATE(${microdollar_usage.created_at})`, kilocode_users.google_user_email);
 
       const header = 'date,user_email,model_cost';
       const csvRows = rows.map(row => {
