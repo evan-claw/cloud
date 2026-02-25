@@ -21,10 +21,10 @@ export const KILOCLAW_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24;
 /** Expected JWT token version -- must match cloud's JWT_TOKEN_VERSION */
 export const KILO_TOKEN_VERSION = 3;
 
-/** Default Fly Machine guest spec (shared-cpu-2x, 4GB) */
+/** Default Fly Machine guest spec (shared-cpu-2x, 3GB) */
 export const DEFAULT_MACHINE_GUEST = {
   cpus: 2,
-  memory_mb: 4096,
+  memory_mb: 3072,
   cpu_kind: 'shared' as const,
 };
 
