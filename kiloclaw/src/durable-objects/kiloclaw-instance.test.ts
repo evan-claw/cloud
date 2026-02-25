@@ -1364,7 +1364,7 @@ describe('start: 412 insufficient resources recovery', () => {
     const regions412Call = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
     expect(regions412Call[1]).toEqual(
       expect.objectContaining({
-        compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
+        compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }),
       })
     );
     // Regions are shuffled, so just check the set (deprioritize is a no-op here
@@ -1411,7 +1411,7 @@ describe('start: 412 insufficient resources recovery', () => {
     expect(regionsForkCall[1]).toEqual(
       expect.objectContaining({
         source_volume_id: 'vol-1',
-        compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
+        compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }),
       })
     );
     // Regions are shuffled — check the set
@@ -1476,7 +1476,7 @@ describe('start: 412 insufficient resources recovery', () => {
     expect(regionsUpdateCall[1]).toEqual(
       expect.objectContaining({
         source_volume_id: 'vol-1',
-        compute: expect.objectContaining({ cpus: 2, memory_mb: 4096 }),
+        compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }),
       })
     );
     // Regions are shuffled then deprioritized — check the set

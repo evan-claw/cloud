@@ -8,9 +8,17 @@ import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
-import { DEFAULT_CLAW_INSTANCE_TYPE } from './claw.types';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { RunDoctorDialog } from './RunDoctorDialog';
+
+const VOLUME_SIZE_GB = 10;
+// Default machine spec fallback (matches kiloclaw DEFAULT_MACHINE_GUEST)
+const DEFAULT_CPUS = 2;
+const DEFAULT_MEMORY_MB = 3072;
+
+function formatMemory(mb: number): string {
+  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
+}
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -56,11 +64,12 @@ export function InstanceControls({
         <div className="flex flex-wrap justify-end gap-2">
           <Badge variant="outline" className="text-muted-foreground gap-1.5 font-normal">
             <Cpu className="h-3.5 w-3.5" />
-            {DEFAULT_CLAW_INSTANCE_TYPE.name} ({DEFAULT_CLAW_INSTANCE_TYPE.description})
+            {status.machineSize?.cpus ?? DEFAULT_CPUS} vCPU,{' '}
+            {formatMemory(status.machineSize?.memory_mb ?? DEFAULT_MEMORY_MB)} RAM
           </Badge>
           <Badge variant="outline" className="text-muted-foreground gap-1.5 font-normal">
             <HardDrive className="h-3.5 w-3.5" />
-            20 GB SSD
+            {VOLUME_SIZE_GB} GB SSD
           </Badge>
         </div>
       </div>

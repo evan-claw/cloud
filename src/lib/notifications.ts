@@ -35,14 +35,10 @@ const normalUnconditionalNotifications: KiloNotification[] = [
   //If you need to check or personalize the notification, see examples at the bottom of this file
   //if you just want a simple straightforward global message, add it here.
   {
-    id: 'feb-12-free-glm-5',
-    title: 'GLM-5 is free (for a limited time)',
-    message: 'Get Opus-level performance, for free.',
-    action: {
-      actionText: 'Learn More',
-      actionURL: 'https://blog.kilo.ai/p/glm-5-free-limited-time',
-    },
-    suggestModelId: 'z-ai/glm-5:free',
+    id: 'feb-25-glm5-free-ended',
+    title: 'GLM-5 Free Period Ended',
+    message:
+      'The free period for GLM-5 has ended. Try another free model like MiniMax M2.5 or Trinity Large Preview!',
     showIn: ['extension', 'cli'],
   },
   {

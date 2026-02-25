@@ -1215,6 +1215,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     flyMachineId: string | null;
     flyVolumeId: string | null;
     flyRegion: string | null;
+    machineSize: MachineSize | null;
     openclawVersion: string | null;
     imageVariant: string | null;
     trackedImageTag: string | null;
@@ -1248,6 +1249,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       flyMachineId: this.flyMachineId,
       flyVolumeId: this.flyVolumeId,
       flyRegion: this.flyRegion,
+      machineSize: this.machineSize,
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
       trackedImageTag: this.trackedImageTag,
@@ -1411,6 +1413,19 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     try {
       const flyConfig = this.getFlyConfig();
+
+      // Backfill machineSize from live Fly machine config for legacy instances
+      // before stopping, so the guest sent to updateMachine matches the actual
+      // deployed size instead of the new default.
+      if (this.machineSize === null && this.flyMachineId) {
+        const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+        if (machine.config?.guest) {
+          const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+          this.machineSize = { cpus, memory_mb, cpu_kind };
+          await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+        }
+      }
+
       await fly.stopMachineAndWait(flyConfig, this.flyMachineId);
 
       const { envVars, minSecretsVersion } = await this.buildUserEnvVars();
@@ -1685,6 +1700,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     try {
       const flyConfig = this.getFlyConfig();
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+
+      // Backfill machineSize from live Fly machine config for legacy instances
+      if (this.machineSize === null && machine.config?.guest) {
+        const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+        this.machineSize = { cpus, memory_mb, cpu_kind };
+        await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+      }
 
       if (machine.state === 'started') {
         // Confirmed running — reset in-memory fail count
@@ -2151,13 +2173,25 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    */
   private async startExistingMachine(
     flyConfig: FlyClientConfig,
-    machineConfig: FlyMachineConfig,
+    initialMachineConfig: FlyMachineConfig,
     minSecretsVersion?: number
   ): Promise<void> {
     if (!this.flyMachineId) return;
 
     try {
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+
+      // Backfill machineSize from live Fly machine config for legacy instances,
+      // then re-derive guest so updateMachine sends the actual deployed size
+      // instead of the new default.
+      let machineConfig = initialMachineConfig;
+      if (this.machineSize === null && machine.config?.guest) {
+        const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+        this.machineSize = { cpus, memory_mb, cpu_kind };
+        await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+        machineConfig = { ...machineConfig, guest: guestFromSize(this.machineSize) };
+      }
+
       if (machine.state === 'stopped' || machine.state === 'created') {
         await fly.updateMachine(flyConfig, this.flyMachineId, machineConfig, { minSecretsVersion });
         await fly.waitForState(flyConfig, this.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
@@ -2169,11 +2203,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     } catch (err) {
       if (fly.isFlyNotFound(err)) {
-        // Machine confirmed gone — safe to recreate
+        // Machine confirmed gone — safe to recreate (new default is correct here)
         console.log('[DO] Machine gone (404), creating new one');
         this.flyMachineId = null;
         await this.ctx.storage.put(storageUpdate({ flyMachineId: null }));
-        await this.createNewMachine(flyConfig, machineConfig, minSecretsVersion);
+        await this.createNewMachine(flyConfig, initialMachineConfig, minSecretsVersion);
       } else {
         // Transient error (timeout, 500, network) — don't create a duplicate.
         // Let the caller surface the error; reconciliation will repair later.
