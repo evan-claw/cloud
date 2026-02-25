@@ -117,11 +117,12 @@ const AIAdoptionTimeseriesOutputSchema = z.object({
   isNewOrganization: z.boolean(), // True if first activity was < 3 days ago
 });
 
-const MAX_EXPORT_ROWS = 10_000;
-
 const ExportUsageCsvInputSchema = OrganizationIdInputSchema.extend({
   startDate: z.iso.date(),
   endDate: z.iso.date(),
+}).refine(data => data.startDate <= data.endDate, {
+  message: 'startDate must be less than or equal to endDate',
+  path: ['startDate'],
 });
 
 function daysAgo(days: number): string {
@@ -477,13 +478,17 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
           )
         )
         .groupBy(sql`DATE(${microdollar_usage.created_at})`, kilocode_users.google_user_email)
-        .orderBy(sql`DATE(${microdollar_usage.created_at})`)
-        .limit(MAX_EXPORT_ROWS);
+        .orderBy(sql`DATE(${microdollar_usage.created_at})`);
 
       const header = 'date,user_email,model_cost';
       const csvRows = rows.map(row => {
         const costDollars = (Number(row.totalCost ?? 0) / 1_000_000).toFixed(2);
-        const escapedEmail = `"${String(row.userEmail).replace(/"/g, '""')}"`;
+        let email = String(row.userEmail);
+        // Prefix formula-triggering characters with single quote to prevent CSV injection
+        if (/^[=+\-@\t\r]/.test(email)) {
+          email = "'" + email;
+        }
+        const escapedEmail = `"${email.replace(/"/g, '""')}"`;
         return `${row.date},${escapedEmail},${costDollars}`;
       });
 
