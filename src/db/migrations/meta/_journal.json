@@ -218,6 +218,13 @@
       "when": 1772006095707,
       "tag": "0030_wet_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1772009431335,
+      "tag": "0031_polite_warpath",
+      "breakpoints": true
     }
   ]
 }
