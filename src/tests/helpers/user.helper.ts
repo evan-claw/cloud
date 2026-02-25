@@ -32,6 +32,7 @@ export function defineTestUser(userData: Partial<User> = {}): User {
     completed_welcome_form: false,
     linkedin_url: null,
     github_url: null,
+    token_milestone_notified_at: null,
     ...userData,
   } satisfies User;
 }

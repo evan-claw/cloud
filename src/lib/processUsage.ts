@@ -30,6 +30,7 @@ import { appendKiloPassAuditLog } from '@/lib/kilo-pass/issuance';
 import { KiloPassAuditLogAction, KiloPassAuditLogResult } from '@/lib/kilo-pass/enums';
 import { reportAbuseCost } from '@/lib/abuse-service';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
+import { maybeFireTokenMilestoneWebhook } from '@/lib/token-milestone';
 
 const posthogClient = PostHogClient();
 
@@ -301,6 +302,14 @@ async function saveUsageRelatedData(
     );
   }
   await ingestOrganizationTokenUsage(coreUsageFields);
+
+  // For org usage or zero-cost requests the CTE path doesn't trigger the
+  // milestone check, so fire it here as a fallback.
+  if (!balanceUpdateResult) {
+    void maybeFireTokenMilestoneWebhook(coreUsageFields.kilo_user_id).catch(error => {
+      console.error('[TokenMilestone] Error in milestone check (fallback)', error);
+    });
+  }
 }
 
 async function isFirstUsage(
@@ -487,6 +496,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
   const result = await db.execute<{
     new_microdollars_used: number;
     kilo_pass_threshold: number | null;
+    token_milestone_notified_at: string | null;
   }>(sql`
           WITH microdollar_usage_ins AS (
             INSERT INTO microdollar_usage (
@@ -595,7 +605,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
           WHERE id = ${coreUsageFields.kilo_user_id}
             AND ${coreUsageFields.organization_id}::uuid IS NULL
             AND ${coreUsageFields.cost} > 0
-          RETURNING microdollars_used AS new_microdollars_used, kilo_pass_threshold
+          RETURNING microdollars_used AS new_microdollars_used, kilo_pass_threshold, token_milestone_notified_at
         `);
 
   // No rows returned means either: org usage (no user balance update), zero cost, or missing user
@@ -635,6 +645,13 @@ async function insertUsageAndMetadataWithBalanceUpdate(
           error: errorMessage,
         },
       });
+    });
+  }
+
+  // Token milestone webhook: only check if user hasn't already been notified
+  if (result.rows[0].token_milestone_notified_at == null) {
+    void maybeFireTokenMilestoneWebhook(coreUsageFields.kilo_user_id).catch(error => {
+      console.error('[TokenMilestone] Error in milestone check', error);
     });
   }
 
