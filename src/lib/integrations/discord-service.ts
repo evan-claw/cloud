@@ -300,3 +300,114 @@ export async function testConnection(owner: Owner): Promise<{ success: boolean; 
     return { success: false, error: errorMessage };
   }
 }
+
+/**
+ * Post a message to a Discord channel using the Bot Token.
+ */
+export async function postDiscordMessage(
+  channelId: string,
+  content: string,
+  options?: { messageReference?: { message_id: string } }
+): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  if (!DISCORD_BOT_TOKEN) {
+    return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
+  }
+
+  try {
+    const body: Record<string, unknown> = { content };
+    if (options?.messageReference) {
+      body.message_reference = options.messageReference;
+    }
+
+    const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Discord API ${response.status}: ${errorText}` };
+    }
+
+    const data = (await response.json()) as { id: string };
+    return { ok: true, messageId: data.id };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[DiscordService] Error posting message:', errorMessage);
+    return { ok: false, error: errorMessage };
+  }
+}
+
+/**
+ * Add a reaction to a Discord message using the Bot Token.
+ */
+export async function addDiscordReaction(
+  channelId: string,
+  messageId: string,
+  emoji: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!DISCORD_BOT_TOKEN) {
+    return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
+  }
+
+  try {
+    const encodedEmoji = encodeURIComponent(emoji);
+    const response = await fetch(
+      `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Discord API ${response.status}: ${errorText}` };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[DiscordService] Error adding reaction:', errorMessage);
+    return { ok: false, error: errorMessage };
+  }
+}
+
+/**
+ * Remove the bot's own reaction from a Discord message.
+ */
+export async function removeDiscordReaction(
+  channelId: string,
+  messageId: string,
+  emoji: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!DISCORD_BOT_TOKEN) {
+    return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
+  }
+
+  try {
+    const encodedEmoji = encodeURIComponent(emoji);
+    const response = await fetch(
+      `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}/reactions/${encodedEmoji}/@me`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Discord API ${response.status}: ${errorText}` };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[DiscordService] Error removing reaction:', errorMessage);
+    return { ok: false, error: errorMessage };
+  }
+}
