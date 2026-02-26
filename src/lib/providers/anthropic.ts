@@ -74,19 +74,6 @@ export function addCacheBreakpoints(messages: OpenAI.Chat.ChatCompletionMessageP
     );
     setCacheControl(lastUserMessage);
   }
-
-  const lastAssistantIndex = messages.findLastIndex(msg => msg.role === 'assistant');
-  if (lastAssistantIndex >= 0) {
-    const previousUserMessage = messages
-      .slice(0, lastAssistantIndex)
-      .findLast(msg => msg.role === 'user' || msg.role === 'tool');
-    if (previousUserMessage) {
-      console.debug(
-        `[addCacheBreakpoints] setting cache breakpoint on second-to-last ${previousUserMessage.role} message`
-      );
-      setCacheControl(previousUserMessage);
-    }
-  }
 }
 
 export function applyAnthropicModelSettings(
