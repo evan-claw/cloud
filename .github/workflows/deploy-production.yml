@@ -3,6 +3,7 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: deploy-production
@@ -171,7 +172,7 @@ jobs:
 
   deploy-cloud-agent:
     needs: [check-cloud-agent-changes]
-    if: needs.check-cloud-agent-changes.outputs.changed == 'true'
+    if: needs.check-cloud-agent-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-cloud-agent.yml
     secrets: inherit
 
@@ -195,7 +196,7 @@ jobs:
 
   deploy-cloud-agent-next:
     needs: [check-cloud-agent-next-changes]
-    if: needs.check-cloud-agent-next-changes.outputs.changed == 'true'
+    if: needs.check-cloud-agent-next-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-cloud-agent-next.yml
     secrets: inherit
 
@@ -219,7 +220,7 @@ jobs:
 
   deploy-session-ingest:
     needs: [check-session-ingest-changes]
-    if: needs.check-session-ingest-changes.outputs.changed == 'true'
+    if: needs.check-session-ingest-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-session-ingest.yml
     secrets: inherit
     with:
@@ -245,7 +246,7 @@ jobs:
 
   deploy-o11y:
     needs: [check-o11y-changes]
-    if: needs.check-o11y-changes.outputs.changed == 'true'
+    if: needs.check-o11y-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-o11y.yml
     secrets: inherit
     with:
@@ -271,7 +272,7 @@ jobs:
 
   deploy-git-token-service:
     needs: [check-git-token-service-changes]
-    if: needs.check-git-token-service-changes.outputs.changed == 'true'
+    if: needs.check-git-token-service-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-git-token-service.yml
     secrets: inherit
 
@@ -295,7 +296,7 @@ jobs:
 
   deploy-deployment-dispatcher:
     needs: [check-deployment-dispatcher-changes]
-    if: needs.check-deployment-dispatcher-changes.outputs.changed == 'true'
+    if: needs.check-deployment-dispatcher-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-deployment-dispatcher.yml
     secrets: inherit
 
@@ -319,7 +320,7 @@ jobs:
 
   deploy-deployment-builder:
     needs: [check-deployment-builder-changes]
-    if: needs.check-deployment-builder-changes.outputs.changed == 'true'
+    if: needs.check-deployment-builder-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-deployment-builder.yml
     secrets: inherit
 
@@ -343,7 +344,7 @@ jobs:
 
   deploy-app-builder:
     needs: [check-app-builder-changes]
-    if: needs.check-app-builder-changes.outputs.changed == 'true'
+    if: needs.check-app-builder-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-app-builder.yml
     secrets: inherit
 
@@ -367,6 +368,6 @@ jobs:
 
   deploy-kiloclaw:
     needs: [check-kiloclaw-changes]
-    if: needs.check-kiloclaw-changes.outputs.changed == 'true'
+    if: needs.check-kiloclaw-changes.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/deploy-kiloclaw.yml
     secrets: inherit
