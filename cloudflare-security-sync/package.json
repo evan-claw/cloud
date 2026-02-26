@@ -1,0 +1,20 @@
+{
+  "name": "cloudflare-security-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env dev",
+    "deploy:prod": "wrangler deploy --env=\"\"",
+    "deploy:dev": "wrangler deploy --env dev",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.61.0"
+  }
+}

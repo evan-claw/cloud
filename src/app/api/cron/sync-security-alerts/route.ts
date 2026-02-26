@@ -1,12 +1,22 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { randomUUID } from 'node:crypto';
 import { captureException } from '@sentry/nextjs';
-import { CRON_SECRET, SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL } from '@/lib/config.server';
+import {
+  CRON_SECRET,
+  SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL,
+  SECURITY_SYNC_USE_WORKER,
+} from '@/lib/config.server';
 import { runFullSync } from '@/lib/security-agent/services/sync-service';
+import {
+  dispatchSecuritySyncToWorker,
+  getEnabledSecuritySyncOwners,
+} from '@/lib/security-agent/services/sync-dispatcher';
 import { shutdownPosthog } from '@/lib/posthog';
 import { sentryLogger } from '@/lib/utils.server';
 
 export const maxDuration = 800;
+const USE_WORKER_DISPATCH = SECURITY_SYNC_USE_WORKER === 'true';
 
 const log = sentryLogger('security-agent:cron-sync', 'info');
 const cronWarn = sentryLogger('cron', 'warning');
@@ -111,6 +121,51 @@ export async function GET(request: NextRequest) {
 
     log('Starting security alerts sync...');
     const startTime = Date.now();
+
+    if (USE_WORKER_DISPATCH) {
+      const owners = await getEnabledSecuritySyncOwners();
+
+      if (owners.length === 0) {
+        log('No enabled security sync owners found, skipping dispatch');
+        return NextResponse.json({
+          success: true,
+          mode: 'worker_dispatch',
+          ownersDispatched: 0,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const runId = randomUUID();
+      const dispatchResult = await dispatchSecuritySyncToWorker({
+        runId,
+        owners,
+      });
+
+      const duration = Date.now() - startTime;
+      const summary = {
+        success: true,
+        mode: 'worker_dispatch',
+        runId,
+        duration: `${duration}ms`,
+        ownersDispatched: owners.length,
+        enqueuedMessages: dispatchResult.enqueuedMessages,
+        timestamp: new Date().toISOString(),
+      };
+
+      log('Worker dispatch completed', summary);
+
+      await sendBetterStackHeartbeat({
+        heartbeatUrl: SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL,
+        heartbeatType: 'success',
+        context: {
+          runId,
+          ownersDispatched: owners.length,
+          enqueuedMessages: dispatchResult.enqueuedMessages,
+        },
+      });
+
+      return NextResponse.json(summary);
+    }
 
     const result = await runFullSync();
 
