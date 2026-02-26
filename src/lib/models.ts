@@ -11,6 +11,7 @@ import { corethink_free_model } from '@/lib/providers/corethink';
 import { giga_potato_model, giga_potato_thinking_model } from '@/lib/providers/gigapotato';
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
+import { kimi_k25_free_model } from '@/lib/providers/moonshotai';
 import { grok_code_fast_1_optimized_free_model } from '@/lib/providers/xai';
 import { zai_glm5_free_model } from '@/lib/providers/zai';
 
@@ -34,7 +35,7 @@ export const preferredModels = [
   'z-ai/glm-5',
   'moonshotai/kimi-k2.5',
   'x-ai/grok-code-fast-1',
-].filter(Boolean) as string[];
+].filter(m => m !== null);
 
 export function getFirstFreeModel() {
   return preferredModels.find(m => isFreeModel(m)) ?? PRIMARY_DEFAULT_MODEL;
@@ -61,6 +62,7 @@ export const kiloFreeModels = [
   corethink_free_model,
   giga_potato_model,
   giga_potato_thinking_model,
+  kimi_k25_free_model,
   minimax_m25_free_model,
   grok_code_fast_1_optimized_free_model,
   zai_glm5_free_model,
