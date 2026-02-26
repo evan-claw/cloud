@@ -1,22 +1,11 @@
 import type { Context, Hono } from 'hono';
 import type { Supervisor } from '../supervisor';
 
-export function registerHealthRoute(app: Hono, supervisor: Supervisor): void {
-  const handler = (c: Context) => {
-    const stats = supervisor.getStats();
-    const ready = stats.state === 'running';
-    return c.json(
-      {
-        status: ready ? 'ok' : 'starting',
-        gateway: stats.state,
-        uptime: stats.uptime,
-        restarts: stats.restarts,
-      },
-      ready ? 200 : 503
-    );
-  };
+export function registerHealthRoute(app: Hono, _supervisor: Supervisor): void {
+  const handler = (c: Context) => c.json({ status: 'ok' });
 
+  // Public Fly health probe endpoint. Keep response intentionally minimal.
   app.get('/_kilo/health', handler);
-  // Compatibility alias for machines still configured with legacy health path.
+  // Compatibility alias to match the same minimal, public health response.
   app.get('/health', handler);
 }
