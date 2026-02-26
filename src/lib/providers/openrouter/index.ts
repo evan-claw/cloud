@@ -75,9 +75,9 @@ function enhancedModelList(models: OpenRouterModel[]) {
               ? model.name + ' (new)'
               : model.name,
         preferredIndex: preferredIndex >= 0 ? preferredIndex : undefined,
-        settings: getModelSettings(model.id),
-        versioned_settings: getVersionedModelSettings(model.id),
-        opencode: getOpenCodeSettings(model.id),
+        settings: model.settings ?? getModelSettings(model.id),
+        versioned_settings: model.versioned_settings ?? getVersionedModelSettings(model.id),
+        opencode: model.opencode ?? getOpenCodeSettings(model.id),
       };
     });
   const sortedModels = enhancedModels.sort((a, b) => {
