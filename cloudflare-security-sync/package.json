@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --env dev",
-    "deploy:prod": "wrangler deploy --env=\"\"",
+    "deploy:prod": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts"
