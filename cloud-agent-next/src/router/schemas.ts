@@ -199,6 +199,13 @@ export const PrepareSessionInput = z
       .max(100)
       .optional()
       .describe('Platform that created this session (e.g. slack, app-builder)'),
+    shallow: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        'Perform a shallow clone (depth: 1) for faster checkout and reduced disk usage. Useful when full git history is not needed.'
+      ),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',

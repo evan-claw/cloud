@@ -236,14 +236,29 @@ const prepareSessionHandler = internalApiProtectedProcedure
       );
 
       // 6. Clone repository
+      const cloneOptions = input.shallow ? { shallow: true } : undefined;
       logger.info('Cloning repository');
       if (input.gitUrl) {
-        await cloneGitRepo(session, workspacePath, input.gitUrl, input.gitToken);
+        await cloneGitRepo(
+          session,
+          workspacePath,
+          input.gitUrl,
+          input.gitToken,
+          undefined,
+          cloneOptions
+        );
       } else if (input.githubRepo) {
-        await cloneGitHubRepo(session, workspacePath, input.githubRepo, resolvedGithubToken, {
-          GITHUB_APP_SLUG: ctx.env.GITHUB_APP_SLUG,
-          GITHUB_APP_BOT_USER_ID: ctx.env.GITHUB_APP_BOT_USER_ID,
-        });
+        await cloneGitHubRepo(
+          session,
+          workspacePath,
+          input.githubRepo,
+          resolvedGithubToken,
+          {
+            GITHUB_APP_SLUG: ctx.env.GITHUB_APP_SLUG,
+            GITHUB_APP_BOT_USER_ID: ctx.env.GITHUB_APP_BOT_USER_ID,
+          },
+          cloneOptions
+        );
       } else {
         throw new TRPCError({
           code: 'BAD_REQUEST',
