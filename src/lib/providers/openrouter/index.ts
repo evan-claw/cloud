@@ -9,7 +9,11 @@ import { errorExceptInTest } from '@/lib/utils.server';
 import { captureException, captureMessage } from '@sentry/nextjs';
 import { convertFromKiloModel } from '@/lib/providers/kilo-free-model';
 import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
-import { getModelSettings, getVersionedModelSettings } from '@/lib/providers/recommended-models';
+import {
+  getModelSettings,
+  getOpenCodeSettings,
+  getVersionedModelSettings,
+} from '@/lib/providers/recommended-models';
 import {
   KILO_AUTO_MODEL_COMPLETION_PRICE,
   KILO_AUTO_MODEL_CONTEXT_LENGTH,
@@ -63,8 +67,7 @@ function enhancedModelList(models: OpenRouterModel[]) {
     .concat(kiloFreeModels.filter(m => m.is_enabled).map(model => convertFromKiloModel(model)))
     .concat([autoModel])
     .map((model: OpenRouterModel) => {
-      const preferredIndex =
-        model.id === KILO_AUTO_MODEL_ID ? -1 : preferredModels.indexOf(model.id);
+      const preferredIndex = preferredModels.indexOf(model.id);
       const ageDays = (Date.now() / 1_000 - model.created) / (24 * 3600);
       const isNew = preferredIndex >= 0 && ageDays >= 0 && ageDays < 7;
       const nameEndsWithParen = model.name.endsWith(')');
@@ -77,10 +80,10 @@ function enhancedModelList(models: OpenRouterModel[]) {
             : isNew
               ? model.name + ' (new)'
               : model.name,
-        preferredIndex:
-          preferredIndex >= 0 || model.id === KILO_AUTO_MODEL_ID ? preferredIndex : undefined,
+        preferredIndex: preferredIndex >= 0 ? preferredIndex : undefined,
         settings: getModelSettings(model.id),
         versioned_settings: getVersionedModelSettings(model.id),
+        opencode: getOpenCodeSettings(model.id),
       };
     });
   const sortedModels = enhancedModels.sort((a, b) => {

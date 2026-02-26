@@ -36,7 +36,10 @@
         "reasoning",
         "include_reasoning"
       ],
-      "preferredIndex": -1
+      "preferredIndex": 0,
+      "opencode": {
+        "prompt": "anthropic"
+      }
     },
     {
       "id": "minimax/minimax-m2.5:free",
@@ -228,7 +231,44 @@
         "web_search": "0",
         "internal_reasoning": "0"
       },
-      "context_length": 200000
+      "context_length": 200000,
+      "opencode": {
+        "variants": {
+          "none": {
+            "reasoning": {
+              "enabled": false
+            }
+          },
+          "low": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "low"
+            },
+            "verbosity": "low"
+          },
+          "medium": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "medium"
+            },
+            "verbosity": "medium"
+          },
+          "high": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "high"
+            },
+            "verbosity": "high"
+          },
+          "max": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "xhigh"
+            },
+            "verbosity": "max"
+          }
+        }
+      }
     },
     {
       "id": "anthropic/claude-3.7-sonnet",
@@ -257,7 +297,44 @@
         "web_search": "0",
         "internal_reasoning": "0"
       },
-      "context_length": 200000
+      "context_length": 200000,
+      "opencode": {
+        "variants": {
+          "none": {
+            "reasoning": {
+              "enabled": false
+            }
+          },
+          "low": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "low"
+            },
+            "verbosity": "low"
+          },
+          "medium": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "medium"
+            },
+            "verbosity": "medium"
+          },
+          "high": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "high"
+            },
+            "verbosity": "high"
+          },
+          "max": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "xhigh"
+            },
+            "verbosity": "max"
+          }
+        }
+      }
     },
     {
       "id": "google/gemini-2.5-pro",
