@@ -1797,7 +1797,7 @@ describe('approveDevicePairingRequest', () => {
       '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
     );
 
-    expect(result).toEqual({ success: false, message: 'request not found' });
+    expect(result).toEqual({ success: false, message: 'Approval failed' });
   });
 });
 

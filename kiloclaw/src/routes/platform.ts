@@ -75,6 +75,32 @@ function jsonError(message: string, status: number): Response {
 }
 
 /**
+ * Safe error messages that can be returned to callers without leaking internals.
+ * All other error messages are replaced with a generic "Internal error" response.
+ * The raw error is always logged via console.error for Sentry/debugging.
+ */
+const SAFE_ERROR_PREFIXES = [
+  'Instance is not ', // e.g. "Instance is not running", "Instance is not provisioned"
+  'User already has an ', // duplicate provision
+  'Gateway controller ', // already sanitized at DO level
+];
+
+function sanitizeError(err: unknown, operation: string): { message: string; status: number } {
+  const raw = err instanceof Error ? err.message : 'Unknown error';
+  const status = statusCodeFromError(err);
+
+  // Log the full error for Sentry/debugging — this never reaches the caller
+  console.error(`[platform] ${operation} failed:`, raw);
+
+  // Allow known-safe messages through
+  if (SAFE_ERROR_PREFIXES.some(prefix => raw.startsWith(prefix))) {
+    return { message: raw, status };
+  }
+
+  return { message: `${operation} failed`, status };
+}
+
+/**
  * Safely parse JSON body through a zod schema.
  * Returns 400 with a consistent error shape on malformed JSON or validation failure.
  */
@@ -136,12 +162,13 @@ platform.post('/provision', async c => {
     );
     return c.json(provision, 201);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] provision failed:', message);
-    if (message.includes('duplicate key') || message.includes('unique constraint')) {
+    const raw = err instanceof Error ? err.message : 'Unknown error';
+    if (raw.includes('duplicate key') || raw.includes('unique constraint')) {
+      console.error('[platform] provision failed: duplicate instance');
       return c.json({ error: 'User already has an active instance' }, 409);
     }
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'provision');
+    return jsonError(message, status);
   }
 });
 
@@ -167,9 +194,8 @@ platform.patch('/kilocode-config', async c => {
     );
     return c.json(updated, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] kilocode-config patch failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'kilocode-config patch');
+    return jsonError(message, status);
   }
 });
 
@@ -188,9 +214,8 @@ platform.patch('/channels', async c => {
     );
     return c.json(updated, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] channels patch failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'channels patch');
+    return jsonError(message, status);
   }
 });
 
@@ -209,9 +234,8 @@ platform.get('/pairing', async c => {
     );
     return c.json(pairing, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] pairing list failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'pairing list');
+    return jsonError(message, status);
   }
 });
 
@@ -236,9 +260,8 @@ platform.post('/pairing/approve', async c => {
     );
     return c.json(approved, approved.success ? 200 : 500);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] pairing approve failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'pairing approve');
+    return jsonError(message, status);
   }
 });
 
@@ -257,9 +280,8 @@ platform.get('/device-pairing', async c => {
     );
     return c.json(pairing, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] device pairing list failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'device pairing list');
+    return jsonError(message, status);
   }
 });
 
@@ -283,9 +305,8 @@ platform.post('/device-pairing/approve', async c => {
     );
     return c.json(approved, approved.success ? 200 : 500);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] device pairing approve failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'device pairing approve');
+    return jsonError(message, status);
   }
 });
 
@@ -304,9 +325,7 @@ platform.get('/gateway/status', async c => {
     );
     return c.json(gatewayStatus, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = statusCodeFromError(err);
-    console.error(`[platform] gateway status failed: ${message} status=${status}`);
+    const { message, status } = sanitizeError(err, 'gateway status');
     return jsonError(message, status);
   }
 });
@@ -324,9 +343,7 @@ platform.post('/gateway/start', async c => {
     );
     return c.json(response, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = statusCodeFromError(err);
-    console.error('[platform] gateway start failed:', message);
+    const { message, status } = sanitizeError(err, 'gateway start');
     return jsonError(message, status);
   }
 });
@@ -344,9 +361,7 @@ platform.post('/gateway/stop', async c => {
     );
     return c.json(response, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = statusCodeFromError(err);
-    console.error('[platform] gateway stop failed:', message);
+    const { message, status } = sanitizeError(err, 'gateway stop');
     return jsonError(message, status);
   }
 });
@@ -364,9 +379,7 @@ platform.post('/gateway/restart', async c => {
     );
     return c.json(response, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    const status = statusCodeFromError(err);
-    console.error('[platform] gateway restart failed:', message);
+    const { message, status } = sanitizeError(err, 'gateway restart');
     return jsonError(message, status);
   }
 });
@@ -384,9 +397,8 @@ platform.post('/doctor', async c => {
     );
     return c.json(doctor, 200);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] doctor failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'doctor');
+    return jsonError(message, status);
   }
 });
 
@@ -403,9 +415,8 @@ platform.post('/start', async c => {
     );
     return c.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] start failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'start');
+    return jsonError(message, status);
   }
 });
 
@@ -418,9 +429,8 @@ platform.post('/stop', async c => {
     await withDORetry(instanceStubFactory(c.env, result.data.userId), stub => stub.stop(), 'stop');
     return c.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] stop failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'stop');
+    return jsonError(message, status);
   }
 });
 
@@ -437,9 +447,8 @@ platform.post('/destroy', async c => {
     );
     return c.json({ ok: true });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] destroy failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'destroy');
+    return jsonError(message, status);
   }
 });
 
@@ -458,9 +467,8 @@ platform.get('/status', async c => {
     );
     return c.json(status);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] status failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'status');
+    return jsonError(message, status);
   }
 });
 
@@ -491,9 +499,8 @@ platform.get('/gateway-token', async c => {
     const gatewayToken = await deriveGatewayToken(status.sandboxId, c.env.GATEWAY_TOKEN_SECRET);
     return c.json({ gatewayToken });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] gateway-token failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'gateway-token');
+    return jsonError(message, status);
   }
 });
 
@@ -513,9 +520,8 @@ platform.get('/volume-snapshots', async c => {
     );
     return c.json({ snapshots });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[platform] volume-snapshots failed:', message);
-    return c.json({ error: message }, 500);
+    const { message, status } = sanitizeError(err, 'volume-snapshots');
+    return jsonError(message, status);
   }
 });
 
