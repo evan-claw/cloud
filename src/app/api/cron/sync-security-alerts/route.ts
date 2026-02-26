@@ -127,6 +127,15 @@ export async function GET(request: NextRequest) {
 
       if (owners.length === 0) {
         log('No enabled security sync owners found, skipping dispatch');
+
+        await sendBetterStackHeartbeat({
+          heartbeatUrl: SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL,
+          heartbeatType: 'success',
+          context: {
+            ownersDispatched: 0,
+          },
+        });
+
         return NextResponse.json({
           success: true,
           mode: 'worker_dispatch',
