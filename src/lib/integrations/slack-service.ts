@@ -131,7 +131,11 @@ export async function getInstallation(owner: Owner): Promise<PlatformIntegration
     .select()
     .from(platform_integrations)
     .where(
-      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.SLACK))
+      and(
+        ...getOwnershipConditions(owner),
+        eq(platform_integrations.platform, PLATFORM.SLACK),
+        eq(platform_integrations.integration_status, INTEGRATION_STATUS.ACTIVE)
+      )
     )
     .limit(1);
 
@@ -177,7 +181,14 @@ export async function upsertSlackInstallation(
   owner: Owner,
   oauthResponse: OAuthV2Response
 ): Promise<PlatformIntegration> {
-  const existing = await getInstallation(owner);
+  // Find existing integration regardless of status so we update rather than create duplicates
+  const [existing] = await db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.SLACK))
+    )
+    .limit(1);
 
   const teamId = oauthResponse.team?.id || '';
   const teamName = oauthResponse.team?.name || 'Unknown Team';
@@ -246,7 +257,7 @@ export async function upsertSlackInstallation(
 export async function uninstallApp(owner: Owner) {
   const integration = await getInstallation(owner);
 
-  if (!integration || integration.integration_status !== INTEGRATION_STATUS.ACTIVE) {
+  if (!integration) {
     throw new TRPCError({
       code: 'NOT_FOUND',
       message: 'Slack installation not found',
@@ -274,7 +285,14 @@ export async function uninstallApp(owner: Owner) {
  * having to re-install the app in Slack.
  */
 export async function removeDbRowOnly(owner: Owner) {
-  const integration = await getInstallation(owner);
+  // Find integration regardless of status since this is a dev utility for cleaning up DB rows
+  const [integration] = await db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.SLACK))
+    )
+    .limit(1);
 
   if (!integration) {
     throw new TRPCError({

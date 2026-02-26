@@ -112,7 +112,11 @@ export async function getInstallation(owner: Owner): Promise<PlatformIntegration
     .select()
     .from(platform_integrations)
     .where(
-      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.DISCORD))
+      and(
+        ...getOwnershipConditions(owner),
+        eq(platform_integrations.platform, PLATFORM.DISCORD),
+        eq(platform_integrations.integration_status, INTEGRATION_STATUS.ACTIVE)
+      )
     )
     .limit(1);
 
@@ -166,7 +170,14 @@ export async function upsertDiscordInstallation(
     );
   }
 
-  const existing = await getInstallation(owner);
+  // Find existing integration regardless of status so we update rather than create duplicates
+  const [existing] = await db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.DISCORD))
+    )
+    .limit(1);
 
   const guildId = oauthResponse.guild.id;
   const guildName = oauthResponse.guild.name || 'Unknown Server';
@@ -222,7 +233,7 @@ export async function upsertDiscordInstallation(
 export async function uninstallApp(owner: Owner) {
   const integration = await getInstallation(owner);
 
-  if (!integration || integration.integration_status !== INTEGRATION_STATUS.ACTIVE) {
+  if (!integration) {
     throw new TRPCError({
       code: 'NOT_FOUND',
       message: 'Discord installation not found',
@@ -239,7 +250,14 @@ export async function uninstallApp(owner: Owner) {
  * Useful for development when you want to re-test the OAuth flow.
  */
 export async function removeDbRowOnly(owner: Owner) {
-  const integration = await getInstallation(owner);
+  // Find integration regardless of status since this is a dev utility for cleaning up DB rows
+  const [integration] = await db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(...getOwnershipConditions(owner), eq(platform_integrations.platform, PLATFORM.DISCORD))
+    )
+    .limit(1);
 
   if (!integration) {
     throw new TRPCError({
