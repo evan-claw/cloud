@@ -61,6 +61,18 @@ export const sessionStatusAtom = atom<
   | { type: 'retry'; attempt: number; message: string; next: number }
 >({ type: 'idle' });
 
+/**
+ * Autocommit status — one per execution, transitions in-place.
+ * Reset to null when a new execution starts.
+ */
+export type AutocommitStatus = {
+  status: 'in_progress' | 'completed' | 'failed';
+  message: string;
+  timestamp: string;
+};
+
+export const autocommitStatusAtom = atom<AutocommitStatus | null>(null);
+
 // ============================================================================
 // Common State
 // ============================================================================
@@ -133,6 +145,7 @@ export const clearMessagesAtom = atom(null, (_get, set) => {
   set(messagesMapAtom, new Map());
   set(partsMapAtom, new Map());
   set(questionRequestIdsAtom, new Map());
+  set(autocommitStatusAtom, null);
 });
 
 // ============================================================================

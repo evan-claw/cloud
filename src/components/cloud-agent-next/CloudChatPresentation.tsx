@@ -16,6 +16,8 @@ import { ChatInput } from './ChatInput';
 import { ErrorBanner } from './ErrorBanner';
 import { MessageErrorBoundary } from './MessageErrorBoundary';
 import { MessageBubble } from './MessageBubble';
+import { AutocommitStatus } from './AutocommitStatus';
+import type { AutocommitStatus as AutocommitStatusType } from './store/atoms';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ArrowDown, RefreshCw } from 'lucide-react';
@@ -160,6 +162,9 @@ export type CloudChatPresentationProps = {
   onMenuClick: () => void;
   onMobileSheetOpenChange: (open: boolean) => void;
 
+  /** Autocommit status to display after messages */
+  autocommitStatus?: AutocommitStatusType | null;
+
   // Old session handling
   isOldSession?: boolean;
 
@@ -225,6 +230,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   onToggleSound,
   onMenuClick,
   onMobileSheetOpenChange,
+  autocommitStatus,
   isOldSession = false,
   getChildMessages,
   inputMode,
@@ -387,6 +393,9 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
 
                 {/* Dynamic messages - re-render during streaming */}
                 <DynamicMessages messages={dynamicMessages} getChildMessages={getChildMessages} />
+
+                {/* Auto-commit status indicator */}
+                {autocommitStatus && <AutocommitStatus status={autocommitStatus} />}
 
                 {/* Invisible anchor for auto-scroll */}
                 <div ref={messagesEndRef} />

@@ -138,7 +138,13 @@ export class ExecutionOrchestrator {
         prepared.session,
         sessionId,
         kiloServerPort,
-        prepared.context.workspacePath
+        prepared.context.workspacePath,
+        {
+          autoCommit: wrapper.autoCommit,
+          condenseOnComplete: wrapper.condenseOnComplete,
+          upstreamBranch: prepared.context.upstreamBranch,
+          model: wrapper.model?.modelID,
+        }
       );
     } catch (error) {
       throw ExecutionError.wrapperStartFailed(

@@ -3,6 +3,7 @@ import { sessionIdSchema, githubRepoSchema, gitUrlSchema, envVarsSchema } from '
 import {
   MCPServerConfigSchema,
   branchNameSchema,
+  modelIdSchema,
   EncryptedSecretEnvelopeSchema,
   EncryptedSecretsSchema,
   CallbackTargetSchema,
@@ -11,7 +12,7 @@ import { AgentModeSchema, Limits } from '../schema.js';
 
 // Re-export schemas from types.ts and persistence/schemas.ts for convenience
 export { sessionIdSchema, githubRepoSchema, gitUrlSchema, envVarsSchema };
-export { MCPServerConfigSchema, branchNameSchema };
+export { MCPServerConfigSchema, branchNameSchema, modelIdSchema };
 export { AgentModeSchema, Limits };
 export { EncryptedSecretEnvelopeSchema, EncryptedSecretsSchema, CallbackTargetSchema };
 
@@ -41,7 +42,7 @@ export type Images = z.infer<typeof ImagesSchema>;
 export const PromptPayload = z.object({
   prompt: z.string().min(1, 'Prompt is required').describe('The task prompt for Kilo Code'),
   mode: AgentModeSchema.describe('Kilo Code execution mode (required)'),
-  model: z.string().min(1, 'Model is required').describe('AI model to use (required)'),
+  model: modelIdSchema.describe('AI model to use (required)'),
 });
 
 /**
@@ -125,7 +126,7 @@ export const PrepareSessionInput = z
       .max(Limits.MAX_PROMPT_LENGTH)
       .describe('The task prompt for Kilo Code'),
     mode: AgentModeSchema.describe('Kilo Code execution mode'),
-    model: z.string().min(1).describe('AI model to use'),
+    model: modelIdSchema.describe('AI model to use'),
 
     // Repository - one of these pairs required
     githubRepo: githubRepoSchema
@@ -229,7 +230,7 @@ export const UpdateSessionInput = z
 
     // Scalar fields - null to clear, value to set, undefined to skip
     mode: AgentModeSchema.nullable().optional().describe('Mode to set (null to clear)'),
-    model: z.string().min(1).nullable().optional().describe('Model to set (null to clear)'),
+    model: modelIdSchema.nullable().optional().describe('Model to set (null to clear)'),
     githubToken: z.string().nullable().optional().describe('GitHub token to set (null to clear)'),
     gitToken: z.string().nullable().optional().describe('Git token to set (null to clear)'),
     upstreamBranch: branchNameSchema

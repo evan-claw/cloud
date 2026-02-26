@@ -93,6 +93,8 @@ export type KiloClient = {
   answerQuestion: (questionId: string, answers: string[][]) => Promise<boolean>;
   /** Reject a question */
   rejectQuestion: (questionId: string) => Promise<boolean>;
+  /** Generate a commit message for staged/unstaged changes */
+  generateCommitMessage: (opts: { path: string }) => Promise<{ message: string }>;
 };
 
 /**
@@ -202,5 +204,8 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/question/${questionId}/reject`, {});
       return true;
     },
+
+    generateCommitMessage: (opts: { path: string }) =>
+      requestJson<{ message: string }>('POST', '/commit-message', { path: opts.path }),
   };
 }

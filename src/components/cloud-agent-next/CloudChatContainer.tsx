@@ -24,6 +24,7 @@ import {
   getChildSessionMessagesAtom,
   questionRequestIdsAtom,
   sessionOrganizationIdAtom,
+  autocommitStatusAtom,
 } from './store/atoms';
 import { buildSessionConfig, needsResumeConfiguration } from './session-config';
 import {
@@ -83,6 +84,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const sessionConfig = useAtomValue(sessionConfigAtom);
   const totalCost = useAtomValue(totalCostAtom);
+  const autocommitStatus = useAtomValue(autocommitStatusAtom);
   const questionRequestIds = useAtomValue(questionRequestIdsAtom);
   const questionOrganizationId = useAtomValue(sessionOrganizationIdAtom);
 
@@ -972,6 +974,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
         onInputModeChange={handleInputModeChange}
         onInputModelChange={handleInputModelChange}
         isOldSession={isOldSession}
+        autocommitStatus={autocommitStatus}
         getChildMessages={getChildSessionMessages}
       />
     </QuestionContextProvider>
