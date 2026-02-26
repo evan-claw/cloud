@@ -130,12 +130,14 @@ export const securityAgentRouter = createTRPCRouter({
     }
 
     const triageModelSlug =
+      result.storedConfig.triage_model_slug ||
+      result.storedConfig.model_slug ||
       result.config.triage_model_slug ||
-      result.config.model_slug ||
       DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
     const analysisModelSlug =
+      result.storedConfig.analysis_model_slug ||
+      result.storedConfig.model_slug ||
       result.config.analysis_model_slug ||
-      result.config.model_slug ||
       DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
 
     return {
@@ -168,12 +170,14 @@ export const securityAgentRouter = createTRPCRouter({
 
       const existingConfig = await getSecurityAgentConfigWithStatus(owner);
       const existingTriageModelSlug =
+        existingConfig?.storedConfig.triage_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
         existingConfig?.config.triage_model_slug ??
-        existingConfig?.config.model_slug ??
         DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
       const existingAnalysisModelSlug =
+        existingConfig?.storedConfig.analysis_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
         existingConfig?.config.analysis_model_slug ??
-        existingConfig?.config.model_slug ??
         DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
       const beforeState = existingConfig
         ? {
@@ -826,14 +830,16 @@ export const securityAgentRouter = createTRPCRouter({
     const triageModel =
       input.triageModel ||
       input.model ||
+      config?.storedConfig.triage_model_slug ||
+      config?.storedConfig.model_slug ||
       config?.config.triage_model_slug ||
-      config?.config.model_slug ||
       DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
     const analysisModel =
       input.analysisModel ||
       input.model ||
+      config?.storedConfig.analysis_model_slug ||
+      config?.storedConfig.model_slug ||
       config?.config.analysis_model_slug ||
-      config?.config.model_slug ||
       DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
     const analysisMode = config?.config.analysis_mode ?? 'auto';
 
