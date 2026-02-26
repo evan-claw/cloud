@@ -13,7 +13,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-02-26',
     description:
-      'Upgraded to OpenClaw 2026.2.25 with native Kilo Gateway provider support. Model config is now managed by OpenClaw directly. Default model changes apply instantly without restart.',
+      'Updated OpenClaw to the latest version. Changing the default model in the dashboard now takes effect immediately without requiring a redeploy.',
     category: 'feature',
     deployHint: 'redeploy_required',
   },
