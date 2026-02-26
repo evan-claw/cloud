@@ -7,7 +7,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, XCircle, GitBranch, Settings, ExternalLink, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo } from 'react';
-import { useGitHubAppsQueries } from './GitHubAppsContext';
+import {
+  useGitHubAppsInstallation,
+  useGitHubAppsPendingInstallation,
+  useGitHubAppsMutations,
+} from './GitHubAppsContext';
 import { useUser } from '@/hooks/useUser';
 import { DevAddGitHubInstallationCard } from './DevAddGitHubInstallationCard';
 import { useOrganizationWithMembers } from '@/app/api/organizations/hooks';
@@ -28,7 +32,7 @@ export function GitHubIntegrationDetails({
   pendingApproval,
   existingPendingOrg,
 }: GitHubIntegrationDetailsProps) {
-  const { queries, mutations } = useGitHubAppsQueries();
+  const mutations = useGitHubAppsMutations();
 
   // Fetch organization data to check GitHub app type
   const { data: organizationData } = useOrganizationWithMembers(organizationId ?? '', {
@@ -45,10 +49,10 @@ export function GitHubIntegrationDetails({
   }, [organizationData?.settings?.github_app_type]);
 
   // Fetch GitHub App installation status
-  const { data: installationData, isLoading, refetch } = queries.getInstallation();
+  const { data: installationData, isLoading, refetch } = useGitHubAppsInstallation();
 
   // Check if user has pending installation in another org
-  const { data: pendingCheck } = queries.checkUserPendingInstallation();
+  const { data: pendingCheck } = useGitHubAppsPendingInstallation();
 
   // Show success/error/pending toasts
   useEffect(() => {

@@ -1,17 +1,17 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { DiscordProvider, type DiscordQueries, type DiscordMutations } from './DiscordContext';
+import { DiscordProvider, type DiscordQueryOptions, type DiscordMutations } from './DiscordContext';
 
 export function UserDiscordProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: DiscordQueries = {
-    getInstallation: () => useQuery(trpc.discord.getInstallation.queryOptions()),
-    getOAuthUrl: () => useQuery(trpc.discord.getOAuthUrl.queryOptions()),
+  const queryOptions: DiscordQueryOptions = {
+    getInstallation: trpc.discord.getInstallation.queryOptions(),
+    getOAuthUrl: trpc.discord.getOAuthUrl.queryOptions(),
   };
 
   const mutations: DiscordMutations = {
@@ -39,7 +39,7 @@ export function UserDiscordProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DiscordProvider queries={queries} mutations={mutations}>
+    <DiscordProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </DiscordProvider>
   );

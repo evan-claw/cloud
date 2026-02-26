@@ -1,11 +1,11 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import type { UseMutationResult } from '@tanstack/react-query';
 import type { TRPCClientErrorLike } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
 
-// Use the same error type pattern as GitHub integration
 type SlackError = TRPCClientErrorLike<AnyRouter>;
 
 type SlackInstallation = {
@@ -41,9 +41,16 @@ type SlackUpdateModelResult = {
   error?: string;
 };
 
-export type SlackQueries = {
-  getInstallation: () => UseQueryResult<SlackInstallationResult, SlackError>;
-  getOAuthUrl: () => UseQueryResult<SlackOAuthUrlResult, SlackError>;
+/**
+ * Query options are typed loosely to accommodate TRPC's specific queryOptions return types.
+ * Type safety is enforced at the hook level via useQuery's return type inference.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CompatibleQueryOptions = Parameters<typeof useQuery<any, any, any, any>>[0];
+
+export type SlackQueryOptions = {
+  getInstallation: CompatibleQueryOptions;
+  getOAuthUrl: CompatibleQueryOptions;
 };
 
 export type SlackMutations = {
@@ -55,35 +62,51 @@ export type SlackMutations = {
 };
 
 type SlackContextValue = {
-  queries: SlackQueries;
+  queryOptions: SlackQueryOptions;
   mutations: SlackMutations;
 };
 
 const SlackContext = createContext<SlackContextValue | null>(null);
 
-/**
- * Hook to access Slack queries and mutations from context
- * Must be used within a SlackProvider
- */
-export function useSlackQueries() {
+function useSlackContext() {
   const context = useContext(SlackContext);
   if (!context) {
-    throw new Error('useSlackQueries must be used within a SlackProvider');
+    throw new Error('Slack hooks must be used within a SlackProvider');
   }
   return context;
 }
 
+/** Hook to access Slack installation query */
+export function useSlackInstallation() {
+  const { queryOptions } = useSlackContext();
+  return useQuery<SlackInstallationResult, SlackError>(queryOptions.getInstallation);
+}
+
+/** Hook to access Slack OAuth URL query */
+export function useSlackOAuthUrl() {
+  const { queryOptions } = useSlackContext();
+  return useQuery<SlackOAuthUrlResult, SlackError>(queryOptions.getOAuthUrl);
+}
+
+/** Hook to access Slack mutations */
+export function useSlackMutations() {
+  const { mutations } = useSlackContext();
+  return mutations;
+}
+
 /**
- * Base provider component that accepts queries and mutations
+ * Base provider component that accepts query options and mutations
  */
 export function SlackProvider({
-  queries,
+  queryOptions,
   mutations,
   children,
 }: {
-  queries: SlackQueries;
+  queryOptions: SlackQueryOptions;
   mutations: SlackMutations;
   children: ReactNode;
 }) {
-  return <SlackContext.Provider value={{ queries, mutations }}>{children}</SlackContext.Provider>;
+  return (
+    <SlackContext.Provider value={{ queryOptions, mutations }}>{children}</SlackContext.Provider>
+  );
 }

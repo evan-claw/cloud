@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useState, useRef } from 'react';
-import { useGitLabQueries } from './GitLabContext';
+import { useGitLabInstallation, useGitLabMutations } from './GitLabContext';
 import { useMutation } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 
@@ -89,7 +89,7 @@ export function GitLabIntegrationDetails({
     showSelfHosted && instanceUrl && instanceUrl !== 'https://gitlab.com' && instanceUrl !== ''
   );
 
-  const { queries, mutations } = useGitLabQueries();
+  const mutations = useGitLabMutations();
 
   // Instance validation mutation (shared between OAuth and PAT)
   const { mutate: validateInstanceMutate } = useMutation(
@@ -233,7 +233,7 @@ export function GitLabIntegrationDetails({
     };
   }, [instanceUrl, isSelfHostedInput, validateInstanceMutate]);
 
-  const { data: installationData, isLoading } = queries.getInstallation();
+  const { data: installationData, isLoading } = useGitLabInstallation();
 
   const isDisconnecting = mutations.disconnect.isPending;
 

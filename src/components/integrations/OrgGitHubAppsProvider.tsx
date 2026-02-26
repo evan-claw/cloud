@@ -1,10 +1,13 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import { GitHubAppsProvider } from './GitHubAppsContext';
-import type { IntegrationQueries, IntegrationMutations } from '@/lib/integrations/router-types';
+import type {
+  IntegrationQueryOptions,
+  IntegrationMutations,
+} from '@/lib/integrations/router-types';
 
 type OrgGitHubAppsProviderProps = {
   organizationId: string;
@@ -15,39 +18,35 @@ export function OrgGitHubAppsProvider({ organizationId, children }: OrgGitHubApp
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: IntegrationQueries = {
-    listIntegrations: () =>
-      useQuery(
-        trpc.organizations.githubApps.listIntegrations.queryOptions({ organizationId })
-      ) as IntegrationQueries['listIntegrations'] extends () => infer R ? R : never,
+  const queryOptions: IntegrationQueryOptions = {
+    listIntegrations: trpc.organizations.githubApps.listIntegrations.queryOptions({
+      organizationId,
+    }),
 
-    getInstallation: () =>
-      useQuery(trpc.organizations.githubApps.getInstallation.queryOptions({ organizationId })),
+    getInstallation: trpc.organizations.githubApps.getInstallation.queryOptions({
+      organizationId,
+    }),
 
-    checkUserPendingInstallation: () =>
-      useQuery(
-        trpc.organizations.githubApps.checkUserPendingInstallation.queryOptions({ organizationId })
-      ),
+    checkUserPendingInstallation:
+      trpc.organizations.githubApps.checkUserPendingInstallation.queryOptions({ organizationId }),
 
-    listRepositories: (integrationId: string, forceRefresh?: boolean) =>
-      useQuery({
-        ...trpc.organizations.githubApps.listRepositories.queryOptions({
-          organizationId,
-          integrationId,
-          forceRefresh: forceRefresh ?? false,
-        }),
-        enabled: !!integrationId,
+    listRepositories: (integrationId: string, forceRefresh?: boolean) => ({
+      ...trpc.organizations.githubApps.listRepositories.queryOptions({
+        organizationId,
+        integrationId,
+        forceRefresh: forceRefresh ?? false,
       }),
+      enabled: !!integrationId,
+    }),
 
-    listBranches: (integrationId: string, repositoryFullName: string) =>
-      useQuery({
-        ...trpc.organizations.githubApps.listBranches.queryOptions({
-          organizationId,
-          integrationId,
-          repositoryFullName,
-        }),
-        enabled: !!integrationId && !!repositoryFullName,
+    listBranches: (integrationId: string, repositoryFullName: string) => ({
+      ...trpc.organizations.githubApps.listBranches.queryOptions({
+        organizationId,
+        integrationId,
+        repositoryFullName,
       }),
+      enabled: !!integrationId && !!repositoryFullName,
+    }),
   };
 
   // Base mutations from TRPC
@@ -135,7 +134,7 @@ export function OrgGitHubAppsProvider({ organizationId, children }: OrgGitHubApp
   };
 
   return (
-    <GitHubAppsProvider queries={queries} mutations={mutations}>
+    <GitHubAppsProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </GitHubAppsProvider>
   );

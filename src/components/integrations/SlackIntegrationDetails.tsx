@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo, useState } from 'react';
-import { useSlackQueries } from './SlackContext';
+import { useSlackInstallation, useSlackOAuthUrl, useSlackMutations } from './SlackContext';
 import { IS_DEVELOPMENT } from '@/lib/constants';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import { useModelSelectorList } from '@/app/api/openrouter/hooks';
@@ -31,13 +31,9 @@ export function SlackIntegrationDetails({
   success,
   error,
 }: SlackIntegrationDetailsProps) {
-  const { queries, mutations } = useSlackQueries();
-
-  // Fetch Slack installation status
-  const { data: installationData, isLoading, refetch } = queries.getInstallation();
-
-  // Get OAuth URL for installation
-  const { data: oauthUrlData } = queries.getOAuthUrl();
+  const { data: installationData, isLoading, refetch } = useSlackInstallation();
+  const { data: oauthUrlData } = useSlackOAuthUrl();
+  const mutations = useSlackMutations();
 
   // Fetch models for the model selector
   const { data: openRouterModels, isLoading: isLoadingModels } =

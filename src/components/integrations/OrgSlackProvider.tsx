@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { SlackProvider, type SlackQueries, type SlackMutations } from './SlackContext';
+import { SlackProvider, type SlackQueryOptions, type SlackMutations } from './SlackContext';
 
 type OrgSlackProviderProps = {
   organizationId: string;
@@ -14,11 +14,9 @@ export function OrgSlackProvider({ organizationId, children }: OrgSlackProviderP
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: SlackQueries = {
-    getInstallation: () =>
-      useQuery(trpc.organizations.slack.getInstallation.queryOptions({ organizationId })),
-    getOAuthUrl: () =>
-      useQuery(trpc.organizations.slack.getOAuthUrl.queryOptions({ organizationId })),
+  const queryOptions: SlackQueryOptions = {
+    getInstallation: trpc.organizations.slack.getInstallation.queryOptions({ organizationId }),
+    getOAuthUrl: trpc.organizations.slack.getOAuthUrl.queryOptions({ organizationId }),
   };
 
   const uninstallAppMutation = useMutation(
@@ -133,7 +131,7 @@ export function OrgSlackProvider({ organizationId, children }: OrgSlackProviderP
   };
 
   return (
-    <SlackProvider queries={queries} mutations={mutations}>
+    <SlackProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </SlackProvider>
   );

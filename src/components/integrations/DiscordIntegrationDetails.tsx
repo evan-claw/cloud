@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, XCircle, MessageSquare, Settings, ExternalLink, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
-import { useDiscordQueries } from './DiscordContext';
+import { useDiscordInstallation, useDiscordOAuthUrl, useDiscordMutations } from './DiscordContext';
 import { IS_DEVELOPMENT } from '@/lib/constants';
 
 type DiscordIntegrationDetailsProps = {
@@ -17,13 +17,9 @@ type DiscordIntegrationDetailsProps = {
 };
 
 export function DiscordIntegrationDetails({ success, error }: DiscordIntegrationDetailsProps) {
-  const { queries, mutations } = useDiscordQueries();
-
-  // Fetch Discord installation status
-  const { data: installationData, isLoading, refetch } = queries.getInstallation();
-
-  // Get OAuth URL for installation
-  const { data: oauthUrlData } = queries.getOAuthUrl();
+  const { data: installationData, isLoading, refetch } = useDiscordInstallation();
+  const { data: oauthUrlData } = useDiscordOAuthUrl();
+  const mutations = useDiscordMutations();
 
   // Show success/error toasts
   useEffect(() => {

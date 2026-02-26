@@ -1,43 +1,40 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import { GitHubAppsProvider } from './GitHubAppsContext';
-import type { IntegrationQueries, IntegrationMutations } from '@/lib/integrations/router-types';
+import type {
+  IntegrationQueryOptions,
+  IntegrationMutations,
+} from '@/lib/integrations/router-types';
 
 export function UserGitHubAppsProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: IntegrationQueries = {
-    listIntegrations: () =>
-      useQuery(
-        trpc.githubApps.listIntegrations.queryOptions()
-      ) as IntegrationQueries['listIntegrations'] extends () => infer R ? R : never,
+  const queryOptions: IntegrationQueryOptions = {
+    listIntegrations: trpc.githubApps.listIntegrations.queryOptions(),
 
-    getInstallation: () => useQuery(trpc.githubApps.getInstallation.queryOptions()),
+    getInstallation: trpc.githubApps.getInstallation.queryOptions(),
 
-    checkUserPendingInstallation: () =>
-      useQuery(trpc.githubApps.checkUserPendingInstallation.queryOptions()),
+    checkUserPendingInstallation: trpc.githubApps.checkUserPendingInstallation.queryOptions(),
 
-    listRepositories: (integrationId: string, forceRefresh?: boolean) =>
-      useQuery({
-        ...trpc.githubApps.listRepositories.queryOptions({
-          integrationId,
-          forceRefresh: forceRefresh ?? false,
-        }),
-        enabled: !!integrationId,
+    listRepositories: (integrationId: string, forceRefresh?: boolean) => ({
+      ...trpc.githubApps.listRepositories.queryOptions({
+        integrationId,
+        forceRefresh: forceRefresh ?? false,
       }),
+      enabled: !!integrationId,
+    }),
 
-    listBranches: (integrationId: string, repositoryFullName: string) =>
-      useQuery({
-        ...trpc.githubApps.listBranches.queryOptions({
-          integrationId,
-          repositoryFullName,
-        }),
-        enabled: !!integrationId && !!repositoryFullName,
+    listBranches: (integrationId: string, repositoryFullName: string) => ({
+      ...trpc.githubApps.listBranches.queryOptions({
+        integrationId,
+        repositoryFullName,
       }),
+      enabled: !!integrationId && !!repositoryFullName,
+    }),
   };
 
   const mutations: IntegrationMutations = {
@@ -82,7 +79,7 @@ export function UserGitHubAppsProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <GitHubAppsProvider queries={queries} mutations={mutations}>
+    <GitHubAppsProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </GitHubAppsProvider>
   );

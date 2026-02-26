@@ -8,33 +8,21 @@ import {
 } from '@/lib/integrations/platform-definitions';
 import { Card, CardContent } from '@/components/ui/card';
 import { UserGitHubAppsProvider } from '@/components/integrations/UserGitHubAppsProvider';
-import { useGitHubAppsQueries } from '@/components/integrations/GitHubAppsContext';
+import { useGitHubAppsInstallation } from '@/components/integrations/GitHubAppsContext';
 import { UserSlackProvider } from '@/components/integrations/UserSlackProvider';
-import { useSlackQueries } from '@/components/integrations/SlackContext';
+import { useSlackInstallation } from '@/components/integrations/SlackContext';
 import { UserDiscordProvider } from '@/components/integrations/UserDiscordProvider';
-import { useDiscordQueries } from '@/components/integrations/DiscordContext';
+import { useDiscordInstallation } from '@/components/integrations/DiscordContext';
 import { UserGitLabProvider } from '@/components/integrations/UserGitLabProvider';
-import { useGitLabQueries } from '@/components/integrations/GitLabContext';
+import { useGitLabInstallation } from '@/components/integrations/GitLabContext';
 import { PageContainer } from '@/components/layouts/PageContainer';
 
 function IntegrationsPageContent() {
   const router = useRouter();
-  const { queries: githubQueries } = useGitHubAppsQueries();
-  const { queries: slackQueries } = useSlackQueries();
-  const { queries: discordQueries } = useDiscordQueries();
-  const { queries: gitlabQueries } = useGitLabQueries();
-
-  // Fetch GitHub App installation status
-  const { data: githubInstallation, isLoading: githubLoading } = githubQueries.getInstallation();
-
-  // Fetch Slack installation status
-  const { data: slackInstallation, isLoading: slackLoading } = slackQueries.getInstallation();
-
-  // Fetch Discord installation status
-  const { data: discordInstallation, isLoading: discordLoading } = discordQueries.getInstallation();
-
-  // Fetch GitLab installation status
-  const { data: gitlabInstallation, isLoading: gitlabLoading } = gitlabQueries.getInstallation();
+  const { data: githubInstallation, isLoading: githubLoading } = useGitHubAppsInstallation();
+  const { data: slackInstallation, isLoading: slackLoading } = useSlackInstallation();
+  const { data: discordInstallation, isLoading: discordLoading } = useDiscordInstallation();
+  const { data: gitlabInstallation, isLoading: gitlabLoading } = useGitLabInstallation();
 
   const isLoading = githubLoading || slackLoading || discordLoading || gitlabLoading;
 

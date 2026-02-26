@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { DiscordProvider, type DiscordQueries, type DiscordMutations } from './DiscordContext';
+import { DiscordProvider, type DiscordQueryOptions, type DiscordMutations } from './DiscordContext';
 
 type OrgDiscordProviderProps = {
   organizationId: string;
@@ -14,11 +14,9 @@ export function OrgDiscordProvider({ organizationId, children }: OrgDiscordProvi
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: DiscordQueries = {
-    getInstallation: () =>
-      useQuery(trpc.organizations.discord.getInstallation.queryOptions({ organizationId })),
-    getOAuthUrl: () =>
-      useQuery(trpc.organizations.discord.getOAuthUrl.queryOptions({ organizationId })),
+  const queryOptions: DiscordQueryOptions = {
+    getInstallation: trpc.organizations.discord.getInstallation.queryOptions({ organizationId }),
+    getOAuthUrl: trpc.organizations.discord.getOAuthUrl.queryOptions({ organizationId }),
   };
 
   const uninstallAppMutation = useMutation(
@@ -87,7 +85,7 @@ export function OrgDiscordProvider({ organizationId, children }: OrgDiscordProvi
   };
 
   return (
-    <DiscordProvider queries={queries} mutations={mutations}>
+    <DiscordProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </DiscordProvider>
   );

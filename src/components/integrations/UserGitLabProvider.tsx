@@ -1,26 +1,16 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { GitLabProvider, type GitLabQueries } from './GitLabContext';
+import { GitLabProvider, type GitLabQueryOptions } from './GitLabContext';
 
 export function UserGitLabProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: GitLabQueries = {
-    getInstallation: () => {
-      const query = useQuery(trpc.gitlab.getInstallation.queryOptions());
-      return {
-        data: query.data,
-        status: query.status,
-        isPending: query.isPending,
-        isLoading: query.isLoading,
-        isError: query.isError,
-        error: query.error,
-      };
-    },
+  const queryOptions: GitLabQueryOptions = {
+    getInstallation: trpc.gitlab.getInstallation.queryOptions(),
   };
 
   const mutations = {
@@ -46,7 +36,7 @@ export function UserGitLabProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <GitLabProvider queries={queries} mutations={mutations}>
+    <GitLabProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </GitLabProvider>
   );

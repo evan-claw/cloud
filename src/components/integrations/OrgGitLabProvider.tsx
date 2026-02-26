@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { GitLabProvider, type GitLabMutations } from './GitLabContext';
+import { GitLabProvider, type GitLabQueryOptions, type GitLabMutations } from './GitLabContext';
 
 type OrgGitLabProviderProps = {
   organizationId: string;
@@ -14,37 +14,36 @@ export function OrgGitLabProvider({ organizationId, children }: OrgGitLabProvide
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  // Note: Casting the queries to the expected types since the underlying
-  // tRPC types are compatible but TypeScript cannot infer this automatically
-  const queries = {
-    getInstallation: () => {
-      const query = useQuery(trpc.gitlab.getIntegration.queryOptions({ organizationId }));
-      // The data transformation happens at runtime, the whole result is casted
-      const transformedData = query.data
-        ? {
-            installed: query.data.connected,
-            installation: query.data.integration
-              ? {
-                  id: query.data.integration.id,
-                  accountId: query.data.integration.accountId,
-                  accountLogin: query.data.integration.accountLogin,
-                  instanceUrl: query.data.integration.instanceUrl,
-                  repositories: query.data.integration.repositories,
-                  repositoriesSyncedAt: query.data.integration.repositoriesSyncedAt,
-                  installedAt: query.data.integration.installedAt,
-                  tokenExpiresAt: query.data.integration.tokenExpiresAt ?? null,
-                }
-              : null,
-          }
-        : undefined;
-      return {
-        data: transformedData,
-        status: query.status,
-        isPending: query.isPending,
-        isLoading: query.isLoading,
-        isError: query.isError,
-        error: query.error,
-      };
+  const queryOptions: GitLabQueryOptions = {
+    getInstallation: {
+      ...trpc.gitlab.getIntegration.queryOptions({ organizationId }),
+      select: (data: {
+        connected: boolean;
+        integration: {
+          id: string;
+          accountId: string | null;
+          accountLogin: string | null;
+          instanceUrl: string;
+          repositories: import('@/lib/integrations/core/types').PlatformRepository[] | null;
+          repositoriesSyncedAt: string | null;
+          installedAt: string;
+          tokenExpiresAt: string | null;
+        } | null;
+      }) => ({
+        installed: data.connected,
+        installation: data.integration
+          ? {
+              id: data.integration.id,
+              accountId: data.integration.accountId,
+              accountLogin: data.integration.accountLogin,
+              instanceUrl: data.integration.instanceUrl,
+              repositories: data.integration.repositories,
+              repositoriesSyncedAt: data.integration.repositoriesSyncedAt,
+              installedAt: data.integration.installedAt,
+              tokenExpiresAt: data.integration.tokenExpiresAt ?? null,
+            }
+          : null,
+      }),
     },
   };
 
@@ -106,7 +105,7 @@ export function OrgGitLabProvider({ organizationId, children }: OrgGitLabProvide
   };
 
   return (
-    <GitLabProvider queries={queries} mutations={mutations}>
+    <GitLabProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </GitLabProvider>
   );

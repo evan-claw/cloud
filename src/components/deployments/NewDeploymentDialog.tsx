@@ -39,7 +39,11 @@ import {
 } from './PasswordFormFields';
 import Link from 'next/link';
 import { useDeploymentQueries } from './DeploymentContext';
-import { useGitHubAppsQueries } from '@/components/integrations/GitHubAppsContext';
+import {
+  useGitHubAppsIntegrations,
+  useGitHubAppsRepositories,
+  useGitHubAppsBranches,
+} from '@/components/integrations/GitHubAppsContext';
 import { envVarKeySchema } from '@/lib/user-deployments/env-vars-validation';
 
 type NewDeploymentDialogProps = {
@@ -76,7 +80,6 @@ export function NewDeploymentDialog({
   });
 
   const { queries: deploymentQueries, mutations } = useDeploymentQueries();
-  const { queries: gitHubQueries } = useGitHubAppsQueries();
 
   // Check if password features are available (org-only)
   const hasPasswordFeature = !!mutations.setPassword;
@@ -92,7 +95,7 @@ export function NewDeploymentDialog({
     data: integrations,
     isLoading: isLoadingIntegration,
     error: integrationError,
-  } = gitHubQueries.listIntegrations();
+  } = useGitHubAppsIntegrations();
 
   // Get the selected integration
   const selectedIntegration = integrations?.find(i => i.id === selectedIntegrationId);
@@ -102,14 +105,14 @@ export function NewDeploymentDialog({
     data: repositories,
     isLoading: isLoadingRepositories,
     error: repositoriesError,
-  } = gitHubQueries.listRepositories(selectedIntegrationId);
+  } = useGitHubAppsRepositories(selectedIntegrationId);
 
   // Query branches for the selected repository
   const {
     data: branchesData,
     isLoading: isLoadingBranches,
     error: branchesError,
-  } = gitHubQueries.listBranches(selectedIntegrationId, selectedRepository);
+  } = useGitHubAppsBranches(selectedIntegrationId, selectedRepository);
 
   // Transform repositories to match RepositoryOption format
   const repositoryOptions: RepositoryOption[] =

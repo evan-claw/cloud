@@ -1,7 +1,8 @@
 'use client';
 
 import { createContext, useContext, type ReactNode } from 'react';
-import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import type { UseMutationResult } from '@tanstack/react-query';
 import type { TRPCClientErrorLike } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
 import type { PlatformRepository } from '@/lib/integrations/core/types';
@@ -19,20 +20,20 @@ type GitLabInstallation = {
   tokenExpiresAt: string | null;
 };
 
-type GitLabInstallationResult = {
+export type GitLabInstallationResult = {
   installed: boolean;
   installation: GitLabInstallation | null;
 };
 
-type GitLabInstallationQueryResult_Full = UseQueryResult<GitLabInstallationResult, GitLabError>;
-// Pick only the properties we actually use to avoid excessive re-renders from observing all query changes
-type GitLabInstallationQueryResult = Pick<
-  GitLabInstallationQueryResult_Full,
-  'data' | 'status' | 'isPending' | 'isLoading' | 'isError' | 'error'
->;
+/**
+ * Query options are typed loosely to accommodate TRPC's specific queryOptions return types.
+ * Type safety is enforced at the hook level via useQuery's return type inference.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CompatibleQueryOptions = Parameters<typeof useQuery<any, any, any, any>>[0];
 
-export type GitLabQueries = {
-  getInstallation: () => GitLabInstallationQueryResult;
+export type GitLabQueryOptions = {
+  getInstallation: CompatibleQueryOptions;
 };
 
 export type GitLabMutations = {
@@ -45,35 +46,45 @@ export type GitLabMutations = {
 };
 
 type GitLabContextValue = {
-  queries: GitLabQueries;
+  queryOptions: GitLabQueryOptions;
   mutations: GitLabMutations;
 };
 
 const GitLabContext = createContext<GitLabContextValue | null>(null);
 
-/**
- * Hook to access GitLab queries and mutations from context
- * Must be used within a GitLabProvider
- */
-export function useGitLabQueries() {
+function useGitLabContext() {
   const context = useContext(GitLabContext);
   if (!context) {
-    throw new Error('useGitLabQueries must be used within a GitLabProvider');
+    throw new Error('GitLab hooks must be used within a GitLabProvider');
   }
   return context;
 }
 
+/** Hook to access GitLab installation query */
+export function useGitLabInstallation() {
+  const { queryOptions } = useGitLabContext();
+  return useQuery<GitLabInstallationResult, GitLabError>(queryOptions.getInstallation);
+}
+
+/** Hook to access GitLab mutations */
+export function useGitLabMutations() {
+  const { mutations } = useGitLabContext();
+  return mutations;
+}
+
 /**
- * Base provider component that accepts queries and mutations
+ * Base provider component that accepts query options and mutations
  */
 export function GitLabProvider({
-  queries,
+  queryOptions,
   mutations,
   children,
 }: {
-  queries: GitLabQueries;
+  queryOptions: GitLabQueryOptions;
   mutations: GitLabMutations;
   children: ReactNode;
 }) {
-  return <GitLabContext.Provider value={{ queries, mutations }}>{children}</GitLabContext.Provider>;
+  return (
+    <GitLabContext.Provider value={{ queryOptions, mutations }}>{children}</GitLabContext.Provider>
+  );
 }

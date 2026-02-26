@@ -1,7 +1,6 @@
-import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query';
+import type { UseMutationResult, UseQueryOptions } from '@tanstack/react-query';
 import type { TRPCClientErrorLike } from '@trpc/client';
 import type { AnyRouter } from '@trpc/server';
-import type { PlatformIntegration } from '@/db/schema';
 import type { PlatformRepository } from '@/lib/integrations/core/types';
 
 /**
@@ -64,57 +63,52 @@ export type ListBranchesResponse = {
 };
 
 /**
- * Query interface that both user and org integration providers must implement
+ * Query options are typed loosely to accommodate TRPC's specific queryOptions return types,
+ * which are structurally compatible with useQuery but not directly assignable to UseQueryOptions.
+ * Type safety is enforced at the hook level via useQuery's return type inference.
  */
-export type IntegrationQueries = {
-  /**
-   * List all integrations
-   */
-  listIntegrations: () => UseQueryResult<PlatformIntegration[], IntegrationError>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CompatibleQueryOptions = UseQueryOptions<any, any, any, any>;
+
+/**
+ * Query options interface that both user and org integration providers must implement.
+ *
+ * Simple queries provide query options objects directly.
+ * Parameterized queries provide functions that return query options objects.
+ */
+export type IntegrationQueryOptions = {
+  /** List all integrations */
+  listIntegrations: CompatibleQueryOptions;
+
+  /** Get GitHub App installation status */
+  getInstallation: CompatibleQueryOptions;
+
+  /** Check if user has a pending installation */
+  checkUserPendingInstallation: CompatibleQueryOptions;
 
   /**
-   * Get GitHub App installation status
+   * List repositories accessible by an integration.
+   * Returns query options; the `enabled` flag is set internally based on integrationId.
    */
-  getInstallation: () => UseQueryResult<InstallationResponse, IntegrationError>;
+  listRepositories: (integrationId: string, forceRefresh?: boolean) => CompatibleQueryOptions;
 
   /**
-   * Check if user has a pending installation
+   * List branches for a repository.
+   * Returns query options; the `enabled` flag is set internally based on args.
    */
-  checkUserPendingInstallation: () => UseQueryResult<PendingCheckResponse, IntegrationError>;
-
-  /**
-   * List repositories accessible by an integration
-   */
-  listRepositories: (
-    integrationId: string,
-    forceRefresh?: boolean
-  ) => UseQueryResult<ListRepositoriesResponse, IntegrationError>;
-
-  /**
-   * List branches for a repository
-   */
-  listBranches: (
-    integrationId: string,
-    repositoryFullName: string
-  ) => UseQueryResult<ListBranchesResponse, IntegrationError>;
+  listBranches: (integrationId: string, repositoryFullName: string) => CompatibleQueryOptions;
 };
 
 /**
  * Mutation interface that both user and org integration providers must implement
  */
 export type IntegrationMutations = {
-  /**
-   * Uninstall GitHub App
-   */
+  /** Uninstall GitHub App */
   uninstallApp: UseMutationResult<{ success: boolean }, IntegrationError, void>;
 
-  /**
-   * Cancel pending installation
-   */
+  /** Cancel pending installation */
   cancelPendingInstallation: UseMutationResult<{ success: boolean }, IntegrationError, void>;
 
-  /**
-   * Refresh installation details from GitHub (permissions, events, repositories)
-   */
+  /** Refresh installation details from GitHub (permissions, events, repositories) */
   refreshInstallation: UseMutationResult<{ success: boolean }, IntegrationError, void>;
 };

@@ -1,17 +1,17 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
-import { SlackProvider, type SlackQueries, type SlackMutations } from './SlackContext';
+import { SlackProvider, type SlackQueryOptions, type SlackMutations } from './SlackContext';
 
 export function UserSlackProvider({ children }: { children: ReactNode }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const queries: SlackQueries = {
-    getInstallation: () => useQuery(trpc.slack.getInstallation.queryOptions()),
-    getOAuthUrl: () => useQuery(trpc.slack.getOAuthUrl.queryOptions()),
+  const queryOptions: SlackQueryOptions = {
+    getInstallation: trpc.slack.getInstallation.queryOptions(),
+    getOAuthUrl: trpc.slack.getOAuthUrl.queryOptions(),
   };
 
   const mutations: SlackMutations = {
@@ -51,7 +51,7 @@ export function UserSlackProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SlackProvider queries={queries} mutations={mutations}>
+    <SlackProvider queryOptions={queryOptions} mutations={mutations}>
       {children}
     </SlackProvider>
   );
