@@ -35,6 +35,10 @@ export const OpenCodePromptSchema = z.enum([
 
 export type OpenCodePrompt = z.infer<typeof OpenCodePromptSchema>;
 
+export const OpenCodeFamilySchema = z.enum(['claude', 'gpt', 'gemini', 'llama', 'mistral']);
+
+export type OpenCodeFamily = z.infer<typeof OpenCodeFamilySchema>;
+
 export const OpenCodeVariantSchema = z.object({
   verbosity: z.enum(['low', 'medium', 'high', 'max']).optional(),
   reasoning: z
@@ -48,6 +52,7 @@ export const OpenCodeVariantSchema = z.object({
 export type OpenCodeVariant = z.infer<typeof OpenCodeVariantSchema>;
 
 export const OpenCodeSettingsSchema = z.object({
+  family: OpenCodeFamilySchema.optional(),
   prompt: OpenCodePromptSchema.optional(),
   variants: z.record(z.string(), OpenCodeVariantSchema).optional(),
 });

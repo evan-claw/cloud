@@ -1,3 +1,4 @@
+import { KILO_AUTO_MODEL_ID, KILO_AUTO_MODEL_OPENCODE_SETTINGS } from '@/lib/kilo-auto-model';
 import type {
   ModelSettings,
   OpenCodeSettings,
@@ -41,10 +42,8 @@ export function getVersionedModelSettings(model: string): VersionedSettings | un
 }
 
 export function getOpenCodeSettings(model: string): OpenCodeSettings | undefined {
-  if (model.startsWith('kilo/auto')) {
-    return {
-      prompt: 'anthropic',
-    };
+  if (model === KILO_AUTO_MODEL_ID) {
+    return KILO_AUTO_MODEL_OPENCODE_SETTINGS;
   }
   if (isAnthropicModel(model)) {
     return {
