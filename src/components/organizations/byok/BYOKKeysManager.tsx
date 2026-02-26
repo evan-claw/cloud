@@ -44,6 +44,7 @@ import {
 // Hardcoded BYOK providers list
 const BYOK_PROVIDERS = [
   { id: VercelUserByokInferenceProviderIdSchema.enum.anthropic, name: 'Anthropic' },
+  { id: VercelUserByokInferenceProviderIdSchema.enum.bedrock, name: 'AWS Bedrock' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.openai, name: 'OpenAI' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.google, name: 'Google AI Studio' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.minimax, name: 'MiniMax' },
@@ -390,26 +391,57 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="apiKey">API Key</Label>
-                <div className="relative">
-                  <Input
+                <Label htmlFor="apiKey">
+                  {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock
+                    ? 'AWS Credentials'
+                    : 'API Key'}
+                </Label>
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock ? (
+                  <textarea
                     id="apiKey"
-                    type={showApiKey ? 'text' : 'password'}
                     value={apiKey}
                     onChange={e => setApiKey(e.target.value)}
-                    placeholder="Enter API key"
-                    className="pr-10"
+                    placeholder='{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'
+                    className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[80px] w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                    rows={4}
                   />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="absolute top-0 right-0 h-full px-3"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      id="apiKey"
+                      type={showApiKey ? 'text' : 'password'}
+                      value={apiKey}
+                      onChange={e => setApiKey(e.target.value)}
+                      placeholder="Enter API key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-0 right-0 h-full px-3"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                )}
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock && (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      <p>Enter your AWS credentials as JSON:</p>
+                      <code className="mt-1 block text-xs break-all">
+                        {'{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'}
+                      </code>
+                      <p className="mt-1">
+                        Your IAM user needs <code className="text-xs">bedrock:InvokeModel</code> and{' '}
+                        <code className="text-xs">bedrock:InvokeModelWithResponseStream</code>{' '}
+                        permissions.
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {editingKeyId ? (
                   <Alert>
                     <Lock className="h-4 w-4" />
