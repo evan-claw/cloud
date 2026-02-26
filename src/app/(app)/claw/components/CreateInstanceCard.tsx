@@ -66,6 +66,11 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
   }
 
   function handleCreate() {
+    if (isLoadingModels) {
+      toast.error('Models are still loading; try again in a moment.');
+      return;
+    }
+
     posthog?.capture('claw_create_instance_clicked', {
       selected_model: selectedModel || null,
       channels: [...addedChannels],
