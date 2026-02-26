@@ -153,12 +153,20 @@ async function enqueueDispatchMessages(
 
 async function handleDispatch(request: Request, env: CloudflareEnv): Promise<Response> {
   const authToken = await env.SECURITY_SYNC_WORKER_AUTH_TOKEN.get();
+  if (!authToken) {
+    console.error('SECURITY_SYNC_WORKER_AUTH_TOKEN is not configured');
+    return jsonResponse({ success: false, error: 'Server misconfiguration' }, 500);
+  }
   if (!validateBearerAuth(request, authToken)) {
     return jsonResponse({ success: false, error: 'Unauthorized' }, 401);
   }
 
   const rawBody = await request.text();
   const hmacSecret = await env.SECURITY_SYNC_WORKER_HMAC_SECRET.get();
+  if (!hmacSecret) {
+    console.error('SECURITY_SYNC_WORKER_HMAC_SECRET is not configured');
+    return jsonResponse({ success: false, error: 'Server misconfiguration' }, 500);
+  }
   const signatureValid = await validateSignedDispatchRequest(request, rawBody, hmacSecret);
   if (!signatureValid) {
     return jsonResponse({ success: false, error: 'Invalid request signature' }, 401);
