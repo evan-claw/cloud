@@ -225,6 +225,13 @@
       "when": 1772009431335,
       "tag": "0031_polite_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1772124948831,
+      "tag": "0032_opposite_wilson_fisk",
+      "breakpoints": true
     }
   ]
 }
