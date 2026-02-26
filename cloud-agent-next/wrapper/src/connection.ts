@@ -14,84 +14,8 @@ import type { IngestEvent, WrapperCommand } from '../../src/shared/protocol.js';
 import { createSSEConsumer, isTerminalErrorEvent, type SSEConsumer } from './sse-consumer.js';
 import { logToFile } from './utils.js';
 
-// ---------------------------------------------------------------------------
-// Kilo Event Types (from kilo-cli SDK)
-// ---------------------------------------------------------------------------
-
-/**
- * Time information for messages.
- */
-type MessageTime = {
-  created: number;
-  completed?: number;
-};
-
-/**
- * Assistant message info from message.updated event.
- * Mirrors AssistantMessage from kilo-cli SDK.
- */
-type AssistantMessageInfo = {
-  id: string;
-  sessionID: string;
-  role: 'assistant';
-  time: MessageTime;
-  parentID: string;
-  modelID: string;
-  providerID: string;
-  mode: string;
-  agent: string;
-  path: { cwd: string; root: string };
-  cost: number;
-  tokens: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: { read: number; write: number };
-  };
-  error?: unknown;
-  summary?: boolean;
-  finish?: string;
-};
-
-/**
- * User message info from message.updated event.
- */
-type UserMessageInfo = {
-  id: string;
-  sessionID: string;
-  role: 'user';
-  time: MessageTime;
-  agent: string;
-  model: { providerID: string; modelID: string };
-  summary?: { title?: string; body?: string };
-  system?: string;
-  tools?: Record<string, boolean>;
-  variant?: string;
-};
-
-/**
- * Message info can be either user or assistant message.
- */
-type MessageInfo = UserMessageInfo | AssistantMessageInfo;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-/**
- * Type guard for message.updated kilocode event data.
- * Kilo server sends: {type: "message.updated", properties: {info: {...}}}
- * After mapping: {type: "message.updated", properties: {info: {...}}, event: "message.updated"}
- */
-function isMessageUpdatedEvent(
-  data: unknown
-): data is { event: 'message.updated'; properties: { info: MessageInfo } } {
-  if (!isRecord(data)) return false;
-  if (data.event !== 'message.updated') return false;
-  const props = data.properties;
-  if (!isRecord(props)) return false;
-  const info = props.info;
-  return isRecord(info) && typeof info.role === 'string' && isRecord(info.time);
 }
 
 /**
@@ -106,15 +30,6 @@ export function isSessionIdleEvent(
   if (data.event !== 'session.idle') return false;
   const props = data.properties;
   return isRecord(props) && typeof props.sessionID === 'string';
-}
-
-/**
- * Type guard for completed assistant message.
- */
-function isCompletedAssistantMessage(
-  info: MessageInfo
-): info is AssistantMessageInfo & { time: { completed: number } } {
-  return info.role === 'assistant' && typeof info.time.completed === 'number';
 }
 
 // ---------------------------------------------------------------------------
@@ -312,25 +227,6 @@ export function createConnectionManager(
           if (terminal.isTerminal) {
             callbacks.onTerminalError(terminal.reason ?? 'terminal error');
             return;
-          }
-
-          // Check for completion events using typed event guards
-          if (isMessageUpdatedEvent(data)) {
-            const { info } = data.properties;
-            if (isCompletedAssistantMessage(info)) {
-              // Guard: only process completions for our current session
-              const currentSessionId = state.currentJob?.kiloSessionId;
-              if (currentSessionId && info.sessionID !== currentSessionId) {
-                logToFile(
-                  `ignoring completion for different session: event=${info.sessionID} current=${currentSessionId}`
-                );
-                return;
-              }
-
-              logToFile(`assistant message completed: ${info.id}`);
-              // Don't call onCompletionSignal here — the CLI may use multiple turns.
-              // Only session.idle means all turns are done (see below).
-            }
           }
 
           // session.idle is the primary completion signal - it means the assistant finished

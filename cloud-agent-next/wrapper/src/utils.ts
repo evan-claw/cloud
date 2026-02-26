@@ -7,9 +7,16 @@ export type ExecResult = {
   exitCode: number;
 };
 
-export function exec(command: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
+/** Spawn a git command with an argv array (no shell interpolation). */
+export function git(
+  args: string[],
+  opts?: { cwd?: string; timeoutMs?: number }
+): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn('git', args, {
+      cwd: opts?.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -46,7 +53,7 @@ export function exec(command: string, opts?: { timeoutMs?: number }): Promise<Ex
 
 export async function getCurrentBranch(workspacePath: string): Promise<string> {
   try {
-    const result = await exec(`cd ${workspacePath} && git branch --show-current`);
+    const result = await git(['branch', '--show-current'], { cwd: workspacePath });
     return result.stdout.trim();
   } catch {
     return '';
