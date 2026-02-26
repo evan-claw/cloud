@@ -239,7 +239,7 @@ export function useCloudAgentStream({
         }
       },
 
-      onSessionStatusChanged: status => {
+      onSessionStatusChanged: (status, _eventSessionId) => {
         setSessionStatus(status);
 
         // Handle streaming state based on status

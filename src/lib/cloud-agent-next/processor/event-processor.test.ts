@@ -441,7 +441,10 @@ describe('createEventProcessor', () => {
         })
       );
 
-      expect(callbacks.onSessionStatusChanged).toHaveBeenCalledWith({ type: 'busy' });
+      expect(callbacks.onSessionStatusChanged).toHaveBeenCalledWith(
+        { type: 'busy' },
+        'session-123'
+      );
       expect(callbacks.onStreamingChanged).toHaveBeenCalledWith(true);
     });
 
@@ -468,7 +471,10 @@ describe('createEventProcessor', () => {
         })
       );
 
-      expect(callbacks.onSessionStatusChanged).toHaveBeenLastCalledWith({ type: 'idle' });
+      expect(callbacks.onSessionStatusChanged).toHaveBeenLastCalledWith(
+        { type: 'idle' },
+        'session-123'
+      );
       expect(callbacks.onStreamingChanged).toHaveBeenLastCalledWith(false);
     });
 
