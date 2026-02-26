@@ -229,6 +229,19 @@ if (process.env.KILOCODE_API_BASE_URL) {
     console.log('Overriding kilocode base URL: ' + process.env.KILOCODE_API_BASE_URL);
 }
 
+// Inject X-KILOCODE-FEATURE header on all kilocode provider requests.
+// KILOCODE_FEATURE is set to 'kilo-claw' by the kiloclaw DO in buildEnvVars().
+// OpenClaw's runner merges config.models.providers.<provider>.headers into every
+// outbound request for that provider, so this is the correct injection point.
+if (process.env.KILOCODE_FEATURE) {
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers.kilocode = config.models.providers.kilocode || {};
+    config.models.providers.kilocode.headers = config.models.providers.kilocode.headers || {};
+    config.models.providers.kilocode.headers['X-KILOCODE-FEATURE'] = process.env.KILOCODE_FEATURE;
+    console.log('Injecting X-KILOCODE-FEATURE header: ' + process.env.KILOCODE_FEATURE);
+}
+
 // User-selected default model override.
 // OpenClaw onboard sets kilocode/anthropic/claude-opus-4.6 as the default.
 // If the user picked a different model in the UI, override it here.
