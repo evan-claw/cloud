@@ -12,19 +12,29 @@ import { NEXTAUTH_SECRET } from '@/lib/config.server';
  *
  * This module produces a state value of the form:
  *
- *   base64url({ owner, uid }) . HMAC-SHA256(payload, secret)
+ *   base64url({ owner, uid, iat, nonce }) . HMAC-SHA256(payload, secret)
  *
- * where `owner` is the original owner string and `uid` is the ID of the
- * authenticated user who started the flow.  On the callback we:
+ * where `owner` is the original owner string, `uid` is the ID of the
+ * authenticated user who started the flow, `iat` is the issued-at timestamp
+ * (seconds since epoch), and `nonce` is random bytes to ensure uniqueness.
+ *
+ * On the callback we:
  *
  *  1. Verify the HMAC (state was created by us, not forged).
- *  2. Extract `uid` and confirm it matches the session user (same user
+ *  2. Check `iat` is within the allowed TTL window (default 10 minutes).
+ *  3. Extract `uid` and confirm it matches the session user (same user
  *     who initiated the flow is completing it).
- *  3. Return the `owner` string so the rest of the callback logic is
+ *  4. Return the `owner` string so the rest of the callback logic is
  *     unchanged.
  */
 
 const HMAC_ALGORITHM = 'sha256';
+
+/** Maximum age of a state token in seconds (10 minutes). */
+const STATE_TTL_SECONDS = 10 * 60;
+
+/** Number of random bytes for the nonce (16 bytes = 128 bits). */
+const NONCE_BYTES = 16;
 
 function sign(data: string): string {
   return crypto.createHmac(HMAC_ALGORITHM, NEXTAUTH_SECRET).update(data).digest('base64url');
@@ -37,7 +47,11 @@ function sign(data: string): string {
  * @param userId – the ID of the currently-authenticated user initiating the flow
  */
 export function createOAuthState(owner: string, userId: string): string {
-  const payload = Buffer.from(JSON.stringify({ owner, uid: userId })).toString('base64url');
+  const iat = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomBytes(NONCE_BYTES).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ owner, uid: userId, iat, nonce })).toString(
+    'base64url'
+  );
   const signature = sign(payload);
   return `${payload}.${signature}`;
 }
@@ -52,8 +66,8 @@ export type VerifiedOAuthState = {
 /**
  * Verify a signed OAuth state parameter and return the embedded payload.
  *
- * Returns `null` if the state is missing, malformed, or the signature is
- * invalid.
+ * Returns `null` if the state is missing, malformed, the signature is
+ * invalid, or the token has expired.
  */
 export function verifyOAuthState(state: string | null): VerifiedOAuthState | null {
   if (!state) return null;
@@ -77,8 +91,19 @@ export function verifyOAuthState(state: string | null): VerifiedOAuthState | nul
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       owner?: string;
       uid?: string;
+      iat?: number;
+      nonce?: string;
     };
     if (typeof data.owner !== 'string' || typeof data.uid !== 'string') return null;
+
+    // Enforce TTL: reject tokens that are too old or have no timestamp
+    if (typeof data.iat !== 'number') return null;
+    const ageSeconds = Math.floor(Date.now() / 1000) - data.iat;
+    if (ageSeconds < 0 || ageSeconds > STATE_TTL_SECONDS) return null;
+
+    // Require nonce to be present (guards against old-format tokens)
+    if (typeof data.nonce !== 'string' || data.nonce.length === 0) return null;
+
     return { owner: data.owner, userId: data.uid };
   } catch {
     return null;
