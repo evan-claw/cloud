@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import { useKiloClawGatewayStatus, useKiloClawMutations } from '@/hooks/useKiloClaw';
@@ -26,9 +26,6 @@ function hasPopulatedStatus(
   return candidate !== undefined && candidate.status !== null;
 }
 
-const FAST_POLL_INTERVAL = 10_000;
-const FAST_POLL_DURATION = 5 * 60 * 1000; // 5 minutes
-
 export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | undefined }) {
   const mutations = useKiloClawMutations();
   const gatewayUrl = useGatewayUrl(status);
@@ -40,29 +37,14 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
     error: gatewayError,
   } = useKiloClawGatewayStatus(isRunning);
 
-  const [channelsChangedAt, setChannelsChangedAt] = useState<number | null>(null);
   const [dirtyChannels, setDirtyChannels] = useState<Set<string>>(new Set());
 
   const onChannelsChanged = useCallback((channelType: string) => {
-    setChannelsChangedAt(Date.now());
     setDirtyChannels(prev => new Set([...prev, channelType]));
   }, []);
   const onRedeploySuccess = useCallback(() => {
     setDirtyChannels(new Set());
   }, []);
-
-  // Automatically stop fast polling after FAST_POLL_DURATION
-  useEffect(() => {
-    if (channelsChangedAt === null) return;
-
-    const timeoutId = setTimeout(() => {
-      setChannelsChangedAt(null);
-    }, FAST_POLL_DURATION);
-
-    return () => clearTimeout(timeoutId);
-  }, [channelsChangedAt]);
-
-  const pairingRefetchInterval = channelsChangedAt !== null ? FAST_POLL_INTERVAL : undefined;
 
   return (
     <div className="container m-auto flex w-full max-w-[1140px] flex-col gap-6 p-4 md:p-6">
@@ -149,9 +131,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         )}
       </Card>
 
-      {instanceStatus?.status === 'running' && (
-        <PairingCard mutations={mutations} pairingRefetchInterval={pairingRefetchInterval} />
-      )}
+      {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
 
       <ChangelogCard />
     </div>
