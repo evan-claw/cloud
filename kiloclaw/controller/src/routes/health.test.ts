@@ -35,15 +35,26 @@ describe('GET /_kilo/health', () => {
     });
   });
 
-  it('returns 200 even when gateway is crashed', async () => {
+  it('returns 503 when gateway is not running', async () => {
     const app = new Hono();
     registerHealthRoute(app, createMockSupervisor('crashed'));
 
     const resp = await app.request('/_kilo/health');
-    expect(resp.status).toBe(200);
+    expect(resp.status).toBe(503);
     const body = (await resp.json()) as { status: string; gateway: string };
-    expect(body.status).toBe('ok');
+    expect(body.status).toBe('starting');
     expect(body.gateway).toBe('crashed');
+  });
+
+  it('returns 503 when gateway is starting', async () => {
+    const app = new Hono();
+    registerHealthRoute(app, createMockSupervisor('starting'));
+
+    const resp = await app.request('/_kilo/health');
+    expect(resp.status).toBe(503);
+    const body = (await resp.json()) as { status: string; gateway: string };
+    expect(body.status).toBe('starting');
+    expect(body.gateway).toBe('starting');
   });
 });
 

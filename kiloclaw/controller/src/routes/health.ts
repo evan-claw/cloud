@@ -4,12 +4,16 @@ import type { Supervisor } from '../supervisor';
 export function registerHealthRoute(app: Hono, supervisor: Supervisor): void {
   const handler = (c: Context) => {
     const stats = supervisor.getStats();
-    return c.json({
-      status: 'ok',
-      gateway: stats.state,
-      uptime: stats.uptime,
-      restarts: stats.restarts,
-    });
+    const ready = stats.state === 'running';
+    return c.json(
+      {
+        status: ready ? 'ok' : 'starting',
+        gateway: stats.state,
+        uptime: stats.uptime,
+        restarts: stats.restarts,
+      },
+      ready ? 200 : 503
+    );
   };
 
   app.get('/_kilo/health', handler);

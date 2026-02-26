@@ -23,7 +23,6 @@ validateGitLfs();
 const nextConfig = {
   reactStrictMode: true,
 
-  reactCompiler: true,
   devIndicators: { position: 'bottom-right' },
 
   async rewrites() {
