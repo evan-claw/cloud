@@ -12,16 +12,19 @@ export type ProvisionInput = {
   };
   kilocodeApiKey?: string;
   kilocodeApiKeyExpiresAt?: string;
+  kilocodeDefaultModel?: string;
 };
 
 export type KiloCodeConfigPatchInput = {
   kilocodeApiKey?: string | null;
   kilocodeApiKeyExpiresAt?: string | null;
+  kilocodeDefaultModel?: string | null;
 };
 
 export type KiloCodeConfigResponse = {
   kilocodeApiKey: string | null;
   kilocodeApiKeyExpiresAt: string | null;
+  kilocodeDefaultModel: string | null;
 };
 
 /** Input to PATCH /api/platform/channels */
@@ -128,6 +131,7 @@ export type VolumeSnapshotsResponse = {
 export type UserConfigResponse = {
   envVarKeys: string[];
   secretCount: number;
+  kilocodeDefaultModel: string | null;
   hasKiloCodeApiKey: boolean;
   kilocodeApiKeyExpiresAt?: string | null;
   channels: {

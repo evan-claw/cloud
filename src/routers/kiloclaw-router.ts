@@ -25,6 +25,25 @@ const updateConfigSchema = z.object({
       slackAppToken: z.string().optional(),
     })
     .optional(),
+  kilocodeDefaultModel: z
+    .string()
+    .regex(
+      /^kilocode\/[^/]+\/.+$/,
+      'kilocodeDefaultModel must start with kilocode/ and include a provider'
+    )
+    .nullable()
+    .optional(),
+});
+
+const updateKiloCodeConfigSchema = z.object({
+  kilocodeDefaultModel: z
+    .string()
+    .regex(
+      /^kilocode\/[^/]+\/.+$/,
+      'kilocodeDefaultModel must start with kilocode/ and include a provider'
+    )
+    .nullable()
+    .optional(),
 });
 
 const patchChannelsSchema = z.object({
@@ -70,13 +89,17 @@ function buildWorkerChannelsPatch(channels: z.infer<typeof patchChannelsSchema>)
   return result;
 }
 
-type KiloCodeConfigPublicResponse = Pick<KiloCodeConfigResponse, 'kilocodeApiKeyExpiresAt'>;
+type KiloCodeConfigPublicResponse = Pick<
+  KiloCodeConfigResponse,
+  'kilocodeApiKeyExpiresAt' | 'kilocodeDefaultModel'
+>;
 
 function sanitizeKiloCodeConfigResponse(
   response: KiloCodeConfigResponse
 ): KiloCodeConfigPublicResponse {
   return {
     kilocodeApiKeyExpiresAt: response.kilocodeApiKeyExpiresAt,
+    kilocodeDefaultModel: response.kilocodeDefaultModel,
   };
 }
 
@@ -105,11 +128,13 @@ async function provisionInstance(
     channels: buildWorkerChannels(input.channels),
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
+    kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
   });
 }
 
 async function patchConfig(
-  user: Parameters<typeof generateApiToken>[0]
+  user: Parameters<typeof generateApiToken>[0],
+  input: z.infer<typeof updateKiloCodeConfigSchema>
 ): Promise<KiloCodeConfigPublicResponse> {
   const client = new KiloClawInternalClient();
   const expiresInSeconds = TOKEN_EXPIRY.thirtyDays;
@@ -119,6 +144,7 @@ async function patchConfig(
   const kilocodeApiKeyExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
   const response = await client.patchKiloCodeConfig(user.id, {
+    ...input,
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
   });
@@ -177,8 +203,8 @@ export const kiloclawRouter = createTRPCRouter({
     return provisionInstance(ctx.user, input);
   }),
 
-  patchConfig: baseProcedure.mutation(async ({ ctx }) => {
-    return patchConfig(ctx.user);
+  patchConfig: baseProcedure.input(updateKiloCodeConfigSchema).mutation(async ({ ctx, input }) => {
+    return patchConfig(ctx.user, input);
   }),
 
   // Backward-compatible aliases.
@@ -186,9 +212,11 @@ export const kiloclawRouter = createTRPCRouter({
     return provisionInstance(ctx.user, input);
   }),
 
-  updateKiloCodeConfig: baseProcedure.mutation(async ({ ctx }) => {
-    return patchConfig(ctx.user);
-  }),
+  updateKiloCodeConfig: baseProcedure
+    .input(updateKiloCodeConfigSchema)
+    .mutation(async ({ ctx, input }) => {
+      return patchConfig(ctx.user, input);
+    }),
 
   patchChannels: baseProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
     const client = new KiloClawInternalClient();

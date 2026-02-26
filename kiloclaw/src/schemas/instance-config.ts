@@ -33,6 +33,7 @@ export const InstanceConfigSchema = z.object({
   encryptedSecrets: z.record(envVarNameSchema, EncryptedEnvelopeSchema).optional(),
   kilocodeApiKey: z.string().nullable().optional(),
   kilocodeApiKeyExpiresAt: z.string().nullable().optional(),
+  kilocodeDefaultModel: z.string().nullable().optional(),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -93,6 +94,7 @@ export const PersistedStateSchema = z.object({
   encryptedSecrets: z.record(z.string(), EncryptedEnvelopeSchema).nullable().default(null),
   kilocodeApiKey: z.string().nullable().default(null),
   kilocodeApiKeyExpiresAt: z.string().nullable().default(null),
+  kilocodeDefaultModel: z.string().nullable().default(null),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),

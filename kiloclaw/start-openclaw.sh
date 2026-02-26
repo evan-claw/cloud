@@ -207,6 +207,16 @@ if (process.env.KILOCODE_API_BASE_URL) {
     console.log('Overriding kilocode base URL: ' + process.env.KILOCODE_API_BASE_URL);
 }
 
+// User-selected default model override.
+// OpenClaw onboard sets kilocode/anthropic/claude-opus-4.6 as the default.
+// If the user picked a different model in the UI, override it here.
+if (process.env.KILOCODE_DEFAULT_MODEL) {
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: process.env.KILOCODE_DEFAULT_MODEL };
+    console.log('Overriding default model: ' + process.env.KILOCODE_DEFAULT_MODEL);
+}
+
 // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
 // gateway host directly. Allowlist mode gates unknown commands via the
 // Control UI approval dialog; safe bins (jq, head, tail, etc.) auto-allow.

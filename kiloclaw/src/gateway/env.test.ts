@@ -94,16 +94,25 @@ describe('buildEnvVars', () => {
     expect(result.env.NODE_ENV).toBe('production');
   });
 
-  it('puts KILOCODE_API_KEY in sensitive bucket', async () => {
+  it('puts KILOCODE_API_KEY in sensitive, default model in env', async () => {
     const env = createMockEnv({ AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey });
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       kilocodeApiKey: 'kc-user-key',
+      kilocodeDefaultModel: 'kilocode/anthropic/claude-opus-4.6',
     });
 
     expect(result.sensitive.KILOCODE_API_KEY).toBe('kc-user-key');
-    // Model config is now handled natively by OpenClaw's kilocode provider
-    expect(result.env.KILOCODE_DEFAULT_MODEL).toBeUndefined();
+    expect(result.env.KILOCODE_DEFAULT_MODEL).toBe('kilocode/anthropic/claude-opus-4.6');
+    // Model catalog is handled natively by OpenClaw's kilocode provider
     expect(result.env.KILOCODE_MODELS_JSON).toBeUndefined();
+  });
+
+  it('does not set KILOCODE_DEFAULT_MODEL when absent', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      kilocodeApiKey: 'kc-key',
+    });
+    expect(result.env.KILOCODE_DEFAULT_MODEL).toBeUndefined();
   });
 
   it('puts decrypted secrets in sensitive bucket', async () => {

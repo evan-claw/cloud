@@ -11,6 +11,7 @@ import {
 import { createSupervisor } from './supervisor';
 import { registerHealthRoute } from './routes/health';
 import { registerGatewayRoutes } from './routes/gateway';
+import { registerConfigRoutes } from './routes/config';
 
 export type RuntimeConfig = {
   port: number;
@@ -117,6 +118,7 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   const app = new Hono();
   registerHealthRoute(app, supervisor);
   registerGatewayRoutes(app, supervisor, config.expectedToken);
+  registerConfigRoutes(app, config.expectedToken);
   app.all(
     '*',
     createHttpProxy({
