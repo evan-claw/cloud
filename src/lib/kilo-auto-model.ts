@@ -20,8 +20,8 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
   description: 'Automatically routes your request to the best model for the task.',
   context_length: 1_000_000,
   max_completion_tokens: 128_000,
-  prompt_price: '5.00',
-  completion_price: '25.00',
+  prompt_price: '0.000005',
+  completion_price: '0.000025',
   supports_images: true,
   roocode_settings: undefined,
   opencode_settings: {
@@ -52,8 +52,8 @@ export const KILO_AUTO_SMALL_MODEL: AutoModel = {
   description: 'Automatically routes your request to a small model.',
   context_length: 400_000,
   max_completion_tokens: 128_000,
-  prompt_price: '0.05',
-  completion_price: '0.40',
+  prompt_price: '0.00000005',
+  completion_price: '0.0000004',
   supports_images: true,
   roocode_settings: undefined,
   opencode_settings: {
