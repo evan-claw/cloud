@@ -17,6 +17,7 @@ import { addBreadcrumb, captureException, startSpan } from '@sentry/nextjs';
 import { sentryLogger } from '@/lib/utils.server';
 import { emitApiMetrics } from '@/lib/o11y/api-metrics.server';
 import { O11Y_KILO_GATEWAY_CLIENT_SECRET } from '@/lib/config.server';
+import { DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL } from '../core/constants';
 
 const VALID_SUGGESTED_ACTIONS: SandboxSuggestedAction[] = [
   'dismiss',
@@ -235,7 +236,7 @@ function createFallbackExtraction(
  * @param options.finding - The security finding being analyzed
  * @param options.rawMarkdown - Raw markdown output from sandbox analysis
  * @param options.authToken - Auth token for the LLM proxy
- * @param options.model - Model to use for extraction (default: anthropic/claude-sonnet-4)
+ * @param options.model - Model to use for extraction (defaults to DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL)
  * @param options.correlationId - Correlation ID for tracing across the analysis pipeline
  * @param options.userId - User ID for metrics tracking
  * @param options.organizationId - Optional organization ID for usage tracking
@@ -253,7 +254,7 @@ export async function extractSandboxAnalysis(options: {
     finding,
     rawMarkdown,
     authToken,
-    model = 'anthropic/claude-sonnet-4',
+    model = DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
     correlationId = '',
     userId = '',
     organizationId,

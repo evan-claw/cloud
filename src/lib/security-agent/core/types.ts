@@ -69,6 +69,8 @@ export const SecurityAgentConfigSchema = z.object({
   repository_selection_mode: z.enum(['all', 'selected']).default('all'),
   selected_repository_ids: z.array(z.number()).optional(),
   model_slug: z.string().optional(),
+  triage_model_slug: z.string().optional(),
+  analysis_model_slug: z.string().optional(),
   // Analysis mode: auto (default), shallow (triage only), deep (always sandbox)
   analysis_mode: z.enum(['auto', 'shallow', 'deep']).default('auto'),
   // Auto-dismiss configuration (off by default)
@@ -292,6 +294,10 @@ export type SecurityFindingAnalysis = {
   analyzedAt: string;
   /** Model used for analysis */
   modelUsed?: string;
+  /** Model used for triage */
+  triageModel?: string;
+  /** Model used for sandbox/extraction analysis */
+  analysisModel?: string;
   /** User ID who triggered the analysis (for audit tracking) */
   triggeredByUserId?: string;
   /** Correlation ID for tracing across triage → sandbox → extraction → auto-dismiss */

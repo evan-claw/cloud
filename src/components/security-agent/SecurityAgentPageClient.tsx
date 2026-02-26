@@ -32,6 +32,15 @@ type SecurityAgentPageClientProps = {
 
 const PAGE_SIZE = 20;
 
+function getOptionalStringField(source: unknown, key: string): string | undefined {
+  if (typeof source !== 'object' || source === null) {
+    return undefined;
+  }
+
+  const value = Reflect.get(source, key);
+  return typeof value === 'string' ? value : undefined;
+}
+
 // Helper to detect GitHub integration errors from error messages
 function isGitHubIntegrationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -474,12 +483,20 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
       config: SlaConfig & {
         repositorySelectionMode: 'all' | 'selected';
         selectedRepositoryIds: number[];
-        modelSlug: string;
+        triageModelSlug: string;
+        analysisModelSlug: string;
+        modelSlug?: string;
         analysisMode: 'auto' | 'shallow' | 'deep';
         autoDismissEnabled: boolean;
         autoDismissConfidenceThreshold: 'high' | 'medium' | 'low';
       }
     ) => {
+      const modelConfigPayload = {
+        triageModelSlug: config.triageModelSlug,
+        analysisModelSlug: config.analysisModelSlug,
+        modelSlug: config.modelSlug,
+      };
+
       if (isOrg && organizationId) {
         orgSaveConfigMutate({
           organizationId,
@@ -489,10 +506,10 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
           slaLowDays: config.low,
           repositorySelectionMode: config.repositorySelectionMode,
           selectedRepositoryIds: config.selectedRepositoryIds,
-          modelSlug: config.modelSlug,
           analysisMode: config.analysisMode,
           autoDismissEnabled: config.autoDismissEnabled,
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
+          ...modelConfigPayload,
         });
       } else if (!isOrg) {
         personalSaveConfigMutate({
@@ -502,10 +519,10 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
           slaLowDays: config.low,
           repositorySelectionMode: config.repositorySelectionMode,
           selectedRepositoryIds: config.selectedRepositoryIds,
-          modelSlug: config.modelSlug,
           analysisMode: config.analysisMode,
           autoDismissEnabled: config.autoDismissEnabled,
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
+          ...modelConfigPayload,
         });
       }
     },
@@ -633,6 +650,8 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
   const allRepositories = reposData ?? [];
   const repositorySelectionMode = configData?.repositorySelectionMode ?? 'selected';
   const selectedRepositoryIds = configData?.selectedRepositoryIds ?? [];
+  const triageModelSlug = getOptionalStringField(configData, 'triageModelSlug');
+  const analysisModelSlug = getOptionalStringField(configData, 'analysisModelSlug');
 
   // For the findings tab, only show repositories that are selected for security reviews
   const filteredRepositories =
@@ -820,11 +839,14 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
         {hasIntegration && (
           <TabsContent value="config" className="space-y-6">
             <SecurityConfigForm
+              organizationId={organizationId}
               enabled={isEnabled}
               slaConfig={slaConfig}
               repositorySelectionMode={configData?.repositorySelectionMode ?? 'selected'}
               selectedRepositoryIds={configData?.selectedRepositoryIds ?? []}
-              modelSlug={configData?.modelSlug ?? ''}
+              modelSlug={configData?.modelSlug}
+              triageModelSlug={triageModelSlug}
+              analysisModelSlug={analysisModelSlug}
               analysisMode={configData?.analysisMode ?? 'auto'}
               autoDismissEnabled={configData?.autoDismissEnabled ?? false}
               autoDismissConfidenceThreshold={configData?.autoDismissConfidenceThreshold ?? 'high'}

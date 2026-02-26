@@ -15,6 +15,15 @@ type AnalysisResultCardProps = {
   showSandboxReasoning?: boolean;
 };
 
+function getOptionalStringField(source: unknown, key: string): string | undefined {
+  if (typeof source !== 'object' || source === null) {
+    return undefined;
+  }
+
+  const value = Reflect.get(source, key);
+  return typeof value === 'string' ? value : undefined;
+}
+
 /**
  * Get the markdown content to display from an analysis result.
  * Prefers sandboxAnalysis.rawMarkdown if available, falls back to rawMarkdown.
@@ -179,8 +188,8 @@ function SandboxSummary({
         <div className="mt-2">
           <span className="text-muted-foreground text-xs font-medium">Usage locations:</span>
           <ul className="text-muted-foreground mt-1 list-inside list-disc text-xs">
-            {sandboxAnalysis.usageLocations.slice(0, 5).map((loc, i) => (
-              <li key={i} className="truncate">
+            {sandboxAnalysis.usageLocations.slice(0, 5).map(loc => (
+              <li key={loc} className="truncate">
                 {loc}
               </li>
             ))}
@@ -209,6 +218,23 @@ export function AnalysisResultCard({
   const markdown = getAnalysisMarkdown(analysis);
   const hasTriage = !!analysis.triage;
   const hasSandbox = !!analysis.sandboxAnalysis;
+  const triageModelUsed =
+    getOptionalStringField(analysis.triage, 'modelUsed') ??
+    getOptionalStringField(analysis, 'triageModelUsed') ??
+    getOptionalStringField(analysis, 'triageModel');
+  const analysisModelUsed =
+    analysis.sandboxAnalysis?.modelUsed ??
+    getOptionalStringField(analysis, 'analysisModelUsed') ??
+    getOptionalStringField(analysis, 'analysisModel');
+  const modelSummary =
+    triageModelUsed || analysisModelUsed
+      ? [
+          triageModelUsed ? `Triage: ${triageModelUsed}` : null,
+          analysisModelUsed ? `Analysis: ${analysisModelUsed}` : null,
+        ]
+          .filter(Boolean)
+          .join(' • ')
+      : analysis.modelUsed;
 
   return (
     <Card className="w-full min-w-0 overflow-hidden">
@@ -221,7 +247,7 @@ export function AnalysisResultCard({
             <CardTitle className="text-lg font-bold">AI Analysis</CardTitle>
             <p className="text-muted-foreground text-xs">
               Analyzed {new Date(analysis.analyzedAt).toLocaleDateString()}
-              {analysis.modelUsed && ` • ${analysis.modelUsed}`}
+              {modelSummary && ` • ${modelSummary}`}
             </p>
           </div>
         </div>

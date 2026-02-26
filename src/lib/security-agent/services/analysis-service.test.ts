@@ -127,7 +127,8 @@ describe('analysis-service', () => {
       user,
       githubRepo: 'acme/repo',
       githubToken: 'gh-token',
-      model: 'anthropic/claude-sonnet-4',
+      triageModel: 'anthropic/claude-sonnet-4',
+      analysisModel: 'anthropic/claude-opus-4.6',
       organizationId,
     });
 
@@ -139,16 +140,80 @@ describe('analysis-service', () => {
         githubRepo: 'acme/repo',
         githubToken: 'gh-token',
         mode: 'code',
-        model: 'anthropic/claude-sonnet-4',
+        model: 'anthropic/claude-opus-4.6',
         callbackTarget: expect.objectContaining({
           url: expect.stringContaining(`/api/internal/security-analysis-callback/${findingId}`),
           headers: expect.objectContaining({ 'X-Internal-Secret': expect.any(String) }),
         }),
       })
     );
+    expect(mockTriageSecurityFinding).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-4' })
+    );
     expect(mockInitiateFromPreparedSession).toHaveBeenCalledWith({
       cloudAgentSessionId: 'ses-agent-123',
     });
+  });
+
+  it('uses triageModel for triage and analysisModel for sandbox session', async () => {
+    const findingId = 'finding-model-split';
+    const user = { id: 'user-1', google_user_email: 'test@example.com' } as User;
+
+    const mockFinding = {
+      id: findingId,
+      analysis_status: 'new',
+      repo_full_name: 'acme/repo',
+      package_name: 'lodash',
+      package_ecosystem: 'npm',
+      severity: 'high',
+      dependency_scope: 'runtime',
+      cve_id: null,
+      ghsa_id: null,
+      title: 'Test vulnerability',
+      description: null,
+      vulnerable_version_range: null,
+      patched_version: null,
+      manifest_path: null,
+    };
+
+    mockGetSecurityFindingById.mockResolvedValue(
+      mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
+    );
+    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockTriageSecurityFinding.mockResolvedValue({
+      needsSandboxAnalysis: true,
+      needsSandboxReasoning: 'Needs analysis',
+      suggestedAction: 'analyze_codebase',
+      confidence: 'high',
+      triageAt: new Date().toISOString(),
+    });
+    mockGenerateApiToken.mockReturnValue('test-token');
+    mockPrepareSession.mockResolvedValue({
+      cloudAgentSessionId: 'agent-session-split',
+      kiloSessionId: 'ses_kilo-split',
+    });
+    mockInitiateFromPreparedSession.mockResolvedValue({
+      cloudAgentSessionId: 'agent-session-split',
+      executionId: 'exec-split',
+      status: 'started',
+      streamUrl: 'wss://example.com/stream',
+    });
+
+    await startSecurityAnalysis({
+      findingId,
+      user,
+      githubRepo: 'acme/repo',
+      githubToken: 'gh-token',
+      triageModel: 'anthropic/claude-sonnet-4.5',
+      analysisModel: 'x-ai/grok-code-fast-1',
+    });
+
+    expect(mockTriageSecurityFinding).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-4.5' })
+    );
+    expect(mockPrepareSession).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'x-ai/grok-code-fast-1' })
+    );
   });
 
   it('stores session IDs after prepareSession', async () => {
@@ -339,7 +404,8 @@ describe('analysis-service', () => {
       user,
       githubRepo: 'acme/repo',
       githubToken: 'gh-token',
-      model: 'anthropic/claude-sonnet-4' as const,
+      triageModel: 'anthropic/claude-sonnet-4' as const,
+      analysisModel: 'anthropic/claude-opus-4.6' as const,
     };
 
     beforeEach(() => {

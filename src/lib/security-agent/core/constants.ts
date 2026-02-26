@@ -22,6 +22,9 @@ export const SECURITY_AGENT_MODELS = [
  */
 export const DEFAULT_SECURITY_AGENT_MODEL = SECURITY_AGENT_MODELS[0].id;
 
+export const DEFAULT_SECURITY_AGENT_TRIAGE_MODEL = SECURITY_AGENT_MODELS[0].id;
+export const DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL = SECURITY_AGENT_MODELS[0].id;
+
 /**
  * Default configuration for the security agent
  */
@@ -32,7 +35,9 @@ export const DEFAULT_SECURITY_AGENT_CONFIG: SecurityAgentConfig = {
   sla_low_days: 90,
   auto_sync_enabled: true,
   repository_selection_mode: 'all',
-  model_slug: DEFAULT_SECURITY_AGENT_MODEL,
+  model_slug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  triage_model_slug: DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+  analysis_model_slug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
   // Analysis mode: auto (triage → conditional sandbox), shallow (triage only), deep (always sandbox)
   analysis_mode: 'auto',
   // Auto-dismiss is off by default - users manually review and dismiss findings
