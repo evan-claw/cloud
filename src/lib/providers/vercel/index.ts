@@ -4,6 +4,7 @@ import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { getGatewayErrorRate } from '@/lib/providers/gateway-error-rate';
 import {
   AutocompleteUserByokProviderIdSchema,
+  AwsCredentialsSchema,
   openRouterToVercelInferenceProviderId,
   VercelUserByokInferenceProviderIdSchema,
 } from '@/lib/providers/openrouter/inference-provider-id';
@@ -101,6 +102,15 @@ function convertProviderOptions(
   };
 }
 
+function parseAwsCredentials(input: string) {
+  try {
+    return AwsCredentialsSchema.parse(JSON.parse(input));
+  } catch (e) {
+    console.error('[parseAwsCredentials] failed to parse input: ', input, ', exception: ', e);
+    return undefined;
+  }
+}
+
 export function applyVercelSettings(
   requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest,
@@ -138,12 +148,8 @@ export function applyVercelSettings(
       }
 
       if (key === VercelUserByokInferenceProviderIdSchema.enum.bedrock) {
-        const { accessKeyId, secretAccessKey, region } = JSON.parse(provider.decryptedAPIKey) as {
-          accessKeyId: string;
-          secretAccessKey: string;
-          region?: string;
-        };
-        list.push({ accessKeyId, secretAccessKey, region });
+        const credentials = parseAwsCredentials(provider.decryptedAPIKey);
+        if (credentials) list.push(credentials);
       } else {
         list.push({ apiKey: provider.decryptedAPIKey });
       }

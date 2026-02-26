@@ -95,3 +95,11 @@ export function inferVercelFirstPartyInferenceProviderForModel(
     ? null
     : (modelPrefixToVercelInferenceProviderMapping[model.split('/')[0]] ?? null);
 }
+
+export const AwsCredentialsSchema = z.object({
+  accessKeyId: z.string(),
+  secretAccessKey: z.string(),
+  region: z.string(),
+});
+
+export type AwsCredentials = z.infer<typeof AwsCredentialsSchema>;
