@@ -15,7 +15,7 @@ const recentMessageSchema = z.object({
 
 const CreateCloudAgentFeedbackInputSchema = z.object({
   cloud_agent_session_id: z.string().max(500).optional(),
-  kilo_session_id: z.string().uuid().optional(),
+  kilo_session_id: z.string().max(500).optional(),
   organization_id: z.string().uuid().optional(),
   feedback_text: z.string().min(1).max(10_000),
   model: z.string().max(255).optional(),
