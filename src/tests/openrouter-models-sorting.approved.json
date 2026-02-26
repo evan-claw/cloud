@@ -38,6 +38,7 @@
       ],
       "preferredIndex": 0,
       "opencode": {
+        "family": "claude",
         "prompt": "anthropic"
       }
     },
