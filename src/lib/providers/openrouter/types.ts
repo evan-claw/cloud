@@ -2,7 +2,7 @@ import type OpenAI from 'openai';
 import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 import type { AnthropicProviderOptions } from '@ai-sdk/anthropic';
 import type { ReasoningDetailUnion } from '@/lib/custom-llm/reasoning-details';
-import { AwsCredentials } from '@/lib/providers/openrouter/inference-provider-id';
+import type { AwsCredentials } from '@/lib/providers/openrouter/inference-provider-id';
 
 // Base types for OpenRouter API that don't depend on other lib files
 // This breaks circular dependencies with mistral.ts, minimax.ts, etc.
