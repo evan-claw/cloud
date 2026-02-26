@@ -242,8 +242,9 @@ export async function runSessionToCompletion(input: RunSessionInput): Promise<Ru
           errorMessage = errData?.data?.message ?? 'Assistant message failed.';
         }
       },
-      onSessionStatusChanged: status => {
-        if (status.type === 'idle') resolveOnce();
+      onSessionStatusChanged: (status, eventSessionId) => {
+        // Only resolve when the root session goes idle, not subagent/child sessions.
+        if (status.type === 'idle' && eventSessionId === sessionId) resolveOnce();
       },
       onError: error => {
         hasError = true;

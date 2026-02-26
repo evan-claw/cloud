@@ -180,7 +180,7 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
         });
       },
 
-      onSessionStatusChanged: status => {
+      onSessionStatusChanged: (status, _sessionId) => {
         if (status.type === 'idle') {
           store.setState({ isStreaming: false });
           onStreamComplete?.();

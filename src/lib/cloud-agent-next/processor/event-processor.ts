@@ -309,9 +309,9 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
    * Handle session.status events.
    */
   function handleSessionStatus(data: EventSessionStatus['properties']): void {
-    const { status } = data;
+    const { status, sessionID } = data;
 
-    callbacks.onSessionStatusChanged?.(status);
+    callbacks.onSessionStatusChanged?.(status, sessionID);
 
     // Update streaming state based on status
     if (status.type === 'idle') {

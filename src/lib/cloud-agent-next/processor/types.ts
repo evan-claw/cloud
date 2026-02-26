@@ -70,7 +70,7 @@ export type EventProcessorCallbacks = {
   ) => void;
 
   /** Called when session status changes (idle/busy/retry) */
-  onSessionStatusChanged?: (status: SessionStatus) => void;
+  onSessionStatusChanged?: (status: SessionStatus, sessionId: string) => void;
 
   /** Called when a new session is created (session.created event) */
   onSessionCreated?: (sessionInfo: Session) => void;
