@@ -9,6 +9,9 @@ catalogs:
     drizzle-orm:
       specifier: ^0.44.7
       version: 0.44.7
+    zod:
+      specifier: ^4.3.4
+      version: 4.3.6
 
 overrides:
   mdast-util-to-hast: ^13.2.1
@@ -292,7 +295,7 @@ importers:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       zod:
-        specifier: ^4.3.4
+        specifier: 'catalog:'
         version: 4.3.6
     devDependencies:
       '@chromatic-com/playwright':

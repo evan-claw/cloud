@@ -14,7 +14,7 @@
     "pg": "^8.16.3"
   },
   "peerDependencies": {
-    "zod": "^4.0.0"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.8",

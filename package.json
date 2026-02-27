@@ -125,7 +125,7 @@
     "tailwind-merge": "^3.3.1",
     "uuid": "11.1.0",
     "vaul": "^1.1.2",
-    "zod": "^4.3.4"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@chromatic-com/playwright": "^0.12.8",
