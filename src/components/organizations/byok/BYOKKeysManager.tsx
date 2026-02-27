@@ -521,7 +521,8 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                 disabled={
                   !selectedProvider ||
                   !apiKey ||
-                  !!awsCredentialError ||
+                  (selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock &&
+                    !!awsCredentialError) ||
                   createMutation.isPending ||
                   updateMutation.isPending
                 }
