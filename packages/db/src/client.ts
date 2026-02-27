@@ -34,4 +34,16 @@ export function createDrizzleClient(options: CreateDrizzleClientOptions) {
   return { db, pool, schema };
 }
 
+/**
+ * Convenience wrapper for Cloudflare Workers using Hyperdrive.
+ * Hyperdrive handles connection pooling at the infrastructure level,
+ * so we use max: 1 here. Pass env.HYPERDRIVE.connectionString directly.
+ */
+export function getWorkerDb(connectionString: string) {
+  const pool = new pg.Pool({ connectionString, max: 1 });
+  return drizzle(pool, { schema });
+}
+
+export type WorkerDb = ReturnType<typeof getWorkerDb>;
+
 export { pg };
