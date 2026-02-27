@@ -25,7 +25,7 @@ import {
 } from '@/lib/providers/openrouter/inference-provider-id';
 import { unstable_cache } from 'next/cache';
 import { StoredModelSchema } from '@/lib/providers/vercel/types';
-import { APICallError, createGateway, generateText } from 'ai';
+import { createGateway, generateText } from 'ai';
 import { PROVIDERS } from '@/lib/providers';
 import { getVercelInferenceProviderConfigForUserByok } from '@/lib/providers/vercel';
 import { decryptByokRow } from '@/lib/byok';
