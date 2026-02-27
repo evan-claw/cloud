@@ -34,3 +34,9 @@ export function imageVersionKey(version: string, variant: string): string {
 export function imageVersionLatestKey(variant: string): string {
   return `image-version:latest:${variant}`;
 }
+
+/**
+ * KV key for the tag index — a JSON array of image_tag strings.
+ * Used by listAllVersions() to enumerate all registered versions.
+ */
+export const IMAGE_VERSION_INDEX_KEY = 'image-version-index';

@@ -3098,3 +3098,32 @@ export const kiloclaw_access_codes = pgTable(
 );
 
 export type KiloClawAccessCode = typeof kiloclaw_access_codes.$inferSelect;
+
+// KiloClaw Image Catalog — version registry populated by the worker via Hyperdrive on deploy.
+// A version in the catalog is not necessarily available to users; status controls availability.
+export const kiloclaw_image_catalog = pgTable(
+  'kiloclaw_image_catalog',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    openclaw_version: text().notNull(),
+    variant: text().notNull().default('default'),
+    image_tag: text().notNull().unique(),
+    image_digest: text(),
+    status: text().$type<'available' | 'deprecated' | 'disabled'>().notNull().default('available'),
+    description: text(),
+    updated_by: text(),
+    published_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+    synced_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  table => [
+    index('IDX_kiloclaw_image_catalog_status').on(table.status),
+    index('IDX_kiloclaw_image_catalog_variant').on(table.variant),
+  ]
+);
+
+export type KiloClawImageCatalogEntry = typeof kiloclaw_image_catalog.$inferSelect;

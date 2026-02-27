@@ -18,7 +18,10 @@ import {
   ImageVersionEntrySchema,
   imageVersionKey,
   imageVersionLatestKey,
+  IMAGE_VERSION_INDEX_KEY,
 } from '../schemas/image-version';
+import { listAllVersions } from '../lib/image-version';
+import { upsertCatalogVersion } from '../lib/catalog-registration';
 import { z } from 'zod';
 import { withDORetry } from '../util/do-retry';
 import { deriveGatewayToken } from '../auth/gateway-token';
@@ -564,6 +567,19 @@ platform.get('/volume-snapshots', async c => {
   }
 });
 
+// GET /api/platform/versions
+// Lists all registered image versions from KV.
+// Used by admin triggerSync for reconciliation/backfill.
+platform.get('/versions', async c => {
+  try {
+    const versions = await listAllVersions(c.env.KV_CLAW_CACHE);
+    return c.json(versions);
+  } catch (err) {
+    console.error('[platform] Failed to list versions:', err);
+    return c.json({ error: 'Failed to list versions' }, 500);
+  }
+});
+
 // POST /api/platform/publish-image-version
 // Manual fallback for publishing/correcting version entries.
 // Primary registration path is worker self-registration on deploy.
@@ -609,6 +625,33 @@ platform.post('/publish-image-version', async c => {
     writes.push(c.env.KV_CLAW_CACHE.put(imageVersionLatestKey(variant), serialized));
   }
   await Promise.all(writes);
+
+  // Maintain KV tag index
+  try {
+    const index: string[] = (await c.env.KV_CLAW_CACHE.get(IMAGE_VERSION_INDEX_KEY, 'json')) ?? [];
+    if (Array.isArray(index) && !index.includes(imageTag)) {
+      index.push(imageTag);
+      await c.env.KV_CLAW_CACHE.put(IMAGE_VERSION_INDEX_KEY, JSON.stringify(index));
+    }
+  } catch (e) {
+    console.warn('[platform] Failed to update tag index:', e);
+  }
+
+  // Write to Postgres catalog (best-effort)
+  const connectionString = c.env.HYPERDRIVE?.connectionString;
+  if (connectionString) {
+    try {
+      await upsertCatalogVersion(connectionString, {
+        openclawVersion,
+        variant,
+        imageTag,
+        imageDigest: imageDigest ?? null,
+        publishedAt: parsed.data.publishedAt,
+      });
+    } catch (e) {
+      console.warn('[platform] Failed to write catalog entry to Postgres:', e);
+    }
+  }
 
   console.log(
     '[platform] Published image version:',
