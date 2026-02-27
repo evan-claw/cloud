@@ -118,15 +118,13 @@ async function claimActiveListener(listenerId: string, expiresAt: string): Promi
 async function runHeartbeat(listenerId: string, abortController: AbortController): Promise<void> {
   while (!abortController.signal.aborted) {
     await new Promise<void>(resolve => {
-      const timeout = setTimeout(resolve, HEARTBEAT_INTERVAL_MS);
-      abortController.signal.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        { once: true }
-      );
+      const done = () => {
+        clearTimeout(timer);
+        abortController.signal.removeEventListener('abort', done);
+        resolve();
+      };
+      const timer = setTimeout(done, HEARTBEAT_INTERVAL_MS);
+      abortController.signal.addEventListener('abort', done, { once: true });
     });
 
     if (abortController.signal.aborted) break;
