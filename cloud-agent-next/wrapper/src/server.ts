@@ -188,7 +188,8 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
     let workerBaseUrl: string;
     try {
       const ingestOrigin = new URL(body.ingestUrl);
-      ingestOrigin.protocol = ingestOrigin.protocol === 'wss:' ? 'https:' : 'http:';
+      ingestOrigin.protocol =
+        ingestOrigin.protocol === 'wss:' || ingestOrigin.protocol === 'https:' ? 'https:' : 'http:';
       workerBaseUrl = ingestOrigin.origin;
     } catch {
       return errorResponse('INVALID_REQUEST', 'Invalid ingestUrl', 400);
