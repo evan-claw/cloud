@@ -62,11 +62,14 @@ export function SlackIntegrationDetails({
     return openRouterModels?.data.map(model => ({ id: model.id, name: model.name })) ?? [];
   }, [openRouterModels]);
 
-  // Build a set of model IDs that support reasoning_effort
+  // Build a set of model IDs that support reasoning effort configuration.
+  // Models advertise this via either "reasoning" or "reasoning_effort" in supported_parameters;
+  // both accept the reasoning.effort field in the OpenRouter API.
   const modelsWithReasoning = useMemo(() => {
     const set = new Set<string>();
     for (const model of openRouterModels?.data ?? []) {
-      if (model.supported_parameters?.includes('reasoning_effort')) {
+      const params = model.supported_parameters;
+      if (params?.includes('reasoning') || params?.includes('reasoning_effort')) {
         set.add(model.id);
       }
     }
