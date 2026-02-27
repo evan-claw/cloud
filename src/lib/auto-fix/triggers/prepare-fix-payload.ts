@@ -59,7 +59,7 @@ export async function prepareFixPayload(params: PreparePayloadParams): Promise<D
     // 5. Determine trigger source
     const triggerSource = ticket.trigger_source || 'label';
 
-    // 5. Prepare session input
+    // 6. Prepare session input
     const sessionInput: DispatchFixRequest['sessionInput'] = {
       repoFullName: ticket.repo_full_name,
       issueNumber: ticket.issue_number,
@@ -89,7 +89,7 @@ export async function prepareFixPayload(params: PreparePayloadParams): Promise<D
       sessionInput.diffHunk = ticket.diff_hunk ?? undefined;
     }
 
-    // 6. Build complete payload
+    // 7. Build complete payload
     const payload: DispatchFixRequest = {
       ticketId,
       authToken,
