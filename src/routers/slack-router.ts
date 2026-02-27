@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import * as slackService from '@/lib/integrations/slack-service';
 import { TRPCError } from '@trpc/server';
-import { resolveOwner, ensureIntegrationAccess } from '@/lib/integrations/resolve-owner';
+import {
+  resolveOwner,
+  ensureIntegrationAccess,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
-
-const optionalOrgInput = z.object({ organizationId: z.string().uuid().optional() }).optional();
 
 export const slackRouter = createTRPCRouter({
   // Get Slack installation status

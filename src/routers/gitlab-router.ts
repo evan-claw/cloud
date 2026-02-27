@@ -3,11 +3,13 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import * as z from 'zod';
 import * as gitlabService from '@/lib/integrations/gitlab-service';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
-import { resolveOwner, ensureIntegrationAccess } from '@/lib/integrations/resolve-owner';
+import {
+  resolveOwner,
+  ensureIntegrationAccess,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
 import { validateGitLabInstance } from '@/lib/integrations/platforms/gitlab/adapter';
 import { validatePersonalAccessToken } from '@/lib/integrations/platforms/gitlab/adapter';
-
-const optionalOrgInput = z.object({ organizationId: z.string().uuid().optional() }).optional();
 
 export const gitlabRouter = createTRPCRouter({
   /**

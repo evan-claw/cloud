@@ -12,11 +12,13 @@ import {
   fetchGitHubRepositories,
 } from '@/lib/integrations/platforms/github/adapter';
 import { TRPCError } from '@trpc/server';
-import { resolveOwner, ensureIntegrationAccess } from '@/lib/integrations/resolve-owner';
+import {
+  resolveOwner,
+  ensureIntegrationAccess,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
-
-const optionalOrgInput = z.object({ organizationId: z.string().uuid().optional() }).optional();
 
 export const githubAppsRouter = createTRPCRouter({
   // List all integrations
