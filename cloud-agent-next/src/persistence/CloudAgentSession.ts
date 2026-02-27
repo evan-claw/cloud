@@ -647,6 +647,7 @@ export class CloudAgentSession extends DurableObject {
     encryptedSecrets?: EncryptedSecrets;
     setupCommands?: string[];
     mcpServers?: Record<string, MCPServerConfig>;
+    reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
     autoCommit?: boolean;
     condenseOnComplete?: boolean;
     appendSystemPrompt?: string;
@@ -1215,6 +1216,7 @@ export class CloudAgentSession extends DurableObject {
     mode: ExecutionMode;
     prompt: string;
     model?: string;
+    reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
     autoCommit?: boolean;
     condenseOnComplete?: boolean;
     initContext?: InitializeContext;
@@ -1279,6 +1281,7 @@ export class CloudAgentSession extends DurableObject {
       wrapper: {
         kiloSessionId: params.kiloSessionId,
         model: params.model ? { modelID: params.model.replace(/^kilo\//, '') } : undefined,
+        reasoningEffort: params.reasoningEffort,
         autoCommit: params.autoCommit,
         condenseOnComplete: params.condenseOnComplete,
       },
@@ -1459,6 +1462,7 @@ export class CloudAgentSession extends DurableObject {
           mode: request.mode,
           prompt: request.prompt,
           model: normalizedModel,
+          reasoningEffort: request.reasoningEffort,
           autoCommit: request.autoCommit,
           condenseOnComplete: request.condenseOnComplete,
           initContext,
@@ -1544,6 +1548,7 @@ export class CloudAgentSession extends DurableObject {
           mode: metadata.mode as ExecutionMode,
           prompt: metadata.prompt,
           model: metadata.model,
+          reasoningEffort: metadata.reasoningEffort,
           autoCommit: metadata.autoCommit,
           condenseOnComplete: metadata.condenseOnComplete,
           initContext,
@@ -1614,6 +1619,7 @@ export class CloudAgentSession extends DurableObject {
         mode,
         prompt: request.prompt,
         model,
+        reasoningEffort: metadata.reasoningEffort,
         autoCommit: request.autoCommit ?? metadata.autoCommit,
         condenseOnComplete: request.condenseOnComplete ?? metadata.condenseOnComplete,
         resumeContext,

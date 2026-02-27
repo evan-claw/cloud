@@ -359,6 +359,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           setupCommands: input.setupCommands,
           mcpServers: input.mcpServers,
           upstreamBranch: input.upstreamBranch,
+          reasoningEffort: input.reasoningEffort,
           autoCommit: input.autoCommit,
           condenseOnComplete: input.condenseOnComplete,
           appendSystemPrompt: input.appendSystemPrompt,

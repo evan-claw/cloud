@@ -200,6 +200,10 @@ export const PrepareSessionInput = z
       .max(100)
       .optional()
       .describe('Platform that created this session (e.g. slack, app-builder)'),
+    reasoningEffort: z
+      .enum(['none', 'low', 'medium', 'high'])
+      .optional()
+      .describe('Reasoning effort level for models that support it'),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',

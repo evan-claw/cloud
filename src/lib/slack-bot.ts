@@ -226,7 +226,8 @@ async function spawnCloudAgentSession(
   model: string,
   authToken: string,
   ticketUserId: string,
-  requesterInfo?: SlackRequesterInfo
+  requesterInfo?: SlackRequesterInfo,
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high'
 ): Promise<SpawnCloudAgentResult> {
   console.log('[SlackBot] spawnCloudAgentSession called with args:', JSON.stringify(args, null, 2));
   console.log('[SlackBot] Owner:', JSON.stringify(owner, null, 2));
@@ -257,6 +258,7 @@ async function spawnCloudAgentSession(
       githubToken,
       kilocodeOrganizationId,
       createdOnPlatform: 'slack',
+      reasoningEffort: reasoningEffort && reasoningEffort !== 'none' ? reasoningEffort : undefined,
     },
     initiateInput: {
       githubToken,
@@ -423,13 +425,17 @@ export async function processKiloBotMessage(
       console.log('[SlackBot] Parsed tool arguments:', JSON.stringify(args, null, 2));
 
       console.log('[SlackBot] Calling spawnCloudAgentSession...');
+      // Map reasoning effort to cloud-agent-next accepted values (xhigh -> high)
+      const agentReasoningEffort =
+        modelConfig.reasoningEffort === 'xhigh' ? 'high' : modelConfig.reasoningEffort;
       const toolResult = await spawnCloudAgentSession(
         args,
         owner,
         selectedModel,
         authToken,
         authUserId,
-        slackRequesterInfo
+        slackRequesterInfo,
+        agentReasoningEffort ?? undefined
       );
       console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
       console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));

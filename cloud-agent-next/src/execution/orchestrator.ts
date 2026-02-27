@@ -190,6 +190,7 @@ export class ExecutionOrchestrator {
         prompt,
         model: wrapper.model,
         agent: normalizedMode,
+        reasoningEffort: wrapper.reasoningEffort,
       });
       logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
     } catch (error) {

@@ -43,6 +43,7 @@ export type WrapperPromptOptions = {
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
 };
 
 export type WrapperPermissionResponse = 'always' | 'once' | 'reject';

@@ -46,6 +46,8 @@ export type SendPromptOptions = {
   system?: string;
   /** Enable/disable specific tools */
   tools?: Record<string, boolean>;
+  /** Reasoning effort level for models that support it */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
 };
 
 /**
@@ -173,6 +175,7 @@ export function createKiloClient(baseUrl: string): KiloClient {
         noReply: opts.noReply,
         system: opts.system,
         tools: opts.tools,
+        reasoningEffort: opts.reasoningEffort,
       });
     },
 

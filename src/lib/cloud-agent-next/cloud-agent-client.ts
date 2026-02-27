@@ -95,6 +95,8 @@ export type PrepareSessionInput = {
   callbackTarget?: CallbackTarget;
   /** Platform that created this session (e.g. 'security-agent', 'slack', 'app-builder') */
   createdOnPlatform?: string;
+  /** Reasoning effort level for models that support it */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
 };
 
 /** Output from prepareSession procedure */

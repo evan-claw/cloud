@@ -58,6 +58,7 @@ type PromptBody = {
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
 };
 
 type CommandBody = {
@@ -276,6 +277,7 @@ function createPromptHandler(deps: ServerDependencies) {
         model: body.model,
         system: body.system,
         tools: body.tools,
+        reasoningEffort: body.reasoningEffort,
       });
       logToFile(`job/prompt: sent messageId=${messageId}`);
     } catch (error) {

@@ -306,6 +306,7 @@ export type WrapperPlan = {
   kiloSessionId?: string;
   kiloSessionTitle?: string;
   model?: ModelConfig;
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
 };
