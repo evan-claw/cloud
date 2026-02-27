@@ -15,6 +15,7 @@ import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
+import type { ReasoningEffort } from '@/lib/organizations/model-settings';
 
 // Default model for Slack integrations - separate from the global platform default
 const SLACK_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
@@ -469,7 +470,8 @@ export async function sendMessage(
  */
 export async function updateModel(
   owner: Owner,
-  modelSlug: string
+  modelSlug: string,
+  reasoningEffort?: ReasoningEffort | null
 ): Promise<{ success: boolean; error?: string }> {
   const integration = await getInstallation(owner);
 
@@ -499,6 +501,7 @@ export async function updateModel(
       metadata: {
         ...existingMetadata,
         model_slug: modelSlug,
+        reasoning_effort: reasoningEffort ?? null,
       },
       updated_at: new Date().toISOString(),
     })
@@ -508,17 +511,33 @@ export async function updateModel(
 }
 
 /**
- * Get the model for a Slack integration
+ * Get the model configuration for a Slack integration
  */
-export async function getModel(owner: Owner): Promise<string | null> {
+export type SlackModelConfig = {
+  modelSlug: string;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+export async function getModelConfig(owner: Owner): Promise<SlackModelConfig | null> {
   const integration = await getInstallation(owner);
 
   if (!integration) {
     return null;
   }
 
-  const metadata = integration.metadata as { model_slug?: string } | null;
-  return metadata?.model_slug || null;
+  const metadata = integration.metadata as {
+    model_slug?: string;
+    reasoning_effort?: ReasoningEffort | null;
+  } | null;
+
+  if (!metadata?.model_slug) {
+    return null;
+  }
+
+  return {
+    modelSlug: metadata.model_slug,
+    reasoningEffort: metadata.reasoning_effort ?? null,
+  };
 }
 
 /*

@@ -5,6 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   CheckCircle2,
   XCircle,
   MessageSquare,
@@ -14,12 +21,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import { IS_DEVELOPMENT } from '@/lib/constants';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import { useModelSelectorList } from '@/app/api/openrouter/hooks';
+import type { ReasoningEffort } from '@/lib/organizations/model-settings';
 
 type SlackIntegrationDetailsProps = {
   organizationId?: string;
@@ -54,15 +62,33 @@ export function SlackIntegrationDetails({
     return openRouterModels?.data.map(model => ({ id: model.id, name: model.name })) ?? [];
   }, [openRouterModels]);
 
-  // Track selected model
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  // Build a set of model IDs that support reasoning_effort
+  const modelsWithReasoning = useMemo(() => {
+    const set = new Set<string>();
+    for (const model of openRouterModels?.data ?? []) {
+      if (model.supported_parameters?.includes('reasoning_effort')) {
+        set.add(model.id);
+      }
+    }
+    return set;
+  }, [openRouterModels]);
 
-  // Initialize selected model from installation data
+  // Track selected model and reasoning effort
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<ReasoningEffort | null>(
+    null
+  );
+
+  // Whether the currently selected model supports reasoning effort
+  const supportsReasoning = modelsWithReasoning.has(selectedModel);
+
+  // Initialize selected model and reasoning effort from installation data
   useEffect(() => {
     if (installationData?.installation?.modelSlug) {
       setSelectedModel(installationData.installation.modelSlug);
     }
-  }, [installationData?.installation?.modelSlug]);
+    setSelectedReasoningEffort(installationData?.installation?.reasoningEffort ?? null);
+  }, [installationData?.installation?.modelSlug, installationData?.installation?.reasoningEffort]);
 
   const uninstallApp = useMutation(
     trpc.slack.uninstallApp.mutationOptions({
@@ -188,27 +214,47 @@ export function SlackIntegrationDetails({
     });
   };
 
+  const saveModelSettings = useCallback(
+    (modelSlug: string, reasoningEffort: ReasoningEffort | null) => {
+      // If the new model doesn't support reasoning, clear the reasoning effort
+      const effectiveReasoning = modelsWithReasoning.has(modelSlug) ? reasoningEffort : null;
+      updateModel.mutate(
+        { modelSlug, organizationId, reasoningEffort: effectiveReasoning },
+        {
+          onSuccess: result => {
+            if (result.success) {
+              toast.success('Model updated successfully');
+            } else {
+              toast.error('Failed to update model', {
+                description: result.error,
+              });
+            }
+          },
+          onError: err => {
+            toast.error('Failed to update model', {
+              description: err.message,
+            });
+          },
+        }
+      );
+    },
+    [modelsWithReasoning, organizationId, updateModel]
+  );
+
   const handleModelChange = (modelSlug: string) => {
     setSelectedModel(modelSlug);
-    updateModel.mutate(
-      { modelSlug, organizationId },
-      {
-        onSuccess: result => {
-          if (result.success) {
-            toast.success('Model updated successfully');
-          } else {
-            toast.error('Failed to update model', {
-              description: result.error,
-            });
-          }
-        },
-        onError: err => {
-          toast.error('Failed to update model', {
-            description: err.message,
-          });
-        },
-      }
-    );
+    // Clear reasoning effort if the new model doesn't support it
+    const newReasoning = modelsWithReasoning.has(modelSlug) ? selectedReasoningEffort : null;
+    if (newReasoning !== selectedReasoningEffort) {
+      setSelectedReasoningEffort(newReasoning);
+    }
+    saveModelSettings(modelSlug, newReasoning);
+  };
+
+  const handleReasoningEffortChange = (value: string) => {
+    const effort = value === 'none' ? null : (value as ReasoningEffort);
+    setSelectedReasoningEffort(effort);
+    saveModelSettings(selectedModel, effort);
   };
 
   if (isLoading) {
@@ -297,6 +343,28 @@ export function SlackIntegrationDetails({
                   isLoading={isLoadingModels}
                   placeholder="Select a model"
                 />
+                {supportsReasoning && (
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Reasoning Level</label>
+                    <Select
+                      value={selectedReasoningEffort ?? 'none'}
+                      onValueChange={handleReasoningEffortChange}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select reasoning level" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      Higher reasoning levels produce more thorough responses but use more tokens
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Actions */}

@@ -1,7 +1,10 @@
 import type OpenAI from 'openai';
 import type { FeatureValue } from '@/lib/feature-detection';
 import { sendProxiedChatCompletion } from '@/lib/llm-proxy-helpers';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type {
+  OpenRouterChatCompletionRequest,
+  OpenRouterReasoningConfig,
+} from '@/lib/providers/openrouter/types';
 
 type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type ChatCompletionResponse = OpenAI.Chat.Completions.ChatCompletion;
@@ -20,6 +23,7 @@ export type BotRunInput = {
   toolExecutor: (toolCall: ToolCall) => Promise<BotToolResult>;
   maxIterations?: number;
   logPrefix?: string;
+  reasoning?: OpenRouterReasoningConfig;
   requestOptions: {
     version: string;
     userAgent: string;
@@ -62,6 +66,10 @@ export async function runBot(input: BotRunInput): Promise<BotRunResult> {
       model: input.model,
       messages,
     };
+
+    if (input.reasoning) {
+      body.reasoning = input.reasoning;
+    }
 
     if (input.tools && input.tools.length > 0) {
       body.tools = input.tools;

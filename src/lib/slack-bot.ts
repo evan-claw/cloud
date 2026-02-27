@@ -12,7 +12,7 @@ import type { Owner } from '@/lib/integrations/core/types';
 import {
   getInstallationByTeamId,
   getOwnerFromInstallation,
-  getModel,
+  getModelConfig,
   getAccessTokenFromInstallation,
 } from '@/lib/integrations/slack-service';
 import type { PlatformIntegration } from '@/db/schema';
@@ -318,8 +318,8 @@ export async function processKiloBotMessage(
   console.log('[SlackBot] Found owner:', JSON.stringify(owner, null, 2));
 
   // Get the configured model for this integration (validated at setup/update time)
-  const selectedModel = await getModel(owner);
-  if (!selectedModel) {
+  const modelConfig = await getModelConfig(owner);
+  if (!modelConfig) {
     console.error('[SlackBot] No model configured for owner:', owner);
     return {
       response:
@@ -330,7 +330,11 @@ export async function processKiloBotMessage(
       installation,
     };
   }
+  const selectedModel = modelConfig.modelSlug;
   console.log('[SlackBot] Using model:', selectedModel);
+  if (modelConfig.reasoningEffort) {
+    console.log('[SlackBot] Using reasoning effort:', modelConfig.reasoningEffort);
+  }
   console.log(
     '[SlackBot] Looking up Slack user email for auth token generation',
     slackEventContext?.userId
@@ -380,6 +384,12 @@ export async function processKiloBotMessage(
   const systemPrompt =
     KILO_BOT_SYSTEM_PROMPT + slackContextForPrompt + formatGitHubRepositoriesForPrompt(repoContext);
 
+  // Build reasoning config from the stored reasoning effort
+  const reasoningConfig =
+    modelConfig.reasoningEffort && modelConfig.reasoningEffort !== 'none'
+      ? { effort: modelConfig.reasoningEffort }
+      : undefined;
+
   const runResult = await runBot({
     authToken,
     model: selectedModel,
@@ -387,6 +397,7 @@ export async function processKiloBotMessage(
     userMessage,
     tools: [SPAWN_CLOUD_AGENT_TOOL],
     logPrefix: '[SlackBot]',
+    reasoning: reasoningConfig,
     requestOptions: {
       version: SLACK_BOT_VERSION,
       userAgent: SLACK_BOT_USER_AGENT,

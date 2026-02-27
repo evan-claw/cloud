@@ -10,6 +10,7 @@ import {
 } from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
+import { ReasoningEffortSchema } from '@/lib/organizations/model-settings';
 
 export const slackRouter = createTRPCRouter({
   // Get Slack installation status
@@ -28,7 +29,10 @@ export const slackRouter = createTRPCRouter({
     }
 
     const isInstalled = integration.integration_status === 'active';
-    const metadata = integration.metadata as { model_slug?: string } | null;
+    const metadata = integration.metadata as {
+      model_slug?: string;
+      reasoning_effort?: string | null;
+    } | null;
 
     return {
       installed: isInstalled,
@@ -38,6 +42,7 @@ export const slackRouter = createTRPCRouter({
         scopes: integration.scopes,
         installedAt: integration.installed_at,
         modelSlug: metadata?.model_slug || null,
+        reasoningEffort: ReasoningEffortSchema.safeParse(metadata?.reasoning_effort).data ?? null,
       },
     };
   }),
@@ -96,20 +101,24 @@ export const slackRouter = createTRPCRouter({
       z.object({
         organizationId: z.string().uuid().optional(),
         modelSlug: z.string(),
+        reasoningEffort: ReasoningEffortSchema.nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const owner = await resolveAuthorizedOwner(ctx, input.organizationId);
-      const result = await slackService.updateModel(owner, input.modelSlug);
+      const result = await slackService.updateModel(owner, input.modelSlug, input.reasoningEffort);
 
       if (input.organizationId) {
+        const reasoningPart = input.reasoningEffort
+          ? ` with reasoning effort ${input.reasoningEffort}`
+          : '';
         await createAuditLog({
           organization_id: input.organizationId,
           action: 'organization.settings.change',
           actor_id: ctx.user.id,
           actor_email: ctx.user.google_user_email,
           actor_name: ctx.user.google_user_name,
-          message: `Updated Slack integration model to ${input.modelSlug}`,
+          message: `Updated Slack integration model to ${input.modelSlug}${reasoningPart}`,
         });
       }
 
