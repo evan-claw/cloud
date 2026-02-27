@@ -387,6 +387,7 @@ export const byokRouter = createTRPCRouter({
         const output = await generateText({
           model,
           prompt: 'Say hi',
+          maxOutputTokens: 1000,
           providerOptions: {
             gateway: {
               only: [key],
