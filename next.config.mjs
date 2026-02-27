@@ -43,8 +43,37 @@ const nextConfig = {
           ]
         : [];
 
+    const gatewayApiRewrites =
+      process.env.KILO_GATEWAY_BACKEND !== 'true'
+        ? [
+            {
+              source: '/api/openrouter/:path*',
+              destination: 'https://gateway.kilo.ai/api/openrouter/:path*',
+            },
+            {
+              source: '/api/gateway/:path*',
+              destination: 'https://gateway.kilo.ai/api/gateway/:path*',
+            },
+            {
+              source: '/api/models/stats',
+              destination: 'https://gateway.kilo.ai/api/models/stats',
+            },
+            {
+              source: '/api/models/stats/:path*',
+              destination: 'https://gateway.kilo.ai/api/models/stats/:path*',
+            },
+            { source: '/api/modelstats', destination: 'https://gateway.kilo.ai/api/modelstats' },
+            { source: '/api/models/up', destination: 'https://gateway.kilo.ai/api/models/up' },
+            { source: '/api/defaults', destination: 'https://gateway.kilo.ai/api/defaults' },
+            {
+              source: '/api/code-indexing/upsert-by-file',
+              destination: 'https://gateway.kilo.ai/api/code-indexing/upsert-by-file',
+            },
+          ]
+        : [];
+
     return {
-      beforeFiles: globalApiRewrites,
+      beforeFiles: [...globalApiRewrites, ...gatewayApiRewrites],
       afterFiles: [
         {
           source: '/config.json',
