@@ -97,7 +97,7 @@ export const discordRouter = createTRPCRouter({
       const owner = await resolveAuthorizedOwner(ctx, input.organizationId);
       const result = await discordService.updateModel(owner, input.modelSlug);
 
-      if (input.organizationId) {
+      if (input.organizationId && result.success) {
         await createAuditLog({
           organization_id: input.organizationId,
           action: 'organization.settings.change',
