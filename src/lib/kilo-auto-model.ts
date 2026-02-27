@@ -106,7 +106,7 @@ const MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   ],
   [
     'orchestrator',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'low' },
+    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
   ],
   ['ask', { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' }],
   [
