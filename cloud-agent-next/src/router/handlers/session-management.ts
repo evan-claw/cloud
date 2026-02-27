@@ -13,7 +13,7 @@ import {
 } from '../../session-service.js';
 import { cleanupWorkspace, getSessionWorkspacePath, getSessionHomePath } from '../../workspace.js';
 import { withDORetry } from '../../utils/do-retry.js';
-import { protectedProcedure, publicProcedure } from '../auth.js';
+import { protectedProcedure, publicProcedure, internalApiProtectedProcedure } from '../auth.js';
 import { sessionIdSchema, GetSessionInput, GetSessionOutput } from '../schemas.js';
 import { computeExecutionHealth } from '../../core/execution.js';
 
@@ -420,7 +420,7 @@ export function createSessionManagementHandlers() {
      * Discovers wrapper logs from /tmp and CLI logs from the session home directory.
      * Useful for debugging wrapper startup and CLI issues.
      */
-    getWrapperLogs: protectedProcedure
+    getWrapperLogs: internalApiProtectedProcedure
       .input(
         z.object({
           sessionId: sessionIdSchema.describe('Session ID'),
