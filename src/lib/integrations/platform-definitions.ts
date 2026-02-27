@@ -1,3 +1,5 @@
+import { PLATFORM } from '@/lib/integrations/core/constants';
+
 export type PlatformType = 'github' | 'gitlab' | 'bitbucket' | 'slack' | 'discord';
 
 export type PlatformStatus = 'installed' | 'not_installed' | 'coming_soon';
@@ -39,7 +41,7 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     orgRoute: organizationId => `/organizations/${organizationId}/integrations/slack`,
   },
   {
-    id: 'gitlab',
+    id: PLATFORM.GITLAB,
     name: 'GitLab',
     description: 'Connect GitLab repositories to enable AI code reviews and automated workflows',
     enabled: true,
