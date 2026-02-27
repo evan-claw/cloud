@@ -100,6 +100,7 @@ export class InstallationLookupService {
         github_app_type: platform_integrations.github_app_type,
       })
       .from(platform_integrations)
+      // For org installations, verify user is a member of the org
       .leftJoin(
         organization_memberships,
         and(
@@ -110,6 +111,7 @@ export class InstallationLookupService {
           eq(organization_memberships.kilo_user_id, params.userId)
         )
       )
+      // Verify user is not blocked
       .innerJoin(
         kilocode_users,
         and(eq(kilocode_users.id, params.userId), isNull(kilocode_users.blocked_reason))
@@ -121,6 +123,7 @@ export class InstallationLookupService {
           eq(platform_integrations.integration_status, 'active'),
           eq(platform_integrations.platform_account_login, repoOwner),
           or(
+            // Org installation: must match org ID AND user must be a member
             and(
               isNotNull(platform_integrations.owned_by_organization_id),
               eq(
@@ -129,6 +132,7 @@ export class InstallationLookupService {
               ),
               isNotNull(organization_memberships.id)
             ),
+            // User installation: must match user ID directly
             and(
               isNotNull(platform_integrations.owned_by_user_id),
               eq(platform_integrations.owned_by_user_id, params.userId)
