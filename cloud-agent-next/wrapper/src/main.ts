@@ -270,6 +270,13 @@ async function main() {
     // Stop lifecycle timers
     getLifecycleManager().stop();
 
+    // Best-effort final log upload
+    const uploader = state.logUploader;
+    if (uploader) {
+      uploader.uploadNow().catch(() => {});
+      uploader.stop();
+    }
+
     // Abort kilo session if running
     const job = state.currentJob;
     if (job) {

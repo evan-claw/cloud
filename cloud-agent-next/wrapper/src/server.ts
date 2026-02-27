@@ -15,6 +15,7 @@
 
 import type { WrapperState, JobContext } from './state.js';
 import type { KiloClient } from './kilo-client.js';
+import { createLogUploader } from './log-uploader.js';
 import { logToFile } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -218,6 +219,25 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
       logToFile(`job/start: state.startJob failed: ${msg}`);
       return errorResponse('JOB_CONFLICT', msg, 409);
     }
+
+    // Create and start log uploader for this job
+    const ingestOrigin = new URL(body.ingestUrl);
+    ingestOrigin.protocol = ingestOrigin.protocol === 'wss:' ? 'https:' : 'http:';
+    const workerBaseUrl = ingestOrigin.origin;
+    const cliLogPath = `/home/${body.sessionId}/.kilocode/cli/logs/cli.txt`;
+    const wrapperLogPath = process.env.WRAPPER_LOG_PATH ?? '/tmp/kilocode-wrapper.log';
+    const logUploader = createLogUploader({
+      workerBaseUrl,
+      sessionId: body.sessionId,
+      executionId: body.executionId,
+      userId: body.userId,
+      kilocodeToken: body.kilocodeToken,
+      cliLogPath,
+      wrapperLogPath,
+    });
+    state.setLogUploader(logUploader);
+    logUploader.start();
+    logToFile(`job/start: log uploader started (url=${workerBaseUrl})`);
 
     logToFile(
       `job/start: job started executionId=${body.executionId} kiloSessionId=${kiloSessionId}`

@@ -109,6 +109,64 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
   return stub.fetch(doRequest);
 });
 
+const ALLOWED_LOG_FILENAMES = new Set(['logs.tar.gz']);
+const MAX_LOG_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+app.put(
+  '/sessions/:userId/:sessionId/logs/:executionId/:filename',
+  async (c: Context<HonoContext>) => {
+    let userId: string;
+    try {
+      userId = decodeURIComponent(c.req.param('userId'));
+    } catch {
+      return c.text('Invalid userId encoding', 400);
+    }
+
+    const filename = c.req.param('filename');
+    if (!ALLOWED_LOG_FILENAMES.has(filename)) {
+      return c.text('Invalid filename', 400);
+    }
+
+    const authHeader = c.req.header('Authorization');
+    const authResult = validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+    if (!authResult.success) {
+      return c.text(authResult.error, 401);
+    }
+    if (authResult.userId !== userId) {
+      return c.text('Token does not match session user', 403);
+    }
+
+    const contentLength = parseInt(c.req.header('Content-Length') ?? '', 10);
+    if (contentLength > MAX_LOG_UPLOAD_BYTES) {
+      return c.text('Request body too large', 413);
+    }
+
+    const body = c.req.raw.body;
+    if (!body) {
+      return c.text('Missing request body', 400);
+    }
+
+    const sessionId = c.req.param('sessionId');
+    const executionId = c.req.param('executionId');
+    const safeUserId = encodeURIComponent(userId);
+
+    try {
+      await c.env.R2_BUCKET.put(
+        `logs/${safeUserId}/${sessionId}/${executionId}/${filename}`,
+        body,
+        { httpMetadata: { contentType: 'application/gzip' } }
+      );
+    } catch (err) {
+      logger
+        .withFields({ error: err instanceof Error ? err.message : String(err) })
+        .error('R2 put failed for log upload');
+      return c.text('R2 write failed', 500);
+    }
+
+    return c.body(null, 204);
+  }
+);
+
 app.use('/trpc/*', authMiddleware);
 app.use('/trpc/*', balanceMiddleware);
 

@@ -384,6 +384,20 @@ export function createLifecycleManager(
           `post-completion tasks failed: ${err instanceof Error ? err.message : String(err)}`
         )
       )
+      .then(async () => {
+        // Final log upload before closing
+        const uploader = state.logUploader;
+        if (uploader) {
+          await uploader
+            .uploadNow()
+            .catch(err =>
+              logToFile(
+                `final log upload failed: ${err instanceof Error ? err.message : String(err)}`
+              )
+            );
+          uploader.stop();
+        }
+      })
       .finally(() => {
         // Send complete event to ingest so DO can update execution status and trigger callbacks
         // BUT only if not aborted - fatal errors already sent their own terminal event
