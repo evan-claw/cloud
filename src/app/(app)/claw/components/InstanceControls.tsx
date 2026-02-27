@@ -181,7 +181,9 @@ export function InstanceControls({
           </DialogHeader>
           <RadioGroup
             value={redeployMode}
-            onValueChange={v => setRedeployMode(v as 'redeploy' | 'upgrade')}
+            onValueChange={v => {
+              if (v === 'redeploy' || v === 'upgrade') setRedeployMode(v);
+            }}
             className="gap-3 py-2"
           >
             <div className="flex items-start gap-3">
