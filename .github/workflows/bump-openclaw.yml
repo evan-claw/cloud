@@ -62,15 +62,19 @@ jobs:
               --jq '.object.url' \
             | xargs gh api --jq '.tagger.date // .author.date'
           )
+          if [ -z "$tag_date" ]; then
+            echo "::error::Failed to retrieve tag date for v${LATEST_VERSION}"
+            exit 1
+          fi
           tag_epoch=$(date -d "$tag_date" +%s)
           now_epoch=$(date +%s)
           age_hours=$(( (now_epoch - tag_epoch) / 3600 ))
           echo "Tag created $age_hours hours ago ($tag_date)"
-          if [ "$age_hours" -lt 24 ]; then
+          if [ "$age_hours" -lt 12 ]; then
             echo "recent=true" >> "$GITHUB_OUTPUT"
           else
             echo "recent=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping — release is older than 24 hours"
+            echo "Skipping — release is older than 12 hours"
           fi
 
       - name: Notify webhook of new release
