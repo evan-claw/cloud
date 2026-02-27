@@ -16,7 +16,9 @@ export function IntegrationsHub({ organizationId }: IntegrationsHubProps) {
   const trpc = useTRPC();
   const input = organizationId ? { organizationId } : undefined;
 
-  // Fetch all installation statuses directly via tRPC
+  // Fetch all installation statuses via tRPC.
+  // These individual useQuery calls are automatically batched into a single HTTP request
+  // by tRPC's built-in batching (httpBatchLink), so no manual parallelization is needed.
   const { data: githubInstallation, isLoading: githubLoading } = useQuery(
     trpc.githubApps.getInstallation.queryOptions(input)
   );
