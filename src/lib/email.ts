@@ -40,7 +40,7 @@ function send(mailRequest: SendEmailRequestOptions) {
   return client.sendEmail(request);
 }
 
-const teamplates = {
+const templates = {
   orgSubscription: '10',
   orgRenewed: '11',
   orgCancelled: '12',
@@ -55,7 +55,7 @@ const teamplates = {
   deployFailed: '21',
 } as const;
 
-type Template = (typeof teamplates)[keyof typeof teamplates];
+type Template = (typeof templates)[keyof typeof templates];
 
 type SendOrgEmailProps = {
   organizationId: Organization['id'];
@@ -89,25 +89,25 @@ export async function sendOrgSSOUserJoinedEmail(
   to: string,
   props: Omit<Props, 'seatCount'> & { new_user_email: string }
 ) {
-  return sendOrgEmail(teamplates.orgSSOUserJoined, to, props);
+  return sendOrgEmail(templates.orgSSOUserJoined, to, props);
 }
 
 export async function sendOrgCancelledEmail(to: string, props: Omit<Props, 'seatCount'>) {
-  return sendOrgEmail(teamplates.orgCancelled, to, props);
+  return sendOrgEmail(templates.orgCancelled, to, props);
 }
 
 export async function sendOrgRenewedEmail(to: string, props: Props) {
-  return sendOrgEmail(teamplates.orgRenewed, to, props);
+  return sendOrgEmail(templates.orgRenewed, to, props);
 }
 
 export async function sendOrgSubscriptionEmail(to: string, props: Props) {
-  return sendOrgEmail(teamplates.orgSubscription, to, props);
+  return sendOrgEmail(templates.orgSubscription, to, props);
 }
 
 export async function sendOrganizationInviteEmail(data: OrganizationInviteEmailData) {
   const mailRequest: SendEmailRequestOptions = {
     // this is the id of the email in customerio - do not change this
-    transactional_message_id: teamplates.orgInvitation,
+    transactional_message_id: templates.orgInvitation,
     message_data: {
       organization_name: data.organizationName,
       inviter_name: data.inviterName,
@@ -137,7 +137,7 @@ export async function sendMagicLinkEmail(
   const expiresIn = '24 hours';
 
   const mailRequest: SendEmailRequestOptions = {
-    transactional_message_id: teamplates.magicLink,
+    transactional_message_id: templates.magicLink,
     to: magicLink.email,
     message_data: {
       magic_link_url: getMagicLinkUrl(magicLink, callbackUrl),
@@ -156,7 +156,7 @@ export async function sendMagicLinkEmail(
 }
 export async function sendAutoTopUpFailedEmail(to: string, props: { reason: string }) {
   return send({
-    transactional_message_id: teamplates.autoTopUpFailed,
+    transactional_message_id: templates.autoTopUpFailed,
     to,
     message_data: {
       reason: props.reason,
@@ -178,7 +178,7 @@ type SendDeploymentFailedEmailProps = {
 
 export async function sendDeploymentFailedEmail(props: SendDeploymentFailedEmailProps) {
   return send({
-    transactional_message_id: teamplates.deployFailed,
+    transactional_message_id: templates.deployFailed,
     to: props.to,
     message_data: {
       deployment_name: props.deployment_name,
@@ -220,7 +220,7 @@ export async function sendBalanceAlertEmail(props: SendBalanceAlertEmailProps) {
 
   const sendToRecipient = async (email: string) => {
     const mailRequest: SendEmailRequestOptions = {
-      transactional_message_id: teamplates.balanceAlert,
+      transactional_message_id: templates.balanceAlert,
       to: email,
       message_data: {
         organizationId,
@@ -283,7 +283,7 @@ export async function sendOssInviteNewUserEmail(data: OssInviteEmailData) {
   const tierConfig = ossTierConfig[data.tier];
 
   const mailRequest: SendEmailRequestOptions = {
-    transactional_message_id: teamplates.ossInviteNewUser,
+    transactional_message_id: templates.ossInviteNewUser,
     to: data.to,
     message_data: {
       organization_name: data.organizationName,
@@ -329,7 +329,7 @@ export async function sendOssInviteExistingUserEmail(
   const tierConfig = ossTierConfig[data.tier];
 
   const mailRequest: SendEmailRequestOptions = {
-    transactional_message_id: teamplates.ossInviteExistingUser,
+    transactional_message_id: templates.ossInviteExistingUser,
     to: data.to,
     message_data: {
       organization_name: data.organizationName,
@@ -382,7 +382,7 @@ export async function sendOssExistingOrgProvisionedEmail(data: OssProvisionEmail
 
   const sendToRecipient = async (email: string) => {
     const mailRequest: SendEmailRequestOptions = {
-      transactional_message_id: teamplates.ossExistingOrgProvisioned,
+      transactional_message_id: templates.ossExistingOrgProvisioned,
       to: email,
       message_data: {
         organization_name: data.organizationName,
