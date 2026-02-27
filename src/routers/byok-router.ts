@@ -18,9 +18,18 @@ import {
   BYOKApiKeyResponseSchema,
   type BYOKApiKeyResponse,
 } from '@/lib/byok/types';
-import { VercelUserByokInferenceProviderIdSchema } from '@/lib/providers/openrouter/inference-provider-id';
+import {
+  UserByokProviderIdSchema,
+  UserByokTestModels,
+  VercelUserByokInferenceProviderIdSchema,
+} from '@/lib/providers/openrouter/inference-provider-id';
 import { unstable_cache } from 'next/cache';
 import { StoredModelSchema } from '@/lib/providers/vercel/types';
+import { APICallError, createGateway, generateText } from 'ai';
+import { PROVIDERS } from '@/lib/providers';
+import { getVercelInferenceProfiderConfigForUserByok } from '@/lib/providers/vercel';
+import { decryptByokRow } from '@/lib/byok';
+import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 
 const fetchSupportedModels = unstable_cache(
   async (): Promise<Record<string, string[]>> => {
@@ -345,6 +354,7 @@ export const byokRouter = createTRPCRouter({
           organization_id: byok_api_keys.organization_id,
           kilo_user_id: byok_api_keys.kilo_user_id,
           provider_id: byok_api_keys.provider_id,
+          encrypted_api_key: byok_api_keys.encrypted_api_key,
         })
         .from(byok_api_keys)
         .where(eq(byok_api_keys.id, id));
@@ -363,11 +373,49 @@ export const byokRouter = createTRPCRouter({
         }
       }
 
-      // TODO: implement actual key validation per provider
-      return {
-        success: true,
-        message: `Placeholder: testing ${existingKey.provider_id} key is not yet implemented`,
-      };
+      const gateway = createGateway({
+        apiKey: PROVIDERS.VERCEL_AI_GATEWAY.apiKey,
+      });
+
+      const [key, list] = getVercelInferenceProfiderConfigForUserByok(decryptByokRow(existingKey));
+
+      try {
+        const model = gateway(
+          UserByokTestModels[UserByokProviderIdSchema.parse(existingKey.provider_id)]
+        );
+
+        const output = await generateText({
+          model,
+          prompt: 'Say hi',
+          providerOptions: {
+            gateway: {
+              only: [key],
+              byok: { [key]: list },
+            } satisfies GatewayProviderOptions,
+          },
+        });
+
+        const metadata = output.providerMetadata?.gateway?.routing as
+          | { originalModelId?: string; finalProvider?: string }
+          | undefined;
+
+        return {
+          success: true,
+          message: `API key test success. Provider: ${metadata?.finalProvider ?? 'unknown'}. Model: ${metadata?.originalModelId ?? 'unknown'}. Completion: ${output.text}`,
+        };
+      } catch (e) {
+        console.error(e);
+        if (APICallError.isInstance(e)) {
+          return {
+            success: false,
+            message: `API key (${key}) test failed: ${e.statusCode} ${e.message}`,
+          };
+        }
+        return {
+          success: false,
+          message: `API key (${key}) test failed with unknown error`,
+        };
+      }
     }),
 
   delete: baseProcedure
