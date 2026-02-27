@@ -128,18 +128,15 @@ export async function ensureBotUserForOrg(db: WorkerDb, orgId: string): Promise<
   const apiTokenPepper = generateApiTokenPepper();
   const stripeCustomerId = generateBotStripeCustomerId();
 
-  await db
-    .insert(kilocode_users)
-    .values({
-      id: botId,
-      google_user_email: botEmail,
-      google_user_name: WEBHOOK_BOT_DISPLAY_NAME,
-      google_user_image_url: BOT_AVATAR_PLACEHOLDER,
-      stripe_customer_id: stripeCustomerId,
-      is_bot: true,
-      api_token_pepper: apiTokenPepper,
-    })
-    .onConflictDoNothing();
+  await db.insert(kilocode_users).values({
+    id: botId,
+    google_user_email: botEmail,
+    google_user_name: WEBHOOK_BOT_DISPLAY_NAME,
+    google_user_image_url: BOT_AVATAR_PLACEHOLDER,
+    stripe_customer_id: stripeCustomerId,
+    is_bot: true,
+    api_token_pepper: apiTokenPepper,
+  });
 
   await ensureBotIsOrgMember(db, botId, orgId);
 
@@ -147,14 +144,25 @@ export async function ensureBotUserForOrg(db: WorkerDb, orgId: string): Promise<
 }
 
 async function ensureBotIsOrgMember(db: WorkerDb, botUserId: string, orgId: string) {
-  await db
-    .insert(organization_memberships)
-    .values({
-      organization_id: orgId,
-      kilo_user_id: botUserId,
-      role: 'member',
-    })
-    .onConflictDoNothing();
+  const existingRows = await db
+    .select({ id: organization_memberships.id })
+    .from(organization_memberships)
+    .where(
+      and(
+        eq(organization_memberships.organization_id, orgId),
+        eq(organization_memberships.kilo_user_id, botUserId)
+      )
+    )
+    .limit(1);
+
+  if (existingRows.length > 0) return;
+
+  await db.insert(organization_memberships).values({
+    id: crypto.randomUUID(),
+    organization_id: orgId,
+    kilo_user_id: botUserId,
+    role: 'member',
+  });
 }
 
 export async function resolveProfile(
