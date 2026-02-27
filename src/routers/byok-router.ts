@@ -346,7 +346,7 @@ export const byokRouter = createTRPCRouter({
       const { organizationId, id } = input;
 
       if (organizationId) {
-        await ensureOrganizationAccess(ctx, organizationId);
+        await ensureOrganizationAccess(ctx, organizationId, ['owner', 'billing_manager']);
       }
 
       const [existingKey] = await db
