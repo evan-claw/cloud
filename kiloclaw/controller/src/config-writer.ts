@@ -273,6 +273,8 @@ export function writeBaseConfig(
     }
 
     console.log('Running openclaw onboard to generate fresh config...');
+    // Spread the full process env (needed for PATH, HOME, etc.) with the
+    // config path override. The API key is passed as a CLI flag, not env var.
     deps.execFileSync('openclaw', [...ONBOARD_FLAGS, '--kilocode-api-key', apiKey], {
       env: { ...process.env, OPENCLAW_CONFIG_PATH: tmpPath },
       stdio: 'inherit',

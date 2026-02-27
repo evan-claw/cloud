@@ -86,6 +86,9 @@ export function useKiloClawMutations() {
   const queryClient = useQueryClient();
   const invalidateStatus = async () => {
     await queryClient.invalidateQueries({ queryKey: trpc.kiloclaw.getStatus.queryKey() });
+    await queryClient.invalidateQueries({
+      queryKey: trpc.kiloclaw.controllerVersion.queryKey(),
+    });
   };
 
   return {

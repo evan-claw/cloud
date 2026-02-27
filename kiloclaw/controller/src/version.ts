@@ -1,7 +1,7 @@
 /**
  * Controller version and commit, injected at build time via bun's --define flag.
  *
- * - KILOCLAW_CONTROLLER_VERSION: semver from controller/package.json (read at build time)
+ * - KILOCLAW_CONTROLLER_VERSION: calver from $(date -u) at Docker build time (e.g. "2026.2.26")
  * - KILOCLAW_CONTROLLER_COMMIT: git SHA (passed as Docker build-arg from CI or push-dev.sh)
  *
  * Falls back to 'dev'/'unknown' when running unbundled (vitest, smoke tests).
