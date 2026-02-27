@@ -1180,6 +1180,107 @@ describe('createEventProcessor', () => {
     });
   });
 
+  describe('question events', () => {
+    it('should call onQuestionAsked with callId and requestId for tool-associated questions', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onQuestionAsked: jest.fn(),
+        onStandaloneQuestionAsked: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('question.asked', {
+          id: 'req-1',
+          sessionID: 'session-123',
+          questions: [{ question: 'Pick one', header: 'Choice', options: [], multiple: false }],
+          tool: { messageID: 'msg-1', callID: 'call-1' },
+        })
+      );
+
+      expect(callbacks.onQuestionAsked).toHaveBeenCalledWith('req-1', 'call-1');
+      expect(callbacks.onStandaloneQuestionAsked).not.toHaveBeenCalled();
+    });
+
+    it('should call onStandaloneQuestionAsked for questions without tool.callID', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onQuestionAsked: jest.fn(),
+        onStandaloneQuestionAsked: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      const questions = [
+        {
+          question: 'Ready?',
+          header: 'Implement',
+          options: [{ label: 'Yes', description: 'Go' }],
+          custom: true,
+        },
+      ];
+
+      processor.processEvent(
+        createKilocodeEvent('question.asked', {
+          id: 'req-2',
+          sessionID: 'session-123',
+          questions,
+        })
+      );
+
+      expect(callbacks.onStandaloneQuestionAsked).toHaveBeenCalledWith('req-2', questions);
+      expect(callbacks.onQuestionAsked).not.toHaveBeenCalled();
+    });
+
+    it('should call onQuestionResolved with requestId on question.rejected', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onQuestionResolved: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('question.rejected', {
+          sessionID: 'session-123',
+          requestID: 'req-1',
+        })
+      );
+
+      expect(callbacks.onQuestionResolved).toHaveBeenCalledWith('req-1');
+    });
+
+    it('should call onQuestionResolved with requestId on question.replied', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onQuestionResolved: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('question.replied', {
+          sessionID: 'session-123',
+          requestID: 'req-1',
+          answers: [['Yes']],
+        })
+      );
+
+      expect(callbacks.onQuestionResolved).toHaveBeenCalledWith('req-1');
+    });
+
+    it('should not call onStandaloneQuestionAsked when questions array is missing', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onQuestionAsked: jest.fn(),
+        onStandaloneQuestionAsked: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('question.asked', {
+          id: 'req-3',
+          sessionID: 'session-123',
+        })
+      );
+
+      expect(callbacks.onQuestionAsked).not.toHaveBeenCalled();
+      expect(callbacks.onStandaloneQuestionAsked).not.toHaveBeenCalled();
+    });
+  });
+
   describe('invalid events', () => {
     it('should ignore events with unknown types', () => {
       const callbacks: EventProcessorCallbacks = {

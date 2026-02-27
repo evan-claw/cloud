@@ -24,8 +24,10 @@ import { ArrowDown, RefreshCw } from 'lucide-react';
 import type { AgentMode, SessionConfig, StoredSession, StoredMessage } from './types';
 import { isMessageStreaming } from './types';
 import type { DbSessionDetails, IndexedDbSessionData } from './store/db-session-atoms';
+import type { StandaloneQuestion } from './store/atoms';
 import type { ModelOption } from '@/components/shared/ModelCombobox';
 import type { SlashCommand } from '@/lib/cloud-agent/slash-commands';
+import { QuestionToolCard } from './QuestionToolCard';
 
 // V2: No conversion needed - StoredMessage format is used directly by MessageBubble
 
@@ -168,6 +170,9 @@ export type CloudChatPresentationProps = {
   // Old session handling
   isOldSession?: boolean;
 
+  // Standalone question (not associated with a tool call)
+  standaloneQuestion?: StandaloneQuestion | null;
+
   // Input toolbar state and callbacks
   inputMode?: AgentMode;
   inputModel?: string;
@@ -233,6 +238,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   autocommitStatus,
   isOldSession = false,
   getChildMessages,
+  standaloneQuestion,
   inputMode,
   inputModel,
   onInputModeChange,
@@ -396,6 +402,18 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
 
                 {/* Auto-commit status indicator */}
                 {autocommitStatus && <AutocommitStatus status={autocommitStatus} />}
+
+                {/* Standalone question (not attached to a tool call) */}
+                {standaloneQuestion && (
+                  <div className="my-4 ml-12">
+                    <QuestionToolCard
+                      key={standaloneQuestion.requestId}
+                      questions={standaloneQuestion.questions}
+                      requestId={standaloneQuestion.requestId}
+                      status="running"
+                    />
+                  </div>
+                )}
 
                 {/* Invisible anchor for auto-scroll */}
                 <div ref={messagesEndRef} />

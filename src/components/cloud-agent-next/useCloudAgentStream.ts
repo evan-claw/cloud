@@ -38,6 +38,8 @@ import {
   setQuestionRequestIdAtom,
   sessionOrganizationIdAtom,
   autocommitStatusAtom,
+  standaloneQuestionAtom,
+  clearStandaloneQuestionAtom,
 } from './store/atoms';
 import {
   updateHighWaterMarkAtom,
@@ -114,8 +116,10 @@ export function useCloudAgentStream({
   const updateChildSessionPart = useSetAtom(updateChildSessionPartAtom);
   const removeChildSessionPart = useSetAtom(removeChildSessionPartAtom);
 
-  // Atom for question tracking
+  // Atoms for question tracking
   const setQuestionRequestId = useSetAtom(setQuestionRequestIdAtom);
+  const setStandaloneQuestion = useSetAtom(standaloneQuestionAtom);
+  const clearStandaloneQuestion = useSetAtom(clearStandaloneQuestionAtom);
 
   // Atom for organization ID (used by QuestionToolCard for tRPC calls)
   const setSessionOrganizationId = useSetAtom(sessionOrganizationIdAtom);
@@ -313,6 +317,15 @@ export function useCloudAgentStream({
         setQuestionRequestId({ callId, requestId });
         onQuestionAskedRef.current?.();
       },
+
+      onStandaloneQuestionAsked: (requestId, questions) => {
+        setStandaloneQuestion({ requestId, questions });
+        onQuestionAskedRef.current?.();
+      },
+
+      onQuestionResolved: requestId => {
+        clearStandaloneQuestion(requestId);
+      },
     }),
     [
       updateMessage,
@@ -330,6 +343,8 @@ export function useCloudAgentStream({
       removeChildSessionPart,
       setError,
       setQuestionRequestId,
+      setStandaloneQuestion,
+      clearStandaloneQuestion,
     ]
   );
 

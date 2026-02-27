@@ -172,6 +172,11 @@ function ToolPartRenderer({
   childSessionMessages?: Map<string, StoredMessage[]>;
   getChildMessages?: (sessionId: string) => StoredMessage[];
 }) {
+  // plan_enter / plan_exit are internal mode-switching tools with no user-visible output
+  if (part.tool === 'plan_exit' || part.tool === 'plan_enter') {
+    return null;
+  }
+
   // Check if tool input is still streaming (incomplete data)
   if (!hasRequiredInput(part)) {
     return <StreamingToolPlaceholder toolName={part.tool} />;

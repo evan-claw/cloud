@@ -17,7 +17,7 @@
 
 import type { CloudAgentEvent } from '../event-types';
 import { isValidCloudAgentEvent } from '../event-types';
-import type { Part } from '@/types/opencode.gen';
+import type { Part, QuestionInfo } from '@/types/opencode.gen';
 import type { ProcessedMessage, EventProcessorConfig } from './types';
 import {
   stripPartContentIfFile,
@@ -46,6 +46,8 @@ const HANDLED_EVENT_TYPES = new Set([
   'session.idle',
   'session.turn.close',
   'question.asked',
+  'question.replied',
+  'question.rejected',
 ]);
 
 function isHandledEventType(type: string): boolean {
@@ -384,13 +386,21 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   }
 
   /**
-   * Handle question.asked events — extract the callID→requestId mapping.
+   * Handle question.asked events.
+   * Tool-associated questions map callID→requestId for QuestionToolCard.
+   * Standalone questions (no tool) are forwarded separately.
    */
-  function handleQuestionAsked(data: { id: string; tool?: { callID: string } }): void {
+  function handleQuestionAsked(data: {
+    id: string;
+    questions?: Array<QuestionInfo>;
+    tool?: { callID: string };
+  }): void {
     const requestId = data.id;
     const callId = data.tool?.callID;
     if (requestId && callId) {
       callbacks.onQuestionAsked?.(requestId, callId);
+    } else if (requestId && !callId && data.questions) {
+      callbacks.onStandaloneQuestionAsked?.(requestId, data.questions);
     }
   }
 
@@ -520,8 +530,23 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
         break;
 
       case 'question.asked':
-        handleQuestionAsked(data as { id: string; tool?: { callID: string } });
+        handleQuestionAsked(
+          data as {
+            id: string;
+            questions?: Array<QuestionInfo>;
+            tool?: { callID: string };
+          }
+        );
         break;
+
+      case 'question.replied':
+      case 'question.rejected': {
+        const requestID = (data as { requestID?: string }).requestID;
+        if (requestID) {
+          callbacks.onQuestionResolved?.(requestID);
+        }
+        break;
+      }
     }
   }
 

@@ -9,9 +9,16 @@ import { useQuestionContext } from './QuestionContext';
 import type { ToolPart } from './types';
 import type { QuestionInfo } from '@/types/opencode.gen';
 
-type QuestionToolCardProps = {
-  toolPart: ToolPart;
-};
+type QuestionToolCardProps =
+  | {
+      toolPart: ToolPart;
+    }
+  | {
+      /** Standalone question (no tool part) — provide data directly */
+      questions: QuestionInfo[];
+      requestId: string;
+      status: 'running' | 'completed' | 'error' | 'pending';
+    };
 
 type QuestionInput = {
   questions: QuestionInfo[];
@@ -259,11 +266,14 @@ function QuestionTab({
   );
 }
 
-export function QuestionToolCard({ toolPart }: QuestionToolCardProps) {
-  const state = toolPart.state;
-  const input = state.input as QuestionInput;
-  const questions = input.questions || [];
-  const isRunning = state.status === 'running';
+export function QuestionToolCard(props: QuestionToolCardProps) {
+  // Normalize: tool-part vs standalone question
+  const isStandalone = 'questions' in props;
+  const questions: QuestionInfo[] = isStandalone
+    ? props.questions
+    : (props.toolPart.state.input as QuestionInput).questions || [];
+  const status = isStandalone ? props.status : props.toolPart.state.status;
+  const isRunning = status === 'running';
 
   const [isExpanded, setIsExpanded] = useState(isRunning);
   const [activeTab, setActiveTab] = useState(0);
@@ -280,15 +290,24 @@ export function QuestionToolCard({ toolPart }: QuestionToolCardProps) {
     organizationId,
   } = useQuestionContext();
 
-  const requestId = toolPart.callID ? questionRequestIds.get(toolPart.callID) : undefined;
+  const requestId = isStandalone
+    ? props.requestId
+    : props.toolPart.callID
+      ? questionRequestIds.get(props.toolPart.callID)
+      : undefined;
 
   // Get answers from metadata for completed state
-  const completedAnswers: string[][] =
-    state.status === 'completed'
-      ? ((state.metadata as QuestionMetadata | undefined)?.answers ?? [])
-      : [];
+  const completedAnswers: string[][] = (() => {
+    if (isStandalone) return [];
+    const { state } = props.toolPart;
+    if (state.status !== 'completed') return [];
+    return (state.metadata as QuestionMetadata | undefined)?.answers ?? [];
+  })();
 
-  const error = state.status === 'error' ? state.error : undefined;
+  const error =
+    !isStandalone && status === 'error' && props.toolPart.state.status === 'error'
+      ? props.toolPart.state.error
+      : undefined;
   const questionCount = questions.length;
   const answeredCount = completedAnswers.filter(a => a && a.length > 0).length;
 
@@ -600,7 +619,7 @@ export function QuestionToolCard({ toolPart }: QuestionToolCardProps) {
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
-        {getStatusIndicator(state.status)}
+        {getStatusIndicator(status)}
         <span className="min-w-0 flex-1 truncate text-sm">{headerText}</span>
         <ChevronDown
           className={cn(
@@ -645,7 +664,7 @@ export function QuestionToolCard({ toolPart }: QuestionToolCardProps) {
             </div>
           )}
 
-          {state.status === 'pending' && (
+          {status === 'pending' && (
             <div className="text-muted-foreground mt-2 text-xs italic">Preparing question...</div>
           )}
         </div>

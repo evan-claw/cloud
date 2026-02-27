@@ -12,6 +12,7 @@ import type {
   Session,
   UserMessage,
   AssistantMessage,
+  QuestionInfo,
 } from '@/types/opencode.gen';
 
 /**
@@ -86,6 +87,12 @@ export type EventProcessorCallbacks = {
 
   /** Called when a question.asked event maps a tool callID to a requestId */
   onQuestionAsked?: (requestId: string, callId: string) => void;
+
+  /** Called when a question.asked event has no associated tool (standalone question) */
+  onStandaloneQuestionAsked?: (requestId: string, questions: QuestionInfo[]) => void;
+
+  /** Called when a question is answered or rejected (question.replied / question.rejected) */
+  onQuestionResolved?: (requestId: string) => void;
 };
 
 /**

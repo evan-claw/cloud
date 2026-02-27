@@ -8,6 +8,7 @@
 import { atom } from 'jotai';
 import type { SessionConfig, StoredMessage, Part } from '../types';
 import { isMessageStreaming, isAssistantMessage } from '../types';
+import type { QuestionInfo } from '@/types/opencode.gen';
 
 // ============================================================================
 // Primary State - StoredMessage format
@@ -50,6 +51,26 @@ export const setQuestionRequestIdAtom = atom(
     set(questionRequestIdsAtom, map);
   }
 );
+
+/**
+ * A standalone question from a question.asked event that has no tool.callID.
+ * These are questions raised outside the tool-call flow (e.g. PlanFollowup).
+ * Only one standalone question can be active at a time.
+ */
+export type StandaloneQuestion = {
+  requestId: string;
+  questions: QuestionInfo[];
+};
+
+export const standaloneQuestionAtom = atom<StandaloneQuestion | null>(null);
+
+/** Clear the standalone question only if its requestId matches the resolved one. */
+export const clearStandaloneQuestionAtom = atom(null, (get, set, resolvedRequestId: string) => {
+  const current = get(standaloneQuestionAtom);
+  if (current && current.requestId === resolvedRequestId) {
+    set(standaloneQuestionAtom, null);
+  }
+});
 
 /**
  * Session status from session.status events
@@ -146,6 +167,7 @@ export const clearMessagesAtom = atom(null, (_get, set) => {
   set(partsMapAtom, new Map());
   set(questionRequestIdsAtom, new Map());
   set(autocommitStatusAtom, null);
+  set(standaloneQuestionAtom, null);
 });
 
 // ============================================================================
