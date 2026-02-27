@@ -1,43 +1,67 @@
 'use client';
 
+import { AlertCircle, AlertTriangle, Hash, RotateCcw, Save, Square, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Hash, Save, Square, X } from 'lucide-react';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
-import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
-import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
-import { useKiloClawConfig } from '@/hooks/useKiloClaw';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
+import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
+import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
+import { useControllerVersion, useKiloClawConfig } from '@/hooks/useKiloClaw';
+import { useDefaultModelSelection } from '../hooks/useDefaultModelSelection';
+
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DetailTile } from './DetailTile';
-import { useDefaultModelSelection } from '../hooks/useDefaultModelSelection';
+
 import { ChannelTokenInput } from './ChannelTokenInput';
 import { CHANNELS, CHANNEL_TYPES, type ChannelDefinition } from './channel-config';
+import { ConfirmActionDialog } from './ConfirmActionDialog';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
+
+/** Returns true if calver `version` is >= `minVersion` (e.g. "2026.2.26"). Fails closed on malformed input. */
+function calverAtLeast(version: string | null | undefined, minVersion: string): boolean {
+  if (!version) return false;
+  const parts = version.split('.').map(Number);
+  const minParts = minVersion.split('.').map(Number);
+  for (let i = 0; i < minParts.length; i++) {
+    const a = parts[i] ?? 0;
+    const b = minParts[i] ?? 0;
+    if (Number.isNaN(a) || Number.isNaN(b)) return false;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true; // equal
+}
 
 function ChannelSection({
   channel,
   configured,
   mutations,
-  channelsDirty,
-  setChannelsDirty,
+  onChannelsChanged,
+  channelType,
+  dirtyChannels,
 }: {
   channel: ChannelDefinition;
   configured: boolean;
   mutations: ClawMutations;
-  channelsDirty: boolean;
-  setChannelsDirty: (v: boolean) => void;
+  onChannelsChanged?: (channelType: string) => void;
+  channelType: string;
+  dirtyChannels: Set<string>;
 }) {
   const [tokens, setTokens] = useState<Record<string, string>>({});
+  const [formatError, setFormatError] = useState<string | null>(null);
   const isSaving = mutations.patchChannels.isPending;
   const Icon = channel.icon;
+  const isChannelDirty = dirtyChannels.has(channelType);
 
   function setToken(key: string, value: string) {
     setTokens(prev => ({ ...prev, [key]: value }));
+    setFormatError(null);
   }
 
   function hasAllTokensFilled() {
@@ -54,6 +78,15 @@ function ChannelSection({
       return;
     }
 
+    for (const field of channel.fields) {
+      const error = field.validate?.(tokens[field.key].trim());
+      if (error) {
+        setFormatError(error);
+        toast.error(error);
+        return;
+      }
+    }
+
     const patch: Record<string, string> = {};
     for (const field of channel.fields) {
       patch[field.key] = tokens[field.key].trim();
@@ -62,10 +95,10 @@ function ChannelSection({
     mutations.patchChannels.mutate(patch, {
       onSuccess: () => {
         toast.success(
-          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} saved. Restart to apply.`
+          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} saved. Hit Redeploy to apply.`
         );
         setTokens({});
-        setChannelsDirty(true);
+        onChannelsChanged?.(channelType);
       },
       onError: err => toast.error(`Failed to save: ${err.message}`),
     });
@@ -80,10 +113,10 @@ function ChannelSection({
     mutations.patchChannels.mutate(patch, {
       onSuccess: () => {
         toast.success(
-          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} removed. Restart to apply.`
+          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} removed. Hit Redeploy to apply.`
         );
         setTokens({});
-        setChannelsDirty(true);
+        onChannelsChanged?.(channelType);
       },
       onError: err => toast.error(`Failed to remove: ${err.message}`),
     });
@@ -97,6 +130,18 @@ function ChannelSection({
         <span className="text-muted-foreground text-xs">
           {configured ? 'Configured' : 'Not configured'}
         </span>
+        {(formatError || isChannelDirty) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <AlertCircle
+                className={`h-4 w-4 ${formatError ? 'text-red-500' : 'text-amber-500'}`}
+              />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{formatError ? 'Improper token format' : 'Redeploy to apply changes'}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
       {channel.fields.map(field => (
@@ -132,7 +177,7 @@ function ChannelSection({
 
       <p className="text-muted-foreground text-xs">
         {channel.help}
-        {channelsDirty && ' Restart the instance for changes to take effect.'}
+        {dirtyChannels.size > 0 && ' Hit Redeploy to apply channel changes.'}
       </p>
     </div>
   );
@@ -141,15 +186,19 @@ function ChannelSection({
 export function SettingsTab({
   status,
   mutations,
+  onChannelsChanged,
+  dirtyChannels,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
+  onChannelsChanged?: (channelType: string) => void;
+  dirtyChannels: Set<string>;
 }) {
   const posthog = usePostHog();
   const { data: config } = useKiloClawConfig();
   const { data: modelsData, isLoading: isLoadingModels } = useOpenRouterModels();
   const [confirmDestroy, setConfirmDestroy] = useState(false);
-  const [channelsDirty, setChannelsDirty] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState(false);
 
   const modelOptions = useMemo<ModelOption[]>(
     () => (modelsData?.data || []).map(model => ({ id: model.id, name: model.name })),
@@ -164,6 +213,8 @@ export function SettingsTab({
   const isSaving = mutations.patchConfig.isPending;
   const isDestroying = status.status === 'destroying';
   const isRunning = status.status === 'running';
+  const { data: controllerVersion } = useControllerVersion(isRunning);
+  const supportsConfigRestore = calverAtLeast(controllerVersion?.version, '2026.2.26');
 
   const channelStatus = config?.channels ?? {
     telegram: false,
@@ -173,24 +224,22 @@ export function SettingsTab({
   };
 
   function handleSave() {
-    posthog?.capture('claw_save_config_clicked', {
-      selected_model: selectedModel || null,
-      instance_status: status.status,
-    });
-
     if (isLoadingModels) {
       toast.error('Models are still loading; try again in a moment.');
       return;
     }
 
-    const modelsPayload = modelOptions.map(({ id, name }) => ({ id, name }));
+    posthog?.capture('claw_save_config_clicked', {
+      selected_model: selectedModel || null,
+      instance_status: status.status,
+    });
+
     mutations.patchConfig.mutate(
       {
         kilocodeDefaultModel: selectedModel ? `kilocode/${selectedModel}` : null,
-        kilocodeModels: modelsPayload.length > 0 ? modelsPayload : null,
       },
       {
-        onSuccess: () => toast.success('Configuration saved'),
+        onSuccess: () => toast.success('Configuration saved. Model change applied.'),
         onError: err => toast.error(`Failed to save: ${err.message}`),
       }
     );
@@ -253,8 +302,9 @@ export function SettingsTab({
               channel={CHANNELS[type]}
               configured={CHANNELS[type].configuredCheck(channelStatus)}
               mutations={mutations}
-              channelsDirty={channelsDirty}
-              setChannelsDirty={setChannelsDirty}
+              onChannelsChanged={onChannelsChanged}
+              channelType={type}
+              dirtyChannels={dirtyChannels}
             />
           ))}
         </div>
@@ -273,6 +323,35 @@ export function SettingsTab({
               Stop or destroy this instance. Destroy permanently removes associated data.
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        !supportsConfigRestore ||
+                        !isRunning ||
+                        mutations.restoreConfig.isPending ||
+                        isDestroying
+                      }
+                      onClick={() => {
+                        posthog?.capture('claw_restore_config_clicked', {
+                          instance_status: status.status,
+                        });
+                        setConfirmRestore(true);
+                      }}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                      Restore Default Config
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!supportsConfigRestore && (
+                  <TooltipContent>Unavailable until redeploy</TooltipContent>
+                )}
+              </Tooltip>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -343,6 +422,37 @@ export function SettingsTab({
           </div>
         </div>
       </div>
+
+      {supportsConfigRestore && (
+        <ConfirmActionDialog
+          open={confirmRestore}
+          onOpenChange={setConfirmRestore}
+          title="Restore Default Config"
+          description="This will rewrite openclaw.json to defaults based on the machine's current environment variables and restart the gateway process. Any manual config changes made via the Control UI will be lost. This does not pull fresh settings from your dashboard — use Redeploy for that."
+          confirmLabel="Restore & Restart"
+          confirmIcon={<RotateCcw className="mr-1 h-4 w-4" />}
+          isPending={mutations.restoreConfig.isPending}
+          pendingLabel="Restoring..."
+          onConfirm={() => {
+            posthog?.capture('claw_restore_config_confirmed', {
+              instance_status: status.status,
+            });
+            mutations.restoreConfig.mutate(undefined, {
+              onSuccess: data => {
+                if (data.signaled) {
+                  toast.success('Config restored and gateway restarting');
+                } else {
+                  toast.success(
+                    'Config restored, but the gateway was not running — restart the instance to apply'
+                  );
+                }
+                setConfirmRestore(false);
+              },
+              onError: err => toast.error(`Failed to restore config: ${err.message}`),
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

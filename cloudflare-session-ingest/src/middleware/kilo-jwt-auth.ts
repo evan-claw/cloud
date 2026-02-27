@@ -1,5 +1,8 @@
 import { createMiddleware } from 'hono/factory';
 import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
+import { getWorkerDb } from '@kilocode/db/client';
+import { kilocode_users } from '@kilocode/db/schema';
 
 import type { Env } from '../env';
 
@@ -15,6 +18,43 @@ function isTokenPayloadV3(payload: unknown): payload is TokenPayloadV3 {
 
   const p = payload as Record<string, unknown>;
   return typeof p.kiloUserId === 'string' && p.kiloUserId.length > 0 && p.version === 3;
+}
+
+const USER_EXISTS_TTL_SECONDS = 24 * 60 * 60; // 24h
+const USER_NOT_FOUND_TTL_SECONDS = 5 * 60; // 5m
+
+/**
+ * Check whether a user exists, using KV as a cache in front of Postgres.
+ * Positive results are cached for 24h. Negative results are cached for 5m
+ * to rate-limit DB hits from deleted/nonexistent users with valid tokens.
+ */
+async function userExists(env: Env, userId: string): Promise<boolean> {
+  const cacheKey = `user-exists:${userId}`;
+
+  const cached = await env.USER_EXISTS_CACHE.get(cacheKey);
+  if (cached === '1') {
+    return true;
+  }
+  if (cached === '0') {
+    return false;
+  }
+
+  const db = getWorkerDb(env.HYPERDRIVE.connectionString);
+  const rows = await db
+    .select({ id: kilocode_users.id })
+    .from(kilocode_users)
+    .where(eq(kilocode_users.id, userId))
+    .limit(1);
+
+  const row = rows[0];
+
+  if (!row) {
+    void env.USER_EXISTS_CACHE.put(cacheKey, '0', { expirationTtl: USER_NOT_FOUND_TTL_SECONDS });
+    return false;
+  }
+
+  void env.USER_EXISTS_CACHE.put(cacheKey, '1', { expirationTtl: USER_EXISTS_TTL_SECONDS });
+  return true;
 }
 
 export const kiloJwtAuthMiddleware = createMiddleware<{
@@ -43,6 +83,11 @@ export const kiloJwtAuthMiddleware = createMiddleware<{
     const payload = jwt.verify(token, secret, { algorithms: ['HS256'] });
     if (!isTokenPayloadV3(payload)) {
       return c.json({ success: false, error: 'Invalid token payload' }, 401);
+    }
+
+    const exists = await userExists(c.env, payload.kiloUserId);
+    if (!exists) {
+      return c.json({ success: false, error: 'User account not found' }, 403);
     }
 
     c.set('user_id', payload.kiloUserId);

@@ -8,13 +8,6 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Save,
   Clock,
   AlertTriangle,
@@ -32,9 +25,11 @@ import {
   RepositoryMultiSelect,
   type Repository,
 } from '@/components/code-reviews/RepositoryMultiSelect';
+import { ModelCombobox } from '@/components/shared/ModelCombobox';
+import { useOrganizationModels } from '@/components/cloud-agent/hooks/useOrganizationModels';
 import {
-  SECURITY_AGENT_MODELS,
-  DEFAULT_SECURITY_AGENT_MODEL,
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
 } from '@/lib/security-agent/core/constants';
 
 type SlaConfig = {
@@ -56,11 +51,14 @@ type RepositoryData = {
 };
 
 type SecurityConfigFormProps = {
+  organizationId?: string;
   enabled: boolean;
   slaConfig: SlaConfig;
   repositorySelectionMode: 'all' | 'selected';
   selectedRepositoryIds: number[];
-  modelSlug: string;
+  modelSlug?: string;
+  triageModelSlug?: string;
+  analysisModelSlug?: string;
   analysisMode: AnalysisMode;
   autoDismissEnabled: boolean;
   autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
@@ -71,7 +69,9 @@ type SecurityConfigFormProps = {
     config: SlaConfig & {
       repositorySelectionMode: 'all' | 'selected';
       selectedRepositoryIds: number[];
-      modelSlug: string;
+      triageModelSlug: string;
+      analysisModelSlug: string;
+      modelSlug?: string;
       analysisMode: AnalysisMode;
       autoDismissEnabled: boolean;
       autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
@@ -168,11 +168,14 @@ const SEVERITY_INFO = [
 ];
 
 export function SecurityConfigForm({
+  organizationId,
   enabled,
   slaConfig,
   repositorySelectionMode: initialSelectionMode,
   selectedRepositoryIds: initialSelectedIds,
   modelSlug: initialModelSlug,
+  triageModelSlug: initialTriageModelSlug,
+  analysisModelSlug: initialAnalysisModelSlug,
   analysisMode: initialAnalysisMode,
   autoDismissEnabled: initialAutoDismissEnabled,
   autoDismissConfidenceThreshold: initialAutoDismissThreshold,
@@ -186,14 +189,20 @@ export function SecurityConfigForm({
   isToggling,
   isRefreshingRepositories,
 }: SecurityConfigFormProps) {
+  const { modelOptions, isLoadingModels } = useOrganizationModels(organizationId);
+
+  const initialTriageModel =
+    initialTriageModelSlug || initialModelSlug || DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+  const initialAnalysisModel =
+    initialAnalysisModelSlug || initialModelSlug || DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
+
   const [localConfig, setLocalConfig] = useState<SlaConfig>(slaConfig);
   const [repositorySelectionMode, setRepositorySelectionMode] = useState<'all' | 'selected'>(
     initialSelectionMode
   );
   const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<number[]>(initialSelectedIds);
-  const [selectedModel, setSelectedModel] = useState<string>(
-    initialModelSlug || DEFAULT_SECURITY_AGENT_MODEL
-  );
+  const [selectedTriageModel, setSelectedTriageModel] = useState<string>(initialTriageModel);
+  const [selectedAnalysisModel, setSelectedAnalysisModel] = useState<string>(initialAnalysisModel);
   const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(initialAnalysisMode);
   const [autoDismissEnabled, setAutoDismissEnabled] = useState(initialAutoDismissEnabled);
   const [autoDismissConfidenceThreshold, setAutoDismissConfidenceThreshold] =
@@ -204,7 +213,8 @@ export function SecurityConfigForm({
     setLocalConfig(slaConfig);
     setRepositorySelectionMode(initialSelectionMode);
     setSelectedRepositoryIds(initialSelectedIds);
-    setSelectedModel(initialModelSlug || DEFAULT_SECURITY_AGENT_MODEL);
+    setSelectedTriageModel(initialTriageModel);
+    setSelectedAnalysisModel(initialAnalysisModel);
     setAnalysisMode(initialAnalysisMode);
     setAutoDismissEnabled(initialAutoDismissEnabled);
     setAutoDismissConfidenceThreshold(initialAutoDismissThreshold);
@@ -213,7 +223,8 @@ export function SecurityConfigForm({
     slaConfig,
     initialSelectionMode,
     initialSelectedIds,
-    initialModelSlug,
+    initialTriageModel,
+    initialAnalysisModel,
     initialAnalysisMode,
     initialAutoDismissEnabled,
     initialAutoDismissThreshold,
@@ -224,7 +235,8 @@ export function SecurityConfigForm({
       newConfig: SlaConfig,
       newMode: 'all' | 'selected',
       newSelectedIds: number[],
-      newModel: string,
+      newTriageModel: string,
+      newAnalysisModel: string,
       newAnalysisMode: AnalysisMode,
       newAutoDismissEnabled: boolean,
       newAutoDismissThreshold: AutoDismissConfidenceThreshold
@@ -237,8 +249,10 @@ export function SecurityConfigForm({
 
       const modeChanged = newMode !== initialSelectionMode;
       const idsChanged =
-        JSON.stringify(newSelectedIds.sort()) !== JSON.stringify(initialSelectedIds.sort());
-      const modelChanged = newModel !== (initialModelSlug || DEFAULT_SECURITY_AGENT_MODEL);
+        JSON.stringify([...newSelectedIds].sort()) !==
+        JSON.stringify([...initialSelectedIds].sort());
+      const triageModelChanged = newTriageModel !== initialTriageModel;
+      const analysisModelChanged = newAnalysisModel !== initialAnalysisModel;
       const analysisModeChanged = newAnalysisMode !== initialAnalysisMode;
       const autoDismissEnabledChanged = newAutoDismissEnabled !== initialAutoDismissEnabled;
       const autoDismissThresholdChanged = newAutoDismissThreshold !== initialAutoDismissThreshold;
@@ -247,7 +261,8 @@ export function SecurityConfigForm({
         configChanged ||
           modeChanged ||
           idsChanged ||
-          modelChanged ||
+          triageModelChanged ||
+          analysisModelChanged ||
           analysisModeChanged ||
           autoDismissEnabledChanged ||
           autoDismissThresholdChanged
@@ -257,7 +272,8 @@ export function SecurityConfigForm({
       slaConfig,
       initialSelectionMode,
       initialSelectedIds,
-      initialModelSlug,
+      initialTriageModel,
+      initialAnalysisModel,
       initialAnalysisMode,
       initialAutoDismissEnabled,
       initialAutoDismissThreshold,
@@ -274,7 +290,8 @@ export function SecurityConfigForm({
       newConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold
@@ -287,7 +304,8 @@ export function SecurityConfigForm({
       localConfig,
       mode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold
@@ -300,19 +318,35 @@ export function SecurityConfigForm({
       localConfig,
       repositorySelectionMode,
       ids,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold
     );
   };
 
-  const handleModelChange = (model: string) => {
-    setSelectedModel(model);
+  const handleTriageModelChange = (model: string) => {
+    setSelectedTriageModel(model);
     checkForChanges(
       localConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
+      model,
+      selectedAnalysisModel,
+      analysisMode,
+      autoDismissEnabled,
+      autoDismissConfidenceThreshold
+    );
+  };
+
+  const handleAnalysisModelChange = (model: string) => {
+    setSelectedAnalysisModel(model);
+    checkForChanges(
+      localConfig,
+      repositorySelectionMode,
+      selectedRepositoryIds,
+      selectedTriageModel,
       model,
       analysisMode,
       autoDismissEnabled,
@@ -326,7 +360,8 @@ export function SecurityConfigForm({
       localConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       mode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold
@@ -339,7 +374,8 @@ export function SecurityConfigForm({
       localConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       newEnabled,
       autoDismissConfidenceThreshold
@@ -352,7 +388,8 @@ export function SecurityConfigForm({
       localConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       threshold
@@ -364,7 +401,9 @@ export function SecurityConfigForm({
       ...localConfig,
       repositorySelectionMode,
       selectedRepositoryIds,
-      modelSlug: selectedModel,
+      triageModelSlug: selectedTriageModel,
+      analysisModelSlug: selectedAnalysisModel,
+      modelSlug: selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold,
@@ -377,7 +416,8 @@ export function SecurityConfigForm({
       DEFAULT_SLA_CONFIG,
       repositorySelectionMode,
       selectedRepositoryIds,
-      selectedModel,
+      selectedTriageModel,
+      selectedAnalysisModel,
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold
@@ -534,31 +574,32 @@ export function SecurityConfigForm({
                 <Bot className="h-5 w-5 text-cyan-400" />
               </div>
               <div>
-                <CardTitle className="text-lg font-bold">AI Model</CardTitle>
+                <CardTitle className="text-lg font-bold">AI Models</CardTitle>
                 <p className="text-muted-foreground text-xs">
-                  Choose the AI model to use for security analysis
+                  Configure dedicated models for quick triage and deep analysis
                 </p>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <Label htmlFor="model-select">Analysis Model</Label>
-              <Select value={selectedModel} onValueChange={handleModelChange}>
-                <SelectTrigger id="model-select" className="w-full">
-                  <SelectValue placeholder="Select a model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SECURITY_AGENT_MODELS.map(model => (
-                    <SelectItem key={model.id} value={model.id}>
-                      {model.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-muted-foreground text-xs">
-                This model will be used when analyzing security findings
-              </p>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <ModelCombobox
+                label="Triage Model"
+                models={modelOptions}
+                value={selectedTriageModel}
+                onValueChange={handleTriageModelChange}
+                isLoading={isLoadingModels}
+                helperText="Used for initial triage and exploitability recommendation"
+              />
+
+              <ModelCombobox
+                label="Analysis Model"
+                models={modelOptions}
+                value={selectedAnalysisModel}
+                onValueChange={handleAnalysisModelChange}
+                isLoading={isLoadingModels}
+                helperText="Used for sandbox/codebase analysis and final extraction"
+              />
             </div>
           </CardContent>
         </Card>

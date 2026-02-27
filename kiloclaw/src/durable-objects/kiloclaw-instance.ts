@@ -25,14 +25,13 @@ import { DurableObject } from 'cloudflare:workers';
 import type { KiloClawEnv } from '../types';
 import { sandboxIdFromUserId } from '../auth/sandbox-id';
 import { deriveGatewayToken } from '../auth/gateway-token';
-import { createDatabaseConnection, InstanceStore } from '../db';
+import { getWorkerDb, getActiveInstance, markInstanceDestroyed } from '../db';
 import { buildEnvVars } from '../gateway/env';
 import {
   PersistedStateSchema,
   type InstanceConfig,
   type PersistedState,
   type EncryptedEnvelope,
-  type ModelEntry,
   type MachineSize,
 } from '../schemas/instance-config';
 import {
@@ -49,6 +48,8 @@ import {
   LIVE_CHECK_THROTTLE_MS,
   HEALTH_PROBE_TIMEOUT_SECONDS,
   HEALTH_PROBE_INTERVAL_MS,
+  STALE_PROVISION_THRESHOLD_MS,
+  OPENCLAW_BUILTIN_DEFAULT_MODEL,
 } from '../config';
 import type { FlyClientConfig } from '../fly/client';
 import type {
@@ -64,6 +65,12 @@ import { z, type ZodType } from 'zod';
 import { resolveLatestVersion } from '../lib/image-version';
 
 type InstanceStatus = PersistedState['status'];
+
+type DestroyResult = {
+  finalized: boolean;
+  destroyedUserId: string | null;
+  destroyedSandboxId: string | null;
+};
 
 type GatewayProcessStatus = {
   state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
@@ -95,6 +102,16 @@ const GatewayProcessStatusSchema: ZodType<GatewayProcessStatus> = z.object({
 
 const GatewayCommandResponseSchema = z.object({
   ok: z.boolean(),
+});
+
+const ConfigRestoreResponseSchema = z.object({
+  ok: z.boolean(),
+  signaled: z.boolean(),
+});
+
+const ControllerVersionResponseSchema = z.object({
+  version: z.string(),
+  commit: z.string(),
 });
 
 class GatewayControllerError extends Error {
@@ -200,7 +217,7 @@ function buildMachineConfig(
         path: '/_kilo/health',
         interval: '30s',
         timeout: '5s',
-        grace_period: '60s',
+        grace_period: '120s',
       },
     },
     mounts: flyVolumeId ? [{ volume: flyVolumeId, path: '/root' }] : [],
@@ -347,7 +364,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private kilocodeApiKey: PersistedState['kilocodeApiKey'] = null;
   private kilocodeApiKeyExpiresAt: PersistedState['kilocodeApiKeyExpiresAt'] = null;
   private kilocodeDefaultModel: PersistedState['kilocodeDefaultModel'] = null;
-  private kilocodeModels: PersistedState['kilocodeModels'] = null;
   private channels: PersistedState['channels'] = null;
   private provisionedAt: number | null = null;
   private lastStartedAt: number | null = null;
@@ -360,6 +376,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private healthCheckFailCount = 0;
   private pendingDestroyMachineId: string | null = null;
   private pendingDestroyVolumeId: string | null = null;
+  private pendingPostgresMarkOnFinalize = false;
   private lastMetadataRecoveryAt: number | null = null;
   private openclawVersion: string | null = null;
   private imageVariant: string | null = null;
@@ -387,7 +404,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.kilocodeApiKey = s.kilocodeApiKey;
       this.kilocodeApiKeyExpiresAt = s.kilocodeApiKeyExpiresAt;
       this.kilocodeDefaultModel = s.kilocodeDefaultModel;
-      this.kilocodeModels = s.kilocodeModels;
       this.channels = s.channels;
       this.provisionedAt = s.provisionedAt;
       this.lastStartedAt = s.lastStartedAt;
@@ -400,6 +416,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = s.healthCheckFailCount;
       this.pendingDestroyMachineId = s.pendingDestroyMachineId;
       this.pendingDestroyVolumeId = s.pendingDestroyVolumeId;
+      this.pendingPostgresMarkOnFinalize = s.pendingPostgresMarkOnFinalize;
       this.lastMetadataRecoveryAt = s.lastMetadataRecoveryAt;
       this.openclawVersion = s.openclawVersion;
       this.imageVariant = s.imageVariant;
@@ -493,7 +510,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       kilocodeApiKey: config.kilocodeApiKey ?? null,
       kilocodeApiKeyExpiresAt: config.kilocodeApiKeyExpiresAt ?? null,
       kilocodeDefaultModel: config.kilocodeDefaultModel ?? null,
-      kilocodeModels: config.kilocodeModels ?? null,
       channels: config.channels ?? null,
       machineSize: config.machineSize ?? this.machineSize ?? null,
     } satisfies Partial<PersistedState>;
@@ -518,6 +534,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
+          pendingPostgresMarkOnFinalize: false,
         })
       : storageUpdate({ ...configFields, ...versionFields });
 
@@ -532,7 +549,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.kilocodeApiKey = config.kilocodeApiKey ?? null;
     this.kilocodeApiKeyExpiresAt = config.kilocodeApiKeyExpiresAt ?? null;
     this.kilocodeDefaultModel = config.kilocodeDefaultModel ?? null;
-    this.kilocodeModels = config.kilocodeModels ?? null;
     this.channels = config.channels ?? null;
     this.machineSize = config.machineSize ?? this.machineSize ?? null;
     if (isNew) {
@@ -542,12 +558,18 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = 0;
       this.pendingDestroyMachineId = null;
       this.pendingDestroyVolumeId = null;
+      this.pendingPostgresMarkOnFinalize = false;
     }
     this.loaded = true;
 
     // Schedule reconciliation alarm for new instances
     if (isNew) {
       await this.scheduleAlarm();
+    }
+
+    // Auto-start machine after provision so users don't have to click Start
+    if (isNew) {
+      await this.start(userId);
     }
 
     return { sandboxId };
@@ -557,12 +579,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     kilocodeApiKey?: string | null;
     kilocodeApiKeyExpiresAt?: string | null;
     kilocodeDefaultModel?: string | null;
-    kilocodeModels?: ModelEntry[] | null;
   }): Promise<{
     kilocodeApiKey: string | null;
     kilocodeApiKeyExpiresAt: string | null;
     kilocodeDefaultModel: string | null;
-    kilocodeModels: ModelEntry[] | null;
   }> {
     await this.loadState();
 
@@ -580,20 +600,25 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.kilocodeDefaultModel = patch.kilocodeDefaultModel;
       pending.kilocodeDefaultModel = this.kilocodeDefaultModel;
     }
-    if (patch.kilocodeModels !== undefined) {
-      this.kilocodeModels = patch.kilocodeModels;
-      pending.kilocodeModels = this.kilocodeModels;
-    }
 
     if (Object.keys(pending).length > 0) {
       await this.ctx.storage.put(pending);
+    }
+
+    // Hot-patch the running machine's config file if the default model changed.
+    // This avoids requiring a full machine restart — OpenClaw watches the config file.
+    // When cleared (null), fall back to OpenClaw's built-in default.
+    if (patch.kilocodeDefaultModel !== undefined) {
+      const model = this.kilocodeDefaultModel ?? OPENCLAW_BUILTIN_DEFAULT_MODEL;
+      await this.patchConfigOnMachine({
+        agents: { defaults: { model: { primary: model } } },
+      });
     }
 
     return {
       kilocodeApiKey: this.kilocodeApiKey,
       kilocodeApiKeyExpiresAt: this.kilocodeApiKeyExpiresAt,
       kilocodeDefaultModel: this.kilocodeDefaultModel,
-      kilocodeModels: this.kilocodeModels,
     };
   }
 
@@ -789,9 +814,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     }
 
+    if (!success) {
+      console.error('[DO] pairing approve failed:', result.stderr || result.stdout);
+    }
+
     return {
       success,
-      message: success ? 'Pairing approved' : result.stderr || result.stdout || 'Approval failed',
+      message: success ? 'Pairing approved' : 'Approval failed',
     };
   }
 
@@ -928,11 +957,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     }
 
+    if (!success) {
+      console.error('[DO] device pairing approve failed:', result.stderr || result.stdout);
+    }
+
     return {
       success,
-      message: success
-        ? 'Device pairing approved'
-        : result.stderr || result.stdout || 'Approval failed',
+      message: success ? 'Device pairing approved' : 'Approval failed',
     };
   }
 
@@ -1156,10 +1187,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    *
    * 1. Persist pendingDestroy IDs + status='destroying'
    * 2. Attempt Fly deletions
-   * 3. Only deleteAll() when BOTH are confirmed deleted
+   * 3. Finalize only after pending Fly deletes clear, and for stale auto-destroy
+   *    also after Postgres mark-destroyed succeeds
    * 4. If either fails, alarm retries cleanup
    */
-  async destroy(): Promise<void> {
+  async destroy(): Promise<DestroyResult> {
     await this.loadState();
 
     if (!this.userId) {
@@ -1186,7 +1218,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Phase 3: Finalize if both cleared, otherwise alarm will retry
     const finalized = await this.finalizeDestroyIfComplete();
-    if (!finalized) {
+    if (!finalized.finalized) {
       console.warn(
         '[DO] Destroy incomplete, alarm will retry. pending machine:',
         this.pendingDestroyMachineId,
@@ -1195,6 +1227,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       await this.scheduleAlarm();
     }
+
+    return finalized;
   }
 
   // ========================================================================
@@ -1215,6 +1249,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     flyMachineId: string | null;
     flyVolumeId: string | null;
     flyRegion: string | null;
+    machineSize: MachineSize | null;
     openclawVersion: string | null;
     imageVariant: string | null;
     trackedImageTag: string | null;
@@ -1248,6 +1283,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       flyMachineId: this.flyMachineId,
       flyVolumeId: this.flyVolumeId,
       flyRegion: this.flyRegion,
+      machineSize: this.machineSize,
       openclawVersion: this.openclawVersion,
       imageVariant: this.imageVariant,
       trackedImageTag: this.trackedImageTag,
@@ -1263,7 +1299,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       kilocodeApiKey: this.kilocodeApiKey ?? undefined,
       kilocodeApiKeyExpiresAt: this.kilocodeApiKeyExpiresAt ?? undefined,
       kilocodeDefaultModel: this.kilocodeDefaultModel ?? undefined,
-      kilocodeModels: this.kilocodeModels ?? undefined,
       channels: this.channels ?? undefined,
       machineSize: this.machineSize ?? undefined,
     };
@@ -1303,7 +1338,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private async callGatewayController<T>(
     path: string,
     method: 'GET' | 'POST',
-    responseSchema: ZodType<T>
+    responseSchema: ZodType<T>,
+    jsonBody?: unknown
   ): Promise<T> {
     const { appName, machineId, sandboxId } = this.requireGatewayControllerContext();
 
@@ -1314,15 +1350,21 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     const gatewayToken = await deriveGatewayToken(sandboxId, this.env.GATEWAY_TOKEN_SECRET);
     const url = `https://${appName}.fly.dev${path}`;
 
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${gatewayToken}`,
+      Accept: 'application/json',
+      'fly-force-instance-id': machineId,
+    };
+    if (jsonBody !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     let response: Response;
     try {
       response = await fetch(url, {
         method,
-        headers: {
-          Authorization: `Bearer ${gatewayToken}`,
-          Accept: 'application/json',
-          'fly-force-instance-id': machineId,
-        },
+        headers,
+        body: jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1398,24 +1440,130 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     );
   }
 
+  async restoreConfig(version: string): Promise<{ ok: boolean; signaled: boolean }> {
+    await this.loadState();
+    return this.callGatewayController(
+      `/_kilo/config/restore/${encodeURIComponent(version)}`,
+      'POST',
+      ConfigRestoreResponseSchema
+    );
+  }
+
+  /** Returns null if the controller is too old to have the /_kilo/version endpoint. */
+  async getControllerVersion(): Promise<{ version: string; commit: string } | null> {
+    await this.loadState();
+    try {
+      return await this.callGatewayController(
+        '/_kilo/version',
+        'GET',
+        ControllerVersionResponseSchema
+      );
+    } catch (error) {
+      // Controllers that predate the /_kilo/version route: the request falls
+      // through to the catch-all proxy which returns 401 (REQUIRE_PROXY_TOKEN)
+      // or forwards to the gateway which returns 404 for the unknown path.
+      if (
+        error instanceof GatewayControllerError &&
+        (error.status === 404 || error.status === 401)
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Hot-patch the openclaw.json config on the running machine.
+   * The gateway watches the config file and reloads on change.
+   * Non-fatal: if the machine isn't running, the patch is silently skipped
+   * (the next start will pick up the value from env vars anyway).
+   */
+  async patchConfigOnMachine(patch: Record<string, unknown>): Promise<void> {
+    await this.loadState();
+    if (this.status !== 'running' || !this.flyMachineId) return;
+    try {
+      await this.callGatewayController(
+        '/_kilo/config/patch',
+        'POST',
+        GatewayCommandResponseSchema,
+        patch
+      );
+    } catch (err) {
+      // Non-fatal — the config will be applied on next machine start via env vars
+      console.warn(
+        '[DO] patchConfigOnMachine failed (non-fatal):',
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+
   // ========================================================================
   // User-facing operations
   // ========================================================================
 
-  async restartGateway(): Promise<{ success: boolean; error?: string }> {
+  async restartGateway(options?: {
+    imageTag?: string;
+  }): Promise<{ success: boolean; error?: string }> {
     await this.loadState();
 
     if (this.status !== 'running' || !this.flyMachineId) {
       return { success: false, error: 'Instance is not running' };
     }
 
+    const action = options?.imageTag
+      ? options.imageTag === 'latest'
+        ? 'upgrade-to-latest'
+        : `pin-to-tag:${options.imageTag}`
+      : 'redeploy-same-image';
+    console.log('[DO] restartGateway:', action, '| current trackedImageTag:', this.trackedImageTag);
+
     try {
+      // If imageTag override requested, resolve and persist before restart
+      if (options?.imageTag) {
+        if (options.imageTag === 'latest') {
+          const variant = 'default';
+          const latest = await resolveLatestVersion(this.env.KV_CLAW_CACHE, variant);
+          if (latest) {
+            this.openclawVersion = latest.openclawVersion;
+            this.imageVariant = latest.variant;
+            this.trackedImageTag = latest.imageTag;
+          }
+          // If KV empty, fall through to existing resolveImageTag() fallback
+        } else {
+          // Custom tag: clear version metadata since we don't know what version this tag represents
+          this.trackedImageTag = options.imageTag;
+          this.openclawVersion = null;
+          this.imageVariant = null;
+        }
+        await this.ctx.storage.put(
+          storageUpdate({
+            openclawVersion: this.openclawVersion,
+            imageVariant: this.imageVariant,
+            trackedImageTag: this.trackedImageTag,
+          })
+        );
+      }
+
       const flyConfig = this.getFlyConfig();
+
+      // Backfill machineSize from live Fly machine config for legacy instances
+      // before stopping, so the guest sent to updateMachine matches the actual
+      // deployed size instead of the new default.
+      if (this.machineSize === null && this.flyMachineId) {
+        const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+        if (machine.config?.guest) {
+          const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+          this.machineSize = { cpus, memory_mb, cpu_kind };
+          await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+        }
+      }
+
       await fly.stopMachineAndWait(flyConfig, this.flyMachineId);
 
       const { envVars, minSecretsVersion } = await this.buildUserEnvVars();
       const guest = guestFromSize(this.machineSize);
       const imageTag = this.resolveImageTag();
+      console.log('[DO] restartGateway: deploying with imageTag:', imageTag);
       const identity = {
         userId: this.userId ?? '',
         sandboxId: this.sandboxId ?? '',
@@ -1483,7 +1631,26 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     // Machine first: metadata recovery can recover both machine AND volume IDs.
     // Volume second: only creates a new volume if still missing after machine recovery.
-    await this.reconcileMachine(flyConfig, reason);
+    const machineReconciled = await this.reconcileMachine(flyConfig, reason);
+
+    // Auto-destroy stale provisioned instances that never started.
+    // Checked AFTER reconcileMachine so metadata recovery has a chance to
+    // discover a live Fly machine before we decide the instance is abandoned.
+    // Only proceeds when machine reconciliation was conclusive (not skipped
+    // due to cooldown or failed due to a transient Fly API error).
+    const staleProvisionAge = this.staleProvisionAgeMs();
+    if (staleProvisionAge !== null && machineReconciled) {
+      reconcileLog(reason, 'auto_destroy_stale_provision', {
+        user_id: this.userId,
+        provisioned_at: this.provisionedAt,
+        age_hours: Math.round(staleProvisionAge / 3600000),
+      });
+      this.pendingPostgresMarkOnFinalize = true;
+      await this.ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: true }));
+      await this.destroy();
+      return;
+    }
+
     await this.reconcileVolume(flyConfig, reason);
   }
 
@@ -1514,22 +1681,30 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
   // ---- Machine reconciliation ----
 
-  private async reconcileMachine(flyConfig: FlyClientConfig, reason: string): Promise<void> {
+  /**
+   * @returns true if machine state was conclusively determined (Fly API
+   *   responded successfully), false if skipped or inconclusive (transient
+   *   error, cooldown). Callers use this to gate destructive decisions
+   *   like auto-destroy of stale provisions.
+   */
+  private async reconcileMachine(flyConfig: FlyClientConfig, reason: string): Promise<boolean> {
     // If we don't have a machine ID, attempt metadata-based recovery
     if (!this.flyMachineId) {
-      await this.attemptMetadataRecovery(flyConfig, reason);
-      return;
+      return this.attemptMetadataRecovery(flyConfig, reason);
     }
 
     try {
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
       await this.syncStatusWithFly(machine.state, reason);
       await this.reconcileMachineMount(flyConfig, machine, reason);
+      return true;
     } catch (err) {
       if (fly.isFlyNotFound(err)) {
         await this.handleMachineGone(reason);
+        return true; // 404 is conclusive: machine is gone
       }
-      // Other errors: log and retry next alarm
+      // Other errors: inconclusive, retry next alarm
+      return false;
     }
   }
 
@@ -1537,16 +1712,22 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    * Attempt to recover machine (and optionally volume) from Fly metadata.
    * Only runs when flyMachineId is null. Respects a cooldown to avoid
    * hammering listMachines when there's genuinely nothing to recover.
+   *
+   * @returns true if the Fly API responded conclusively (even if no machine
+   *   was found), false if skipped (cooldown) or failed (transient error).
    */
-  private async attemptMetadataRecovery(flyConfig: FlyClientConfig, reason: string): Promise<void> {
-    if (!this.userId) return;
+  private async attemptMetadataRecovery(
+    flyConfig: FlyClientConfig,
+    reason: string
+  ): Promise<boolean> {
+    if (!this.userId) return false;
 
     // Cooldown: skip if we tried recently
     if (
       this.lastMetadataRecoveryAt &&
       Date.now() - this.lastMetadataRecoveryAt < METADATA_RECOVERY_COOLDOWN_MS
     ) {
-      return;
+      return false;
     }
 
     // Record attempt time regardless of outcome
@@ -1569,7 +1750,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
 
       const candidate = selectRecoveryCandidate(machines);
-      if (!candidate) return;
+      if (!candidate) return true; // Conclusive: no machine exists on Fly
 
       reconcileLog(reason, 'recover_machine_from_metadata', {
         machine_id: candidate.id,
@@ -1620,8 +1801,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
 
       await this.ctx.storage.put(storageUpdate(updates));
+      return true; // Conclusive: machine recovered
     } catch (err) {
       console.error('[reconcile] metadata recovery failed:', err);
+      return false; // Inconclusive: transient error
     }
   }
 
@@ -1685,6 +1868,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     try {
       const flyConfig = this.getFlyConfig();
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+
+      // Backfill machineSize from live Fly machine config for legacy instances
+      if (this.machineSize === null && machine.config?.guest) {
+        const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+        this.machineSize = { cpus, memory_mb, cpu_kind };
+        await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+      }
 
       if (machine.state === 'started') {
         // Confirmed running — reset in-memory fail count
@@ -1843,19 +2033,56 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   }
 
   /**
-   * If both pending IDs are cleared, atomically wipe all DO state.
-   * Returns true if finalized, false if still pending.
+   * If both pending IDs are cleared, finalize destroy.
+   * For stale auto-destroy, this includes marking Postgres before wiping DO state.
+   * Returns finalization details for callers that need retry behavior.
    */
-  private async finalizeDestroyIfComplete(): Promise<boolean> {
+  private async finalizeDestroyIfComplete(): Promise<DestroyResult> {
     if (this.pendingDestroyMachineId || this.pendingDestroyVolumeId) {
-      return false;
+      return {
+        finalized: false,
+        destroyedUserId: null,
+        destroyedSandboxId: null,
+      };
+    }
+
+    if (!this.userId || !this.sandboxId) {
+      return {
+        finalized: false,
+        destroyedUserId: null,
+        destroyedSandboxId: null,
+      };
+    }
+
+    const destroyedUserId = this.userId;
+    const destroyedSandboxId = this.sandboxId;
+
+    if (this.pendingPostgresMarkOnFinalize) {
+      const marked = await this.markDestroyedInPostgres(destroyedUserId, destroyedSandboxId);
+      if (!marked) {
+        return {
+          finalized: false,
+          destroyedUserId,
+          destroyedSandboxId,
+        };
+      }
     }
 
     reconcileLog('finalize', 'destroy_complete', {
-      user_id: this.userId,
-      sandbox_id: this.sandboxId,
+      user_id: destroyedUserId,
+      sandbox_id: destroyedSandboxId,
     });
 
+    await this.clearDestroyedState();
+
+    return {
+      finalized: true,
+      destroyedUserId,
+      destroyedSandboxId,
+    };
+  }
+
+  private async clearDestroyedState(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
 
@@ -1868,7 +2095,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.kilocodeApiKey = null;
     this.kilocodeApiKeyExpiresAt = null;
     this.kilocodeDefaultModel = null;
-    this.kilocodeModels = null;
     this.channels = null;
     this.provisionedAt = null;
     this.lastStartedAt = null;
@@ -1881,13 +2107,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.healthCheckFailCount = 0;
     this.pendingDestroyMachineId = null;
     this.pendingDestroyVolumeId = null;
+    this.pendingPostgresMarkOnFinalize = false;
     this.lastMetadataRecoveryAt = null;
     this.openclawVersion = null;
     this.imageVariant = null;
     this.trackedImageTag = null;
     this.loaded = false;
-
-    return true;
   }
 
   // ========================================================================
@@ -1985,6 +2210,23 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       HEALTH_PROBE_TIMEOUT_SECONDS,
       's — proceeding anyway'
     );
+  }
+
+  /**
+   * Returns the age in ms if this instance is a stale abandoned provision
+   * (provisioned, never started, no machine, older than threshold), or null.
+   */
+  private staleProvisionAgeMs(): number | null {
+    if (
+      this.status === 'provisioned' &&
+      !this.flyMachineId &&
+      !this.lastStartedAt &&
+      this.provisionedAt
+    ) {
+      const age = Date.now() - this.provisionedAt;
+      if (age > STALE_PROVISION_THRESHOLD_MS) return age;
+    }
+    return null;
   }
 
   private getFlyConfig(): FlyClientConfig {
@@ -2151,13 +2393,25 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
    */
   private async startExistingMachine(
     flyConfig: FlyClientConfig,
-    machineConfig: FlyMachineConfig,
+    initialMachineConfig: FlyMachineConfig,
     minSecretsVersion?: number
   ): Promise<void> {
     if (!this.flyMachineId) return;
 
     try {
       const machine = await fly.getMachine(flyConfig, this.flyMachineId);
+
+      // Backfill machineSize from live Fly machine config for legacy instances,
+      // then re-derive guest so updateMachine sends the actual deployed size
+      // instead of the new default.
+      let machineConfig = initialMachineConfig;
+      if (this.machineSize === null && machine.config?.guest) {
+        const { cpus, memory_mb, cpu_kind } = machine.config.guest;
+        this.machineSize = { cpus, memory_mb, cpu_kind };
+        await this.ctx.storage.put(storageUpdate({ machineSize: this.machineSize }));
+        machineConfig = { ...machineConfig, guest: guestFromSize(this.machineSize) };
+      }
+
       if (machine.state === 'stopped' || machine.state === 'created') {
         await fly.updateMachine(flyConfig, this.flyMachineId, machineConfig, { minSecretsVersion });
         await fly.waitForState(flyConfig, this.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
@@ -2169,11 +2423,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     } catch (err) {
       if (fly.isFlyNotFound(err)) {
-        // Machine confirmed gone — safe to recreate
+        // Machine confirmed gone — safe to recreate (new default is correct here)
         console.log('[DO] Machine gone (404), creating new one');
         this.flyMachineId = null;
         await this.ctx.storage.put(storageUpdate({ flyMachineId: null }));
-        await this.createNewMachine(flyConfig, machineConfig, minSecretsVersion);
+        await this.createNewMachine(flyConfig, initialMachineConfig, minSecretsVersion);
       } else {
         // Transient error (timeout, 500, network) — don't create a duplicate.
         // Let the caller surface the error; reconciliation will repair later.
@@ -2216,9 +2470,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
 
     try {
-      const db = createDatabaseConnection(connectionString);
-      const store = new InstanceStore(db);
-      const instance = await store.getActiveInstance(userId);
+      const db = getWorkerDb(connectionString);
+      const instance = await getActiveInstance(db, userId);
 
       if (!instance) {
         console.warn('[DO] No active instance found in Postgres for', userId);
@@ -2262,6 +2515,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           healthCheckFailCount: 0,
           pendingDestroyMachineId: null,
           pendingDestroyVolumeId: null,
+          pendingPostgresMarkOnFinalize: false,
           openclawVersion: null,
           imageVariant: null,
           trackedImageTag: null,
@@ -2285,6 +2539,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.healthCheckFailCount = 0;
       this.pendingDestroyMachineId = null;
       this.pendingDestroyVolumeId = null;
+      this.pendingPostgresMarkOnFinalize = false;
       this.lastMetadataRecoveryAt = null;
       this.openclawVersion = null;
       this.imageVariant = null;
@@ -2304,6 +2559,32 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     } catch (err) {
       console.error('[DO] Postgres restore failed:', err);
+    }
+  }
+
+  /**
+   * Mark the Postgres registry row as destroyed during stale auto-destroy
+   * finalization. Returns true when marked (or already marked), false when
+   * a retry is needed.
+   */
+  private async markDestroyedInPostgres(userId: string, sandboxId: string): Promise<boolean> {
+    const connectionString = this.env.HYPERDRIVE?.connectionString;
+    if (!connectionString) {
+      // Hyperdrive not available — skip rather than block finalization forever.
+      // The stale Postgres row is harmless; restoreFromPostgres handles it.
+      console.warn('[DO] HYPERDRIVE not configured, skipping Postgres mark-destroyed');
+      return true;
+    }
+
+    try {
+      const db = getWorkerDb(connectionString);
+      await markInstanceDestroyed(db, userId, sandboxId);
+      this.pendingPostgresMarkOnFinalize = false;
+      await this.ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: false }));
+      return true;
+    } catch (err) {
+      console.error('[DO] Failed to mark instance destroyed in Postgres:', err);
+      return false;
     }
   }
 
@@ -2327,7 +2608,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         encryptedSecrets: this.encryptedSecrets ?? undefined,
         kilocodeApiKey: this.kilocodeApiKey ?? undefined,
         kilocodeDefaultModel: this.kilocodeDefaultModel ?? undefined,
-        kilocodeModels: this.kilocodeModels ?? undefined,
         channels: this.channels ?? undefined,
       }
     );

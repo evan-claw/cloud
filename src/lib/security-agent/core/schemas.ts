@@ -65,6 +65,8 @@ export const SaveSecurityConfigInputSchema = z.object({
   repositorySelectionMode: RepositorySelectionModeSchema.optional(),
   selectedRepositoryIds: z.array(z.number()).optional(),
   modelSlug: z.string().optional(),
+  triageModelSlug: z.string().optional(),
+  analysisModelSlug: z.string().optional(),
   // Analysis mode configuration
   analysisMode: AnalysisModeSchema.optional(),
   // Auto-dismiss configuration
@@ -215,6 +217,8 @@ export const AnalysisResponseSchema = z.object({
   rawMarkdown: z.string().optional(), // Present in legacy format or as fallback
   analyzedAt: z.string(),
   modelUsed: z.string().optional(),
+  triageModel: z.string().optional(),
+  analysisModel: z.string().optional(),
   triggeredByUserId: z.string().optional(), // User ID who triggered the analysis (for audit tracking)
 });
 
@@ -234,6 +238,8 @@ export const AnalysisResponseLegacySchema = z.object({
 export const StartAnalysisInputSchema = z.object({
   findingId: z.string().uuid(),
   model: z.string().optional(),
+  triageModel: z.string().optional(),
+  analysisModel: z.string().optional(),
   retrySandboxOnly: z.boolean().optional(), // Skip triage, reuse existing triage data, retry only sandbox
 });
 

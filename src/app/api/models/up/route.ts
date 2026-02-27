@@ -1,5 +1,5 @@
 import { db, sql } from '@/lib/drizzle';
-import { microdollar_usage } from '@/db/schema';
+import { microdollar_usage } from '@kilocode/db/schema';
 import { NextResponse } from 'next/server';
 import { captureException } from '@sentry/nextjs';
 import { preferredModels } from '@/lib/models';

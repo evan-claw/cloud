@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { AnimatedDots } from './AnimatedDots';
 
 export function ConfirmActionDialog({
   open,
@@ -47,7 +48,10 @@ export function ConfirmActionDialog({
           </Button>
           <Button className={className} onClick={onConfirm} disabled={isPending}>
             {isPending ? (
-              pendingLabel
+              <>
+                {pendingLabel}
+                <AnimatedDots />
+              </>
             ) : (
               <>
                 {confirmIcon}

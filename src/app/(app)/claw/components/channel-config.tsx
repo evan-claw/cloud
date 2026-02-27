@@ -9,6 +9,8 @@ type ChannelField = {
   label: string;
   placeholder: string;
   placeholderConfigured: string;
+  /** Client-side format check run on Save. Returns an error hint or null if valid. */
+  validate?: (value: string) => string | null;
 };
 
 export type ChannelDefinition = {
@@ -24,6 +26,15 @@ export type ChannelDefinition = {
   help: React.ReactNode;
 };
 
+// Telegram: {8-10 digit bot ID}:{30-50 base64url chars}
+const TELEGRAM_TOKEN_RE = /^\d{8,10}:[A-Za-z0-9_-]{30,50}$/;
+// Discord: three dot-separated base64url segments
+const DISCORD_TOKEN_RE = /^[A-Za-z\d_-]{24,}?\.[A-Za-z\d_-]{4,}\.[A-Za-z\d_-]{25,}$/;
+// Slack bot token: xoxb- prefix
+const SLACK_BOT_TOKEN_RE = /^xoxb-[A-Za-z0-9-]{20,255}$/;
+// Slack app-level token: xapp- prefix
+const SLACK_APP_TOKEN_RE = /^xapp-[A-Za-z0-9-]{20,255}$/;
+
 export const CHANNELS: Record<ChannelType, ChannelDefinition> = {
   telegram: {
     label: 'Telegram',
@@ -34,6 +45,10 @@ export const CHANNELS: Record<ChannelType, ChannelDefinition> = {
         label: 'Bot Token',
         placeholder: '123456:ABC-DEF...',
         placeholderConfigured: 'Enter new token to replace',
+        validate: v =>
+          TELEGRAM_TOKEN_RE.test(v)
+            ? null
+            : 'Telegram tokens look like 123456789:ABCDefGhIJKlmn... (digits, colon, then letters/numbers).',
       },
     ],
     configuredCheck: ch => ch.telegram,
@@ -61,6 +76,10 @@ export const CHANNELS: Record<ChannelType, ChannelDefinition> = {
         label: 'Bot Token',
         placeholder: 'MTIz...',
         placeholderConfigured: 'Enter new token to replace',
+        validate: v =>
+          DISCORD_TOKEN_RE.test(v)
+            ? null
+            : 'Discord tokens have three dot-separated parts, like MTIz...abc.XYZ123.abcdef...',
       },
     ],
     configuredCheck: ch => ch.discord,
@@ -88,12 +107,20 @@ export const CHANNELS: Record<ChannelType, ChannelDefinition> = {
         label: 'Bot Token',
         placeholder: 'xoxb-...',
         placeholderConfigured: 'Enter new bot token to replace',
+        validate: v =>
+          SLACK_BOT_TOKEN_RE.test(v)
+            ? null
+            : 'Slack bot tokens start with xoxb- (not xoxp- or xapp-).',
       },
       {
         key: 'slackAppToken',
         label: 'App Token',
         placeholder: 'xapp-...',
         placeholderConfigured: 'Enter new app token to replace',
+        validate: v =>
+          SLACK_APP_TOKEN_RE.test(v)
+            ? null
+            : 'Slack app tokens start with xapp- (not xoxb- or xoxp-).',
       },
     ],
     configuredCheck: ch => ch.slackBot && ch.slackApp,

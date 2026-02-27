@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { GitLabIntegrationDetails } from '@/components/integrations/GitLabIntegrationDetails';
-import { OrgGitLabProvider } from '@/components/integrations/OrgGitLabProvider';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -39,27 +38,25 @@ export default async function GitLabIntegrationPage({
             </div>
           </div>
 
-          <OrgGitLabProvider organizationId={organization.id}>
-            <Suspense
-              fallback={
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="animate-pulse space-y-4">
-                      <div className="bg-muted h-20 rounded" />
-                      <div className="bg-muted h-32 rounded" />
-                    </div>
-                  </CardContent>
-                </Card>
-              }
-            >
-              <GitLabIntegrationDetails
-                organizationId={organization.id}
-                organizationName={organization.name}
-                success={search.success === 'connected'}
-                error={search.error}
-              />
-            </Suspense>
-          </OrgGitLabProvider>
+          <Suspense
+            fallback={
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="animate-pulse space-y-4">
+                    <div className="bg-muted h-20 rounded" />
+                    <div className="bg-muted h-32 rounded" />
+                  </div>
+                </CardContent>
+              </Card>
+            }
+          >
+            <GitLabIntegrationDetails
+              organizationId={organization.id}
+              organizationName={organization.name}
+              success={search.success === 'connected'}
+              error={search.error}
+            />
+          </Suspense>
         </>
       )}
     />

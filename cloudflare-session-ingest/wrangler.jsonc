@@ -16,10 +16,17 @@
   "observability": {
     "enabled": true,
   },
+  "logpush": true,
   "routes": [
     {
       "pattern": "ingest.kilosessions.ai",
       "custom_domain": true,
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "USER_EXISTS_CACHE",
+      "id": "ab836697b6034a95beb92aceea474b10",
     },
   ],
   "hyperdrive": [

@@ -62,15 +62,6 @@ cd cloud/kiloclaw
 pnpm start
 ```
 
-**4. DEV_MODE consideration**
-
-- If `DEV_MODE=false` in `.dev.vars`, the worker requires real JWT auth from the
-  Cloud backend. Provision and access must go through the UI or use the platform
-  API with the internal API key.
-- If `DEV_MODE=true`, the worker sets userId to `dev@kilocode.ai` for all requests,
-  which won't match instances provisioned for real user IDs. Only use this for
-  quick smoke tests where auth doesn't matter.
-
 ### Verify services
 
 ```bash

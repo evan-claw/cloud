@@ -205,6 +205,14 @@ export class WrapperClient {
     kiloServerPort: number;
     /** Workspace path (required by wrapper) */
     workspacePath: string;
+    /** Enable auto-commit after prompt completes */
+    autoCommit?: boolean;
+    /** Enable condense-on-complete */
+    condenseOnComplete?: boolean;
+    /** Upstream branch name */
+    upstreamBranch?: string;
+    /** Model ID for the wrapper */
+    model?: string;
   }): Promise<void> {
     const {
       sessionId,
@@ -212,6 +220,10 @@ export class WrapperClient {
       maxWaitMs = 30_000,
       kiloServerPort,
       workspacePath,
+      autoCommit,
+      condenseOnComplete,
+      upstreamBranch,
+      model,
     } = options;
 
     // First, try to check health
@@ -227,7 +239,17 @@ export class WrapperClient {
     // Start the wrapper process using startProcess so it's trackable via listProcesses()
     // The command includes a session marker so we can find this wrapper later
     const sessionMarker = getWrapperSessionMarker(sessionId);
-    const command = `WRAPPER_PORT=${this.port} KILO_SERVER_PORT=${kiloServerPort} WORKSPACE_PATH=${workspacePath} bun run ${wrapperPath} ${sessionMarker}`;
+    const envParts = [
+      `WRAPPER_PORT=${this.port}`,
+      `KILO_SERVER_PORT=${kiloServerPort}`,
+      `WORKSPACE_PATH=${workspacePath}`,
+    ];
+    if (autoCommit) envParts.push('AUTO_COMMIT=true');
+    if (condenseOnComplete) envParts.push('CONDENSE_ON_COMPLETE=true');
+    if (upstreamBranch) envParts.push(`UPSTREAM_BRANCH=${upstreamBranch}`);
+    if (model) envParts.push(`MODEL=${model}`);
+
+    const command = `${envParts.join(' ')} bun run ${wrapperPath} ${sessionMarker}`;
 
     logger.debug('WrapperClient: starting wrapper process', { command, port: this.port });
 
@@ -271,7 +293,13 @@ export class WrapperClient {
     session: ExecutionSession,
     sessionId: string,
     kiloServerPort: number,
-    workspacePath: string
+    workspacePath: string,
+    wrapperConfig?: {
+      autoCommit?: boolean;
+      condenseOnComplete?: boolean;
+      upstreamBranch?: string;
+      model?: string;
+    }
   ): Promise<WrapperClient> {
     logger.withFields({ sessionId, workspacePath }).info('Ensuring wrapper is running');
 
@@ -283,7 +311,8 @@ export class WrapperClient {
       logger.withFields({ sessionId, port }).info('Found existing wrapper');
       const client = new WrapperClient({ session, port });
 
-      // Verify it's healthy
+      // Verify it's healthy. If so, reuse it — wrapperConfig env vars are
+      // immutable for the lifetime of the wrapper process (set at startup only).
       try {
         await client.health();
         return client;
@@ -303,6 +332,7 @@ export class WrapperClient {
       sessionId,
       kiloServerPort,
       workspacePath,
+      ...wrapperConfig,
     });
 
     return client;

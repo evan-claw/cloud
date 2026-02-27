@@ -8,7 +8,7 @@ import type {
   writebackDependabotDismissal as writebackDependabotDismissalType,
   maybeAutoDismissAnalysis as maybeAutoDismissAnalysisType,
 } from './auto-dismiss-service';
-import type { SecurityFinding } from '@/db/schema';
+import type { SecurityFinding } from '@kilocode/db/schema';
 import type { SecurityFindingAnalysis } from '../core/types';
 
 // ── Mocks ──────────────────────────────────────────────────────────────────

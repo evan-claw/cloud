@@ -39,7 +39,7 @@ import {
 } from './PasswordFormFields';
 import Link from 'next/link';
 import { useDeploymentQueries } from './DeploymentContext';
-import { useGitHubAppsQueries } from '@/components/integrations/GitHubAppsContext';
+import { useQuery } from '@tanstack/react-query';
 import { envVarKeySchema } from '@/lib/user-deployments/env-vars-validation';
 
 type NewDeploymentDialogProps = {
@@ -76,7 +76,6 @@ export function NewDeploymentDialog({
   });
 
   const { queries: deploymentQueries, mutations } = useDeploymentQueries();
-  const { queries: gitHubQueries } = useGitHubAppsQueries();
 
   // Check if password features are available (org-only)
   const hasPasswordFeature = !!mutations.setPassword;
@@ -86,13 +85,15 @@ export function NewDeploymentDialog({
   const canCreateDeployment = deploymentEligibility?.canCreateDeployment ?? true;
   const creditsPageUrl = organizationId ? `/organizations/${organizationId}` : '/credits';
   const trpc = useTRPC();
+  const orgId = organizationId ?? undefined;
+  const ghInput = orgId ? { organizationId: orgId } : undefined;
 
-  // Query integrations using the provider
+  // Query integrations using direct tRPC calls
   const {
     data: integrations,
     isLoading: isLoadingIntegration,
     error: integrationError,
-  } = gitHubQueries.listIntegrations();
+  } = useQuery(trpc.githubApps.listIntegrations.queryOptions(ghInput));
 
   // Get the selected integration
   const selectedIntegration = integrations?.find(i => i.id === selectedIntegrationId);
@@ -102,14 +103,28 @@ export function NewDeploymentDialog({
     data: repositories,
     isLoading: isLoadingRepositories,
     error: repositoriesError,
-  } = gitHubQueries.listRepositories(selectedIntegrationId);
+  } = useQuery({
+    ...trpc.githubApps.listRepositories.queryOptions({
+      organizationId: orgId,
+      integrationId: selectedIntegrationId,
+      forceRefresh: false,
+    }),
+    enabled: !!selectedIntegrationId,
+  });
 
   // Query branches for the selected repository
   const {
     data: branchesData,
     isLoading: isLoadingBranches,
     error: branchesError,
-  } = gitHubQueries.listBranches(selectedIntegrationId, selectedRepository);
+  } = useQuery({
+    ...trpc.githubApps.listBranches.queryOptions({
+      organizationId: orgId,
+      integrationId: selectedIntegrationId,
+      repositoryFullName: selectedRepository,
+    }),
+    enabled: !!selectedIntegrationId && !!selectedRepository,
+  });
 
   // Transform repositories to match RepositoryOption format
   const repositoryOptions: RepositoryOption[] =
@@ -156,31 +171,21 @@ export function NewDeploymentDialog({
   const { refresh: refreshRepositories, isRefreshing: isRefreshingRepos } = useRefreshRepositories({
     getRefreshQueryOptions: useCallback(
       () =>
-        organizationId
-          ? trpc.organizations.githubApps.listRepositories.queryOptions({
-              organizationId,
-              integrationId: selectedIntegrationId,
-              forceRefresh: true,
-            })
-          : trpc.githubApps.listRepositories.queryOptions({
-              integrationId: selectedIntegrationId,
-              forceRefresh: true,
-            }),
-      [organizationId, selectedIntegrationId, trpc]
+        trpc.githubApps.listRepositories.queryOptions({
+          organizationId: orgId,
+          integrationId: selectedIntegrationId,
+          forceRefresh: true,
+        }),
+      [orgId, selectedIntegrationId, trpc]
     ),
     getCacheQueryKey: useCallback(
       () =>
-        organizationId
-          ? trpc.organizations.githubApps.listRepositories.queryKey({
-              organizationId,
-              integrationId: selectedIntegrationId,
-              forceRefresh: false,
-            })
-          : trpc.githubApps.listRepositories.queryKey({
-              integrationId: selectedIntegrationId,
-              forceRefresh: false,
-            }),
-      [organizationId, selectedIntegrationId, trpc]
+        trpc.githubApps.listRepositories.queryKey({
+          organizationId: orgId,
+          integrationId: selectedIntegrationId,
+          forceRefresh: false,
+        }),
+      [orgId, selectedIntegrationId, trpc]
     ),
   });
 

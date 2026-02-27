@@ -1,4 +1,4 @@
-import type { MicrodollarUsage } from '@/db/schema';
+import type { MicrodollarUsage } from '@kilocode/db/schema';
 import {
   toInsertableDbUsageRecord,
   insertUsageRecord,

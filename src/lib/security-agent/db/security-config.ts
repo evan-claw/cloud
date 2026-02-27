@@ -45,7 +45,11 @@ export async function getSecurityAgentConfig(
 export async function getSecurityAgentConfigWithStatus(
   owner: Owner,
   platform: string = DEFAULT_PLATFORM
-): Promise<{ config: SecurityAgentConfig; isEnabled: boolean } | null> {
+): Promise<{
+  config: SecurityAgentConfig;
+  storedConfig: Partial<SecurityAgentConfig>;
+  isEnabled: boolean;
+} | null> {
   const agentConfig = await getAgentConfigForOwner(owner, AGENT_TYPE, platform);
 
   if (!agentConfig) {
@@ -53,6 +57,7 @@ export async function getSecurityAgentConfigWithStatus(
   }
 
   return {
+    storedConfig: agentConfig.config as Partial<SecurityAgentConfig>,
     config: {
       ...DEFAULT_SECURITY_AGENT_CONFIG,
       ...(agentConfig.config as Partial<SecurityAgentConfig>),
@@ -70,8 +75,10 @@ export async function upsertSecurityAgentConfig(
   createdBy: string,
   platform: string = DEFAULT_PLATFORM
 ): Promise<void> {
+  const existingConfig = await getAgentConfigForOwner(owner, AGENT_TYPE, platform);
   const fullConfig = {
     ...DEFAULT_SECURITY_AGENT_CONFIG,
+    ...(existingConfig?.config as Partial<SecurityAgentConfig> | undefined),
     ...config,
   };
 

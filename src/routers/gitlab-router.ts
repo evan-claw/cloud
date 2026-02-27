@@ -3,6 +3,11 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import * as z from 'zod';
 import * as gitlabService from '@/lib/integrations/gitlab-service';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
+import {
+  resolveOwner,
+  resolveAuthorizedOwner,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
 import { validateGitLabInstance } from '@/lib/integrations/platforms/gitlab/adapter';
 import { validatePersonalAccessToken } from '@/lib/integrations/platforms/gitlab/adapter';
 
@@ -49,19 +54,22 @@ export const gitlabRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
-
       if (input.organizationId) {
         await ensureOrganizationAccess(ctx, input.organizationId, ['owner', 'billing_manager']);
       }
-
+      const owner = resolveOwner(ctx, input.organizationId);
       return gitlabService.connectWithPAT(owner, input.token, input.instanceUrl);
     }),
 
-  getInstallation: baseProcedure.query(async ({ ctx }) => {
-    const owner = { type: 'user' as const, id: ctx.user.id };
+  /**
+   * Gets GitLab installation status.
+   * Works for both user and org contexts via optional organizationId.
+   */
+  getInstallation: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
     const integration = await gitlabService.getGitLabIntegration(owner);
 
     if (!integration) {
@@ -95,8 +103,12 @@ export const gitlabRouter = createTRPCRouter({
     };
   }),
 
-  disconnect: baseProcedure.mutation(async ({ ctx }) => {
-    const owner = { type: 'user' as const, id: ctx.user.id };
+  /**
+   * Disconnects GitLab integration.
+   * Works for both user and org contexts via optional organizationId.
+   */
+  disconnect: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     const integration = await gitlabService.getGitLabIntegration(owner);
 
     if (!integration) {
@@ -106,61 +118,6 @@ export const gitlabRouter = createTRPCRouter({
     return gitlabService.disconnectGitLabIntegration(owner);
   }),
 
-  getIntegration: baseProcedure
-    .input(
-      z.object({
-        organizationId: z.string().uuid().optional(),
-      })
-    )
-    .query(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
-
-      const integration = await gitlabService.getGitLabIntegration(owner);
-
-      if (!integration) {
-        return {
-          connected: false,
-          integration: null,
-        };
-      }
-
-      const metadata = integration.metadata as {
-        gitlab_instance_url?: string;
-        token_expires_at?: string;
-        auth_type?: 'oauth' | 'pat';
-      } | null;
-
-      return {
-        connected: integration.integration_status === 'active',
-        integration: {
-          id: integration.id,
-          accountId: integration.platform_account_id,
-          accountLogin: integration.platform_account_login,
-          instanceUrl: metadata?.gitlab_instance_url || 'https://gitlab.com',
-          repositories: integration.repositories,
-          repositoriesSyncedAt: integration.repositories_synced_at,
-          installedAt: integration.installed_at,
-          tokenExpiresAt: metadata?.token_expires_at,
-          authType: metadata?.auth_type ?? 'oauth',
-        },
-      };
-    }),
-
-  disconnectOrg: baseProcedure
-    .input(
-      z.object({
-        organizationId: z.uuid(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const owner = { type: 'org' as const, id: input.organizationId };
-      await ensureOrganizationAccess(ctx, input.organizationId, ['owner', 'billing_manager']);
-
-      return gitlabService.disconnectGitLabIntegration(owner);
-    }),
-
   refreshRepositories: baseProcedure
     .input(
       z.object({
@@ -169,9 +126,10 @@ export const gitlabRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
+      if (input.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input.organizationId);
 
       const result = await gitlabService.listGitLabRepositories(owner, input.integrationId, true);
 
@@ -191,10 +149,10 @@ export const gitlabRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
-
+      if (input.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input.organizationId);
       return gitlabService.listGitLabRepositories(owner, input.integrationId, input.forceRefresh);
     }),
 
@@ -207,10 +165,10 @@ export const gitlabRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
-
+      if (input.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input.organizationId);
       return gitlabService.listGitLabBranches(owner, input.integrationId, input.projectPath);
     }),
 
@@ -221,14 +179,10 @@ export const gitlabRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
-
       if (input.organizationId) {
         await ensureOrganizationAccess(ctx, input.organizationId, ['owner', 'billing_manager']);
       }
-
+      const owner = resolveOwner(ctx, input.organizationId);
       return gitlabService.regenerateWebhookSecret(owner);
     }),
 });

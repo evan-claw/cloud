@@ -1,12 +1,10 @@
 import { getEnvVariable } from '@/lib/dotenvx';
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { createDrizzleClient, pg } from '@kilocode/db/client';
+import { computeDatabaseUrl } from '@kilocode/db';
 import { sql } from 'drizzle-orm';
-import pg, { types } from 'pg';
 import assert from 'node:assert';
-import * as schema from '../db/schema';
-import { computeDatabaseUrl, getDatabaseClientConfig } from './database-url';
-export const { Client, Pool } = pg;
 import { attachDatabasePool } from '@vercel/functions';
+export const { Client, Pool } = pg;
 const {
   POSTGRES_CONNECT_TIMEOUT,
   POSTGRES_MAX_QUERY_TIME,
@@ -33,10 +31,6 @@ if (IS_SCRIPT) {
   assert(getEnvVariable('POSTGRES_SCRIPT_URL'), 'POSTGRES_SCRIPT_URL must be set for scripts');
   postgresUrl = getEnvVariable('POSTGRES_SCRIPT_URL');
 }
-
-// Drizzle requires this for BigInts
-// https://orm.drizzle.team/docs/column-types/pg#bigint
-types.setTypeParser(types.builtins.INT8, val => BigInt(val));
 
 const appName = IS_SCRIPT ? 'kilocode-script' : 'kilocode-backend';
 
@@ -68,31 +62,39 @@ function getReplicaUrl(): string {
   return postgresUrl;
 }
 
-// Primary pool - always points to Frankfurt (writes go here)
-// max: 15 — keep low because Vercel can spawn 100+ concurrent serverless instances,
+// Keep low because Vercel can spawn 100+ concurrent serverless instances,
 // each with its own pool, all hitting the same pgbouncer. At max:100, a cold-start
 // cascade can open 100×N connections simultaneously and overwhelm pgbouncer.
-export const pool = new Pool({
-  ...getDatabaseClientConfig(postgresUrl),
-  max: 15,
+const max = 10;
+
+const idleTimeoutMillis = 10_000;
+
+const sharedPoolConfig: Partial<pg.PoolConfig> = {
+  max,
   connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
-  idleTimeoutMillis: 3000,
-  application_name: appName,
+  idleTimeoutMillis,
+};
+
+// Primary pool - always points to Frankfurt (writes go here)
+const primary = createDrizzleClient({
+  connectionString: postgresUrl,
+  poolConfig: { ...sharedPoolConfig, application_name: appName },
+  logger: !!DEBUG_QUERY_LOGGING,
 });
+export const pool = primary.pool;
 
 // Replica pool - points to US replica in US regions, primary in EU regions
 const replicaUrl = getReplicaUrl();
 export const usesSeparateReplica = replicaUrl !== postgresUrl;
 
-const replicaPool = usesSeparateReplica
-  ? new Pool({
-      ...getDatabaseClientConfig(replicaUrl),
-      max: 15,
-      connectionTimeoutMillis: Number.parseInt(POSTGRES_CONNECT_TIMEOUT || '30000'),
-      idleTimeoutMillis: 3000,
-      application_name: `${appName}-replica`,
+const replica = usesSeparateReplica
+  ? createDrizzleClient({
+      connectionString: replicaUrl,
+      poolConfig: { ...sharedPoolConfig, application_name: `${appName}-replica` },
+      logger: !!DEBUG_QUERY_LOGGING,
     })
-  : pool; // Reuse primary pool if no separate replica
+  : primary;
+const replicaPool = replica.pool;
 
 // Attach pools to ensure idle connections close before suspension
 // Skip in test environment as it interferes with Jest's cleanup
@@ -165,13 +167,13 @@ if (IS_PROD) {
 }
 
 function logPoolMetrics() {
-  const primary = {
+  const primaryMetrics = {
     total: pool.totalCount,
     idle: pool.idleCount,
     waiting: pool.waitingCount,
     max: pool.options.max,
   };
-  const replica = usesSeparateReplica
+  const replicaMetrics = usesSeparateReplica
     ? {
         total: replicaPool.totalCount,
         idle: replicaPool.idleCount,
@@ -184,8 +186,8 @@ function logPoolMetrics() {
       type: 'pool_metrics',
       instanceId,
       region: VERCEL_REGION ?? 'unknown',
-      primary,
-      replica,
+      primary: primaryMetrics,
+      replica: replicaMetrics,
     })
   );
 }
@@ -201,7 +203,7 @@ if (IS_PROD) {
  *
  * This always connects to the primary database in Frankfurt.
  */
-const primaryDb = drizzle(pool, { schema, logger: !!DEBUG_QUERY_LOGGING });
+const primaryDb = primary.db;
 
 /**
  * Read replica database instance - use for read-only queries that can
@@ -209,21 +211,8 @@ const primaryDb = drizzle(pool, { schema, logger: !!DEBUG_QUERY_LOGGING });
  *
  * In US regions, this connects to the San Francisco replica for lower latency.
  * In EU regions, this connects to the primary (Frankfurt).
- *
- * Example usage:
- * ```
- * // Read from replica (fast for US users)
- * const users = await readDb.select().from(kilocode_users);
- *
- * // Write to primary
- * await db.insert(kilocode_users).values({ ... });
- *
- * // Read-after-write: use primary for consistency
- * await db.insert(kilocode_users).values({ ... });
- * const newUser = await db.select().from(kilocode_users).where(...);
- * ```
  */
-export const readDb = drizzle(replicaPool, { schema, logger: !!DEBUG_QUERY_LOGGING });
+export const readDb = replica.db;
 
 /**
  * Default database instance - connects to the primary database.

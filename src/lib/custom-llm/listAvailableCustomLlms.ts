@@ -1,5 +1,6 @@
-import { custom_llm, type CustomLlm } from '@/db/schema';
+import { custom_llm, type CustomLlm } from '@kilocode/db/schema';
 import { readDb } from '@/lib/drizzle';
+import { OpenCodeSettingsSchema, ToolArraySchema } from '@/lib/organizations/model-settings';
 
 export function convert(model: CustomLlm) {
   return {
@@ -35,9 +36,10 @@ export function convert(model: CustomLlm) {
     supported_parameters: ['max_tokens', 'temperature', 'tools', 'reasoning', 'include_reasoning'],
     default_parameters: {},
     settings: {
-      included_tools: model.included_tools ?? [],
-      excluded_tools: model.excluded_tools ?? [],
+      included_tools: ToolArraySchema.safeParse(model.included_tools).data ?? [],
+      excluded_tools: ToolArraySchema.safeParse(model.excluded_tools).data ?? [],
     },
+    opencode: OpenCodeSettingsSchema.safeParse(model.opencode_settings).data,
   };
 }
 

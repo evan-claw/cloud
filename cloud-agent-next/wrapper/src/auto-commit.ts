@@ -1,164 +1,163 @@
 import type { IngestEvent } from '../../src/shared/protocol.js';
 import type { KiloClient } from './kilo-client.js';
-import { exec, getCurrentBranch, logToFile } from './utils.js';
+import { git, getCurrentBranch, logToFile } from './utils.js';
 
-/** Default timeout for auto-commit operation (5 minutes) */
-const DEFAULT_AUTO_COMMIT_TIMEOUT_MS = 5 * 60 * 1000;
+/** Timeout for local git operations (status, add, commit) */
+const GIT_LOCAL_TIMEOUT_MS = 30_000;
+/** Timeout for git push (network-bound) */
+const GIT_PUSH_TIMEOUT_MS = 60_000;
+/** Timeout for commit message generation API call */
+const COMMIT_MESSAGE_TIMEOUT_MS = 60_000;
 
 export type AutoCommitResult = {
-  /** Whether the operation was aborted (kill signal or fatal error during execution) */
-  wasAborted: boolean;
-  /** Whether the operation completed successfully */
   success: boolean;
-  /** Error message if failed */
+  skipped?: boolean;
   error?: string;
 };
 
 export type AutoCommitOptions = {
   workspacePath: string;
   upstreamBranch?: string;
-  model?: string;
   onEvent: (event: IngestEvent) => void;
   kiloClient: KiloClient;
-  kiloSessionId: string;
-  /** Arm the completion waiter before sending a prompt */
-  expectCompletion: () => void;
-  /** Wait for the completion event (call after sending prompt) */
-  waitForCompletion: () => Promise<void>;
-  /** Check if the execution was aborted (kill signal or fatal error) */
-  wasAborted: () => boolean;
-  /** Timeout for the entire operation in ms (default: 5 minutes) */
-  timeoutMs?: number;
 };
 
-function buildAutoCommitPrompt(hasUpstream: boolean): string {
-  const lines = [
-    'Commit and push all uncommitted changes. Follow these guidelines:',
-    '1. Create a clear, concise commit message summarizing the changes',
-    '2. Stage all modified and new files (git add -A)',
-    '3. If pre-commit hooks fail, retry with --no-verify',
-    '4. Push to the current branch',
-    '5. Do NOT force push',
-    '6. If you detect secrets or credentials, decline to commit and explain why',
-  ];
-  if (!hasUpstream) {
-    lines.push('7. Do NOT push to main or master branches - if on these branches, skip the push');
-  }
-  return lines.join('\n');
+function emitStarted(onEvent: AutoCommitOptions['onEvent'], message: string): void {
+  onEvent({
+    streamEventType: 'autocommit_started',
+    data: { message },
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function emitCompleted(
+  onEvent: AutoCommitOptions['onEvent'],
+  result: { success: boolean; message: string; skipped?: boolean }
+): void {
+  onEvent({
+    streamEventType: 'autocommit_completed',
+    data: result,
+    timestamp: new Date().toISOString(),
+  });
 }
 
 export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommitResult> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_AUTO_COMMIT_TIMEOUT_MS;
-  const sendStatus = (msg: string) =>
-    opts.onEvent({
-      streamEventType: 'status',
-      data: { message: msg },
-      timestamp: new Date().toISOString(),
-    });
-
-  // Check if already aborted before starting
-  if (opts.wasAborted()) {
-    logToFile('auto-commit: skipped - execution was aborted');
-    return { wasAborted: true, success: false };
-  }
+  const { workspacePath, upstreamBranch, onEvent, kiloClient } = opts;
 
   try {
     // Check current branch
-    const branch = await getCurrentBranch(opts.workspacePath);
+    const branch = await getCurrentBranch(workspacePath);
     if (!branch) {
-      sendStatus('Auto-commit skipped: detached HEAD state');
-      return { wasAborted: false, success: true };
-    }
-
-    // Branch protection
-    const hasUpstream = opts.upstreamBranch !== undefined && opts.upstreamBranch !== '';
-    if (!hasUpstream && (branch === 'main' || branch === 'master')) {
-      sendStatus(`Auto-commit skipped: cannot commit to ${branch}`);
-      return { wasAborted: false, success: true };
-    }
-
-    // Check for changes
-    const status = await exec(`cd "${opts.workspacePath}" && git status --porcelain`);
-    if (!status.stdout.trim()) {
-      sendStatus('No uncommitted changes');
-      return { wasAborted: false, success: true };
-    }
-
-    // Check again before sending prompt
-    if (opts.wasAborted()) {
-      logToFile('auto-commit: aborted before sending prompt');
-      return { wasAborted: true, success: false };
-    }
-
-    sendStatus('Auto-committing changes...');
-
-    // Select prompt based on explicit upstream branch
-    const prompt = buildAutoCommitPrompt(hasUpstream);
-
-    // Arm the completion waiter BEFORE sending the prompt
-    opts.expectCompletion();
-
-    // Send prompt via server API
-    logToFile(`auto-commit: sending prompt to session ${opts.kiloSessionId}`);
-    await opts.kiloClient.sendPromptAsync({
-      sessionId: opts.kiloSessionId,
-      prompt,
-      agent: 'code',
-      model: opts.model ? { modelID: opts.model } : undefined,
-    });
-
-    // Wait for completion with timeout
-    logToFile('auto-commit: waiting for completion');
-    const completionPromise = opts.waitForCompletion();
-    const timeoutPromise = new Promise<'timeout'>(resolve =>
-      setTimeout(() => resolve('timeout'), timeoutMs)
-    );
-
-    const result = await Promise.race([
-      completionPromise.then(() => 'done' as const),
-      timeoutPromise,
-    ]);
-
-    if (result === 'timeout') {
-      logToFile('auto-commit: timed out, aborting session');
-      // Abort the session to stop the running prompt
-      try {
-        await opts.kiloClient.abortSession({ sessionId: opts.kiloSessionId });
-        logToFile('auto-commit: session aborted after timeout');
-      } catch (abortError) {
-        logToFile(
-          `auto-commit: failed to abort session: ${abortError instanceof Error ? abortError.message : String(abortError)}`
-        );
-      }
-      opts.onEvent({
-        streamEventType: 'error',
-        data: { error: 'Auto-commit timed out', fatal: false },
-        timestamp: new Date().toISOString(),
+      emitCompleted(onEvent, {
+        success: true,
+        message: 'Skipped: detached HEAD state',
+        skipped: true,
       });
-      // Treat timeout as abort to prevent further operations on potentially inconsistent state
-      return { wasAborted: true, success: false, error: 'Timed out' };
+      return { success: true, skipped: true };
     }
 
-    // Check if aborted during execution
-    if (opts.wasAborted()) {
-      logToFile('auto-commit: aborted during execution');
-      return { wasAborted: true, success: false };
+    // Branch protection: don't commit to main/master without an explicit upstream
+    const hasUpstream = upstreamBranch !== undefined && upstreamBranch !== '';
+    if (!hasUpstream && (branch === 'main' || branch === 'master')) {
+      emitCompleted(onEvent, {
+        success: true,
+        message: `Skipped: cannot commit to ${branch}`,
+        skipped: true,
+      });
+      return { success: true, skipped: true };
     }
 
-    logToFile('auto-commit: completed');
-    sendStatus('Auto-commit completed');
-    return { wasAborted: false, success: true };
+    // Check for uncommitted changes
+    const status = await git(['status', '--porcelain'], {
+      cwd: workspacePath,
+      timeoutMs: GIT_LOCAL_TIMEOUT_MS,
+    });
+    if (!status.stdout.trim()) {
+      emitCompleted(onEvent, { success: true, message: 'No uncommitted changes', skipped: true });
+      return { success: true, skipped: true };
+    }
+
+    emitStarted(onEvent, 'Committing changes...');
+
+    // Generate commit message via kilo server API
+    logToFile('auto-commit: generating commit message');
+    let commitMessage: string;
+    try {
+      const commitMsgPromise = kiloClient.generateCommitMessage({ path: workspacePath });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Commit message generation timed out')),
+          COMMIT_MESSAGE_TIMEOUT_MS
+        )
+      );
+      const result = await Promise.race([commitMsgPromise, timeoutPromise]);
+      commitMessage = result.message;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logToFile(`auto-commit: commit message generation failed: ${msg}`);
+      emitCompleted(onEvent, {
+        success: false,
+        message: `Failed to generate commit message: ${msg}`,
+      });
+      return { success: false, error: msg };
+    }
+
+    // Stage all changes
+    logToFile('auto-commit: staging changes');
+    const addResult = await git(['add', '-A'], {
+      cwd: workspacePath,
+      timeoutMs: GIT_LOCAL_TIMEOUT_MS,
+    });
+    if (addResult.exitCode !== 0) {
+      const msg = `git add failed: ${addResult.stderr.trim()}`;
+      logToFile(`auto-commit: ${msg}`);
+      emitCompleted(onEvent, { success: false, message: msg });
+      return { success: false, error: msg };
+    }
+
+    // Commit — retry with --no-verify if pre-commit hook fails
+    logToFile('auto-commit: committing');
+    let commitResult = await git(['commit', '-m', commitMessage], {
+      cwd: workspacePath,
+      timeoutMs: GIT_LOCAL_TIMEOUT_MS,
+    });
+    if (commitResult.exitCode !== 0) {
+      logToFile('auto-commit: commit failed, retrying with --no-verify');
+      commitResult = await git(['commit', '--no-verify', '-m', commitMessage], {
+        cwd: workspacePath,
+        timeoutMs: GIT_LOCAL_TIMEOUT_MS,
+      });
+      if (commitResult.exitCode !== 0) {
+        const msg = `git commit failed: ${commitResult.stderr.trim()}`;
+        logToFile(`auto-commit: ${msg}`);
+        emitCompleted(onEvent, { success: false, message: msg });
+        return { success: false, error: msg };
+      }
+    }
+
+    // Push
+    logToFile('auto-commit: pushing');
+    const pushArgs = hasUpstream ? ['push'] : ['push', '-u', 'origin', branch];
+
+    const pushResult = await git(pushArgs, { cwd: workspacePath, timeoutMs: GIT_PUSH_TIMEOUT_MS });
+    if (pushResult.exitCode !== 0) {
+      // Push failure is non-fatal — changes are committed locally
+      const msg = `git push failed: ${pushResult.stderr.trim()}`;
+      logToFile(`auto-commit: ${msg}`);
+      emitCompleted(onEvent, {
+        success: true,
+        message: `Changes committed (push failed: ${pushResult.stderr.trim()})`,
+      });
+      return { success: true };
+    }
+
+    logToFile('auto-commit: completed successfully');
+    emitCompleted(onEvent, { success: true, message: 'Changes committed and pushed' });
+    return { success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logToFile(`auto-commit: error - ${errorMsg}`);
-    opts.onEvent({
-      streamEventType: 'error',
-      data: {
-        error: `Auto-commit failed: ${errorMsg}`,
-        fatal: false,
-      },
-      timestamp: new Date().toISOString(),
-    });
-    return { wasAborted: false, success: false, error: errorMsg };
+    emitCompleted(onEvent, { success: false, message: `Auto-commit failed: ${errorMsg}` });
+    return { success: false, error: errorMsg };
   }
 }

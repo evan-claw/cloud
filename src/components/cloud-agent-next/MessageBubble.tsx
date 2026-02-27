@@ -16,6 +16,7 @@ import {
 import type { FilePart } from './types';
 import { PartRenderer } from './PartRenderer';
 import { CopyMessageButton } from '@/components/shared/CopyMessageButton';
+import { stripImageContext } from '@/lib/app-builder/message-utils';
 
 /**
  * Compaction separator component - shown when context is compacted
@@ -83,7 +84,7 @@ function InlineFileAttachment({ part }: { part: FilePart }) {
  */
 function getUserTextContent(parts: Part[]): string {
   const textParts = parts.filter(isTextPart);
-  return textParts.map(p => p.text).join('');
+  return stripImageContext(textParts.map(p => p.text).join(''));
 }
 
 /**

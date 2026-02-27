@@ -34,16 +34,20 @@ import {
   Lock,
   ChevronDown,
   ChevronRight,
+  FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AutocompleteUserByokProviderIdSchema,
   VercelUserByokInferenceProviderIdSchema,
+  AwsCredentialsSchema,
 } from '@/lib/providers/openrouter/inference-provider-id';
+import * as z from 'zod';
 
 // Hardcoded BYOK providers list
 const BYOK_PROVIDERS = [
   { id: VercelUserByokInferenceProviderIdSchema.enum.anthropic, name: 'Anthropic' },
+  { id: VercelUserByokInferenceProviderIdSchema.enum.bedrock, name: 'AWS Bedrock' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.openai, name: 'OpenAI' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.google, name: 'Google AI Studio' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.minimax, name: 'MiniMax' },
@@ -98,6 +102,7 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
   const [selectedProvider, setSelectedProvider] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
+  const [awsCredentialError, setAwsCredentialError] = useState<string | null>(null);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -169,9 +174,39 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     })
   );
 
+  const testMutation = useMutation(
+    trpc.byok.testApiKey.mutationOptions({
+      onSuccess: result => {
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.error(result.message);
+        }
+      },
+      onError: (error: { message: string }) => {
+        toast.error(`Test failed: ${error.message}`);
+      },
+    })
+  );
+
   // Check if a provider already has a key
   const hasExistingKey = (providerSlug: string) => {
     return keys?.some(k => k.provider_id === providerSlug) ?? false;
+  };
+
+  const validateAwsCredentials = (value: string): string | null => {
+    if (!value) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return 'Invalid JSON — please enter a valid JSON object.';
+    }
+    const result = AwsCredentialsSchema.safeParse(parsed);
+    if (!result.success) {
+      return `Invalid AWS credentials:\n${z.prettifyError(result.error)}`;
+    }
+    return null;
   };
 
   const closeDialog = () => {
@@ -180,9 +215,15 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     setSelectedProvider('');
     setApiKey('');
     setShowApiKey(false);
+    setAwsCredentialError(null);
   };
 
   const handleSave = () => {
+    if (selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock) {
+      const error = validateAwsCredentials(apiKey);
+      setAwsCredentialError(error);
+      if (error) return;
+    }
     if (editingKeyId) {
       updateMutation.mutate({
         ...(organizationId && { organizationId }),
@@ -310,6 +351,20 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                           <Button
                             variant="secondary"
                             size="sm"
+                            onClick={() =>
+                              testMutation.mutate({
+                                ...(organizationId && { organizationId }),
+                                id: key.id,
+                              })
+                            }
+                            disabled={testMutation.isPending}
+                            title="Test API key"
+                          >
+                            <FlaskConical className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             onClick={() => handleEdit(key.id)}
                             disabled={updateMutation.isPending}
                           >
@@ -390,26 +445,69 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="apiKey">API Key</Label>
-                <div className="relative">
-                  <Input
-                    id="apiKey"
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                    placeholder="Enter API key"
-                    className="pr-10"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="absolute top-0 right-0 h-full px-3"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
+                <Label htmlFor="apiKey">
+                  {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock
+                    ? 'AWS Credentials'
+                    : 'API Key'}
+                </Label>
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock ? (
+                  <>
+                    <textarea
+                      id="apiKey"
+                      value={apiKey}
+                      onChange={e => {
+                        setApiKey(e.target.value);
+                        setAwsCredentialError(validateAwsCredentials(e.target.value));
+                      }}
+                      placeholder='{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'
+                      className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-20 w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      rows={4}
+                    />
+                    {awsCredentialError && (
+                      <Alert variant="destructive">
+                        <AlertDescription className="whitespace-break-spaces">
+                          {awsCredentialError}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      id="apiKey"
+                      type={showApiKey ? 'text' : 'password'}
+                      value={apiKey}
+                      onChange={e => setApiKey(e.target.value)}
+                      placeholder="Enter API key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-0 right-0 h-full px-3"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                )}
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock && (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      <p>Enter your AWS credentials as JSON:</p>
+                      <code className="mt-1 block text-xs break-all">
+                        {'{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'}
+                      </code>
+                      <p className="mt-1">
+                        Your IAM user needs <code className="text-xs">bedrock:InvokeModel</code> and{' '}
+                        <code className="text-xs">bedrock:InvokeModelWithResponseStream</code>{' '}
+                        permissions.
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {editingKeyId ? (
                   <Alert>
                     <Lock className="h-4 w-4" />
@@ -453,6 +551,8 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                 disabled={
                   !selectedProvider ||
                   !apiKey ||
+                  (selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock &&
+                    !!awsCredentialError) ||
                   createMutation.isPending ||
                   updateMutation.isPending
                 }

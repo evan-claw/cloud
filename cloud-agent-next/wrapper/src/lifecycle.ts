@@ -37,6 +37,9 @@ export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 /** SSE inactivity timeout - if no SSE events for this long while active, assume broken (2 minutes) */
 const SSE_INACTIVITY_TIMEOUT_MS = 120_000;
 
+/** Overall timeout for auto-commit operation (2 minutes) */
+const AUTO_COMMIT_TIMEOUT_MS = 120_000;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -285,7 +288,42 @@ export function createLifecycleManager(
     const job = state.currentJob;
     if (!job) return;
 
-    // Use the shared completion state for waiting on post-processing commands
+    // Run auto-commit if enabled
+    if (config.autoCommit) {
+      logToFile('running auto-commit');
+      try {
+        const autoCommitPromise = runAutoCommit({
+          workspacePath: config.workspacePath,
+          upstreamBranch: config.upstreamBranch,
+          onEvent: event => state.sendToIngest(event),
+          kiloClient,
+        });
+        const timeoutPromise = new Promise<'timeout'>(resolve =>
+          setTimeout(() => resolve('timeout'), AUTO_COMMIT_TIMEOUT_MS)
+        );
+        const result = await Promise.race([autoCommitPromise, timeoutPromise]);
+        if (result === 'timeout') {
+          logToFile('auto-commit timed out');
+          state.sendToIngest({
+            streamEventType: 'error',
+            data: { error: 'Auto-commit timed out', fatal: false },
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          logToFile('auto-commit complete');
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logToFile(`auto-commit error: ${msg}`);
+        state.sendToIngest({
+          streamEventType: 'error',
+          data: { error: `Auto-commit failed: ${msg}`, fatal: false },
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Completion/abort helpers are only needed for condense (which still uses the prompt-based approach)
     const expectCompletion = () => {
       postProcessingCompleted = false;
       postProcessingResolve = null;
@@ -299,33 +337,6 @@ export function createLifecycleManager(
     };
 
     const wasAborted = () => isAborted;
-
-    // Run auto-commit if enabled
-    if (config.autoCommit) {
-      logToFile('running auto-commit');
-      try {
-        await runAutoCommit({
-          workspacePath: config.workspacePath,
-          upstreamBranch: config.upstreamBranch,
-          model: config.model,
-          onEvent: event => state.sendToIngest(event),
-          kiloClient,
-          kiloSessionId: job.kiloSessionId,
-          expectCompletion,
-          waitForCompletion,
-          wasAborted,
-        });
-        logToFile('auto-commit complete');
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        logToFile(`auto-commit error: ${msg}`);
-        state.sendToIngest({
-          streamEventType: 'error',
-          data: { error: `Auto-commit failed: ${msg}`, fatal: false },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
 
     // Run condense if enabled
     if (config.condenseOnComplete) {
@@ -356,7 +367,7 @@ export function createLifecycleManager(
 
   /**
    * Trigger drain period and close connections.
-   * Sends complete event (unless aborted), runs post-completion tasks, then closes after drain delay.
+   * Runs post-completion tasks (auto-commit, condense), sends complete event, then closes after drain delay.
    */
   function triggerDrainAndClose(): void {
     if (isDraining) return;
@@ -364,32 +375,48 @@ export function createLifecycleManager(
 
     logToFile(`starting drain period (isAborted=${isAborted})`);
 
-    // Send complete event to ingest so DO can update execution status and trigger callbacks
-    // BUT only if not aborted - fatal errors already sent their own terminal event
-    const job = state.currentJob;
-    if (job && !isAborted) {
-      logToFile(`sending complete event for executionId=${job.executionId}`);
-      state.sendToIngest({
-        streamEventType: 'complete',
-        data: {
-          exitCode: 0,
-          executionId: job.executionId,
-          kiloSessionId: job.kiloSessionId,
-        },
-        timestamp: new Date().toISOString(),
-      });
-    } else if (job && isAborted) {
-      logToFile(`skipping complete event - execution was aborted`);
-    }
-
-    // Run post-completion tasks, then drain and close
-    runPostCompletionTasks()
+    // Run post-completion tasks first (auto-commit, condense), THEN send the complete event.
+    // The complete event must be sent after post-completion tasks so that clients don't
+    // disconnect before autocommit output is streamed.
+    void runPostCompletionTasks()
       .catch(err =>
         logToFile(
           `post-completion tasks failed: ${err instanceof Error ? err.message : String(err)}`
         )
       )
+      .then(async () => {
+        // Final log upload before closing
+        const uploader = state.logUploader;
+        if (uploader) {
+          await uploader
+            .uploadNow()
+            .catch(err =>
+              logToFile(
+                `final log upload failed: ${err instanceof Error ? err.message : String(err)}`
+              )
+            );
+          uploader.stop();
+        }
+      })
       .finally(() => {
+        // Send complete event to ingest so DO can update execution status and trigger callbacks
+        // BUT only if not aborted - fatal errors already sent their own terminal event
+        const job = state.currentJob;
+        if (job && !isAborted) {
+          logToFile(`sending complete event for executionId=${job.executionId}`);
+          state.sendToIngest({
+            streamEventType: 'complete',
+            data: {
+              exitCode: 0,
+              executionId: job.executionId,
+              kiloSessionId: job.kiloSessionId,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        } else if (job && isAborted) {
+          logToFile(`skipping complete event - execution was aborted`);
+        }
+
         drainTimeout = setTimeout(() => {
           logToFile('drain complete, closing connections');
           connectionManager
@@ -456,7 +483,6 @@ export function createLifecycleManager(
 
     setAborted: () => {
       isAborted = true;
-      logToFile('abort flag set - post-completion tasks will be skipped');
     },
 
     getMaxRuntimeMs: () => config.maxRuntimeMs,

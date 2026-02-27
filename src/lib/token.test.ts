@@ -1,7 +1,7 @@
 import { getEnvVariable } from '@/lib/dotenvx';
 import { describe, it, expect } from '@jest/globals';
 import jwt from 'jsonwebtoken';
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import {
   generateApiToken,
   generateOrganizationApiToken,

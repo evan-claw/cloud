@@ -1,4 +1,4 @@
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import { sql } from 'drizzle-orm';
 
 const ManuallyEnabledUsers = new Set(['9ff28f58-a37a-4d8a-ad45-bb0c9a4cd229']);

@@ -25,7 +25,7 @@ import type {
   SecurityFindingTriage,
   SecurityReviewOwner,
 } from '../core/types';
-import type { User, SecurityFinding } from '@/db/schema';
+import type { User, SecurityFinding } from '@kilocode/db/schema';
 import {
   trackSecurityAgentAnalysisStarted,
   trackSecurityAgentAnalysisCompleted,
@@ -38,8 +38,13 @@ import { sentryLogger } from '@/lib/utils.server';
 import { APP_URL } from '@/lib/constants';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import type { SessionSnapshot } from '@/lib/session-ingest-client';
+import {
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+} from '../core/constants';
 
 const log = sentryLogger('security-agent:analysis', 'info');
+const warn = sentryLogger('security-agent:analysis', 'warning');
 const logError = sentryLogger('security-agent:analysis', 'error');
 
 const ANALYSIS_PROMPT_TEMPLATE = `You are a security analyst reviewing a dependency vulnerability alert for a codebase.
@@ -197,6 +202,8 @@ export async function finalizeAnalysis(
     rawMarkdown: existingAnalysis?.rawMarkdown,
     analyzedAt: new Date().toISOString(),
     modelUsed: model,
+    triageModel: existingAnalysis?.triageModel,
+    analysisModel: existingAnalysis?.analysisModel ?? model,
     triggeredByUserId: existingAnalysis?.triggeredByUserId,
     correlationId,
   };
@@ -210,6 +217,8 @@ export async function finalizeAnalysis(
     organizationId,
     findingId,
     model,
+    triageModel: existingAnalysis?.triageModel,
+    analysisModel: existingAnalysis?.analysisModel ?? model,
     triageOnly: false,
     needsSandboxAnalysis: existingAnalysis?.triage?.needsSandboxAnalysis,
     triageSuggestedAction: existingAnalysis?.triage?.suggestedAction,
@@ -246,7 +255,8 @@ export async function startSecurityAnalysis(params: {
   user: User;
   githubRepo: string;
   githubToken?: string;
-  model?: string;
+  triageModel?: string;
+  analysisModel?: string;
   analysisMode?: AnalysisMode;
   forceSandbox?: boolean;
   retrySandboxOnly?: boolean;
@@ -257,7 +267,8 @@ export async function startSecurityAnalysis(params: {
     user,
     githubRepo,
     githubToken,
-    model = 'anthropic/claude-sonnet-4',
+    triageModel = DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+    analysisModel = DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
     analysisMode = 'auto',
     forceSandbox = false,
     retrySandboxOnly = false,
@@ -322,21 +333,25 @@ export async function startSecurityAnalysis(params: {
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: analysisModel,
+        triageModel,
+        analysisModel,
         analysisMode,
       });
     } else {
       // =========================================================================
       // Tier 1: Quick Triage (always runs)
       // =========================================================================
-      log('Starting Tier 1 triage', { correlationId, findingId, model });
+      log('Starting Tier 1 triage', { correlationId, findingId, triageModel });
 
       trackSecurityAgentAnalysisStarted({
         distinctId: user.id,
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: analysisModel,
+        triageModel,
+        analysisModel,
         analysisMode,
       });
 
@@ -344,7 +359,7 @@ export async function startSecurityAnalysis(params: {
       triage = await triageSecurityFinding({
         finding,
         authToken,
-        model,
+        model: triageModel,
         correlationId,
         userId: user.id,
         organizationId,
@@ -391,7 +406,9 @@ export async function startSecurityAnalysis(params: {
       const analysis: SecurityFindingAnalysis = {
         triage,
         analyzedAt: new Date().toISOString(),
-        modelUsed: model,
+        modelUsed: triageModel,
+        triageModel,
+        analysisModel,
         triggeredByUserId: user.id,
         correlationId,
       };
@@ -403,7 +420,9 @@ export async function startSecurityAnalysis(params: {
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: triageModel,
+        triageModel,
+        analysisModel,
         triageOnly: true,
         needsSandboxAnalysis: triage.needsSandboxAnalysis,
         triageSuggestedAction: triage.suggestedAction,
@@ -442,7 +461,9 @@ export async function startSecurityAnalysis(params: {
     const partialAnalysis: SecurityFindingAnalysis = {
       triage,
       analyzedAt: new Date().toISOString(),
-      modelUsed: model,
+      modelUsed: analysisModel,
+      triageModel,
+      analysisModel,
       triggeredByUserId: user.id,
       correlationId,
     };
@@ -456,7 +477,7 @@ export async function startSecurityAnalysis(params: {
     const { cloudAgentSessionId, kiloSessionId } = await client.prepareSession({
       prompt,
       mode: 'code',
-      model,
+      model: analysisModel,
       githubRepo,
       githubToken,
       kilocodeOrganizationId: organizationId,
@@ -484,6 +505,18 @@ export async function startSecurityAnalysis(params: {
     try {
       await client.initiateFromPreparedSession({ cloudAgentSessionId });
     } catch (initiateError) {
+      // Re-throw InsufficientCreditsError so it propagates to the caller
+      if (initiateError instanceof InsufficientCreditsError) {
+        warn('Sandbox initiation blocked by insufficient credits', {
+          correlationId,
+          findingId,
+          cloudAgentSessionId,
+        });
+        // Clean up the prepared session
+        void client.deleteSession(cloudAgentSessionId).catch(() => {});
+        throw initiateError;
+      }
+
       logError('initiateFromPreparedSession failed', {
         correlationId,
         findingId,
@@ -492,11 +525,6 @@ export async function startSecurityAnalysis(params: {
       });
       // Clean up the prepared session
       void client.deleteSession(cloudAgentSessionId).catch(() => {});
-
-      // Re-throw InsufficientCreditsError so it propagates to the caller
-      if (initiateError instanceof InsufficientCreditsError) {
-        throw initiateError;
-      }
 
       await updateAnalysisStatus(findingId, 'failed', {
         error: initiateError instanceof Error ? initiateError.message : String(initiateError),

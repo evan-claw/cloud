@@ -1,6 +1,6 @@
 import { PLATFORM } from '@/lib/integrations/core/constants';
 
-export type PlatformType = 'github' | 'gitlab' | 'bitbucket' | 'slack';
+export type PlatformType = 'github' | 'gitlab' | 'bitbucket' | 'slack' | 'discord';
 
 export type PlatformStatus = 'installed' | 'not_installed' | 'coming_soon';
 
@@ -49,6 +49,15 @@ export const PLATFORM_DEFINITIONS: PlatformDefinition[] = [
     orgRoute: organizationId => `/organizations/${organizationId}/integrations/gitlab`,
   },
   {
+    id: 'discord',
+    name: 'Discord',
+    description:
+      'Create PRs, debug code, ask questions about your repos, etc. directly from Discord',
+    enabled: true,
+    personalRoute: '/integrations/discord',
+    orgRoute: organizationId => `/organizations/${organizationId}/integrations/discord`,
+  },
+  {
     id: 'bitbucket',
     name: 'Bitbucket',
     description: 'Integrate Bitbucket repositories for intelligent code analysis and automation',
@@ -60,35 +69,18 @@ type InstallationStatus = {
   github?: { installed: boolean };
   slack?: { installed: boolean };
   gitlab?: { installed: boolean };
+  discord?: { installed: boolean };
 };
 
 function getStatus(id: PlatformType, installations: InstallationStatus): PlatformStatus {
-  if (id === 'github') {
-    return installations.github?.installed ? 'installed' : 'not_installed';
-  }
-  if (id === 'slack') {
-    return installations.slack?.installed ? 'installed' : 'not_installed';
-  }
-  if (id === PLATFORM.GITLAB) {
-    return installations.gitlab?.installed ? 'installed' : 'not_installed';
-  }
-  return 'coming_soon';
+  const def = PLATFORM_DEFINITIONS.find(p => p.id === id);
+  if (!def?.enabled) return 'coming_soon';
+  return installations[id as keyof InstallationStatus]?.installed ? 'installed' : 'not_installed';
 }
 
-export function buildPlatformsForPersonal(installations: InstallationStatus): Platform[] {
-  return PLATFORM_DEFINITIONS.map(def => ({
-    id: def.id,
-    name: def.name,
-    description: def.description,
-    status: getStatus(def.id, installations),
-    enabled: def.enabled,
-    route: def.personalRoute,
-  }));
-}
-
-export function buildPlatformsForOrg(
-  organizationId: string,
-  installations: InstallationStatus
+export function buildPlatforms(
+  installations: InstallationStatus,
+  organizationId?: string
 ): Platform[] {
   return PLATFORM_DEFINITIONS.map(def => ({
     id: def.id,
@@ -96,6 +88,19 @@ export function buildPlatformsForOrg(
     description: def.description,
     status: getStatus(def.id, installations),
     enabled: def.enabled,
-    route: def.orgRoute?.(organizationId),
+    route: organizationId ? def.orgRoute?.(organizationId) : def.personalRoute,
   }));
+}
+
+/** @deprecated Use buildPlatforms() instead */
+export function buildPlatformsForPersonal(installations: InstallationStatus): Platform[] {
+  return buildPlatforms(installations);
+}
+
+/** @deprecated Use buildPlatforms(installations, organizationId) instead */
+export function buildPlatformsForOrg(
+  organizationId: string,
+  installations: InstallationStatus
+): Platform[] {
+  return buildPlatforms(installations, organizationId);
 }

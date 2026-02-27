@@ -2,7 +2,7 @@ import 'server-only';
 
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { db } from '@/lib/drizzle';
-import { cloud_agent_feedback } from '@/db/schema';
+import { cloud_agent_feedback } from '@kilocode/db/schema';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import * as z from 'zod';
 import { SLACK_USER_FEEDBACK_WEBHOOK_URL } from '@/lib/config.server';
@@ -15,7 +15,7 @@ const recentMessageSchema = z.object({
 
 const CreateCloudAgentFeedbackInputSchema = z.object({
   cloud_agent_session_id: z.string().max(500).optional(),
-  kilo_session_id: z.string().uuid().optional(),
+  kilo_session_id: z.string().max(500).optional(),
   organization_id: z.string().uuid().optional(),
   feedback_text: z.string().min(1).max(10_000),
   model: z.string().max(255).optional(),

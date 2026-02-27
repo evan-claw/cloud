@@ -1,6 +1,5 @@
 import { Suspense } from 'react';
 import { GitHubIntegrationDetails } from '@/components/integrations/GitHubIntegrationDetails';
-import { OrgGitHubAppsProvider } from '@/components/integrations/OrgGitHubAppsProvider';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -41,29 +40,27 @@ export default async function GitHubIntegrationPage({
             </div>
           </div>
 
-          <OrgGitHubAppsProvider organizationId={organization.id}>
-            <Suspense
-              fallback={
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="animate-pulse space-y-4">
-                      <div className="bg-muted h-20 rounded" />
-                      <div className="bg-muted h-32 rounded" />
-                    </div>
-                  </CardContent>
-                </Card>
-              }
-            >
-              <GitHubIntegrationDetails
-                organizationId={organization.id}
-                organizationName={organization.name}
-                success={search.success === 'installed'}
-                error={search.error}
-                pendingApproval={search.pending_approval === 'true'}
-                existingPendingOrg={search.org}
-              />
-            </Suspense>
-          </OrgGitHubAppsProvider>
+          <Suspense
+            fallback={
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="animate-pulse space-y-4">
+                    <div className="bg-muted h-20 rounded" />
+                    <div className="bg-muted h-32 rounded" />
+                  </div>
+                </CardContent>
+              </Card>
+            }
+          >
+            <GitHubIntegrationDetails
+              organizationId={organization.id}
+              organizationName={organization.name}
+              success={search.success === 'installed'}
+              error={search.error}
+              pendingApproval={search.pending_approval === 'true'}
+              existingPendingOrg={search.org}
+            />
+          </Suspense>
         </>
       )}
     />

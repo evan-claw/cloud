@@ -1,4 +1,4 @@
-import { modelsByProvider } from '@/db/schema';
+import { modelsByProvider } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
 import { normalizeModelId } from '@/lib/model-utils';
 import type { NormalizedOpenRouterResponse } from '@/lib/providers/openrouter/openrouter-types';

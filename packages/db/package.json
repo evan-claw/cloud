@@ -1,0 +1,22 @@
+{
+  "name": "@kilocode/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./schema-types": "./src/schema-types.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "pg": "^8.16.3",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.9",
+    "@types/pg": "^8.11.0",
+    "typescript": "^5.0.0"
+  }
+}

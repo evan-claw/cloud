@@ -1,7 +1,7 @@
 import { adminProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { db } from '@/lib/drizzle';
-import { kiloclaw_instances, kilocode_users } from '@/db/schema';
-import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { kiloclaw_instances, kilocode_users } from '@kilocode/db/schema';
+import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import {
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
@@ -281,9 +281,10 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
         const client = new KiloClawInternalClient();
         return await client.listVolumeSnapshots(input.userId);
       } catch (err) {
+        console.error('Failed to fetch volume snapshots for user:', input.userId, err);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: err instanceof Error ? err.message : 'Failed to fetch volume snapshots',
+          message: 'Failed to fetch volume snapshots',
         });
       }
     }),
@@ -293,9 +294,16 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.getGatewayStatus(input.userId);
     } catch (err) {
+      console.error('Failed to fetch gateway status for user:', input.userId, err);
+      if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Gateway control unavailable',
+        });
+      }
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
-        message: err instanceof Error ? err.message : 'Failed to fetch gateway status',
+        message: 'Failed to fetch gateway status',
       });
     }
   }),
@@ -305,9 +313,10 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.startGateway(input.userId);
     } catch (err) {
+      console.error('Failed to start gateway for user:', input.userId, err);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
-        message: err instanceof Error ? err.message : 'Failed to start gateway',
+        message: 'Failed to start gateway',
       });
     }
   }),
@@ -317,9 +326,10 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.stopGateway(input.userId);
     } catch (err) {
+      console.error('Failed to stop gateway for user:', input.userId, err);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
-        message: err instanceof Error ? err.message : 'Failed to stop gateway',
+        message: 'Failed to stop gateway',
       });
     }
   }),
@@ -329,9 +339,10 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.restartGatewayProcess(input.userId);
     } catch (err) {
+      console.error('Failed to restart gateway for user:', input.userId, err);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
-        message: err instanceof Error ? err.message : 'Failed to restart gateway',
+        message: 'Failed to restart gateway',
       });
     }
   }),

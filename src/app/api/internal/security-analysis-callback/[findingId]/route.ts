@@ -24,14 +24,18 @@ import { fetchSessionSnapshot } from '@/lib/session-ingest-client';
 import { trackSecurityAgentAnalysisCompleted } from '@/lib/security-agent/posthog-tracking';
 import { generateApiToken } from '@/lib/tokens';
 import { db } from '@/lib/drizzle';
-import { kilocode_users } from '@/db/schema';
+import { kilocode_users } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
-import { sentryLogger } from '@/lib/utils.server';
+import { logExceptInTest, sentryLogger } from '@/lib/utils.server';
 import type { SecurityFindingAnalysis, SecurityReviewOwner } from '@/lib/security-agent/core/types';
 import {
   logSecurityAudit,
   SecurityAuditLogAction,
 } from '@/lib/security-agent/services/audit-log-service';
+import {
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+} from '@/lib/security-agent/core/constants';
 
 const log = sentryLogger('security-agent:callback', 'info');
 const warn = sentryLogger('security-agent:callback', 'warning');
@@ -129,12 +133,19 @@ export async function POST(
 function readAnalysisContext(analysis: SecurityFindingAnalysis | null | undefined): {
   correlationId: string;
   modelUsed: string;
+  triageModel: string;
+  analysisModel: string;
   triggeredByUserId: string;
 } {
-  const defaultModel = 'anthropic/claude-sonnet-4';
+  const analysisModel =
+    analysis?.analysisModel ?? analysis?.modelUsed ?? DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
+  const triageModel =
+    analysis?.triageModel ?? analysis?.modelUsed ?? DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
   return {
     correlationId: analysis?.correlationId ?? '',
-    modelUsed: analysis?.modelUsed ?? defaultModel,
+    modelUsed: analysis?.modelUsed ?? analysisModel,
+    triageModel,
+    analysisModel,
     triggeredByUserId: analysis?.triggeredByUserId ?? '',
   };
 }
@@ -147,6 +158,8 @@ async function handleAnalysisCompleted(
   const {
     correlationId,
     modelUsed: model,
+    triageModel,
+    analysisModel,
     triggeredByUserId,
   } = readAnalysisContext(finding.analysis);
   const organizationId = finding.owned_by_organization_id ?? undefined;
@@ -265,13 +278,20 @@ async function handleAnalysisCompleted(
     action: SecurityAuditLogAction.FindingAnalysisCompleted,
     resource_type: 'security_finding',
     resource_id: findingId,
-    metadata: { source: 'system', model, correlationId, triggeredByUserId },
+    metadata: {
+      source: 'system',
+      model,
+      triageModel,
+      analysisModel,
+      correlationId,
+      triggeredByUserId,
+    },
   });
 
   await finalizeAnalysis(
     findingId,
     rawMarkdown,
-    model,
+    analysisModel,
     owner,
     triggeredByUserId,
     authToken,
@@ -289,6 +309,8 @@ async function handleAnalysisFailed(
     correlationId,
     triggeredByUserId,
     modelUsed: model,
+    triageModel,
+    analysisModel,
   } = readAnalysisContext(finding.analysis);
   const organizationId = finding.owned_by_organization_id ?? undefined;
 
@@ -297,13 +319,21 @@ async function handleAnalysisFailed(
       ? `Analysis interrupted: ${payload.errorMessage ?? 'unknown reason'}`
       : (payload.errorMessage ?? 'Analysis failed');
 
-  const logger = payload.status === 'interrupted' ? log : logError;
-  logger('Analysis failed/interrupted', {
-    findingId,
-    correlationId,
-    status: payload.status,
-    errorMessage,
-  });
+  if (payload.status === 'interrupted') {
+    logExceptInTest('Analysis interrupted by user', {
+      findingId,
+      correlationId,
+      status: payload.status,
+      errorMessage,
+    });
+  } else {
+    logError('Analysis failed/interrupted', {
+      findingId,
+      correlationId,
+      status: payload.status,
+      errorMessage,
+    });
+  }
 
   await updateAnalysisStatus(findingId, 'failed', { error: errorMessage });
 
@@ -321,6 +351,8 @@ async function handleAnalysisFailed(
     organizationId,
     findingId,
     model,
+    triageModel,
+    analysisModel,
     triageOnly: false,
     durationMs: finding.analysis_started_at
       ? Date.now() - new Date(finding.analysis_started_at).getTime()

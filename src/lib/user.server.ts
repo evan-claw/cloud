@@ -30,7 +30,7 @@ import { isOrganizationHardLocked } from '@/lib/organizations/trial-utils';
 import { secondsInDay } from 'date-fns/constants';
 import type { AdapterUser } from 'next-auth/adapters';
 import assert from 'node:assert';
-import type { Organization, User } from '@/db/schema';
+import type { Organization, User } from '@kilocode/db/schema';
 import PostHogClient from '@/lib/posthog';
 import { captureException } from '@sentry/nextjs';
 import {
@@ -644,6 +644,7 @@ type GetAuthResponse =
       organizationId?: undefined;
       internalApiUse?: undefined;
       botId?: undefined;
+      tokenSource?: undefined;
     }
   | {
       user: User;
@@ -652,6 +653,7 @@ type GetAuthResponse =
       organizationId?: Organization['id'];
       internalApiUse?: boolean;
       botId?: string;
+      tokenSource?: string;
     };
 
 export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAuthResponse> {
@@ -678,6 +680,7 @@ export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAut
     const organizationId = headersList.get(ORGANIZATION_ID_HEADER) || undefined;
     const internalApiUse = authorizationValidationResult.internalApiUse;
     const botId = authorizationValidationResult.botId;
+    const tokenSource = authorizationValidationResult.tokenSource;
 
     return await validateUserAuthorization(
       authorizationValidationResult.kiloUserId,
@@ -687,7 +690,8 @@ export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAut
       organizationId,
       internalApiUse,
       readDb,
-      botId
+      botId,
+      tokenSource
     );
   }
 
@@ -755,7 +759,8 @@ async function validateUserAuthorization(
   organizationId?: Organization['id'],
   internalApiUse?: boolean,
   fromDb: typeof db = db,
-  botId?: string
+  botId?: string,
+  tokenSource?: string
 ): Promise<GetAuthResponse> {
   if (!user) {
     return authError(401, 'User not found', kiloUserId);
@@ -778,7 +783,15 @@ async function validateUserAuthorization(
     }
   }
 
-  return { user, authFailedResponse: null, isNewUser, organizationId, internalApiUse, botId };
+  return {
+    user,
+    authFailedResponse: null,
+    isNewUser,
+    organizationId,
+    internalApiUse,
+    botId,
+    tokenSource,
+  };
 }
 
 export const isUserBlacklistedByDomain = (existingUser: Pick<User, 'google_user_email'>) =>

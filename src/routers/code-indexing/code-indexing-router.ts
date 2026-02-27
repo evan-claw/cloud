@@ -1,7 +1,7 @@
 import { baseProcedure, createTRPCRouter, type TRPCContext } from '@/lib/trpc/init';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
-import { code_indexing_search, code_indexing_manifest } from '@/db/schema';
+import { code_indexing_search, code_indexing_manifest } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
 import { eq, getTableName, sql, desc } from 'drizzle-orm';
 import {

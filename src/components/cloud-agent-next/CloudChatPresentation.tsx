@@ -16,14 +16,18 @@ import { ChatInput } from './ChatInput';
 import { ErrorBanner } from './ErrorBanner';
 import { MessageErrorBoundary } from './MessageErrorBoundary';
 import { MessageBubble } from './MessageBubble';
+import { AutocommitStatus } from './AutocommitStatus';
+import type { AutocommitStatus as AutocommitStatusType } from './store/atoms';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ArrowDown, RefreshCw } from 'lucide-react';
 import type { AgentMode, SessionConfig, StoredSession, StoredMessage } from './types';
 import { isMessageStreaming } from './types';
 import type { DbSessionDetails, IndexedDbSessionData } from './store/db-session-atoms';
+import type { StandaloneQuestion } from './store/atoms';
 import type { ModelOption } from '@/components/shared/ModelCombobox';
 import type { SlashCommand } from '@/lib/cloud-agent/slash-commands';
+import { QuestionToolCard } from './QuestionToolCard';
 
 // V2: No conversion needed - StoredMessage format is used directly by MessageBubble
 
@@ -160,8 +164,14 @@ export type CloudChatPresentationProps = {
   onMenuClick: () => void;
   onMobileSheetOpenChange: (open: boolean) => void;
 
+  /** Autocommit status to display after messages */
+  autocommitStatus?: AutocommitStatusType | null;
+
   // Old session handling
   isOldSession?: boolean;
+
+  // Standalone question (not associated with a tool call)
+  standaloneQuestion?: StandaloneQuestion | null;
 
   // Input toolbar state and callbacks
   inputMode?: AgentMode;
@@ -225,8 +235,10 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   onToggleSound,
   onMenuClick,
   onMobileSheetOpenChange,
+  autocommitStatus,
   isOldSession = false,
   getChildMessages,
+  standaloneQuestion,
   inputMode,
   inputModel,
   onInputModeChange,
@@ -387,6 +399,21 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
 
                 {/* Dynamic messages - re-render during streaming */}
                 <DynamicMessages messages={dynamicMessages} getChildMessages={getChildMessages} />
+
+                {/* Auto-commit status indicator */}
+                {autocommitStatus && <AutocommitStatus status={autocommitStatus} />}
+
+                {/* Standalone question (not attached to a tool call) */}
+                {standaloneQuestion && (
+                  <div className="my-4 ml-12">
+                    <QuestionToolCard
+                      key={standaloneQuestion.requestId}
+                      questions={standaloneQuestion.questions}
+                      requestId={standaloneQuestion.requestId}
+                      status="running"
+                    />
+                  </div>
+                )}
 
                 {/* Invisible anchor for auto-scroll */}
                 <div ref={messagesEndRef} />

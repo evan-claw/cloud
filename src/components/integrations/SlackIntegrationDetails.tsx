@@ -15,7 +15,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo, useState } from 'react';
-import { useSlackQueries } from './SlackContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc/utils';
 import { IS_DEVELOPMENT } from '@/lib/constants';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import { useModelSelectorList } from '@/app/api/openrouter/hooks';
@@ -31,13 +32,19 @@ export function SlackIntegrationDetails({
   success,
   error,
 }: SlackIntegrationDetailsProps) {
-  const { queries, mutations } = useSlackQueries();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const input = organizationId ? { organizationId } : undefined;
 
   // Fetch Slack installation status
-  const { data: installationData, isLoading, refetch } = queries.getInstallation();
+  const {
+    data: installationData,
+    isLoading,
+    refetch,
+  } = useQuery(trpc.slack.getInstallation.queryOptions(input));
 
   // Get OAuth URL for installation
-  const { data: oauthUrlData } = queries.getOAuthUrl();
+  const { data: oauthUrlData } = useQuery(trpc.slack.getOAuthUrl.queryOptions(input));
 
   // Fetch models for the model selector
   const { data: openRouterModels, isLoading: isLoadingModels } =
@@ -57,6 +64,40 @@ export function SlackIntegrationDetails({
     }
   }, [installationData?.installation?.modelSlug]);
 
+  const uninstallApp = useMutation(
+    trpc.slack.uninstallApp.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.slack.getInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const testConnection = useMutation(trpc.slack.testConnection.mutationOptions());
+
+  const sendTestMessage = useMutation(trpc.slack.sendTestMessage.mutationOptions());
+
+  const updateModel = useMutation(
+    trpc.slack.updateModel.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.slack.getInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const devRemoveDbRowOnly = useMutation(
+    trpc.slack.devRemoveDbRowOnly.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.slack.getInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
   // Show success/error toasts
   useEffect(() => {
     if (success) {
@@ -75,7 +116,7 @@ export function SlackIntegrationDetails({
 
   const handleUninstall = () => {
     if (confirm('Are you sure you want to disconnect Slack?')) {
-      mutations.uninstallApp.mutate(undefined, {
+      uninstallApp.mutate(input, {
         onSuccess: async () => {
           toast.success('Slack disconnected');
           await refetch();
@@ -93,7 +134,7 @@ export function SlackIntegrationDetails({
     if (
       confirm('This will remove the database row but keep the Slack app installed. Are you sure?')
     ) {
-      mutations.devRemoveDbRowOnly?.mutate(undefined, {
+      devRemoveDbRowOnly.mutate(input, {
         onSuccess: async () => {
           toast.success('Database row removed (Slack app still installed)');
           await refetch();
@@ -108,7 +149,7 @@ export function SlackIntegrationDetails({
   };
 
   const handleTestConnection = () => {
-    mutations.testConnection.mutate(undefined, {
+    testConnection.mutate(input, {
       onSuccess: result => {
         if (result.success) {
           toast.success('Connection test successful!');
@@ -127,7 +168,7 @@ export function SlackIntegrationDetails({
   };
 
   const handleSendTestMessage = () => {
-    mutations.sendTestMessage.mutate(undefined, {
+    sendTestMessage.mutate(input, {
       onSuccess: result => {
         if (result.success) {
           toast.success('Test message sent!', {
@@ -149,8 +190,8 @@ export function SlackIntegrationDetails({
 
   const handleModelChange = (modelSlug: string) => {
     setSelectedModel(modelSlug);
-    mutations.updateModel.mutate(
-      { modelSlug },
+    updateModel.mutate(
+      { modelSlug, organizationId },
       {
         onSuccess: result => {
           if (result.success) {
@@ -263,17 +304,17 @@ export function SlackIntegrationDetails({
                 <Button
                   variant="outline"
                   onClick={handleTestConnection}
-                  disabled={mutations.testConnection.isPending}
+                  disabled={testConnection.isPending}
                 >
-                  {mutations.testConnection.isPending ? 'Testing...' : 'Test Connection'}
+                  {testConnection.isPending ? 'Testing...' : 'Test Connection'}
                 </Button>
                 <Button
                   variant="outline"
                   onClick={handleSendTestMessage}
-                  disabled={mutations.sendTestMessage.isPending}
+                  disabled={sendTestMessage.isPending}
                 >
                   <Send className="mr-2 h-4 w-4" />
-                  {mutations.sendTestMessage.isPending ? 'Sending...' : 'Send Test Message'}
+                  {sendTestMessage.isPending ? 'Sending...' : 'Send Test Message'}
                 </Button>
                 <Button
                   variant="outline"
@@ -288,20 +329,20 @@ export function SlackIntegrationDetails({
                 <Button
                   variant="destructive"
                   onClick={handleUninstall}
-                  disabled={mutations.uninstallApp.isPending}
+                  disabled={uninstallApp.isPending}
                 >
-                  {mutations.uninstallApp.isPending ? 'Disconnecting...' : 'Disconnect'}
+                  {uninstallApp.isPending ? 'Disconnecting...' : 'Disconnect'}
                 </Button>
                 {IS_DEVELOPMENT && (
                   <Button
                     variant="outline"
                     onClick={handleDevRemoveDbRowOnly}
-                    disabled={mutations.devRemoveDbRowOnly.isPending}
+                    disabled={devRemoveDbRowOnly.isPending}
                     className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
                     title="Dev only: Remove DB row without revoking Slack token"
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
-                    {mutations.devRemoveDbRowOnly.isPending ? 'Removing...' : 'Dev: Remove DB Only'}
+                    {devRemoveDbRowOnly.isPending ? 'Removing...' : 'Dev: Remove DB Only'}
                   </Button>
                 )}
               </div>

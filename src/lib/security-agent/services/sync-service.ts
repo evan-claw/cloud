@@ -7,7 +7,7 @@
 import { captureException } from '@sentry/nextjs';
 import { trackSecurityAgentFullSync } from '../posthog-tracking';
 import { db } from '@/lib/drizzle';
-import { platform_integrations, agent_configs } from '@/db/schema';
+import { platform_integrations, agent_configs } from '@kilocode/db/schema';
 import { eq, and, isNotNull } from 'drizzle-orm';
 import { fetchAllDependabotAlerts } from '../github/dependabot-api';
 import { hasSecurityReviewPermissions } from '../github/permissions';
@@ -23,7 +23,7 @@ import {
 } from '../core/types';
 import type { Owner } from '@/lib/code-reviews/core';
 import { sentryLogger } from '@/lib/utils.server';
-import { logSecurityAudit, SecurityAuditLogAction } from './audit-log-service';
+import { logSecurityAuditAndWait, SecurityAuditLogAction } from './audit-log-service';
 
 const log = sentryLogger('security-agent:sync', 'info');
 const warn = sentryLogger('security-agent:sync', 'warning');
@@ -81,8 +81,8 @@ export async function syncDependabotAlertsForRepo(params: {
       return result;
     }
 
-    if (fetchResult.status === 'alerts_disabled') {
-      log(`Dependabot alerts disabled for ${repoFullName}, skipping`);
+    if (fetchResult.status === 'alerts_unavailable') {
+      warn(`Dependabot alerts unavailable for ${repoFullName}, skipping`);
       return result;
     }
 
@@ -416,22 +416,25 @@ export async function runFullSync(): Promise<{
         'organizationId' in config.owner
           ? (config.owner.organizationId ?? 'unknown')
           : (config.owner.userId ?? 'unknown');
-      logSecurityAudit({
-        owner: config.owner,
-        actor_id: null,
-        actor_email: null,
-        actor_name: null,
-        action: SecurityAuditLogAction.SyncCompleted,
-        resource_type: 'agent_config',
-        resource_id: ownerId,
-        metadata: {
-          source: 'system',
-          trigger: 'cron',
-          synced: result.synced,
-          errors: result.errors,
-          repoCount: config.repositories.length,
+      await logSecurityAuditAndWait(
+        {
+          owner: config.owner,
+          actor_id: null,
+          actor_email: null,
+          actor_name: null,
+          action: SecurityAuditLogAction.SyncCompleted,
+          resource_type: 'agent_config',
+          resource_id: ownerId,
+          metadata: {
+            source: 'system',
+            trigger: 'cron',
+            synced: result.synced,
+            errors: result.errors,
+            repoCount: config.repositories.length,
+          },
         },
-      });
+        1500
+      );
     } catch (error) {
       totalErrors++;
       captureException(error, {

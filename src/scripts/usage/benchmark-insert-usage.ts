@@ -6,7 +6,7 @@ import { closeAllDrizzleConnections, db } from '@/lib/drizzle';
 import { shutdownPosthog } from '@/lib/posthog';
 import { sql } from 'drizzle-orm';
 import type { UsageMetaData } from '@/lib/processUsage';
-import type { MicrodollarUsage } from '@/db/schema';
+import type { MicrodollarUsage } from '@kilocode/db/schema';
 import stats from './stats.json';
 
 const TOTAL_RECORDS = 100_000;

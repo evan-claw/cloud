@@ -8,6 +8,7 @@
 import { atom } from 'jotai';
 import type { SessionConfig, StoredMessage, Part } from '../types';
 import { isMessageStreaming, isAssistantMessage } from '../types';
+import type { QuestionInfo } from '@/types/opencode.gen';
 
 // ============================================================================
 // Primary State - StoredMessage format
@@ -52,6 +53,26 @@ export const setQuestionRequestIdAtom = atom(
 );
 
 /**
+ * A standalone question from a question.asked event that has no tool.callID.
+ * These are questions raised outside the tool-call flow (e.g. PlanFollowup).
+ * Only one standalone question can be active at a time.
+ */
+export type StandaloneQuestion = {
+  requestId: string;
+  questions: QuestionInfo[];
+};
+
+export const standaloneQuestionAtom = atom<StandaloneQuestion | null>(null);
+
+/** Clear the standalone question only if its requestId matches the resolved one. */
+export const clearStandaloneQuestionAtom = atom(null, (get, set, resolvedRequestId: string) => {
+  const current = get(standaloneQuestionAtom);
+  if (current && current.requestId === resolvedRequestId) {
+    set(standaloneQuestionAtom, null);
+  }
+});
+
+/**
  * Session status from session.status events
  * Can be 'idle', 'busy', or 'retry' with additional metadata
  */
@@ -60,6 +81,18 @@ export const sessionStatusAtom = atom<
   | { type: 'busy' }
   | { type: 'retry'; attempt: number; message: string; next: number }
 >({ type: 'idle' });
+
+/**
+ * Autocommit status — one per execution, transitions in-place.
+ * Reset to null when a new execution starts.
+ */
+export type AutocommitStatus = {
+  status: 'in_progress' | 'completed' | 'failed';
+  message: string;
+  timestamp: string;
+};
+
+export const autocommitStatusAtom = atom<AutocommitStatus | null>(null);
 
 // ============================================================================
 // Common State
@@ -133,6 +166,8 @@ export const clearMessagesAtom = atom(null, (_get, set) => {
   set(messagesMapAtom, new Map());
   set(partsMapAtom, new Map());
   set(questionRequestIdsAtom, new Map());
+  set(autocommitStatusAtom, null);
+  set(standaloneQuestionAtom, null);
 });
 
 // ============================================================================

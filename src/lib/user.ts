@@ -6,7 +6,7 @@ import { captureException, captureMessage } from '@sentry/nextjs';
 import { db } from '@/lib/drizzle';
 import { WORKOS_API_KEY } from '@/lib/config.server';
 import { WorkOS } from '@workos-inc/node';
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import {
   payment_methods,
   kilocode_users,
@@ -46,7 +46,7 @@ import {
   cloud_agent_feedback,
   free_model_usage,
   kilo_pass_scheduled_changes,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
 import type { AuthErrorType } from '@/lib/auth/constants';

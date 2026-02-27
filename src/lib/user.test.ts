@@ -24,7 +24,7 @@ import {
   user_admin_notes,
   magic_link_tokens,
   stytch_fingerprints,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
 import { createTestPaymentMethod } from '@/tests/helpers/payment-method.helper';

@@ -23,7 +23,7 @@ import { SeverityBadge } from './SeverityBadge';
 import { FindingDetailDialog } from './FindingDetailDialog';
 import { DismissFindingDialog, type DismissReason } from './DismissFindingDialog';
 import { cn } from '@/lib/utils';
-import type { SecurityFinding } from '@/db/schema';
+import type { SecurityFinding } from '@kilocode/db/schema';
 
 type AnalysisJobsCardProps = {
   organizationId?: string;

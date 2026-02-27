@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, jest } from '@jest/globals';
 
 import { db, cleanupDbForTest } from '@/lib/drizzle';
-import { kilo_pass_audit_log, kilo_pass_subscriptions } from '@/db/schema';
+import { kilo_pass_audit_log, kilo_pass_subscriptions } from '@kilocode/db/schema';
 import { KiloPassAuditLogResult } from './enums';
 import { KiloPassAuditLogAction } from './enums';
 import { KiloPassCadence } from './enums';

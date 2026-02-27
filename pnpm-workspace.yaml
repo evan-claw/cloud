@@ -1,4 +1,9 @@
+catalog:
+  drizzle-orm: ^0.44.7
+  zod: ^4.3.4
+
 packages:
+  - 'packages/db'
   - 'storybook'
   - 'cloudflare-deploy-infra/builder'
   - 'cloudflare-deploy-infra/dispatcher'
@@ -10,6 +15,7 @@ packages:
   - 'cloud-agent-next'
   - 'cloud-agent-next/wrapper'
   - 'cloudflare-app-builder'
+  - 'cloudflare-images-mcp'
   - 'cloudflare-ai-attribution'
   - 'cloudflare-db-proxy'
   - 'cloudflare-webhook-agent-ingest'

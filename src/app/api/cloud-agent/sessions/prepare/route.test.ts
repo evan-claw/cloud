@@ -17,7 +17,7 @@ import {
   ProfileNotFoundError,
   type MergeProfileConfigurationResult,
 } from '@/lib/agent/profile-session-config';
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 
 jest.mock('@/lib/user.server');
 jest.mock('@/routers/organizations/utils');

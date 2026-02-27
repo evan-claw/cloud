@@ -278,6 +278,7 @@ describe('router sessionId validation', () => {
               SESSION_INGEST: {
                 fetch: vi.fn(),
               } as unknown as TRPCContext['env']['SESSION_INGEST'],
+              R2_BUCKET: {} as TRPCContext['env']['R2_BUCKET'],
               NEXTAUTH_SECRET: 'test-secret',
             },
           };
@@ -619,6 +620,7 @@ describe('router sessionId validation', () => {
             SESSION_INGEST: {
               fetch: vi.fn(),
             } as unknown as TRPCContext['env']['SESSION_INGEST'],
+            R2_BUCKET: {} as TRPCContext['env']['R2_BUCKET'],
             NEXTAUTH_SECRET: 'test-secret',
           },
         };

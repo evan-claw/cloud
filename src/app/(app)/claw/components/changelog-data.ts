@@ -11,6 +11,34 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-02-27',
+    description:
+      'Updated OpenClaw to 2026.2.26. Added 1Password CLI, build-essential, python3, ffmpeg, tmux, and mcporter to the default image.',
+    category: 'feature',
+    deployHint: 'redeploy_suggested',
+  },
+  {
+    date: '2026-02-26',
+    description:
+      'Added Restore Default Config: rewrite openclaw.json from environment variables and restart the gateway without a full redeploy. Available in Settings > Danger Zone.',
+    category: 'feature',
+    deployHint: 'redeploy_suggested',
+  },
+  {
+    date: '2026-02-26',
+    description:
+      'Updated OpenClaw to the latest version. Changing the default model in the dashboard now takes effect immediately without requiring a redeploy.',
+    category: 'feature',
+    deployHint: 'redeploy_required',
+  },
+  {
+    date: '2026-02-26',
+    description:
+      'Added ripgrep (rg), GitHub CLI (gh), rsync, zstd, and ClawHub CLI to the default image.',
+    category: 'feature',
+    deployHint: null,
+  },
+  {
     date: '2026-02-25',
     description:
       'Adjust tools.exec.security from deny to allowlist. Asking the agent to exec commands will trigger approval prompts in the Control UI.',

@@ -11,7 +11,7 @@ import {
   user_admin_notes,
   referral_codes,
   organization_memberships,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import {
   ilike,
   or,

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { KILOCLAW_API_URL } from '@/lib/config.server';
+import { KiloClawApiError } from './kiloclaw-internal-client';
 import type { UserConfigResponse, PlatformStatusResponse, RestartGatewayResponse } from './types';
 
 /**
@@ -31,7 +32,11 @@ export class KiloClawUserClient {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`KiloClaw API error (${res.status}): ${body}`);
+      console.error(
+        `KiloClaw API error (${res.status}) ${options?.method ?? 'GET'} ${path}:`,
+        body
+      );
+      throw new KiloClawApiError(res.status);
     }
 
     return res.json() as Promise<T>;
@@ -45,7 +50,10 @@ export class KiloClawUserClient {
     return this.request('/api/kiloclaw/status');
   }
 
-  async restartGateway(): Promise<RestartGatewayResponse> {
-    return this.request('/api/admin/gateway/restart', { method: 'POST' });
+  async restartGateway(options?: { imageTag?: string }): Promise<RestartGatewayResponse> {
+    return this.request('/api/admin/gateway/restart', {
+      method: 'POST',
+      body: options?.imageTag ? JSON.stringify({ imageTag: options.imageTag }) : undefined,
+    });
   }
 }

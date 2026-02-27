@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { createReadStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { db } from '@/lib/drizzle';
-import { microdollar_usage, microdollar_usage_metadata } from '@/db/schema';
+import { microdollar_usage, microdollar_usage_metadata } from '@kilocode/db/schema';
 import { eq, getTableColumns } from 'drizzle-orm';
 import { findUserById } from './user';
 import { Readable } from 'node:stream';

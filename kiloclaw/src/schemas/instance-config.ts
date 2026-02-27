@@ -1,15 +1,14 @@
 import { z } from 'zod';
 
 export const EncryptedEnvelopeSchema = z.object({
-  encryptedData: z.string(),
-  encryptedDEK: z.string(),
+  // AES-256-GCM ciphertext: 16-byte IV + ciphertext + 16-byte tag, base64-encoded.
+  // 8 KiB is generous for token values (typical bot tokens are < 200 bytes).
+  encryptedData: z.string().max(8192),
+  // RSA-2048 OAEP ciphertext of the 32-byte DEK, base64-encoded (~344 chars).
+  encryptedDEK: z.string().max(1024),
   algorithm: z.literal('rsa-aes-256-gcm'),
   version: z.literal(1),
 });
-
-export type ModelEntry = { id: string; name: string };
-
-const ModelEntrySchema = z.object({ id: z.string(), name: z.string() });
 
 const MachineSizeSchema = z.object({
   cpus: z.number().int().min(1).max(8),
@@ -38,7 +37,6 @@ export const InstanceConfigSchema = z.object({
   kilocodeApiKey: z.string().nullable().optional(),
   kilocodeApiKeyExpiresAt: z.string().nullable().optional(),
   kilocodeDefaultModel: z.string().nullable().optional(),
-  kilocodeModels: z.array(ModelEntrySchema).nullable().optional(),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -100,7 +98,6 @@ export const PersistedStateSchema = z.object({
   kilocodeApiKey: z.string().nullable().default(null),
   kilocodeApiKeyExpiresAt: z.string().nullable().default(null),
   kilocodeDefaultModel: z.string().nullable().default(null),
-  kilocodeModels: z.array(ModelEntrySchema).nullable().default(null),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -124,6 +121,8 @@ export const PersistedStateSchema = z.object({
   // Two-phase destroy: IDs pending deletion on Fly. Cleared once Fly confirms.
   pendingDestroyMachineId: z.string().nullable().default(null),
   pendingDestroyVolumeId: z.string().nullable().default(null),
+  // For stale auto-destroy only: defer DO state wipe until Postgres row is marked destroyed.
+  pendingPostgresMarkOnFinalize: z.boolean().default(false),
   // Cooldown: last time we attempted metadata-based machine recovery from Fly.
   // Prevents hammering listMachines on every alarm when there's genuinely nothing.
   lastMetadataRecoveryAt: z.number().nullable().default(null),

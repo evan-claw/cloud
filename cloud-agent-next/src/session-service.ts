@@ -498,6 +498,10 @@ export class SessionService {
     // MCP configs are already in CLI-native format — pass through directly
     if (mcpServers && Object.keys(mcpServers).length > 0) {
       configContent.mcp = mcpServers;
+      logger.info('MCP config merged into KILO_CONFIG_CONTENT', {
+        mcpServerNames: Object.keys(mcpServers),
+        mcpServerCount: Object.keys(mcpServers).length,
+      });
     }
     if (kilocodeModel && kilocodeModel.trim()) {
       const normalizedModel = kilocodeModel.startsWith('kilo/')

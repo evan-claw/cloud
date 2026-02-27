@@ -61,7 +61,7 @@ export function InstanceTab({
   status: KiloClawDashboardStatus;
   gatewayStatus: GatewayProcessStatusResponse | undefined;
   gatewayLoading: boolean;
-  gatewayError: { message: string } | null;
+  gatewayError: { message: string; data?: { code?: string } | null } | null;
 }) {
   const isRunning = status.status === 'running';
 
@@ -83,12 +83,12 @@ export function InstanceTab({
   }
 
   if (gatewayError) {
-    const isControllerError = gatewayError.message.includes('GatewayControllerError');
+    const isControllerUnavailable = gatewayError.data?.code === 'NOT_FOUND';
     return (
       <p className="text-muted-foreground text-sm">
-        {isControllerError
+        {isControllerUnavailable
           ? 'Gateway control unavailable. Redeploy to update instance to use this feature.'
-          : `Failed to load gateway status: ${gatewayError.message}`}
+          : 'Failed to load gateway status.'}
       </p>
     );
   }

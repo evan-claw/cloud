@@ -28,17 +28,16 @@ import {
   type AiSdkReasoningPart,
 } from './reasoning-provider-metadata';
 import type { ChatCompletionChunk, ChatCompletionChunkChoice } from './schemas';
-import { temp_phase, type CustomLlm } from '@/db/schema';
+import { temp_phase, type CustomLlm } from '@kilocode/db/schema';
 import type { OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai';
 import { createOpenAI } from '@ai-sdk/openai';
-import { createXai } from '@ai-sdk/xai';
-import type { XaiLanguageModelResponsesOptions } from '@ai-sdk/xai';
 import { debugSaveLog, inStreamDebugMode } from '@/lib/debugUtils';
 import { ReasoningFormat } from '@/lib/custom-llm/format';
 import type OpenAI from 'openai';
 import crypto from 'crypto';
 import { db } from '@/lib/drizzle';
 import { inArray } from 'drizzle-orm';
+import { ReasoningEffortSchema, VerbositySchema } from '@/lib/organizations/model-settings';
 
 function convertMessages(messages: OpenRouterChatCompletionsInput): ModelMessage[] {
   const toolNameByCallId = new Map<string, string>();
@@ -505,6 +504,7 @@ function createStreamPartConverter(userId: string, taskId: string | undefined, m
         responseId = part.response.id;
         const cacheReadTokens = part.usage.inputTokenDetails.cacheReadTokens;
         const cacheWriteTokens = part.usage.inputTokenDetails.cacheWriteTokens;
+        const reasoningTokens = part.usage.outputTokenDetails.reasoningTokens;
         return {
           id: responseId,
           model,
@@ -523,6 +523,13 @@ function createStreamPartConverter(userId: string, taskId: string | undefined, m
                   prompt_tokens_details: {
                     cached_tokens: cacheReadTokens ?? 0,
                     ...(cacheWriteTokens != null && { cache_write_tokens: cacheWriteTokens }),
+                  },
+                }
+              : {}),
+            ...(reasoningTokens != null
+              ? {
+                  completion_tokens_details: {
+                    reasoning_tokens: reasoningTokens,
                   },
                 }
               : {}),
@@ -559,7 +566,10 @@ function buildCommonParams(
   request: OpenRouterChatCompletionRequest,
   isLegacyExtension: boolean
 ) {
-  const verbosity = customLlm.verbosity ?? request.verbosity ?? undefined;
+  const verbosity = VerbositySchema.safeParse(request.verbosity ?? customLlm.verbosity).data;
+  const reasoningEffort = ReasoningEffortSchema.safeParse(
+    request.reasoning?.effort ?? customLlm.reasoning_effort
+  ).data;
   return {
     messages,
     tools: convertTools(request.tools),
@@ -576,12 +586,10 @@ function buildCommonParams(
         disableParallelToolUse: request.parallel_tool_calls === false || isLegacyExtension,
       } satisfies AnthropicProviderOptions,
       openai: {
-        forceReasoning:
-          (customLlm.reasoning_effort && customLlm.reasoning_effort !== 'none') || undefined,
+        forceReasoning: (reasoningEffort !== 'none' && customLlm.force_reasoning) || undefined,
         reasoningSummary: 'auto',
         textVerbosity: verbosity === 'max' ? 'high' : verbosity,
-        reasoningEffort:
-          customLlm.reasoning_effort ?? request.reasoning?.effort ?? request.reasoning_effort,
+        reasoningEffort: reasoningEffort,
         include: ['reasoning.encrypted_content'],
         parallelToolCalls: (request.parallel_tool_calls ?? true) && !isLegacyExtension,
         store: false,
@@ -589,9 +597,6 @@ function buildCommonParams(
         safetyIdentifier: request.safety_identifier,
         user: request.user,
       } satisfies OpenAILanguageModelResponsesOptions,
-      xai: {
-        store: false,
-      } satisfies XaiLanguageModelResponsesOptions,
     },
   };
 }
@@ -644,6 +649,13 @@ function convertGenerateResultToResponse(
             },
           }
         : {}),
+      ...(result.usage.outputTokenDetails.reasoningTokens != null
+        ? {
+            completion_tokens_details: {
+              reasoning_tokens: result.usage.outputTokenDetails.reasoningTokens,
+            },
+          }
+        : {}),
     },
   };
 }
@@ -660,18 +672,12 @@ function createModel(customLlm: CustomLlm, userId: string, taskId: string | unde
     const openai = createOpenAI({
       apiKey: customLlm.api_key,
       baseURL: customLlm.base_url,
-      fetch: customLlm.base_url.startsWith('https://api.openai.com/v1')
-        ? responseCreateParamsPatchFetch(userId, taskId)
-        : undefined,
+      fetch:
+        customLlm.base_url === 'https://api.openai.com/v1'
+          ? responseCreateParamsPatchFetch(userId, taskId)
+          : undefined,
     });
     return openai(customLlm.internal_id);
-  }
-  if (customLlm.provider === 'xai') {
-    const xai = createXai({
-      apiKey: customLlm.api_key,
-      baseURL: customLlm.base_url,
-    });
-    return xai.responses(customLlm.internal_id);
   }
   throw new Error(`Unknown provider: ${customLlm.provider}`);
 }
@@ -736,6 +742,11 @@ function responseCreateParamsPatchFetch(userId: string, taskId: string | undefin
             const phase = phaseByKey.get(keyByMessage.get(message) ?? '');
             if (phase) {
               Object.assign(message, { phase });
+            } else {
+              console.error(
+                `[responseCreateParamsPatchFetch] failed to find phase param for userId: ${userId}, taskId: ${taskId}, message: `,
+                message
+              );
             }
           }
 

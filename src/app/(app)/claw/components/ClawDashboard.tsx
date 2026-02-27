@@ -1,8 +1,13 @@
 'use client';
 
+import { useCallback, useState } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
-import { useKiloClawGatewayStatus, useKiloClawMutations } from '@/hooks/useKiloClaw';
+import {
+  useKiloClawGatewayStatus,
+  useKiloClawMutations,
+  useKiloClawServiceDegraded,
+} from '@/hooks/useKiloClaw';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -36,6 +41,17 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
     error: gatewayError,
   } = useKiloClawGatewayStatus(isRunning);
 
+  const { data: isServiceDegraded } = useKiloClawServiceDegraded();
+
+  const [dirtyChannels, setDirtyChannels] = useState<Set<string>>(new Set());
+
+  const onChannelsChanged = useCallback((channelType: string) => {
+    setDirtyChannels(prev => new Set([...prev, channelType]));
+  }, []);
+  const onRedeploySuccess = useCallback(() => {
+    setDirtyChannels(new Set());
+  }, []);
+
   return (
     <div className="container m-auto flex w-full max-w-[1140px] flex-col gap-6 p-4 md:p-6">
       <ClawHeader
@@ -46,26 +62,28 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         gatewayReady={gatewayStatus?.state === 'running'}
       />
 
-      <Alert variant="warning">
-        <TriangleAlert className="size-4" />
-        <AlertDescription className="flex flex-col">
-          <span>
-            KiloClaw ended up being really popular! We&apos;re working on getting additional
-            capacity. If you have trouble starting a machine, please try again in a few minutes.
-          </span>
-          <span className="mt-2 flex flex-row gap-1">
-            <span>You can also</span>
-            <a
-              href="https://status.kilo.ai/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:opacity-80"
-            >
-              check our status page for live updates
-            </a>
-          </span>
-        </AlertDescription>
-      </Alert>
+      {isServiceDegraded && (
+        <Alert variant="warning">
+          <TriangleAlert className="size-4" />
+          <AlertDescription className="flex flex-col">
+            <span>
+              KiloClaw ended up being really popular! We&apos;re working on getting additional
+              capacity. If you have trouble starting a machine, please try again in a few minutes.
+            </span>
+            <span className="mt-2 flex flex-row gap-1">
+              <span>You can also</span>
+              <a
+                href="https://status.kilo.ai/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:opacity-80"
+              >
+                check our status page for live updates
+              </a>
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card className="mt-6">
         {!instanceStatus ? (
@@ -75,7 +93,11 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         ) : (
           <>
             <CardContent className="border-b p-5">
-              <InstanceControls status={instanceStatus} mutations={mutations} />
+              <InstanceControls
+                status={instanceStatus}
+                mutations={mutations}
+                onRedeploySuccess={onRedeploySuccess}
+              />
             </CardContent>
             <Tabs defaultValue="instance">
               <div className="px-5">
@@ -104,7 +126,12 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
                   />
                 </TabsContent>
                 <TabsContent value="settings" className="mt-0">
-                  <SettingsTab status={instanceStatus} mutations={mutations} />
+                  <SettingsTab
+                    status={instanceStatus}
+                    mutations={mutations}
+                    onChannelsChanged={onChannelsChanged}
+                    dirtyChannels={dirtyChannels}
+                  />
                 </TabsContent>
               </CardContent>
             </Tabs>

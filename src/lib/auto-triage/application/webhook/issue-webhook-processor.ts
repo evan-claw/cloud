@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { captureException } from '@sentry/nextjs';
-import type { PlatformIntegration } from '@/db/schema';
+import type { PlatformIntegration } from '@kilocode/db/schema';
 import { logExceptInTest } from '@/lib/utils.server';
 import { createTriageTicket, findExistingTicket } from '@/lib/auto-triage/db/triage-tickets';
 import { getAgentConfigForOwner } from '@/lib/agent-config/db/agent-configs';

@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { db } from '@/lib/drizzle';
-import { kilocode_users, organization_memberships, type User } from '@/db/schema';
+import { kilocode_users, organization_memberships, type User } from '@kilocode/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';

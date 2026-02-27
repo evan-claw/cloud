@@ -6,7 +6,7 @@ import { getUserFromAuth } from '@/lib/user.server';
 import { findUserById } from '@/lib/user';
 import { forceImmediateExpirationRecomputation } from '@/lib/balanceCache';
 import { insertUsageRecord, type UsageMetaData } from '@/lib/processUsage';
-import type { MicrodollarUsage } from '@/db/schema';
+import type { MicrodollarUsage } from '@kilocode/db/schema';
 
 export async function POST(
   request: NextRequest,
