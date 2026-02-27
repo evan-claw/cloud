@@ -445,7 +445,9 @@ export default {
           env.KV_CLAW_CACHE,
           env.OPENCLAW_VERSION,
           'default', // variant hardcoded day 1
-          env.FLY_IMAGE_TAG
+          env.FLY_IMAGE_TAG,
+          env.FLY_IMAGE_DIGEST ?? null,
+          env.HYPERDRIVE?.connectionString
         )
       );
     }

@@ -8,4 +8,4 @@ export {
   type WorkerDb,
 } from './client';
 export { computeDatabaseUrl, getDatabaseClientConfig } from './database-url';
-export { sql } from 'drizzle-orm';
+export { sql, ne } from 'drizzle-orm';
