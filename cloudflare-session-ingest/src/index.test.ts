@@ -17,7 +17,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-vi.mock('./db/kysely', () => ({
+vi.mock('./db/drizzle', () => ({
   getDb: vi.fn(),
 }));
 
@@ -26,7 +26,7 @@ vi.mock('./dos/SessionIngestDO', () => ({
 }));
 
 import app from './index';
-import { getDb } from './db/kysely';
+import { getDb } from './db/drizzle';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
 
 type TestBindings = {
@@ -38,18 +38,19 @@ type TestBindings = {
 };
 
 function makeDbFakes() {
-  const selectExecuteTakeFirst = vi.fn<() => Promise<unknown>>(async () => undefined);
+  const selectResult = vi.fn<() => Promise<unknown[]>>(async () => []);
   const select = {
-    select: vi.fn(() => select),
+    from: vi.fn(() => select),
     where: vi.fn(() => select),
-    executeTakeFirst: selectExecuteTakeFirst,
+    limit: vi.fn(() => select),
+    then: vi.fn((resolve: (v: unknown) => unknown) => resolve(selectResult())),
   };
 
   const db = {
-    selectFrom: vi.fn(() => select),
+    select: vi.fn(() => select),
   };
 
-  return { db, selectExecuteTakeFirst };
+  return { db, selectResult };
 }
 
 const defaultEnv: TestBindings = {
@@ -71,9 +72,9 @@ describe('public session route', () => {
   });
 
   it('returns 404 when public_id not found', async () => {
-    const { db, selectExecuteTakeFirst } = makeDbFakes();
+    const { db, selectResult } = makeDbFakes();
     vi.mocked(getDb).mockReturnValue(db as never);
-    selectExecuteTakeFirst.mockResolvedValueOnce(undefined);
+    selectResult.mockResolvedValueOnce([]);
 
     const res = await app.request('/session/11111111-1111-4111-8111-111111111111', {}, defaultEnv);
 
@@ -81,12 +82,14 @@ describe('public session route', () => {
   });
 
   it('returns DO snapshot json with content-type', async () => {
-    const { db, selectExecuteTakeFirst } = makeDbFakes();
+    const { db, selectResult } = makeDbFakes();
     vi.mocked(getDb).mockReturnValue(db as never);
-    selectExecuteTakeFirst.mockResolvedValueOnce({
-      session_id: 'ses_12345678901234567890123456',
-      kilo_user_id: 'usr_123',
-    });
+    selectResult.mockResolvedValueOnce([
+      {
+        session_id: 'ses_12345678901234567890123456',
+        kilo_user_id: 'usr_123',
+      },
+    ]);
 
     const stub = {
       getAll: vi.fn(async () => '{"ok":true}'),

@@ -1,5 +1,8 @@
+import { eq, and } from 'drizzle-orm';
+import { cli_sessions_v2 } from '@kilocode/db/schema';
+
 import type { Env } from '../env';
-import { getDb } from '../db/kysely';
+import { getDb } from '../db/drizzle';
 import { getSessionIngestDO } from '../dos/SessionIngestDO';
 import { withDORetry } from '../util/do-retry';
 
@@ -19,14 +22,15 @@ export async function getSessionExport(
 ): Promise<string | null> {
   const db = getDb(env.HYPERDRIVE);
 
-  const session = await db
-    .selectFrom('cli_sessions_v2')
-    .select(['session_id'])
-    .where('session_id', '=', sessionId)
-    .where('kilo_user_id', '=', kiloUserId)
-    .executeTakeFirst();
+  const rows = await db
+    .select({ session_id: cli_sessions_v2.session_id })
+    .from(cli_sessions_v2)
+    .where(
+      and(eq(cli_sessions_v2.session_id, sessionId), eq(cli_sessions_v2.kilo_user_id, kiloUserId))
+    )
+    .limit(1);
 
-  if (!session) {
+  if (!rows[0]) {
     return null;
   }
 
