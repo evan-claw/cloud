@@ -177,7 +177,7 @@ const KILOCLAW_STATUS_PAGE_RESOURCE_ID = '8737418';
 async function fetchKiloClawServiceStatus(): Promise<boolean> {
   const response = await fetch('https://status.kilo.ai/index.json');
   if (!response.ok) {
-    // Fail closed: hide the banner if we can't fetch status
+    // Default: hide the banner if we can't fetch status
     return false;
   }
   const data = await response.json();
