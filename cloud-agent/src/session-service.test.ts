@@ -137,6 +137,7 @@ describe('SessionService', () => {
         'code',
         sessionId,
         undefined,
+        undefined,
         undefined
       );
       expect(sandboxCreateSession).toHaveBeenCalledWith({
@@ -260,6 +261,7 @@ describe('SessionService', () => {
         'org',
         'token',
         'architect',
+        undefined,
         undefined,
         undefined
       );
@@ -2444,6 +2446,7 @@ describe('SessionService', () => {
         'token',
         'code',
         sessionId,
+        undefined,
         undefined,
         undefined
       );

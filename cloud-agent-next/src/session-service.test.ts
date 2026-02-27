@@ -1150,6 +1150,41 @@ describe('SessionService', () => {
         expect(config.permission.question).toBe('deny');
       }
     );
+
+    it('should include read-only command guard policy for code-review sessions', async () => {
+      const { sandbox, sandboxCreateSession } = setupForPlatformTest();
+      const sessionId: SessionId = 'agent_code_review_policy_test';
+      mockedSetupWorkspace.mockResolvedValue({
+        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+        sessionHome: `/home/${sessionId}`,
+      });
+
+      const service = new SessionService();
+      await service.initiate({
+        sandbox,
+        sandboxId: 'org__user',
+        orgId: 'org',
+        userId: 'user',
+        sessionId,
+        kilocodeToken: 'token',
+        kilocodeModel: 'test-model',
+        githubRepo: 'acme/repo',
+        env: mockEnv,
+        createdOnPlatform: 'code-review',
+      });
+
+      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        autoApproval?: {
+          execute?: {
+            denied?: string[];
+          };
+        };
+      };
+
+      expect(configContent.autoApproval?.execute?.denied).toContain('git commit');
+      expect(configContent.autoApproval?.execute?.denied).toContain('gh pr merge');
+    });
   });
 
   describe('GH_TOKEN Auto-Setting', () => {
