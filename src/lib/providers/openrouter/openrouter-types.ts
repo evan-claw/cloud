@@ -194,7 +194,7 @@ export const OpenRouterAnalytics = z.record(z.string(), OpenRouterAnalyticsEntry
 // Categories
 export type OpenRouterCategoryEntry = z.infer<typeof OpenRouterCategoryEntry>;
 export const OpenRouterCategoryEntry = z.object({
-  id: z.number(),
+  id: z.number().optional(),
   date: z.string(),
   model: z.string(),
   category: z.string(),
