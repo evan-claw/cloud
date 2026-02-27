@@ -5,7 +5,7 @@ import * as slackService from '@/lib/integrations/slack-service';
 import { TRPCError } from '@trpc/server';
 import {
   resolveOwner,
-  ensureIntegrationAccess,
+  resolveAuthorizedOwner,
   optionalOrgInput,
 } from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
@@ -55,8 +55,7 @@ export const slackRouter = createTRPCRouter({
 
   // Uninstall Slack integration
   uninstallApp: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     const result = await slackService.uninstallApp(owner);
 
     if (input?.organizationId) {
@@ -100,8 +99,7 @@ export const slackRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      await ensureIntegrationAccess(ctx, input.organizationId);
-      const owner = resolveOwner(ctx, input.organizationId);
+      const owner = await resolveAuthorizedOwner(ctx, input.organizationId);
       const result = await slackService.updateModel(owner, input.modelSlug);
 
       if (input.organizationId) {
@@ -126,8 +124,7 @@ export const slackRouter = createTRPCRouter({
         message: 'This endpoint is only available in development mode',
       });
     }
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     return slackService.removeDbRowOnly(owner);
   }),
 });

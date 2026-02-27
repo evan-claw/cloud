@@ -14,7 +14,7 @@ import {
 import { TRPCError } from '@trpc/server';
 import {
   resolveOwner,
-  ensureIntegrationAccess,
+  resolveAuthorizedOwner,
   optionalOrgInput,
 } from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
@@ -100,8 +100,7 @@ export const githubAppsRouter = createTRPCRouter({
 
   // Uninstall GitHub App
   uninstallApp: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     const result = await githubAppsService.uninstallApp(
       owner,
       ctx.user.id,

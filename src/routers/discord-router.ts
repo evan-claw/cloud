@@ -5,7 +5,7 @@ import { createOAuthState } from '@/lib/integrations/oauth-state';
 import { TRPCError } from '@trpc/server';
 import {
   resolveOwner,
-  ensureIntegrationAccess,
+  resolveAuthorizedOwner,
   optionalOrgInput,
 } from '@/lib/integrations/resolve-owner';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
@@ -56,8 +56,7 @@ export const discordRouter = createTRPCRouter({
 
   // Uninstall Discord integration
   uninstallApp: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     const result = await discordService.uninstallApp(owner);
 
     if (input?.organizationId) {
@@ -91,8 +90,7 @@ export const discordRouter = createTRPCRouter({
         message: 'This endpoint is only available in development mode',
       });
     }
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     return discordService.removeDbRowOnly(owner);
   }),
 });
