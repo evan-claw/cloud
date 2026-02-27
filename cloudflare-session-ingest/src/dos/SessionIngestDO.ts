@@ -338,7 +338,22 @@ export class SessionIngestDO extends DurableObject<Env> {
     const closeReason = (meta['closeReason'] ?? 'abandoned') as TerminationReason;
     const ingestVersion = Number(meta['ingestVersion'] ?? '0') || 0;
 
-    await this.emitSessionMetrics(kiloUserId, sessionId, closeReason, ingestVersion);
+    // DO alarm exceptions don't populate the Exceptions array in logpush traces,
+    // so without this catch we get outcome=exception with zero diagnostics.
+    try {
+      await this.emitSessionMetrics(kiloUserId, sessionId, closeReason, ingestVersion);
+    } catch (error) {
+      console.error('SessionIngestDO alarm failed', {
+        sessionId,
+        kiloUserId,
+        closeReason,
+        ingestVersion,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      throw error;
+    }
   }
 
   async clear(): Promise<void> {
