@@ -5,7 +5,7 @@ import * as gitlabService from '@/lib/integrations/gitlab-service';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import {
   resolveOwner,
-  ensureIntegrationAccess,
+  resolveAuthorizedOwner,
   optionalOrgInput,
 } from '@/lib/integrations/resolve-owner';
 import { validateGitLabInstance } from '@/lib/integrations/platforms/gitlab/adapter';
@@ -108,8 +108,7 @@ export const gitlabRouter = createTRPCRouter({
    * Works for both user and org contexts via optional organizationId.
    */
   disconnect: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
-    await ensureIntegrationAccess(ctx, input?.organizationId);
-    const owner = resolveOwner(ctx, input?.organizationId);
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
     const integration = await gitlabService.getGitLabIntegration(owner);
 
     if (!integration) {
