@@ -248,7 +248,21 @@
         "include_reasoning"
       ],
       "default_parameters": {},
-      "preferredIndex": 13
+      "preferredIndex": 13,
+      "opencode": {
+        "variants": {
+          "instant": {
+            "reasoning": {
+              "enabled": false
+            }
+          },
+          "thinking": {
+            "reasoning": {
+              "enabled": true
+            }
+          }
+        }
+      }
     },
     {
       "id": "anthropic/claude-sonnet-4",
@@ -460,6 +474,40 @@
           "edit_file",
           "write_to_file"
         ]
+      },
+      "opencode": {
+        "variants": {
+          "none": {
+            "reasoning": {
+              "enabled": false,
+              "effort": "none"
+            }
+          },
+          "low": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "low"
+            }
+          },
+          "medium": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "medium"
+            }
+          },
+          "high": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "high"
+            }
+          },
+          "xhigh": {
+            "reasoning": {
+              "enabled": true,
+              "effort": "xhigh"
+            }
+          }
+        }
       }
     },
     {
