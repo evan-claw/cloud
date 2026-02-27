@@ -19,8 +19,6 @@ import { getWorkerDb } from '@kilocode/db/client';
 import { getSessionIngestDO } from '../dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from '../dos/SessionAccessCacheDO';
 
-const getDb = getWorkerDb;
-
 type HyperdriveBinding = { connectionString: string };
 
 type TestBindings = {
@@ -262,7 +260,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest updates platform and orgId when changed', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     const sessionCache = {
       has: vi.fn(async () => true),
@@ -311,7 +309,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest updates git_url and git_branch when changed', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     const sessionCache = {
       has: vi.fn(async () => true),
@@ -365,7 +363,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest updates parent_session_id when changed', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     // Parent existence check: select returns a match.
     fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' }]);
@@ -410,7 +408,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest returns 400 when parent_session_id is self', async () => {
     const { db } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     const sessionCache = {
       has: vi.fn(async () => true),
@@ -450,7 +448,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest returns 404 when parent_session_id is missing', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     const sessionCache = {
       has: vi.fn(async () => true),
@@ -493,7 +491,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest returns 404 on cache miss + missing session', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     // Session existence check fails — returns empty array.
     fns.selectResult.mockResolvedValueOnce([]);
 
@@ -521,7 +519,7 @@ describe('api routes', () => {
 
   it('GET /session/:sessionId/export returns 400 for invalid sessionId', async () => {
     const { db } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     const app = makeApiApp();
     const invalid = 'not-a-session';
@@ -538,7 +536,7 @@ describe('api routes', () => {
 
   it('GET /session/:sessionId/export returns 404 when session missing', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     // Session existence check returns empty.
     fns.selectResult.mockResolvedValueOnce([]);
 
@@ -556,7 +554,7 @@ describe('api routes', () => {
 
   it('GET /session/:sessionId/export returns DO payload for valid session', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
 
     const payload = JSON.stringify({ success: true, events: [] });
@@ -583,7 +581,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/ingest backfills cache on cache miss + existing session', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
 
     const sessionCache = {
@@ -620,7 +618,7 @@ describe('api routes', () => {
 
   it('DELETE /session/:sessionId revokes cache, clears DO, and deletes row', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     // Ownership check
     fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
     // Recursive CTE
@@ -658,7 +656,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/share returns existing public_id when already shared', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     fns.selectResult.mockResolvedValueOnce([
       {
         session_id: 'ses_12345678901234567890123456',
@@ -683,7 +681,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/share sets public_id when missing', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     // First select: not shared yet
     fns.selectResult.mockResolvedValueOnce([
@@ -713,7 +711,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/share returns existing public_id when update is raced', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
 
     // First select: not shared yet
     fns.selectResult.mockResolvedValueOnce([
@@ -748,7 +746,7 @@ describe('api routes', () => {
 
   it('POST /session/:sessionId/unshare clears public_id when session exists', async () => {
     const { db, fns } = makeDbFakes();
-    vi.mocked(getDb).mockReturnValue(db);
+    vi.mocked(getWorkerDb).mockReturnValue(db);
     fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
 
     const app = makeApiApp();

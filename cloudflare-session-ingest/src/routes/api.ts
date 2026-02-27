@@ -93,11 +93,11 @@ api.delete('/session/:sessionId', async c => {
   const treeResult = await db.execute<{ session_id: string }>(sql`
     WITH RECURSIVE tree AS (
       SELECT session_id, parent_session_id, kilo_user_id, 0 AS depth, ARRAY[session_id] AS path
-      FROM cli_sessions_v2
+      FROM ${cli_sessions_v2}
       WHERE session_id = ${parsed.data} AND kilo_user_id = ${kiloUserId}
       UNION ALL
       SELECT c.session_id, c.parent_session_id, c.kilo_user_id, t.depth + 1, t.path || c.session_id
-      FROM cli_sessions_v2 c
+      FROM ${cli_sessions_v2} c
       INNER JOIN tree t ON c.parent_session_id = t.session_id AND c.kilo_user_id = t.kilo_user_id
       WHERE NOT (c.session_id = ANY(t.path)) AND t.depth < 10
     )
