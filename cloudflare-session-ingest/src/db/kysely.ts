@@ -27,8 +27,13 @@ export type CliSessionsV2Table = {
   updated_at: Generated<string>;
 };
 
+export type KilocodeUsersTable = {
+  id: string;
+};
+
 export type Database = {
   cli_sessions_v2: CliSessionsV2Table;
+  kilocode_users: KilocodeUsersTable;
 };
 
 /**
