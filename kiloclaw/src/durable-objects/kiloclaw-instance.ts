@@ -814,9 +814,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     }
 
+    if (!success) {
+      console.error('[DO] pairing approve failed:', result.stderr || result.stdout);
+    }
+
     return {
       success,
-      message: success ? 'Pairing approved' : result.stderr || result.stdout || 'Approval failed',
+      message: success ? 'Pairing approved' : 'Approval failed',
     };
   }
 
@@ -953,11 +957,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     }
 
+    if (!success) {
+      console.error('[DO] device pairing approve failed:', result.stderr || result.stdout);
+    }
+
     return {
       success,
-      message: success
-        ? 'Device pairing approved'
-        : result.stderr || result.stdout || 'Approval failed',
+      message: success ? 'Device pairing approved' : 'Approval failed',
     };
   }
 
