@@ -171,3 +171,14 @@ export function useKiloClawMutations() {
     ),
   };
 }
+
+/** Returns true when KiloClaw is experiencing issues (not "operational"). */
+export function useKiloClawServiceDegraded() {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.serviceDegraded.queryOptions(undefined, {
+      staleTime: 60_000,
+      refetchInterval: 60_000,
+    })
+  );
+}
