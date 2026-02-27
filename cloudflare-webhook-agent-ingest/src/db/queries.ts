@@ -8,32 +8,31 @@ import {
   agent_environment_profile_commands,
 } from '@kilocode/db/schema';
 import { eq, and, isNull, asc } from 'drizzle-orm';
+import * as z from 'zod';
 import { logger } from '../util/logger.js';
 
 export { getWorkerDb, type WorkerDb };
 
-export type UserForToken = {
-  id: string;
-  blocked_reason: string | null;
-  api_token_pepper: string | null;
-};
+export type UserForToken = Pick<
+  typeof kilocode_users.$inferSelect,
+  'id' | 'blocked_reason' | 'api_token_pepper'
+>;
 
 export type BotUserForToken = {
   id: string;
   api_token_pepper: string;
 };
 
+const encryptedSecretSchema = z.object({
+  encryptedData: z.string(),
+  encryptedDEK: z.string(),
+  algorithm: z.literal('rsa-aes-256-gcm'),
+  version: z.literal(1),
+});
+
 export type ResolvedProfileConfig = {
   envVars: Record<string, string>;
-  encryptedSecrets: Record<
-    string,
-    {
-      encryptedData: string;
-      encryptedDEK: string;
-      algorithm: 'rsa-aes-256-gcm';
-      version: 1;
-    }
-  >;
+  encryptedSecrets: Record<string, z.infer<typeof encryptedSecretSchema>>;
   setupCommands: string[];
 };
 
@@ -129,15 +128,18 @@ export async function ensureBotUserForOrg(db: WorkerDb, orgId: string): Promise<
   const apiTokenPepper = generateApiTokenPepper();
   const stripeCustomerId = generateBotStripeCustomerId();
 
-  await db.insert(kilocode_users).values({
-    id: botId,
-    google_user_email: botEmail,
-    google_user_name: WEBHOOK_BOT_DISPLAY_NAME,
-    google_user_image_url: BOT_AVATAR_PLACEHOLDER,
-    stripe_customer_id: stripeCustomerId,
-    is_bot: true,
-    api_token_pepper: apiTokenPepper,
-  });
+  await db
+    .insert(kilocode_users)
+    .values({
+      id: botId,
+      google_user_email: botEmail,
+      google_user_name: WEBHOOK_BOT_DISPLAY_NAME,
+      google_user_image_url: BOT_AVATAR_PLACEHOLDER,
+      stripe_customer_id: stripeCustomerId,
+      is_bot: true,
+      api_token_pepper: apiTokenPepper,
+    })
+    .onConflictDoNothing();
 
   await ensureBotIsOrgMember(db, botId, orgId);
 
@@ -145,25 +147,14 @@ export async function ensureBotUserForOrg(db: WorkerDb, orgId: string): Promise<
 }
 
 async function ensureBotIsOrgMember(db: WorkerDb, botUserId: string, orgId: string) {
-  const existingRows = await db
-    .select({ id: organization_memberships.id })
-    .from(organization_memberships)
-    .where(
-      and(
-        eq(organization_memberships.organization_id, orgId),
-        eq(organization_memberships.kilo_user_id, botUserId)
-      )
-    )
-    .limit(1);
-
-  if (existingRows.length > 0) return;
-
-  await db.insert(organization_memberships).values({
-    id: crypto.randomUUID(),
-    organization_id: orgId,
-    kilo_user_id: botUserId,
-    role: 'member',
-  });
+  await db
+    .insert(organization_memberships)
+    .values({
+      organization_id: orgId,
+      kilo_user_id: botUserId,
+      role: 'member',
+    })
+    .onConflictDoNothing();
 }
 
 export async function resolveProfile(
@@ -217,13 +208,7 @@ export async function resolveProfile(
   for (const variable of vars) {
     if (variable.is_secret) {
       try {
-        const parsed = JSON.parse(variable.value) as {
-          encryptedData: string;
-          encryptedDEK: string;
-          algorithm: 'rsa-aes-256-gcm';
-          version: 1;
-        };
-        encryptedSecrets[variable.key] = parsed;
+        encryptedSecrets[variable.key] = encryptedSecretSchema.parse(JSON.parse(variable.value));
       } catch {
         // Skip malformed secrets
         logger.error('Failed to parse encrypted secret', {
