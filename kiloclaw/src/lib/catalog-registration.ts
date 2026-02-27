@@ -26,9 +26,6 @@ function validateEntry(entry: CatalogVersionEntry): string | null {
   if (!isValidImageTag(entry.imageTag)) {
     return `Invalid image tag: ${entry.imageTag}`;
   }
-  if (/[/@]/.test(entry.imageTag)) {
-    return `Image tag contains invalid chars: ${entry.imageTag}`;
-  }
   if (!OPENCLAW_VERSION_RE.test(entry.openclawVersion)) {
     return `Invalid openclaw version format: ${entry.openclawVersion}`;
   }

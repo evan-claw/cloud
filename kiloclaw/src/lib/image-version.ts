@@ -29,14 +29,15 @@ export async function resolveLatestVersion(
 }
 
 /**
- * Register a version in KV if the latest entry doesn't already match.
- * Writes both the versioned key and the latest pointer. Idempotent —
- * safe to call on every request (no-ops if already current).
+ * Register a version in KV and Postgres catalog.
  *
- * Also writes to the Postgres catalog via Hyperdrive (best-effort)
- * and maintains a KV tag index for the list endpoint.
+ * - KV: writes versioned key + latest pointer if not already current.
+ * - Postgres: upserts to kiloclaw_image_catalog via Hyperdrive, throttled
+ *   to at most once per minute per isolate (idempotent ON CONFLICT).
+ * - KV tag index: maintained for enumeration.
  *
- * imageDigest is optional — the worker knows its tag but not its digest.
+ * Called via ctx.waitUntil() on every request; KV check and catalog
+ * throttle ensure writes only happen when needed.
  */
 // Throttle catalog syncs: at most once per minute per isolate.
 // Cloudflare may reuse isolates across deploys, so a boolean flag alone could
@@ -53,8 +54,6 @@ export async function registerVersionIfNeeded(
   imageDigest: string | null = null,
   hyperdriveConnectionString?: string
 ): Promise<boolean> {
-  const publishedAt = new Date().toISOString();
-
   // Upsert to Postgres catalog, throttled to once per minute per isolate.
   const now = Date.now();
   if (
@@ -67,7 +66,7 @@ export async function registerVersionIfNeeded(
         variant,
         imageTag,
         imageDigest,
-        publishedAt,
+        publishedAt: new Date().toISOString(),
       });
       lastCatalogSyncMs = now;
     } catch (e) {
@@ -91,6 +90,7 @@ export async function registerVersionIfNeeded(
     }
   }
 
+  const publishedAt = new Date().toISOString();
   const entry: ImageVersionEntry = {
     openclawVersion,
     variant,
