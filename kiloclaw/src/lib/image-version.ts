@@ -119,7 +119,7 @@ export async function registerVersionIfNeeded(
 /**
  * Add a tag to the KV index if not already present.
  */
-async function updateTagIndex(kv: KVNamespace, imageTag: string): Promise<void> {
+export async function updateTagIndex(kv: KVNamespace, imageTag: string): Promise<void> {
   try {
     const index = await getOrRebuildIndex(kv);
     if (!index.includes(imageTag)) {
@@ -165,11 +165,9 @@ async function rebuildIndex(kv: KVNamespace): Promise<string[]> {
         continue;
       }
       const raw = await kv.get(key.name, 'json');
-      if (raw && typeof raw === 'object' && 'imageTag' in raw) {
-        const tag = String((raw as Record<string, unknown>).imageTag);
-        if (!tags.includes(tag)) {
-          tags.push(tag);
-        }
+      const parsed = ImageVersionEntrySchema.safeParse(raw);
+      if (parsed.success && !tags.includes(parsed.data.imageTag)) {
+        tags.push(parsed.data.imageTag);
       }
     }
     cursor = result.list_complete ? undefined : result.cursor;

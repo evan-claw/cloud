@@ -18,9 +18,8 @@ import {
   ImageVersionEntrySchema,
   imageVersionKey,
   imageVersionLatestKey,
-  IMAGE_VERSION_INDEX_KEY,
 } from '../schemas/image-version';
-import { listAllVersions } from '../lib/image-version';
+import { listAllVersions, updateTagIndex } from '../lib/image-version';
 import { upsertCatalogVersion } from '../lib/catalog-registration';
 import { z } from 'zod';
 import { withDORetry } from '../util/do-retry';
@@ -627,16 +626,7 @@ platform.post('/publish-image-version', async c => {
   await Promise.all(writes);
 
   // Maintain KV tag index
-  try {
-    const raw = await c.env.KV_CLAW_CACHE.get(IMAGE_VERSION_INDEX_KEY, 'json');
-    const index = Array.isArray(raw) ? (raw as unknown[]) : [];
-    if (!index.includes(imageTag)) {
-      index.push(imageTag);
-      await c.env.KV_CLAW_CACHE.put(IMAGE_VERSION_INDEX_KEY, JSON.stringify(index));
-    }
-  } catch (e) {
-    console.warn('[platform] Failed to update tag index:', e);
-  }
+  await updateTagIndex(c.env.KV_CLAW_CACHE, imageTag);
 
   // Write to Postgres catalog (best-effort)
   const connectionString = c.env.HYPERDRIVE?.connectionString;
