@@ -41,7 +41,10 @@ export const slackRouter = createTRPCRouter({
   }),
 
   // Get OAuth URL for initiating Slack OAuth flow
-  getOAuthUrl: baseProcedure.input(optionalOrgInput).query(({ ctx, input }) => {
+  getOAuthUrl: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
     const state = input?.organizationId ? `org_${input.organizationId}` : `user_${ctx.user.id}`;
     return {
       url: slackService.getSlackOAuthUrl(state),
