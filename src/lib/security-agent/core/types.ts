@@ -11,7 +11,10 @@ export type {
   SecurityFindingAnalysis,
 } from '@kilocode/db/schema-types';
 import { DependabotAlertState, SecuritySeverity } from '@kilocode/db/schema-types';
-import type { DependabotAlertState as DependabotAlertStateType } from '@kilocode/db/schema-types';
+import type {
+  DependabotAlertRaw,
+  DependabotAlertState as DependabotAlertStateType,
+} from '@kilocode/db/schema-types';
 
 /**
  * Security finding source types
@@ -151,7 +154,7 @@ export type ParsedSecurityFinding = {
   fixed_at: string | null;
   dependabot_html_url: string | null;
   first_detected_at: string;
-  raw_data: import('@kilocode/db/schema-types').DependabotAlertRaw;
+  raw_data: DependabotAlertRaw;
   cwe_ids: string[] | null;
   cvss_score: number | null;
   dependency_scope: 'development' | 'runtime' | null;
