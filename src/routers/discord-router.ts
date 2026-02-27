@@ -40,10 +40,9 @@ export const discordRouter = createTRPCRouter({
   }),
 
   // Get OAuth URL for initiating Discord OAuth flow
-  getOAuthUrl: baseProcedure.input(optionalOrgInput).query(({ ctx, input }) => {
+  getOAuthUrl: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
     if (input?.organizationId) {
-      // Access check is not strictly needed for reading an OAuth URL,
-      // but we keep it consistent with the org pattern
+      await ensureOrganizationAccess(ctx, input.organizationId);
     }
     const statePrefix = input?.organizationId
       ? `org_${input.organizationId}`
