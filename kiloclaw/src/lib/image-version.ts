@@ -29,23 +29,16 @@ export async function resolveLatestVersion(
 }
 
 /**
- * Register a version in KV and Postgres catalog.
+ * Register a version in KV and Postgres catalog if not already current.
  *
- * - KV: writes versioned key + latest pointer if not already current.
- * - Postgres: upserts to kiloclaw_image_catalog via Hyperdrive, throttled
- *   to at most once per minute per isolate (idempotent ON CONFLICT).
+ * - Checks KV latest pointer first — no-ops if version+tag already match.
+ * - KV: writes versioned key + latest pointer.
+ * - Postgres: upserts to kiloclaw_image_catalog via Hyperdrive (best-effort).
  * - KV tag index: maintained for enumeration.
  *
- * Called via ctx.waitUntil() on every request; KV check and catalog
- * throttle ensure writes only happen when needed.
+ * Called via ctx.waitUntil() on every request; KV check ensures writes
+ * only happen on the first request after a deploy with a new version.
  */
-// Throttle catalog syncs: at most once per minute per isolate.
-// Cloudflare may reuse isolates across deploys, so a boolean flag alone could
-// suppress legitimate syncs. A timestamp bound keeps writes rare while ensuring
-// the catalog stays populated. The upsert is idempotent, so extra writes are cheap.
-const CATALOG_SYNC_INTERVAL_MS = 60_000;
-let lastCatalogSyncMs: number | null = null;
-
 export async function registerVersionIfNeeded(
   kv: KVNamespace,
   openclawVersion: string,
@@ -54,32 +47,7 @@ export async function registerVersionIfNeeded(
   imageDigest: string | null = null,
   hyperdriveConnectionString?: string
 ): Promise<boolean> {
-  const publishedAt = new Date().toISOString();
-
-  // Upsert to Postgres catalog, throttled to once per minute per isolate.
-  const now = Date.now();
-  if (
-    hyperdriveConnectionString &&
-    (!lastCatalogSyncMs || now - lastCatalogSyncMs > CATALOG_SYNC_INTERVAL_MS)
-  ) {
-    try {
-      await upsertCatalogVersion(hyperdriveConnectionString, {
-        openclawVersion,
-        variant,
-        imageTag,
-        imageDigest,
-        publishedAt,
-      });
-      lastCatalogSyncMs = now;
-    } catch (e) {
-      console.error(
-        '[image-version] Failed to write catalog entry to Postgres:',
-        e instanceof Error ? e.message : e
-      );
-    }
-  }
-
-  // Check if latest already matches — avoid unnecessary KV writes
+  // Check if latest already matches — avoid unnecessary writes
   const existing = await kv.get(imageVersionLatestKey(variant), 'json');
   if (existing) {
     const parsed = ImageVersionEntrySchema.safeParse(existing);
@@ -88,10 +56,11 @@ export async function registerVersionIfNeeded(
       parsed.data.openclawVersion === openclawVersion &&
       parsed.data.imageTag === imageTag
     ) {
-      return false; // KV already current
+      return false; // Already current in KV — nothing to do
     }
   }
 
+  const publishedAt = new Date().toISOString();
   const entry: ImageVersionEntry = {
     openclawVersion,
     variant,
@@ -100,6 +69,7 @@ export async function registerVersionIfNeeded(
     publishedAt,
   };
 
+  // Write to KV: versioned key + latest pointer
   const serialized = JSON.stringify(entry);
   await Promise.all([
     kv.put(imageVersionKey(openclawVersion, variant), serialized),
@@ -108,6 +78,24 @@ export async function registerVersionIfNeeded(
 
   // Maintain KV tag index (best-effort)
   await updateTagIndex(kv, imageTag);
+
+  // Upsert to Postgres catalog (best-effort)
+  if (hyperdriveConnectionString) {
+    try {
+      await upsertCatalogVersion(hyperdriveConnectionString, {
+        openclawVersion,
+        variant,
+        imageTag,
+        imageDigest,
+        publishedAt,
+      });
+    } catch (e) {
+      console.error(
+        '[image-version] Failed to write catalog entry to Postgres:',
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
 
   console.log('[image-version] Registered version:', openclawVersion, variant, '→', imageTag);
   return true;
