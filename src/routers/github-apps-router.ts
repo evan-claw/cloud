@@ -73,7 +73,10 @@ export const githubAppsRouter = createTRPCRouter({
     };
   }),
 
-  // Check if current user has a pending installation
+  // Check if current user has a pending installation.
+  // Note: This is intentionally user-scoped (ctx.user.id) even when an organizationId is
+  // provided, because GitHub App installations are initiated per-user. The org access
+  // check only gates visibility — the pending state itself is always user-global.
   checkUserPendingInstallation: baseProcedure
     .input(optionalOrgInput)
     .query(async ({ ctx, input }) => {
