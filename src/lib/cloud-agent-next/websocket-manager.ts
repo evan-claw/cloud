@@ -49,12 +49,6 @@ function parseMessage(data: unknown): ParsedMessage | null {
 const MAX_RECONNECT_ATTEMPTS = 8;
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
-/**
- * Timeout for the initial WebSocket connection handshake.
- * If the socket doesn't open within this window, we treat it as a connection failure.
- * This guards against Node.js 22's built-in WebSocket silently hanging.
- */
-const CONNECTION_TIMEOUT_MS = 30_000;
 
 /**
  * Calculate reconnect delay with exponential backoff and jitter.
@@ -97,23 +91,13 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
   let ws: WebSocket | null = null;
   let lastEventId = 0;
   let reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  let connectionTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let intentionalDisconnect = false;
   let currentTicket = config.ticket;
   let ticketRefreshAttempted = false;
-  /** Tracks whether onerror already triggered close handling (Node.js 22 workaround). */
-  let errorHandledAsClose = false;
 
   function setState(newState: ConnectionState) {
     state = newState;
     config.onStateChange(state);
-  }
-
-  function clearConnectionTimeout() {
-    if (connectionTimeoutId !== null) {
-      clearTimeout(connectionTimeoutId);
-      connectionTimeoutId = null;
-    }
   }
 
   function buildUrl(fromId?: number): string {
@@ -123,54 +107,6 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
       url.searchParams.set('fromId', String(fromId));
     }
     return url.toString();
-  }
-
-  /**
-   * Central close-handling logic, shared by onclose and the Node.js onerror fallback.
-   * @param code  WebSocket close code (1006 when synthesised from onerror)
-   * @param reason  Human-readable reason string
-   */
-  function handleClose(code: number, reason: string) {
-    clearConnectionTimeout();
-
-    console.log('[WebSocketManager] handleClose', {
-      code,
-      reason,
-      intentionalDisconnect,
-      ticketRefreshAttempted,
-      currentState: state.status,
-    });
-
-    if (intentionalDisconnect) {
-      setState({ status: 'disconnected' });
-      return;
-    }
-
-    const isAuthFailure =
-      AUTH_FAILURE_CLOSE_CODES.includes(code as (typeof AUTH_FAILURE_CLOSE_CODES)[number]) ||
-      AUTH_FAILURE_KEYWORDS.some(kw => reason.toLowerCase().includes(kw));
-
-    if (isAuthFailure && !ticketRefreshAttempted && config.onRefreshTicket) {
-      console.log('[WebSocketManager] Auth failure detected, attempting ticket refresh');
-      void refreshTicketAndReconnect();
-      return;
-    }
-
-    if (isAuthFailure && ticketRefreshAttempted) {
-      console.log('[WebSocketManager] Auth failure after ticket refresh - stopping retries');
-      setState({
-        status: 'error',
-        error: 'Authentication failed after ticket refresh. Check server configuration.',
-        retryable: false,
-      });
-      return;
-    }
-
-    if (state.status === 'connecting' || state.status === 'connected') {
-      scheduleReconnect(0);
-    } else if (state.status === 'reconnecting') {
-      scheduleReconnect(state.attempt);
-    }
   }
 
   async function refreshTicketAndReconnect() {
@@ -232,8 +168,6 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
   }
 
   function connectInternal(_attempt = 0) {
-    clearConnectionTimeout();
-
     // Close existing socket if any - store reference so onclose handler can ignore it
     const oldWs = ws;
     if (oldWs !== null) {
@@ -241,52 +175,15 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
       oldWs.close();
     }
 
-    // Reset per-connection flag
-    errorHandledAsClose = false;
-
     // Always include lastEventId if we have one - this enables replay after any reconnection
     // (whether from network issues, ticket refresh, or other disconnects)
     const urlWithReplay = lastEventId ? buildUrl(lastEventId) : buildUrl();
     setState({ status: 'connecting' });
 
-    let newWs: WebSocket;
-    try {
-      newWs = new WebSocket(urlWithReplay);
-    } catch (err) {
-      console.error('[WebSocketManager] Failed to create WebSocket:', err);
-      setState({
-        status: 'error',
-        error: `WebSocket constructor error: ${err instanceof Error ? err.message : String(err)}`,
-        retryable: true,
-      });
-      return;
-    }
+    const newWs = new WebSocket(urlWithReplay);
     ws = newWs;
 
-    // Connection timeout — if we don't receive a message within CONNECTION_TIMEOUT_MS,
-    // treat it as a failed connection. This guards against Node.js WebSocket hanging
-    // without firing onclose.
-    connectionTimeoutId = setTimeout(() => {
-      connectionTimeoutId = null;
-      if (ws === newWs && state.status === 'connecting') {
-        console.log(
-          '[WebSocketManager] Connection timeout - no messages received within',
-          CONNECTION_TIMEOUT_MS,
-          'ms'
-        );
-        ws = null;
-        try {
-          newWs.close();
-        } catch {
-          /* ignore */
-        }
-        handleClose(1006, 'Connection timeout');
-      }
-    }, CONNECTION_TIMEOUT_MS);
-
     newWs.onmessage = (messageEvent: MessageEvent) => {
-      clearConnectionTimeout();
-
       const parsed = parseMessage(messageEvent.data);
       if (parsed === null) {
         return;
@@ -311,51 +208,72 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
     };
 
     newWs.onerror = (errorEvent: Event) => {
-      const errorMessage =
-        'message' in errorEvent
-          ? String((errorEvent as { message: unknown }).message)
-          : 'Unknown error';
+      // WebSocket errors during HTTP upgrade (like 401) may not give us useful close codes
+      // Log the error for debugging
       console.log('[WebSocketManager] WebSocket error', {
         type: errorEvent.type,
-        message: errorMessage,
-        readyState: newWs.readyState,
         ticketRefreshAttempted,
         currentState: state.status,
       });
-
-      // Node.js 22 workaround: the built-in WebSocket fires onerror but NOT onclose
-      // when a connection fails (e.g., server unreachable or HTTP error before upgrade).
-      // readyState stays at CONNECTING (0). In browsers, onclose always fires after
-      // onerror, but Node.js 22's undici-based WebSocket doesn't follow this.
-      // Detect this case and trigger close handling directly.
-      if (newWs.readyState === WebSocket.CONNECTING || newWs.readyState === WebSocket.CLOSED) {
-        // Mark that we handled this error as a close so the real onclose (if it
-        // does eventually fire) won't double-process.
-        errorHandledAsClose = true;
-        ws = null;
-        clearConnectionTimeout();
-        handleClose(1006, errorMessage);
-      }
-      // Otherwise, wait for the onclose event (browser behavior).
+      // The actual handling happens in onclose which fires after onerror
     };
 
     newWs.onclose = (event: CloseEvent) => {
       // Ignore close events from replaced sockets - a new socket has already been created
-      if (ws !== newWs && !errorHandledAsClose) {
+      if (ws !== newWs) {
         console.log('[WebSocketManager] Ignoring close from replaced socket');
         return;
       }
+      ws = null;
 
-      // If onerror already handled this as a close (Node.js 22 workaround), skip.
-      if (errorHandledAsClose) {
-        console.log(
-          '[WebSocketManager] Ignoring onclose - already handled via onerror (Node.js 22 workaround)'
-        );
+      console.log('[WebSocketManager] WebSocket closed', {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean,
+        intentionalDisconnect,
+        ticketRefreshAttempted,
+        currentState: state.status,
+      });
+
+      if (intentionalDisconnect) {
+        setState({ status: 'disconnected' });
         return;
       }
 
-      ws = null;
-      handleClose(event.code, event.reason ?? '');
+      const isAuthFailure = isAuthFailureClose(event);
+
+      console.log('[WebSocketManager] Auth failure check', {
+        isAuthFailure,
+        ticketRefreshAttempted,
+        hasRefreshHandler: !!config.onRefreshTicket,
+        willRefresh: isAuthFailure && !ticketRefreshAttempted && !!config.onRefreshTicket,
+      });
+
+      if (isAuthFailure && !ticketRefreshAttempted && config.onRefreshTicket) {
+        console.log('[WebSocketManager] Auth failure detected, attempting ticket refresh');
+        void refreshTicketAndReconnect();
+        return;
+      }
+
+      // If we already tried refreshing the ticket and still getting auth failures,
+      // don't keep retrying - the issue is likely not the ticket
+      if (isAuthFailure && ticketRefreshAttempted) {
+        console.log(
+          '[WebSocketManager] Auth failure after ticket refresh - stopping retries (likely origin/config issue)'
+        );
+        setState({
+          status: 'error',
+          error: 'Authentication failed after ticket refresh. Check server configuration.',
+          retryable: false,
+        });
+        return;
+      }
+
+      if (state.status === 'connecting' || state.status === 'connected') {
+        scheduleReconnect(0);
+      } else if (state.status === 'reconnecting') {
+        scheduleReconnect(state.attempt);
+      }
     };
   }
 
@@ -369,7 +287,6 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
 
   function disconnect() {
     intentionalDisconnect = true;
-    clearConnectionTimeout();
 
     if (reconnectTimeoutId !== null) {
       clearTimeout(reconnectTimeoutId);
