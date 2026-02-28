@@ -1,4 +1,4 @@
-CREATE TABLE `command_queue` (
+CREATE TABLE IF NOT EXISTS `command_queue` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`session_id` text NOT NULL,
 	`execution_id` text NOT NULL,
@@ -6,8 +6,8 @@ CREATE TABLE `command_queue` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `idx_command_queue_session` ON `command_queue` (`session_id`);--> statement-breakpoint
-CREATE TABLE `events` (
+CREATE INDEX IF NOT EXISTS `idx_command_queue_session` ON `command_queue` (`session_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `events` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`execution_id` text NOT NULL,
 	`session_id` text NOT NULL,
@@ -16,11 +16,11 @@ CREATE TABLE `events` (
 	`timestamp` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `idx_events_execution` ON `events` (`execution_id`);--> statement-breakpoint
-CREATE INDEX `idx_events_type` ON `events` (`stream_event_type`);--> statement-breakpoint
-CREATE INDEX `idx_events_timestamp` ON `events` (`timestamp`);--> statement-breakpoint
-CREATE INDEX `idx_events_id_execution` ON `events` (`id`,`execution_id`);--> statement-breakpoint
-CREATE TABLE `execution_leases` (
+CREATE INDEX IF NOT EXISTS `idx_events_execution` ON `events` (`execution_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_events_type` ON `events` (`stream_event_type`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_events_timestamp` ON `events` (`timestamp`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_events_id_execution` ON `events` (`id`,`execution_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `execution_leases` (
 	`execution_id` text PRIMARY KEY NOT NULL,
 	`lease_id` text NOT NULL,
 	`lease_expires_at` integer NOT NULL,
@@ -28,4 +28,4 @@ CREATE TABLE `execution_leases` (
 	`message_id` text
 );
 --> statement-breakpoint
-CREATE INDEX `idx_leases_expires` ON `execution_leases` (`lease_expires_at`);
+CREATE INDEX IF NOT EXISTS `idx_leases_expires` ON `execution_leases` (`lease_expires_at`);

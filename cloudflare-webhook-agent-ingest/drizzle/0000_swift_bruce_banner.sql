@@ -1,4 +1,4 @@
-CREATE TABLE `requests` (
+CREATE TABLE IF NOT EXISTS `requests` (
 	`id` text PRIMARY KEY NOT NULL,
 	`timestamp` text NOT NULL,
 	`method` text NOT NULL,
@@ -17,10 +17,10 @@ CREATE TABLE `requests` (
 	CONSTRAINT "process_status_check" CHECK(process_status in ('captured', 'inprogress', 'success', 'failed'))
 );
 --> statement-breakpoint
-CREATE INDEX `idx_requests_timestamp` ON `requests` (`timestamp`);--> statement-breakpoint
-CREATE INDEX `idx_requests_status` ON `requests` (`process_status`);--> statement-breakpoint
-CREATE INDEX `idx_requests_session` ON `requests` (`cloud_agent_session_id`);--> statement-breakpoint
-CREATE TABLE `trigger_config` (
+CREATE INDEX IF NOT EXISTS `idx_requests_timestamp` ON `requests` (`timestamp`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_requests_status` ON `requests` (`process_status`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_requests_session` ON `requests` (`cloud_agent_session_id`);--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `trigger_config` (
 	`trigger_id` text PRIMARY KEY NOT NULL,
 	`namespace` text NOT NULL,
 	`user_id` text,
