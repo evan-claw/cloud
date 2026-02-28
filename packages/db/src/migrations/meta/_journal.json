@@ -239,6 +239,13 @@
       "when": 1772223319721,
       "tag": "0033_absent_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1772299855878,
+      "tag": "0034_brave_amphibian",
+      "breakpoints": true
     }
   ]
 }
