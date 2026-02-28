@@ -38,17 +38,11 @@ export function getCurrentTownConfig(): Record<string, unknown> | null {
   return lastKnownTownConfig;
 }
 
-type ContainerEnv = {
-  Variables: {
-    townConfig?: Record<string, unknown>;
-  };
-};
-
-export const app = new Hono<ContainerEnv>();
+export const app = new Hono();
 
 // Parse and validate town config from X-Town-Config header (sent by TownDO on
-// every request). The validated config is stored both per-request on the Hono
-// context and in a module-level cache for non-request code paths.
+// every request). The validated config is stored in a module-level cache
+// accessible via getCurrentTownConfig().
 app.use('*', async (c, next) => {
   const configHeader = c.req.header('X-Town-Config');
   if (configHeader) {
@@ -57,7 +51,6 @@ app.use('*', async (c, next) => {
       const result = TownConfigHeader.safeParse(raw);
       if (result.success) {
         lastKnownTownConfig = result.data;
-        c.set('townConfig', result.data);
         const hasToken =
           typeof result.data.kilocode_token === 'string' && result.data.kilocode_token.length > 0;
         console.log(
