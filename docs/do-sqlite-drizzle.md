@@ -16,9 +16,9 @@ Each worker root contains a `drizzle.config.ts` that configures `drizzle-kit` wi
    pnpm drizzle-kit generate
    ```
 3. Commit the three generated/updated artifacts:
-   - The new `.sql` file in `src/db/migrations/`
-   - The updated `src/db/migrations/migrations.js` (barrel file)
-   - The updated snapshot in `src/db/migrations/meta/`
+   - The new `.sql` file in `drizzle/`
+   - The updated `drizzle/migrations.js` (barrel file)
+   - The updated snapshot in `drizzle/meta/`
 
 ## How migrations run
 

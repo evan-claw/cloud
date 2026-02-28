@@ -1,4 +1,4 @@
-import { eq, and, lt, count } from 'drizzle-orm';
+import { eq, and, lt } from 'drizzle-orm';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { Ok, Err, type Result } from '../../lib/result.js';
 import { calculateExpiry, isExpired } from '../../core/lease.js';
@@ -186,13 +186,12 @@ export function createLeaseQueries(db: DrizzleSqliteDODatabase) {
     },
 
     deleteExpired(now: number = Date.now()): number {
-      const condition = lt(executionLeases.lease_expires_at, now);
-      const countRow = db.select({ count: count() }).from(executionLeases).where(condition).get();
-      const total = countRow?.count ?? 0;
-      if (total > 0) {
-        db.delete(executionLeases).where(condition).run();
-      }
-      return total;
+      const deleted = db
+        .delete(executionLeases)
+        .where(lt(executionLeases.lease_expires_at, now))
+        .returning({ execution_id: executionLeases.execution_id })
+        .all();
+      return deleted.length;
     },
   };
 }

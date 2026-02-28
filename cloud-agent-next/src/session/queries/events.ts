@@ -1,4 +1,4 @@
-import { count, max, eq, and, gt, gte, lte, lt, inArray, asc, sql } from 'drizzle-orm';
+import { count, max, eq, and, gt, gte, lte, lt, inArray, asc } from 'drizzle-orm';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { StoredEvent } from '../../websocket/types.js';
 import type { EventId } from '../../types/ids.js';
@@ -90,28 +90,23 @@ export function createEventQueries(db: DrizzleSqliteDODatabase) {
         query = query.limit(filters.limit);
       }
 
-      return query.all() as StoredEvent[];
+      return query.all() satisfies StoredEvent[];
     },
 
     *iterateByFilters(filters: Omit<EventQueryFilters, 'limit'>): Generator<StoredEvent> {
       const conditions = buildConditions(filters);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
-
       const rows = db.select().from(events).where(where).orderBy(asc(events.id)).all();
-
-      for (const row of rows) {
-        yield row as StoredEvent;
-      }
+      yield* rows;
     },
 
     deleteOlderThan(timestamp: number): number {
-      const condition = lt(events.timestamp, timestamp);
-      const countRow = db.select({ count: count() }).from(events).where(condition).get();
-      const total = countRow?.count ?? 0;
-      if (total > 0) {
-        db.delete(events).where(condition).run();
-      }
-      return total;
+      const deleted = db
+        .delete(events)
+        .where(lt(events.timestamp, timestamp))
+        .returning({ id: events.id })
+        .all();
+      return deleted.length;
     },
 
     countByExecutionId(executionId: string): number {
