@@ -20,6 +20,7 @@
     "test": "NODE_ENV=test jest",
     "typecheck-oldtsc": "tsc --noEmit",
     "typecheck": "tsgo --noEmit --incremental false",
+    "typecheck:all": "pnpm -r run typecheck",
     "dependency-cycle-check": "madge --circular --warning --extensions ts,tsx --ts-config tsconfig.json --basedir . src",
     "validate": "pnpm run typecheck && pnpm run lint:changed && pnpm run format:changed && pnpm run test && pnpm run dependency-cycle-check",
     "prepare": "sh -c '[ \"$HUSKY\" = 0 ] && git config --unset core.hooksPath || husky'",

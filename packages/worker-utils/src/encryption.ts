@@ -29,6 +29,16 @@ export type EncryptedEnvelope = {
 
 // ---- helpers ----
 
+/** Narrow generateKey result — symmetric algorithms always return CryptoKey, never CryptoKeyPair. */
+function isCryptoKey(key: CryptoKey | CryptoKeyPair): key is CryptoKey {
+  return 'type' in key && typeof (key as CryptoKey).type === 'string';
+}
+
+/** Narrow exportKey result — 'raw' format always returns ArrayBuffer, never JsonWebKey. */
+function isArrayBuffer(val: ArrayBuffer | JsonWebKey): val is ArrayBuffer {
+  return val instanceof ArrayBuffer;
+}
+
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
   const buf = new ArrayBuffer(bin.length);
@@ -108,9 +118,11 @@ export async function encryptWithPublicKey(
     );
 
     // Generate random AES-256 DEK
-    const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+    const aesKeyResult = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
       'encrypt',
     ]);
+    if (!isCryptoKey(aesKeyResult)) throw new EncryptionConfigurationError('Expected CryptoKey');
+    const aesKey = aesKeyResult;
 
     // Encrypt value with AES-256-GCM
     const iv = crypto.getRandomValues(new Uint8Array(16));
@@ -127,9 +139,11 @@ export async function encryptWithPublicKey(
     const encryptedData = bytesToBase64(encryptedDataBytes);
 
     // Export raw DEK bytes and wrap with RSA-OAEP
-    const rawDek = await crypto.subtle.exportKey('raw', aesKey);
+    const rawDekResult = await crypto.subtle.exportKey('raw', aesKey);
+    if (!isArrayBuffer(rawDekResult))
+      throw new EncryptionConfigurationError('Expected ArrayBuffer');
     const encryptedDEKBytes = new Uint8Array(
-      await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaKey, rawDek)
+      await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsaKey, rawDekResult)
     );
     const encryptedDEK = bytesToBase64(encryptedDEKBytes);
 

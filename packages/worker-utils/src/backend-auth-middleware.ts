@@ -7,7 +7,7 @@ import { bearerAuth } from 'hono/bearer-auth';
  *
  * @param getToken - Returns the expected token from the Hono context (e.g. `c => c.env.BACKEND_AUTH_TOKEN`)
  */
-export function backendAuthMiddleware<E extends { Bindings: Record<string, unknown> }>(
+export function backendAuthMiddleware<E extends { Bindings: Record<never, never> }>(
   getToken: (c: Context<E>) => string | undefined
 ): MiddlewareHandler<E> {
   return async (c, next) => {

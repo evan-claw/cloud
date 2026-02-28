@@ -413,7 +413,7 @@ export class SessionService {
     };
   }
 
-  private getSaferEnvVars(
+  private async getSaferEnvVars(
     userEnvVars: Record<string, string> | undefined,
     sessionHome: string,
     sessionId: string,
@@ -430,7 +430,7 @@ export class SessionService {
     gitToken?: string,
     platform?: 'github' | 'gitlab',
     mcpServers?: Record<string, MCPServerConfig>
-  ): Record<string, string> {
+  ): Promise<Record<string, string>> {
     // Use override if available, otherwise use original values from API
     const kilocodeToken = env.KILOCODE_TOKEN_OVERRIDE ?? originalToken;
     const kilocodeOrganizationId = env.KILOCODE_ORG_ID_OVERRIDE ?? originalOrgId;
@@ -446,7 +446,7 @@ export class SessionService {
           'Encrypted secrets provided but AGENT_ENV_VARS_PRIVATE_KEY is not configured on the worker'
         );
       }
-      baseEnvVars = mergeEnvVarsWithSecrets(baseEnvVars, encryptedSecrets, privateKey);
+      baseEnvVars = await mergeEnvVarsWithSecrets(baseEnvVars, encryptedSecrets, privateKey);
       logger
         .withTags({ secretCount: Object.keys(encryptedSecrets).length })
         .info('Decrypted and merged encrypted secrets');
@@ -591,7 +591,7 @@ export class SessionService {
     const { sessionId, sessionHome, workspacePath, envVars } = context;
 
     // Decrypt secrets and merge with env vars (just-in-time decryption)
-    const saferEnvVars = this.getSaferEnvVars(
+    const saferEnvVars = await this.getSaferEnvVars(
       envVars,
       sessionHome,
       sessionId,

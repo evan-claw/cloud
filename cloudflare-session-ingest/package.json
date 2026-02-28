@@ -6,7 +6,8 @@
     "deploy": "wrangler deploy --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@kilocode/db": "workspace:*",
@@ -21,6 +22,7 @@
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
     "drizzle-kit": "catalog:",
+    "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"
   }

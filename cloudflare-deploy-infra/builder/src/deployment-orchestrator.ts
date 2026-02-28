@@ -630,7 +630,7 @@ export class DeploymentOrchestrator extends DurableObject<Env> {
       };
 
       // Decrypt env vars
-      const decryptedEnvVars = decryptEnvVars(
+      const decryptedEnvVars = await decryptEnvVars(
         envVars || [],
         Buffer.from(this.env.ENV_ENCRYPTION_PRIVATE_KEY, 'base64')
       );

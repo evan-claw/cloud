@@ -76,17 +76,15 @@ async function buildWorkerChannels(channels: z.infer<typeof updateConfigSchema>[
  * Encrypt channel tokens for a PATCH (supports null for removal).
  */
 async function buildWorkerChannelsPatch(channels: z.infer<typeof patchChannelsSchema>) {
-  const result: Record<
-    string,
-    Awaited<ReturnType<typeof encryptKiloClawSecret>> | null | undefined
-  > = {};
+  const entries = Object.entries(channels).filter(
+    (entry): entry is [string, string | null] => entry[1] !== undefined
+  );
 
-  for (const [key, value] of Object.entries(channels)) {
-    if (value === undefined) continue;
-    result[key] = value === null ? null : await encryptKiloClawSecret(value);
-  }
+  const encrypted = await Promise.all(
+    entries.map(([, value]) => (value === null ? null : encryptKiloClawSecret(value)))
+  );
 
-  return result;
+  return Object.fromEntries(entries.map(([key], i) => [key, encrypted[i]]));
 }
 
 type KiloCodeConfigPublicResponse = Pick<
