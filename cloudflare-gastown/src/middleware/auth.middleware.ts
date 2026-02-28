@@ -65,7 +65,7 @@ export const authMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
 
   // Verify the townId in the JWT matches the route param (cross-town guard)
   const townId = c.req.param('townId');
-  if (townId && result.payload.townId && townId !== result.payload.townId) {
+  if (townId && townId !== result.payload.townId) {
     return c.json(resError('Cross-town access denied'), 403);
   }
 
