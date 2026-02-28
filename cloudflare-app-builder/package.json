@@ -17,6 +17,7 @@
     "@ashishkumar472/cf-git": "1.0.5",
     "@kilocode/worker-utils": "workspace:*",
     "diff": "^8.0.3",
+    "drizzle-orm": "catalog:",
     "jsonwebtoken": "catalog:",
     "workers-tagged-logger": "catalog:",
     "zod": "catalog:"
@@ -27,6 +28,7 @@
     "@cloudflare/workers-types": "^4.20251014.0",
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22.10.1",
+    "drizzle-kit": "catalog:",
     "tsx": "^4.7.0",
     "typescript": "catalog:",
     "vitest": "^4.0.18",

@@ -47,6 +47,7 @@
     "@types/node": "^22",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
     "@vitest/ui": "^3.2.4",
+    "drizzle-kit": "catalog:",
     "eslint": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",

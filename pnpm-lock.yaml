@@ -21,6 +21,9 @@ catalogs:
     aws4fetch:
       specifier: ^1.0.20
       version: 1.0.20
+    drizzle-kit:
+      specifier: ^0.31.9
+      version: 0.31.9
     drizzle-orm:
       specifier: ^0.45.1
       version: 0.45.1
@@ -530,6 +533,9 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       eslint:
         specifier: 'catalog:'
         version: 9.39.3(jiti@2.6.1)
@@ -612,6 +618,9 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       eslint:
         specifier: 'catalog:'
         version: 9.39.3(jiti@2.6.1)
@@ -660,6 +669,9 @@ importers:
       '@kilocode/worker-utils':
         specifier: workspace:*
         version: link:../packages/worker-utils
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -679,6 +691,9 @@ importers:
       '@types/jsonwebtoken':
         specifier: 'catalog:'
         version: 9.0.10
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@25.2.0)
@@ -700,6 +715,9 @@ importers:
       diff:
         specifier: '>=8.0.3'
         version: 8.0.3
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.1(@cloudflare/workers-types@4.20251014.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
       jsonwebtoken:
         specifier: 'catalog:'
         version: 9.0.3
@@ -725,6 +743,9 @@ importers:
       '@types/node':
         specifier: ^22.10.1
         version: 22.19.1
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       tsx:
         specifier: ^4.7.0
         version: 4.20.6
@@ -910,7 +931,7 @@ importers:
         version: 9.0.10
       jest:
         specifier: ^30.2.0
-        version: 30.2.0(@types/node@22.19.1)(esbuild-register@3.6.0(esbuild@0.27.0))
+        version: 30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0))
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -985,6 +1006,9 @@ importers:
       '@kilocode/worker-utils':
         specifier: workspace:*
         version: link:../packages/worker-utils
+      drizzle-orm:
+        specifier: 'catalog:'
+        version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -998,6 +1022,9 @@ importers:
       '@types/node':
         specifier: ^25.1.0
         version: 25.2.0
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -1038,6 +1065,9 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.19.1
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -1084,6 +1114,9 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       eslint:
         specifier: 'catalog:'
         version: 9.39.3(jiti@2.6.1)
@@ -18975,6 +19008,14 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  drizzle-orm@0.45.1(@cloudflare/workers-types@4.20251014.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0):
+    optionalDependencies:
+      '@cloudflare/workers-types': 4.20251014.0
+      '@opentelemetry/api': 1.9.0
+      '@types/pg': 8.16.0
+      bun-types: 1.3.9
+      pg: 8.18.0
+
   drizzle-orm@0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0):
     optionalDependencies:
       '@cloudflare/workers-types': 4.20260130.0
@@ -20384,6 +20425,25 @@ snapshots:
       - supports-color
       - ts-node
 
+  jest-cli@30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0)):
+    dependencies:
+      '@jest/core': 30.2.0(esbuild-register@3.6.0(esbuild@0.27.0))
+      '@jest/test-result': 30.2.0
+      '@jest/types': 30.2.0
+      chalk: 4.1.2
+      exit-x: 0.2.2
+      import-local: 3.2.0
+      jest-config: 30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0))
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      yargs: 17.7.2
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - esbuild-register
+      - supports-color
+      - ts-node
+
   jest-config@29.7.0(@types/node@22.19.1):
     dependencies:
       '@babel/core': 7.28.5
@@ -20472,6 +20532,39 @@ snapshots:
       strip-json-comments: 3.1.1
     optionalDependencies:
       '@types/node': 22.19.1
+      esbuild-register: 3.6.0(esbuild@0.27.0)
+    transitivePeerDependencies:
+      - babel-plugin-macros
+      - supports-color
+
+  jest-config@30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0)):
+    dependencies:
+      '@babel/core': 7.28.5
+      '@jest/get-type': 30.1.0
+      '@jest/pattern': 30.0.1
+      '@jest/test-sequencer': 30.2.0
+      '@jest/types': 30.2.0
+      babel-jest: 30.2.0(@babel/core@7.28.5)
+      chalk: 4.1.2
+      ci-info: 4.3.1
+      deepmerge: 4.3.1
+      glob: 13.0.1
+      graceful-fs: 4.2.11
+      jest-circus: 30.2.0
+      jest-docblock: 30.2.0
+      jest-environment-node: 30.2.0
+      jest-regex-util: 30.0.1
+      jest-resolve: 30.2.0
+      jest-runner: 30.2.0
+      jest-util: 30.2.0
+      jest-validate: 30.2.0
+      micromatch: 4.0.8
+      parse-json: 5.2.0
+      pretty-format: 30.2.0
+      slash: 3.0.0
+      strip-json-comments: 3.1.1
+    optionalDependencies:
+      '@types/node': 25.2.0
       esbuild-register: 3.6.0(esbuild@0.27.0)
     transitivePeerDependencies:
       - babel-plugin-macros
@@ -21038,6 +21131,19 @@ snapshots:
       '@jest/types': 30.2.0
       import-local: 3.2.0
       jest-cli: 30.2.0(@types/node@22.19.1)(esbuild-register@3.6.0(esbuild@0.27.0))
+    transitivePeerDependencies:
+      - '@types/node'
+      - babel-plugin-macros
+      - esbuild-register
+      - supports-color
+      - ts-node
+
+  jest@30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0)):
+    dependencies:
+      '@jest/core': 30.2.0(esbuild-register@3.6.0(esbuild@0.27.0))
+      '@jest/types': 30.2.0
+      import-local: 3.2.0
+      jest-cli: 30.2.0(@types/node@25.2.0)(esbuild-register@3.6.0(esbuild@0.27.0))
     transitivePeerDependencies:
       - '@types/node'
       - babel-plugin-macros
