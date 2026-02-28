@@ -146,7 +146,11 @@ type JustTheCostsUsageStats = {
   is_byok: boolean | null;
 };
 
-export type MicrodollarUsageStats = NotYetCostedUsageStats & JustTheCostsUsageStats;
+export type MicrodollarUsageStats = NotYetCostedUsageStats &
+  JustTheCostsUsageStats & {
+    /** The real cost before any free/BYOK/promo zeroing. Set by processTokenData. */
+    market_cost?: number;
+  };
 
 export type PromptInfo = {
   system_prompt_prefix: string;
@@ -262,6 +266,7 @@ export function toInsertableDbUsageRecord(
     is_byok: usageStats.is_byok,
     streamed: usageStats.streamed,
     cancelled: usageStats.cancelled,
+    market_cost: usageStats.market_cost ?? null,
   };
 
   // Legacy heuristic classification removed - abuse_classification is now handled
@@ -447,6 +452,7 @@ export type UsageMetaData = {
   session_id: string | null;
   mode: string | null;
   auto_model: string | null;
+  market_cost: number | null;
 };
 
 export async function insertUsageRecord(
@@ -558,6 +564,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               has_tools,
               machine_id,
               session_id,
+              market_cost,
 
               http_user_agent_id,
               http_ip_id,
@@ -593,6 +600,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               ${metadataFields.has_tools},
               ${metadataFields.machine_id},
               ${metadataFields.session_id},
+              ${metadataFields.market_cost},
 
               (SELECT http_user_agent_id FROM http_user_agent_cte),
               (SELECT http_ip_id FROM http_ip_cte),
@@ -961,6 +969,9 @@ async function processTokenData(
   reportAbuseCost(usageContext, usageStats).catch(error => {
     console.error('[Abuse] Failed to report cost:', error);
   });
+
+  // Preserve the real cost before zeroing for free/BYOK/promo
+  usageStats.market_cost = usageStats.cost_mUsd;
 
   if (
     isFreeModel(usageContext.requested_model) ||

@@ -199,6 +199,7 @@ function generateRandomRecord(
       pickRandom(['kilo/auto', 'kilo/auto-free', 'kilo/auto-small'], Math.random()),
       70
     ),
+    market_cost: core.cost,
   };
 
   return { core, metadata };
