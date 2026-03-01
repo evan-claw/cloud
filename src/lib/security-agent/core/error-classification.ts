@@ -25,8 +25,9 @@ const AUTH_PATTERNS = [
 const NOT_FOUND_PATTERNS = [
   /\brepo(sitory)?\b.*\bnot found\b/i,
   /\bnot found\b.*\brepo(sitory)?\b/i,
-  /\b404\b/,
-  /\bdoes not exist\b/i,
+  /\b404\b.*\brepo(sitory)?\b/i,
+  /\brepo(sitory)?\b.*\b404\b/i,
+  /\brepo(sitory)?\b.*\bdoes not exist\b/i,
   /\bno such\b.*\brepository\b/i,
 ];
 

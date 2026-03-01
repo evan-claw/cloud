@@ -44,7 +44,8 @@ describe('classifyAnalysisError', () => {
       'repository not found',
       'repo not found',
       'Not found - repo foo/bar',
-      'Error 404: resource not available',
+      '404 repo not available',
+      'repository 404',
       'Repository does not exist',
       'no such repository: foo/bar',
     ])('classifies %j as REPO_NOT_FOUND', message => {
@@ -54,6 +55,21 @@ describe('classifyAnalysisError', () => {
     it('does not match generic "not found" without repo context', () => {
       expect(classifyAnalysisError(new Error('Module not found')).code).not.toBe('REPO_NOT_FOUND');
       expect(classifyAnalysisError(new Error('Config file not found')).code).not.toBe(
+        'REPO_NOT_FOUND'
+      );
+    });
+
+    it('does not match generic 404 without repo context', () => {
+      expect(classifyAnalysisError(new Error('HTTP 404: endpoint not found')).code).not.toBe(
+        'REPO_NOT_FOUND'
+      );
+    });
+
+    it('does not match generic "does not exist" without repo context', () => {
+      expect(classifyAnalysisError(new Error('file does not exist')).code).not.toBe(
+        'REPO_NOT_FOUND'
+      );
+      expect(classifyAnalysisError(new Error('branch does not exist')).code).not.toBe(
         'REPO_NOT_FOUND'
       );
     });
@@ -100,7 +116,7 @@ describe('isUserActionableError', () => {
     ['REPO_NOT_FOUND', true],
     ['SANDBOX_FAILED', false],
     ['UNKNOWN', false],
-  ])('returns %s for %s', (code, expected) => {
+  ])('%s → isUserActionable = %s', (code, expected) => {
     expect(isUserActionableError(code)).toBe(expected);
   });
 });
@@ -113,7 +129,7 @@ describe('trpcCodeForAnalysisError', () => {
     ['SANDBOX_FAILED', 'INTERNAL_SERVER_ERROR'],
     ['UNKNOWN', 'INTERNAL_SERVER_ERROR'],
     [undefined, 'INTERNAL_SERVER_ERROR'],
-  ])('returns %s for code %s', (code, expected) => {
+  ])('%s → trpcCode = %s', (code, expected) => {
     expect(trpcCodeForAnalysisError(code)).toBe(expected);
   });
 });
