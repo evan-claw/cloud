@@ -13,6 +13,7 @@
 	},
 	"logpush": true,
 	"compatibility_flags": ["nodejs_compat"],
+	"rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

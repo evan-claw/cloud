@@ -13,7 +13,8 @@ import type { CallbackJob, CallbackTarget } from '../callbacks/index.js';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
 import { logger } from '../logger.js';
 import { Limits } from '../schema.js';
-import { runMigrations } from './migrations.js';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import migrations from '../../drizzle/migrations';
 import { normalizeKilocodeModel } from './model-utils.js';
 import {
   createExecutionQueries,
@@ -162,7 +163,7 @@ export class CloudAgentSession extends DurableObject {
     this.leaseQueries = createLeaseQueries(db);
 
     void ctx.blockConcurrencyWhile(async () => {
-      runMigrations(db);
+      migrate(db, migrations);
       await this.ensureAlarmScheduled();
     });
   }
