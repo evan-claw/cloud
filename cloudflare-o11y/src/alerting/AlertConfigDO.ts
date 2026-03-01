@@ -10,7 +10,7 @@ import type { TtfbAlertingConfig } from './ttfb-config-store';
 function rowToConfig(row: typeof alertConfig.$inferSelect): AlertingConfig {
 	return {
 		model: row.model,
-		enabled: row.enabled === 1,
+		enabled: row.enabled,
 		errorRateSlo: row.error_rate_slo,
 		minRequestsPerWindow: row.min_requests_per_window,
 		updatedAt: row.updated_at,
@@ -20,7 +20,7 @@ function rowToConfig(row: typeof alertConfig.$inferSelect): AlertingConfig {
 function rowToTtfbConfig(row: typeof ttfbAlertConfig.$inferSelect): TtfbAlertingConfig {
 	return {
 		model: row.model,
-		enabled: row.enabled === 1,
+		enabled: row.enabled,
 		ttfbThresholdMs: row.ttfb_threshold_ms,
 		ttfbSlo: row.ttfb_slo,
 		minRequestsPerWindow: row.min_requests_per_window,
@@ -44,9 +44,9 @@ export class AlertConfigDO extends DurableObject<Env> {
 	}
 
 	get(model: string): AlertingConfig | null {
-		const rows = this.db.select().from(alertConfig).where(eq(alertConfig.model, model)).all();
-		if (rows.length === 0) return null;
-		return rowToConfig(rows[0]);
+		const row = this.db.select().from(alertConfig).where(eq(alertConfig.model, model)).get();
+		if (!row) return null;
+		return rowToConfig(row);
 	}
 
 	upsert(config: AlertingConfig): void {
@@ -54,7 +54,7 @@ export class AlertConfigDO extends DurableObject<Env> {
 			.insert(alertConfig)
 			.values({
 				model: config.model,
-				enabled: config.enabled ? 1 : 0,
+				enabled: config.enabled,
 				error_rate_slo: config.errorRateSlo,
 				min_requests_per_window: config.minRequestsPerWindow,
 				updated_at: config.updatedAt,
@@ -62,7 +62,7 @@ export class AlertConfigDO extends DurableObject<Env> {
 			.onConflictDoUpdate({
 				target: alertConfig.model,
 				set: {
-					enabled: config.enabled ? 1 : 0,
+					enabled: config.enabled,
 					error_rate_slo: config.errorRateSlo,
 					min_requests_per_window: config.minRequestsPerWindow,
 					updated_at: config.updatedAt,
@@ -80,9 +80,9 @@ export class AlertConfigDO extends DurableObject<Env> {
 	}
 
 	getTtfb(model: string): TtfbAlertingConfig | null {
-		const rows = this.db.select().from(ttfbAlertConfig).where(eq(ttfbAlertConfig.model, model)).all();
-		if (rows.length === 0) return null;
-		return rowToTtfbConfig(rows[0]);
+		const row = this.db.select().from(ttfbAlertConfig).where(eq(ttfbAlertConfig.model, model)).get();
+		if (!row) return null;
+		return rowToTtfbConfig(row);
 	}
 
 	upsertTtfb(config: TtfbAlertingConfig): void {
@@ -90,7 +90,7 @@ export class AlertConfigDO extends DurableObject<Env> {
 			.insert(ttfbAlertConfig)
 			.values({
 				model: config.model,
-				enabled: config.enabled ? 1 : 0,
+				enabled: config.enabled,
 				ttfb_threshold_ms: config.ttfbThresholdMs,
 				ttfb_slo: config.ttfbSlo,
 				min_requests_per_window: config.minRequestsPerWindow,
@@ -99,7 +99,7 @@ export class AlertConfigDO extends DurableObject<Env> {
 			.onConflictDoUpdate({
 				target: ttfbAlertConfig.model,
 				set: {
-					enabled: config.enabled ? 1 : 0,
+					enabled: config.enabled,
 					ttfb_threshold_ms: config.ttfbThresholdMs,
 					ttfb_slo: config.ttfbSlo,
 					min_requests_per_window: config.minRequestsPerWindow,
