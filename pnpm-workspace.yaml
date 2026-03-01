@@ -4,6 +4,7 @@ catalog:
   '@octokit/auth-app': ^8.1.2
   '@types/jsonwebtoken': ^9.0.10
   aws4fetch: ^1.0.20
+  drizzle-kit: ^0.31.9
   drizzle-orm: ^0.45.1
   eslint: ^9.39.3
   hono: ^4.12.1
