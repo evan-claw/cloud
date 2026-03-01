@@ -7,7 +7,7 @@ import { cli_sessions_v2 } from '@kilocode/db/schema';
 import type { Env } from './env';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from './dos/SessionAccessCacheDO';
-import { withDORetry } from './util/do-retry';
+import { withDORetry } from '@kilocode/worker-utils';
 import { getSessionExport } from './services/session-export';
 
 const sessionIdSchema = z.string().startsWith('ses_').length(30);

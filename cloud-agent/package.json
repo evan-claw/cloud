@@ -27,9 +27,10 @@
   "dependencies": {
     "@cloudflare/sandbox": "0.6.7",
     "@kilocode/db": "workspace:*",
+    "@kilocode/encryption": "workspace:*",
+    "@kilocode/worker-utils": "workspace:*",
     "@octokit/auth-app": "catalog:",
     "@trpc/server": "^11.0.0",
-    "aws4fetch": "catalog:",
     "drizzle-orm": "catalog:",
     "jsonwebtoken": "catalog:",
     "workers-tagged-logger": "catalog:",

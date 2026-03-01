@@ -6,7 +6,7 @@ import { Hono } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import { AttributionTrackerDO, getAttributionTrackerDO } from './dos/AttributionTracker.do';
 import { logger } from './util/logger';
-import { resError, resSuccess } from './util/res';
+import { resError, resSuccess } from '@kilocode/worker-utils';
 import { authMiddleware } from './util/auth';
 import { adminAuthMiddleware } from './util/admin-auth';
 import {

@@ -1,7 +1,10 @@
 import { Hono, type Context } from 'hono';
-import { HTTPException } from 'hono/http-exception';
-import { bearerAuth } from 'hono/bearer-auth';
 import type { Env, DeployRequest, DeployResponse, StatusResponse } from './types';
+import {
+  backendAuthMiddleware,
+  createErrorHandler,
+  createNotFoundHandler,
+} from '@kilocode/worker-utils';
 import { CloudflareAPI } from './cloudflare-api';
 import { validateWorkerName } from './utils';
 import * as Sentry from '@sentry/cloudflare';
@@ -41,26 +44,10 @@ type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
 
 // Authentication middleware
-app.use('*', async (c: Context<HonoEnv>, next) => {
-  const authToken = c.env.BACKEND_AUTH_TOKEN;
-
-  // Fail if auth token is not configured
-  if (!authToken || authToken.trim() === '') {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  // Use Hono's bearer auth middleware with error handling
-  const authMiddleware = bearerAuth({ token: authToken });
-  try {
-    return await authMiddleware(c, next);
-  } catch (error) {
-    // Handle HTTPException from bearer auth
-    if (error instanceof HTTPException) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-    throw error;
-  }
-});
+app.use(
+  '*',
+  backendAuthMiddleware<HonoEnv>(c => c.env.BACKEND_AUTH_TOKEN)
+);
 
 // Route: POST /deploy
 app.post('/deploy', async (c: Context<HonoEnv>) => {
@@ -287,7 +274,8 @@ app.delete('/worker/:slug', async (c: Context<HonoEnv>) => {
 });
 
 // Global error handler
-app.onError((err: Error, c: Context<HonoEnv>) => {
+const errorHandler = createErrorHandler(console, { includeMessage: false });
+app.onError((err, c) => {
   Sentry.captureException(err, {
     extra: {
       path: c.req.path,
@@ -295,13 +283,11 @@ app.onError((err: Error, c: Context<HonoEnv>) => {
     },
   });
 
-  return c.json({ error: 'Internal server error' }, 500);
+  return errorHandler(err, c);
 });
 
 // 404 handler
-app.notFound((c: Context<HonoEnv>) => {
-  return c.json({ error: 'Not found' }, 404);
-});
+app.notFound(createNotFoundHandler());
 
 export default Sentry.withSentry((env: Env) => {
   const { id: versionId } = env.CF_VERSION_METADATA;

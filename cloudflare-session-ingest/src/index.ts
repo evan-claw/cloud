@@ -8,7 +8,7 @@ import { cli_sessions_v2 } from '@kilocode/db/schema';
 import { kiloJwtAuthMiddleware } from './middleware/kilo-jwt-auth';
 import { api } from './routes/api';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
-import { withDORetry } from './util/do-retry';
+import { withDORetry } from '@kilocode/worker-utils';
 export { SessionIngestDO } from './dos/SessionIngestDO';
 export { SessionAccessCacheDO } from './dos/SessionAccessCacheDO';
 export { SessionIngestRPC } from './session-ingest-rpc';

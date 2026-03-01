@@ -4,7 +4,7 @@ import { cli_sessions_v2 } from '@kilocode/db/schema';
 
 import type { Env } from '../env';
 import { getSessionIngestDO } from '../dos/SessionIngestDO';
-import { withDORetry } from '../util/do-retry';
+import { withDORetry } from '@kilocode/worker-utils';
 
 /**
  * Fetch the full session export payload from the SessionIngestDO.

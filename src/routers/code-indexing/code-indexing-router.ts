@@ -15,7 +15,6 @@ import { getIndexStorage } from '@/lib/code-indexing/storage';
 import { getUserUUID } from '@/lib/user.server';
 import { findUserByEmail } from '@/lib/user';
 import { chunkCountToSizeKbSql } from '@/lib/code-indexing/util';
-import { MANAGED_INDEXING_ENABLED } from '@/lib/config.server';
 import {
   trackCodeIndexingSearch,
   trackCodeIndexingDelete,
@@ -184,9 +183,6 @@ export const codeIndexingRouter = createTRPCRouter({
     .input(CodebaseIndexingSearchRequestSchema)
     .output(CodebaseIndexingSearchResponseSchema)
     .query(async ({ ctx, input }) => {
-      if (!MANAGED_INDEXING_ENABLED) {
-        return [];
-      }
       const organizationId = await getCodeIndexOrganizationId(ctx, input);
 
       // Search using storage class with default provider and collection

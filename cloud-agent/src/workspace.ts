@@ -6,7 +6,7 @@ import type {
   SystemStatusEvent,
 } from './types.js';
 import { logger } from './logger.js';
-import { withTimeout } from './utils/timeout.js';
+import { withTimeout } from '@kilocode/worker-utils';
 
 /**
  * Sanitize a string for use in filesystem paths by replacing forbidden characters with dashes.

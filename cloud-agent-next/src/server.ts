@@ -6,6 +6,7 @@ import type { Env } from './types.js';
 import type { HonoContext } from './hono-context.js';
 import { logger, withLogTags } from './logger.js';
 import { validateStreamTicket, validateKiloToken } from './auth.js';
+import { createErrorHandler, createNotFoundHandler } from '@kilocode/worker-utils';
 import { createCallbackQueueConsumer } from './callbacks/index.js';
 import type { CallbackJob } from './callbacks/index.js';
 import { authMiddleware } from './middleware/auth.js';
@@ -200,20 +201,8 @@ app.use(
   })
 );
 
-app.notFound((c: Context<HonoContext>) => {
-  return c.json({ error: 'Not found' }, 404);
-});
-
-app.onError((err: Error, c: Context<HonoContext>) => {
-  logger
-    .withFields({
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    })
-    .error('Unhandled error');
-
-  return c.json({ error: 'Internal server error' }, 500);
-});
+app.notFound(createNotFoundHandler());
+app.onError(createErrorHandler(logger, { includeMessage: false }));
 
 export default {
   fetch: app.fetch,

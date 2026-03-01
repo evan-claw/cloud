@@ -151,6 +151,13 @@ export function generateBaseConfig(
     console.log(`Overriding default model: ${env.KILOCODE_DEFAULT_MODEL}`);
   }
 
+  // Remove the agents.defaults.models allowlist that `openclaw onboard` creates.
+  // When non-empty it restricts visible models to only those listed, hiding the
+  // rest of the kilocode catalog. KiloClaw users should see all available models.
+  if (config.agents?.defaults?.models) {
+    delete config.agents.defaults.models;
+  }
+
   // Exec tool settings
   config.tools = config.tools ?? {};
   config.tools.exec = config.tools.exec ?? {};

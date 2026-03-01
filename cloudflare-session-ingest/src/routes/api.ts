@@ -5,11 +5,10 @@ import { getWorkerDb } from '@kilocode/db/client';
 import { cli_sessions_v2 } from '@kilocode/db/schema';
 
 import type { Env } from '../env';
-import { zodJsonValidator } from '../util/validation';
+import { zodJsonValidator, withDORetry } from '@kilocode/worker-utils';
 import { getSessionIngestDO } from '../dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from '../dos/SessionAccessCacheDO';
 import { SessionSyncInputSchema } from '../types/session-sync';
-import { withDORetry } from '../util/do-retry';
 import { splitIngestBatchForDO } from '../util/ingest-batching';
 import { getSessionExport } from '../services/session-export';
 

@@ -93,6 +93,12 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:packages/db
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:packages/worker-utils
       '@lottiefiles/dotlottie-react':
         specifier: ^0.17.6
         version: 0.17.7(react@19.2.0)
@@ -177,9 +183,6 @@ importers:
       '@radix-ui/react-tabs':
         specifier: ^1.1.13
         version: 1.1.13(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      '@radix-ui/react-toggle':
-        specifier: ^1.1.10
-        version: 1.1.10(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@radix-ui/react-tooltip':
         specifier: ^1.2.8
         version: 1.2.8(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -222,9 +225,6 @@ importers:
       '@types/mdx':
         specifier: ^2.0.13
         version: 2.0.13
-      '@uiw/react-json-view':
-        specifier: 2.0.0-alpha.39
-        version: 2.0.0-alpha.39(@babel/runtime@7.28.4)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@vercel/functions':
         specifier: ^3.3.3
         version: 3.3.3(@aws-sdk/credential-provider-web-identity@3.972.3)
@@ -409,9 +409,6 @@ importers:
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
-      brace-expansion:
-        specifier: ^4.0.1
-        version: 4.0.1
       dependency-cruiser:
         specifier: ^17.3.1
         version: 17.3.1
@@ -496,15 +493,18 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:../packages/db
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       '@octokit/auth-app':
         specifier: 'catalog:'
         version: 8.1.2
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.8.0(typescript@5.9.3)
-      aws4fetch:
-        specifier: 'catalog:'
-        version: 1.0.20
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -569,15 +569,18 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:../packages/db
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       '@octokit/auth-app':
         specifier: 'catalog:'
         version: 8.1.2
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.9.0(typescript@5.9.3)
-      aws4fetch:
-        specifier: 'catalog:'
-        version: 1.0.20
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -666,6 +669,9 @@ importers:
 
   cloudflare-ai-attribution:
     dependencies:
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -700,6 +706,9 @@ importers:
       '@ashishkumar472/cf-git':
         specifier: 1.0.5
         version: 1.0.5
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       diff:
         specifier: '>=8.0.3'
         version: 8.0.3
@@ -743,12 +752,12 @@ importers:
 
   cloudflare-auto-fix-infra:
     dependencies:
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
-      zod:
-        specifier: 'catalog:'
-        version: 4.3.6
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260120.0
@@ -762,6 +771,9 @@ importers:
 
   cloudflare-auto-triage-infra:
     dependencies:
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -781,6 +793,9 @@ importers:
 
   cloudflare-code-review-infra:
     dependencies:
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -797,6 +812,12 @@ importers:
 
   cloudflare-db-proxy:
     dependencies:
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -831,6 +852,12 @@ importers:
 
   cloudflare-deploy-infra/builder:
     dependencies:
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../../packages/worker-utils
       '@sentry/cloudflare':
         specifier: ^10.25.0
         version: 10.25.0(@cloudflare/workers-types@4.20260130.0)
@@ -914,6 +941,9 @@ importers:
       '@cloudflare/containers':
         specifier: ^0.1.0
         version: 0.1.0
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -1044,9 +1074,9 @@ importers:
 
   cloudflare-o11y:
     dependencies:
-      '@hono/zod-validator':
-        specifier: ^0.7.6
-        version: 0.7.6(hono@4.12.2)(zod@4.3.6)
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2
@@ -1075,6 +1105,9 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:../packages/db
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -1097,6 +1130,9 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.19.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
@@ -1109,6 +1145,12 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:../packages/db
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -1164,6 +1206,12 @@ importers:
       '@kilocode/db':
         specifier: workspace:*
         version: link:../packages/db
+      '@kilocode/encryption':
+        specifier: workspace:*
+        version: link:../packages/encryption
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260130.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.9)(pg@8.18.0)
@@ -1229,6 +1277,37 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+
+  packages/encryption:
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.19.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ~3.2.0
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+
+  packages/worker-utils:
+    dependencies:
+      aws4fetch:
+        specifier: 'catalog:'
+        version: 1.0.20
+      hono:
+        specifier: 'catalog:'
+        version: 4.12.2
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ~3.2.0
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
   storybook:
     dependencies:
@@ -2956,12 +3035,6 @@ packages:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
       hono: '>=4.0.0'
 
-  '@hono/zod-validator@0.7.6':
-    resolution: {integrity: sha512-Io1B6d011Gj1KknV4rXYz4le5+5EubcWEU/speUjuw9XMMIaP3n78yXLhjd2A3PXaXaUwEAluOiAyLqhBEJgsw==}
-    peerDependencies:
-      hono: '>=3.9.0'
-      zod: ^3.25.0 || ^4.0.0
-
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
     engines: {node: '>=18.18.0'}
@@ -4318,19 +4391,6 @@ packages:
 
   '@radix-ui/react-tabs@1.1.13':
     resolution: {integrity: sha512-7xdcatg7/U+7+Udyoj2zodtI9H/IIopqo+YOIcZOq1nJwXWBZ9p8xiu5llXlekDbZkca79a/fozEYQXIA4sW6A==}
-    peerDependencies:
-      '@types/react': '*'
-      '@types/react-dom': '*'
-      react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
-      react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
-    peerDependenciesMeta:
-      '@types/react':
-        optional: true
-      '@types/react-dom':
-        optional: true
-
-  '@radix-ui/react-toggle@1.1.10':
-    resolution: {integrity: sha512-lS1odchhFTeZv3xwHH31YPObmJn8gOg7Lq12inrr0+BH/l3Tsq32VfjqH1oh80ARM3mlkfMic15n0kg4sD1poQ==}
     peerDependencies:
       '@types/react': '*'
       '@types/react-dom': '*'
@@ -5988,13 +6048,6 @@ packages:
     resolution: {integrity: sha512-ytCPJouuNmJyGjZwSFg/v0Ugkn/52drU5HymW1p0l6dU+iHuTIaZSKfHFWETJxQVwyyYqNxxvC0QMxTDfwPlGQ==}
     hasBin: true
 
-  '@uiw/react-json-view@2.0.0-alpha.39':
-    resolution: {integrity: sha512-D9MHNan56WhtdAsmjtE9x18YLY0JSMnh0a6Ji0/2sVXCF456ZVumYLdx2II7hLQOgRMa4QMaHloytpTUHxsFRw==}
-    peerDependencies:
-      '@babel/runtime': '>=7.10.0'
-      react: '>=18.0.0'
-      react-dom: '>=18.0.0'
-
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
 
@@ -6569,10 +6622,6 @@ packages:
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
-  balanced-match@3.0.1:
-    resolution: {integrity: sha512-vjtV3hiLqYDNRoiAv0zC4QaGAMPomEoq83PRmYIofPswwZurCeWR5LByXm7SyoL0Zh5+2z0+HC7jG8gSZJUh0w==}
-    engines: {node: '>= 16'}
-
   bare-events@2.8.2:
     resolution: {integrity: sha512-riJjyv1/mHLIPX4RwiK+oW9/4c3TEUeORHKefKAKnZ5kyslbN+HXowtbaVEqt4IMUB7OXlfixcs6gsFeo/jhiQ==}
     peerDependencies:
@@ -6629,10 +6678,6 @@ packages:
 
   brace-expansion@2.0.2:
     resolution: {integrity: sha512-Jt0vHyM+jmUBqojB7E1NIYadt0vI0Qxjxd2TErW94wDz+E2LAm5vKMXXwg6ZZBTHPuUlDgQHKXvjGBdfcF1ZDQ==}
-
-  brace-expansion@4.0.1:
-    resolution: {integrity: sha512-YClrbvTCXGe70pU2JiEiPLYXO9gQkyxYeKpJIQHVS/gOs6EWMQP2RYBwjFLNT322Ji8TOC3IMPfsYCedNpzKfA==}
-    engines: {node: '>= 18'}
 
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
@@ -13853,11 +13898,6 @@ snapshots:
       '@trpc/server': 11.9.0(typescript@5.9.3)
       hono: 4.12.2
 
-  '@hono/zod-validator@0.7.6(hono@4.12.2)(zod@4.3.6)':
-    dependencies:
-      hono: 4.12.2
-      zod: 4.3.6
-
   '@humanfs/core@0.19.1': {}
 
   '@humanfs/node@0.16.7':
@@ -15421,17 +15461,6 @@ snapshots:
       '@radix-ui/react-presence': 1.1.5(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@radix-ui/react-primitive': 2.1.3(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@radix-ui/react-roving-focus': 1.1.11(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
-      '@radix-ui/react-use-controllable-state': 1.2.2(@types/react@19.2.2)(react@19.2.0)
-      react: 19.2.0
-      react-dom: 19.2.0(react@19.2.0)
-    optionalDependencies:
-      '@types/react': 19.2.2
-      '@types/react-dom': 19.2.2(@types/react@19.2.2)
-
-  '@radix-ui/react-toggle@1.1.10(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
-    dependencies:
-      '@radix-ui/primitive': 1.1.3
-      '@radix-ui/react-primitive': 2.1.3(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@radix-ui/react-use-controllable-state': 1.2.2(@types/react@19.2.2)(react@19.2.0)
       react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
@@ -17577,12 +17606,6 @@ snapshots:
       '@typescript/native-preview-win32-arm64': 7.0.0-dev.20251019.1
       '@typescript/native-preview-win32-x64': 7.0.0-dev.20251019.1
 
-  '@uiw/react-json-view@2.0.0-alpha.39(@babel/runtime@7.28.4)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)':
-    dependencies:
-      '@babel/runtime': 7.28.4
-      react: 19.2.0
-      react-dom: 19.2.0(react@19.2.0)
-
   '@ungap/structured-clone@1.3.0': {}
 
   '@unrs/resolver-binding-android-arm-eabi@1.11.1':
@@ -18237,8 +18260,6 @@ snapshots:
 
   balanced-match@1.0.2: {}
 
-  balanced-match@3.0.1: {}
-
   bare-events@2.8.2: {}
 
   base64-js@1.5.1: {}
@@ -18293,10 +18314,6 @@ snapshots:
   brace-expansion@2.0.2:
     dependencies:
       balanced-match: 1.0.2
-
-  brace-expansion@4.0.1:
-    dependencies:
-      balanced-match: 3.0.1
 
   braces@3.0.3:
     dependencies:

@@ -6,10 +6,12 @@
     "deploy": "wrangler deploy --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@kilocode/db": "workspace:*",
+    "@kilocode/worker-utils": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "jsonwebtoken": "catalog:",
@@ -19,6 +21,7 @@
     "@cloudflare/workers-types": "^4.20260120.0",
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
+    "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"
   }

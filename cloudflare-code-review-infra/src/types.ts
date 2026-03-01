@@ -3,21 +3,11 @@
  */
 
 import type { CodeReviewOrchestrator } from './code-review-orchestrator';
+import type { Owner, MCPServerConfig } from '@kilocode/worker-utils';
+
+export type { Owner, MCPServerConfig };
 
 export type CodeReviewStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export interface Owner {
-  type: 'user' | 'org';
-  id: string;
-  userId: string;
-}
-
-export interface MCPServerConfig {
-  type: string;
-  url: string;
-  headers: Record<string, string>;
-  timeout: number;
-}
 
 export interface SessionInput {
   /** GitHub repo in format "owner/repo" (for GitHub platform) */

@@ -22,7 +22,7 @@ import {
 import { listAllVersions, updateTagIndex } from '../lib/image-version';
 import { upsertCatalogVersion } from '../lib/catalog-registration';
 import { z } from 'zod';
-import { withDORetry } from '../util/do-retry';
+import { withDORetry } from '@kilocode/worker-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
 
 const KiloCodeConfigPatchSchema = z.object({

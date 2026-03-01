@@ -16,7 +16,7 @@ import { logger } from './logger.js';
 import { z } from 'zod';
 import { withDORetry } from './utils/do-retry.js';
 import { downloadImagesToSandbox, buildAttachArgs } from './utils/image-download.js';
-import { createR2Client } from './utils/r2-client.js';
+import { createR2Client } from '@kilocode/worker-utils';
 import type { Images } from './router/schemas.js';
 
 const uuidSchema = z.uuid();

@@ -27,6 +27,8 @@ const config: Config = {
       '<rootDir>/src/tests/setup/__mocks__/lib/integrations/platforms/github/adapter.ts',
     '^@kilocode/db/(.*)$': '<rootDir>/packages/db/src/$1',
     '^@kilocode/db$': '<rootDir>/packages/db/src/index.ts',
+    '^@kilocode/worker-utils$': '<rootDir>/packages/worker-utils/src/index.ts',
+    '^(\\.{1,2}/.+)\\.js$': '$1',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^server-only$': '<rootDir>/src/tests/setup/__mocks__/server-only.js',
   },
@@ -40,6 +42,8 @@ const config: Config = {
     '<rootDir>/cloudflare-session-ingest/',
     '<rootDir>/cloudflare-gastown/',
     '<rootDir>/kiloclaw/',
+    '<rootDir>/packages/encryption/',
+    '<rootDir>/packages/worker-utils/',
   ],
   transformIgnorePatterns: [
     'node_modules/.pnpm/(?!(@octokit|universal-user-agent|before-after-hook|bottleneck))',

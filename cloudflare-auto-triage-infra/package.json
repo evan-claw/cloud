@@ -15,6 +15,7 @@
     "wrangler": "catalog:"
   },
   "dependencies": {
+    "@kilocode/worker-utils": "workspace:*",
     "hono": "catalog:",
     "zod": "catalog:"
   }

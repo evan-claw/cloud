@@ -7,7 +7,8 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
@@ -17,7 +18,7 @@
 		"wrangler": "catalog:"
 	},
 	"dependencies": {
-		"@hono/zod-validator": "^0.7.6",
+		"@kilocode/worker-utils": "workspace:*",
 		"hono": "catalog:",
 		"zod": "catalog:"
 	}
