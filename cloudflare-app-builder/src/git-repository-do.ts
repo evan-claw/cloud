@@ -6,6 +6,8 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import migrations from '../drizzle/migrations';
 import git from '@ashishkumar472/cf-git';
 import http from '@ashishkumar472/cf-git/http/web';
 import { sanitizeGitUrl } from './utils/git-url';
@@ -22,6 +24,9 @@ export class GitRepositoryDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.db = drizzle(ctx.storage, { logger: false });
+    ctx.blockConcurrencyWhile(async () => {
+      migrate(this.db, migrations);
+    });
   }
 
   private async initializeFS(): Promise<void> {

@@ -520,7 +520,7 @@ export class TriggerDO extends DurableObject<Env> {
   }
 
   async updateRequest(requestId: string, updates: RequestUpdates): Promise<{ success: boolean }> {
-    const setValues: Record<string, unknown> = {};
+    const setValues: Partial<typeof requestsTable.$inferInsert> = {};
     if (updates.process_status !== undefined) setValues.process_status = updates.process_status;
     if (updates.cloud_agent_session_id !== undefined)
       setValues.cloud_agent_session_id = updates.cloud_agent_session_id;
@@ -597,8 +597,7 @@ function recordToCapturedRequest(record: RequestRow): CapturedRequest {
     sourceIp: record.source_ip,
     startedAt: record.started_at,
     completedAt: record.completed_at,
-    // Drizzle infers text() as string; CHECK constraint guarantees ProcessStatus values
-    processStatus: record.process_status as ProcessStatus,
+    processStatus: record.process_status,
     cloudAgentSessionId: record.cloud_agent_session_id,
     errorMessage: record.error_message,
   };

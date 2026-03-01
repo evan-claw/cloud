@@ -18,7 +18,11 @@ export const requests = sqliteTable(
       .default(sql`(unixepoch())`),
     started_at: text('started_at'),
     completed_at: text('completed_at'),
-    process_status: text('process_status').notNull().default('captured'),
+    process_status: text('process_status', {
+      enum: ['captured', 'inprogress', 'success', 'failed'],
+    })
+      .notNull()
+      .default('captured'),
     cloud_agent_session_id: text('cloud_agent_session_id'),
     error_message: text('error_message'),
   },

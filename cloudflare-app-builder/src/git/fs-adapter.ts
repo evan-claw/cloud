@@ -10,8 +10,7 @@
 
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { eq, and, like } from 'drizzle-orm';
-import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
-import migrations from '../../drizzle/migrations';
+
 import { gitObjects } from '../db/sqlite-schema';
 import type { ErrnoException } from '../types';
 import { MAX_OBJECT_SIZE } from './constants';
@@ -25,8 +24,6 @@ export class SqliteFS {
   }
 
   init() {
-    migrate(this.db, migrations);
-
     // Ensure root directory exists
     this.db
       .insert(gitObjects)
@@ -206,6 +203,7 @@ export class SqliteFS {
       base64Content = btoa(binaryString);
     }
 
+    const now = Date.now();
     this.db
       .insert(gitObjects)
       .values({
@@ -213,7 +211,7 @@ export class SqliteFS {
         parent_path: parentPath,
         data: base64Content,
         is_dir: 0,
-        mtime: Date.now(),
+        mtime: now,
       })
       .onConflictDoUpdate({
         target: gitObjects.path,
@@ -221,7 +219,7 @@ export class SqliteFS {
           parent_path: parentPath,
           data: base64Content,
           is_dir: 0,
-          mtime: Date.now(),
+          mtime: now,
         },
       })
       .run();
