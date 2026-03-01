@@ -12,7 +12,7 @@ import {
   fetchSessionMetadata,
 } from '../../session-service.js';
 import { cleanupWorkspace, getSessionWorkspacePath, getSessionHomePath } from '../../workspace.js';
-import { withDORetry } from '@kilocode/worker-utils';
+import { withDORetry } from '../../utils/do-retry.js';
 import { protectedProcedure, publicProcedure, internalApiProtectedProcedure } from '../auth.js';
 import { sessionIdSchema, GetSessionInput, GetSessionOutput } from '../schemas.js';
 import { computeExecutionHealth } from '../../core/execution.js';

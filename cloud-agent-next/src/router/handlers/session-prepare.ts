@@ -21,7 +21,7 @@ import { generateSandboxId } from '../../sandbox-id.js';
 import type { SandboxId } from '../../types.js';
 import { setupWorkspace, cloneGitHubRepo, cloneGitRepo, manageBranch } from '../../workspace.js';
 import { ensureKiloServer, createKiloCliSession } from '../../kilo/server-manager.js';
-import { withDORetry } from '@kilocode/worker-utils';
+import { withDORetry } from '../../utils/do-retry.js';
 
 type SessionPrepareHandlers = {
   prepareSession: typeof prepareSessionHandler;

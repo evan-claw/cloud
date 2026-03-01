@@ -21,7 +21,7 @@ import { logger } from '../logger.js';
 import { updateGitRemoteToken } from '../workspace.js';
 import { ensureKiloServer } from '../kilo/server-manager.js';
 import { WrapperClient } from '../kilo/wrapper-client.js';
-import { withDORetry } from '@kilocode/worker-utils';
+import { withDORetry } from '../utils/do-retry.js';
 import { normalizeAgentMode } from '../schema.js';
 
 // ---------------------------------------------------------------------------
