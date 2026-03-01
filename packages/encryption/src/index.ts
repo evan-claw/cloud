@@ -17,3 +17,5 @@ export {
 } from './encryption.js';
 
 export type { EncryptedEnvelope } from './encryption.js';
+
+export { timingSafeEqual } from './timing-safe-equal.js';

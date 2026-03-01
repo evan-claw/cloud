@@ -10,6 +10,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@kilocode/encryption": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
     "hono": "catalog:",
     "workers-tagged-logger": "catalog:",
