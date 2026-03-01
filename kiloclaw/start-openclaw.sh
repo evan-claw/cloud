@@ -242,6 +242,13 @@ if (process.env.KILOCODE_DEFAULT_MODEL) {
     console.log('Overriding default model: ' + process.env.KILOCODE_DEFAULT_MODEL);
 }
 
+// Remove the agents.defaults.models allowlist that `openclaw onboard` creates.
+// When non-empty it restricts visible models to only those listed, hiding the
+// rest of the kilocode catalog. KiloClaw users should see all available models.
+if (config.agents && config.agents.defaults && config.agents.defaults.models) {
+    delete config.agents.defaults.models;
+}
+
 // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
 // gateway host directly. Allowlist mode gates unknown commands via the
 // Control UI approval dialog; safe bins (jq, head, tail, etc.) auto-allow.

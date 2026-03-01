@@ -23,6 +23,23 @@ import { ConfirmActionDialog } from './ConfirmActionDialog';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
+/**
+ * Models available via the kilocode gateway's baked-in catalog in openclaw.
+ * Only these models are selectable as the default until openclaw supports
+ * dynamic model discovery from the gateway's /models endpoint.
+ */
+const KILOCODE_CATALOG_IDS = new Set([
+  'anthropic/claude-opus-4.6',
+  'z-ai/glm-5:free',
+  'minimax/minimax-m2.5:free',
+  'anthropic/claude-sonnet-4.5',
+  'openai/gpt-5.2',
+  'google/gemini-3-pro-preview',
+  'google/gemini-3-flash-preview',
+  'x-ai/grok-code-fast-1',
+  'moonshotai/kimi-k2.5',
+]);
+
 /** Returns true if calver `version` is >= `minVersion` (e.g. "2026.2.26"). Fails closed on malformed input. */
 function calverAtLeast(version: string | null | undefined, minVersion: string): boolean {
   if (!version) return false;
@@ -201,7 +218,10 @@ export function SettingsTab({
   const [confirmRestore, setConfirmRestore] = useState(false);
 
   const modelOptions = useMemo<ModelOption[]>(
-    () => (modelsData?.data || []).map(model => ({ id: model.id, name: model.name })),
+    () =>
+      (modelsData?.data || [])
+        .filter(model => KILOCODE_CATALOG_IDS.has(model.id))
+        .map(model => ({ id: model.id, name: model.name })),
     [modelsData]
   );
 
