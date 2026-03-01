@@ -160,7 +160,7 @@ export class CloudAgentSession extends DurableObject {
     this.commandQueueQueries = createCommandQueueQueries(db, rawSql);
 
     void ctx.blockConcurrencyWhile(async () => {
-      migrate(db, migrations);
+      await migrate(db, migrations);
       await this.ensureAlarmScheduled();
     });
   }
