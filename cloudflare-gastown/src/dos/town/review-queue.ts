@@ -50,6 +50,7 @@ function toReviewQueueEntry(row: MergeRequestBeadRecord): ReviewQueueEntry {
     agent_id: row.assignee_agent_bead_id ?? row.created_by ?? '',
     bead_id:
       typeof row.metadata?.source_bead_id === 'string' ? row.metadata.source_bead_id : row.bead_id,
+    rig_id: row.rig_id ?? '',
     branch: row.branch,
     pr_url: row.pr_url,
     status:
@@ -89,7 +90,7 @@ export function submitToReviewQueue(sql: SqlStorage, input: ReviewQueueInput): v
       'open',
       `Review: ${input.branch}`,
       input.summary ?? null,
-      null,
+      input.rig_id,
       null,
       input.agent_id,
       'medium',
@@ -266,6 +267,7 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
   submitToReviewQueue(sql, {
     agent_id: agentId,
     bead_id: agent.current_hook_bead_id,
+    rig_id: agent.rig_id ?? '',
     branch: input.branch,
     pr_url: input.pr_url,
     summary: input.summary,

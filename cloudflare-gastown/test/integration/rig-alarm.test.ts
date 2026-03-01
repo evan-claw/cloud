@@ -150,6 +150,7 @@ describe('Town DO Alarm', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/review',
       });
 

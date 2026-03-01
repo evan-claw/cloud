@@ -28,7 +28,7 @@ export async function handleSubmitToReviewQueue(c: Context<GastownEnv>, params: 
   }
   const townId = c.get('townId');
   const town = getTownDOStub(c.env, townId);
-  await town.submitToReviewQueue(parsed.data);
+  await town.submitToReviewQueue({ ...parsed.data, rig_id: params.rigId });
   return c.json(resSuccess({ submitted: true }), 201);
 }
 

@@ -1446,8 +1446,14 @@ export class TownDO extends DurableObject<Env> {
     const entry = reviewQueue.popReviewQueue(this.sql);
     if (!entry) return;
 
-    const rigList = rigs.listRigs(this.sql);
-    const rigId = rigList[0]?.id ?? '';
+    // Resolve rig from the merge_request bead — not rigList[0] which would
+    // pick the wrong rig in multi-rig towns.
+    const rigId = entry.rig_id;
+    if (!rigId) {
+      console.error(`${TOWN_LOG} processReviewQueue: entry ${entry.id} has no rig_id, skipping`);
+      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      return;
+    }
     const rigConfig = await this.getRigConfig(rigId);
     if (!rigConfig) {
       reviewQueue.completeReview(this.sql, entry.id, 'failed');
