@@ -6,13 +6,15 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { TRPCError } from '@trpc/server';
+import { drizzle } from 'drizzle-orm/durable-sqlite';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import migrations from '../../drizzle/migrations';
 import type { CloudAgentSessionState, OperationResult, MCPServerConfig } from './types.js';
 import { MetadataSchema, type Images } from './schemas.js';
 import type { EncryptedSecrets } from '../router/schemas.js';
 import type { CallbackJob, CallbackTarget } from '../callbacks/index.js';
 import { logger } from '../logger.js';
 import { Limits } from '../schema.js';
-import { runMigrations } from './migrations.js';
 import {
   createExecutionQueries,
   createEventQueries,
@@ -149,18 +151,16 @@ export class CloudAgentSession extends DurableObject {
     const sessionIdPart = doName?.split(':')[1];
     this.sessionId = sessionIdPart ? (sessionIdPart as SessionId) : undefined;
 
-    // Initialize query modules with storage
-    this.executionQueries = createExecutionQueries(ctx.storage);
-    this.eventQueries = createEventQueries(ctx.storage.sql);
-    this.leaseQueries = createLeaseQueries(ctx.storage.sql);
-    this.commandQueueQueries = createCommandQueueQueries(ctx.storage.sql);
+    const db = drizzle(ctx.storage, { logger: false });
+    const rawSql = ctx.storage.sql;
 
-    // Run schema migrations on first access to this DO instance.
-    // blockConcurrencyWhile blocks all concurrent requests until completed,
-    // ensuring migrations complete before any handlers execute.
-    // Also ensures reaper alarm is scheduled.
+    this.executionQueries = createExecutionQueries(ctx.storage);
+    this.eventQueries = createEventQueries(db, rawSql);
+    this.leaseQueries = createLeaseQueries(db, rawSql);
+    this.commandQueueQueries = createCommandQueueQueries(db, rawSql);
+
     void ctx.blockConcurrencyWhile(async () => {
-      await runMigrations(ctx);
+      migrate(db, migrations);
       await this.ensureAlarmScheduled();
     });
   }

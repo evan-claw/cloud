@@ -10,7 +10,7 @@ import {
   createSandboxUsageEvent,
   updateGitRemoteToken,
 } from '../../workspace.js';
-import { withDORetry } from '../../utils/do-retry.js';
+import { withDORetry } from '@kilocode/worker-utils';
 import { protectedProcedure } from '../auth.js';
 import { SendMessageInput } from '../schemas.js';
 import { translateSessionError } from '../error-handling.js';

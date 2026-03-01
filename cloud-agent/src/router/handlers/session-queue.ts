@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure } from '../auth.js';
-import { withDORetry } from '../../utils/do-retry.js';
+import { withDORetry } from '@kilocode/worker-utils';
 import type { SessionId } from '../../types/ids.js';
 import type { StartExecutionV2Request, StartExecutionV2Result } from '../../queue/types.js';
 import { logger, withLogTags } from '../../logger.js';

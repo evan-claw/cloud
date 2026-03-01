@@ -12,7 +12,7 @@ import {
   createSandboxUsageEvent,
 } from '../../workspace.js';
 import { invokeCallback } from '../../callbacks.js';
-import { withDORetry } from '../../utils/do-retry.js';
+import { withDORetry } from '@kilocode/worker-utils';
 import { protectedProcedure } from '../auth.js';
 import {
   InitiateSessionInput,
