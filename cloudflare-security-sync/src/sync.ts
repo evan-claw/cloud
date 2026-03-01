@@ -24,42 +24,46 @@ const SecurityFindingStatus = {
 } as const;
 type SecurityFindingStatus = (typeof SecurityFindingStatus)[keyof typeof SecurityFindingStatus];
 
-type SecuritySeverity = 'critical' | 'high' | 'medium' | 'low';
+const securitySeveritySchema = z.enum(['critical', 'high', 'medium', 'low']);
+type SecuritySeverity = z.infer<typeof securitySeveritySchema>;
 
-type DependabotAlertState = 'open' | 'fixed' | 'dismissed' | 'auto_dismissed';
+const dependabotAlertStateSchema = z.enum(['open', 'fixed', 'dismissed', 'auto_dismissed']);
+type DependabotAlertState = z.infer<typeof dependabotAlertStateSchema>;
 
-type DependabotAlertRaw = {
-  number: number;
-  state: DependabotAlertState;
-  dependency: {
-    package: { ecosystem: string; name: string };
-    manifest_path: string;
-    scope: 'development' | 'runtime';
-  };
-  security_advisory: {
-    ghsa_id: string;
-    cve_id: string | null;
-    summary: string;
-    description: string;
-    severity: SecuritySeverity;
-    cvss?: { score: number; vector_string: string };
-    cwes?: Array<{ cwe_id: string; name: string }>;
-  };
-  security_vulnerability: {
-    vulnerable_version_range: string;
-    first_patched_version?: { identifier: string };
-  };
-  created_at: string;
-  updated_at: string;
-  fixed_at: string | null;
-  dismissed_at: string | null;
-  dismissed_by?: { login: string } | null;
-  dismissed_reason?: string | null;
-  dismissed_comment?: string | null;
-  auto_dismissed_at?: string | null;
-  html_url: string;
-  url: string;
-};
+const dependabotAlertRawSchema = z.object({
+  number: z.number(),
+  state: dependabotAlertStateSchema,
+  dependency: z.object({
+    package: z.object({ ecosystem: z.string(), name: z.string() }),
+    manifest_path: z.string(),
+    scope: z.enum(['development', 'runtime']),
+  }),
+  security_advisory: z.object({
+    ghsa_id: z.string(),
+    cve_id: z.string().nullable(),
+    summary: z.string(),
+    description: z.string(),
+    severity: securitySeveritySchema,
+    cvss: z.object({ score: z.number(), vector_string: z.string() }).optional(),
+    cwes: z.array(z.object({ cwe_id: z.string(), name: z.string() })).optional(),
+  }),
+  security_vulnerability: z.object({
+    vulnerable_version_range: z.string(),
+    first_patched_version: z.object({ identifier: z.string() }).optional(),
+  }),
+  created_at: z.string(),
+  updated_at: z.string(),
+  fixed_at: z.string().nullable(),
+  dismissed_at: z.string().nullable(),
+  dismissed_by: z.object({ login: z.string() }).nullable().optional(),
+  dismissed_reason: z.string().nullable().optional(),
+  dismissed_comment: z.string().nullable().optional(),
+  auto_dismissed_at: z.string().nullable().optional(),
+  html_url: z.string(),
+  url: z.string(),
+});
+
+type DependabotAlertRaw = z.infer<typeof dependabotAlertRawSchema>;
 
 type ParsedSecurityFinding = {
   source: string;
@@ -262,7 +266,8 @@ async function fetchAllDependabotAlerts(
       throw new Error(`GitHub API error ${response.status} for ${repoOwner}/${repoName}: ${body}`);
     }
 
-    const data = (await response.json()) as DependabotAlertRaw[];
+    const json: unknown = await response.json();
+    const data = z.array(dependabotAlertRawSchema).parse(json);
     allAlerts.push(...data);
 
     // Follow pagination via Link header
