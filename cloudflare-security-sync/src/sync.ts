@@ -36,7 +36,7 @@ const dependabotAlertRawSchema = z.object({
   dependency: z.object({
     package: z.object({ ecosystem: z.string(), name: z.string() }),
     manifest_path: z.string(),
-    scope: z.enum(['development', 'runtime']),
+    scope: z.enum(['development', 'runtime']).nullable(),
   }),
   security_advisory: z.object({
     ghsa_id: z.string(),
