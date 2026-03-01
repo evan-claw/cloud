@@ -953,6 +953,9 @@ importers:
       '@cloudflare/containers':
         specifier: ^0.1.0
         version: 0.1.0
+      '@kilocode/worker-utils':
+        specifier: workspace:*
+        version: link:../packages/worker-utils
       hono:
         specifier: 'catalog:'
         version: 4.12.2

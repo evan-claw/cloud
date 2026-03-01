@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { extractBearerToken } from '@kilocode/worker-utils';
 import { verifyAgentJWT, type AgentJWTPayload } from '../util/jwt.util';
 import { resError } from '../util/res.util';
 import type { GastownEnv } from '../gastown.worker';
@@ -36,14 +37,9 @@ export const townIdMiddleware = createMiddleware<GastownEnv>(async (c, next) => 
  * and rigId match the route params to prevent cross-town/cross-rig access.
  */
 export const authMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.toLowerCase().startsWith('bearer ')) {
-    return c.json(resError('Authentication required'), 401);
-  }
-
-  const token = authHeader.slice(7).trim();
+  const token = extractBearerToken(c.req.header('Authorization'));
   if (!token) {
-    return c.json(resError('Missing token'), 401);
+    return c.json(resError('Authentication required'), 401);
   }
 
   const secret = await resolveSecret(c.env.GASTOWN_JWT_SECRET);

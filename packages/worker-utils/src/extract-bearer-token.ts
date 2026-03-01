@@ -1,9 +1,10 @@
 /**
  * Extract the token from an `Authorization: Bearer <token>` header value.
- * Returns `null` if the header is missing or doesn't start with "Bearer ".
+ * The "Bearer" prefix is matched case-insensitively per RFC 6750 §2.1.
+ * Returns `null` if the header is missing or malformed.
  */
 export function extractBearerToken(authHeader: string | null | undefined): string | null {
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (!authHeader || authHeader.slice(0, 7).toLowerCase() !== 'bearer ') {
     return null;
   }
   return authHeader.slice(7);
