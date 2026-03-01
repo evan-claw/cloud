@@ -3,9 +3,12 @@ const GITHUB_INTEGRATION_ERROR_NEEDLES = [
   'GitHub installation',
   'installation_id',
   'Bad credentials',
-  'Not Found',
   'Forbidden',
   'Resource not accessible',
+  // Match user-friendly messages from classifyAnalysisError
+  'GitHub authentication failed',
+  'Failed to clone the repository',
+  'Repository not found',
 ];
 
 /** Detect GitHub integration errors so the UI can show "reconnect your GitHub App" guidance. */

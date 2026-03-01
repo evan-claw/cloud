@@ -12,7 +12,7 @@ type ClassifiedError = {
   userMessage: string;
 };
 
-const CLONE_PATTERNS = [/\bclone\b/i, /\brepository\b.*\bfrom\b/i];
+const CLONE_PATTERNS = [/\bgit\b.*\bclone\b/i, /\bfailed to clone\b/i, /\brepository\b.*\bfrom\b/i];
 
 const AUTH_PATTERNS = [
   /\bauthenticat/i,
@@ -23,7 +23,8 @@ const AUTH_PATTERNS = [
 ];
 
 const NOT_FOUND_PATTERNS = [
-  /\bnot found\b/i,
+  /\brepo(sitory)?\b.*\bnot found\b/i,
+  /\bnot found\b.*\brepo(sitory)?\b/i,
   /\b404\b/,
   /\bdoes not exist\b/i,
   /\bno such\b.*\brepository\b/i,
@@ -63,13 +64,21 @@ export function classifyAnalysisError(error: unknown): ClassifiedError {
 
   return {
     code: 'UNKNOWN',
-    userMessage: raw,
+    userMessage: 'An unexpected error occurred. Please try again.',
   };
 }
 
 /** User-actionable errors that should not be reported as Sentry exceptions. */
 export function isUserActionableError(code: AnalysisErrorCode): boolean {
-  return code === 'CLONE_FAILED' || code === 'AUTH_FAILED' || code === 'REPO_NOT_FOUND';
+  switch (code) {
+    case 'CLONE_FAILED':
+    case 'AUTH_FAILED':
+    case 'REPO_NOT_FOUND':
+      return true;
+    case 'SANDBOX_FAILED':
+    case 'UNKNOWN':
+      return false;
+  }
 }
 
 export function trpcCodeForAnalysisError(code: AnalysisErrorCode | undefined): TRPCError['code'] {

@@ -530,12 +530,13 @@ export async function startSecurityAnalysis(params: {
       const classified = classifyAnalysisError(initiateError);
       // Default to SANDBOX_FAILED for initiation errors unless a more specific code applies
       const isUnknown = classified.code === 'UNKNOWN';
-      const errorCode = isUnknown ? ('SANDBOX_FAILED' as const) : classified.code;
+      const errorCode: AnalysisErrorCode = isUnknown ? 'SANDBOX_FAILED' : classified.code;
       const userMessage = isUnknown
         ? 'Sandbox analysis failed to start. Please try again.'
         : classified.userMessage;
 
-      const logFn = isUserActionableError(errorCode) ? warn : logError;
+      const isActionable = isUserActionableError(errorCode);
+      const logFn = isActionable ? warn : logError;
       logFn('initiateFromPreparedSession failed', {
         correlationId,
         findingId,
@@ -543,6 +544,13 @@ export async function startSecurityAnalysis(params: {
         errorCode,
         error: initiateError,
       });
+
+      if (!isActionable) {
+        captureException(initiateError, {
+          tags: { operation: 'initiateFromPreparedSession', errorCode },
+          extra: { findingId, cloudAgentSessionId, correlationId },
+        });
+      }
 
       await updateAnalysisStatus(findingId, 'failed', { error: userMessage });
       return { started: false, error: userMessage, errorCode };
