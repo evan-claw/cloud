@@ -80,6 +80,9 @@ export function createEventQueries(db: DrizzleSqliteDODatabase, rawSql: SqlStora
     // Uses toSQL() + raw exec() for true lazy cursor-based iteration.
     // Drizzle's durable-sqlite .all() materializes everything; the raw
     // SqlStorageCursor lets callers break early without loading all rows.
+    // The cursor returns plain objects whose shape is guaranteed to match
+    // StoredEvent because the SELECT list is generated from the same Drizzle
+    // schema columns — no runtime coercion is needed beyond the type annotation.
     *iterateByFilters(filters: Omit<EventQueryFilters, 'limit'>): Generator<StoredEvent> {
       const conditions = buildConditions(filters);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -89,9 +92,9 @@ export function createEventQueries(db: DrizzleSqliteDODatabase, rawSql: SqlStora
         .where(where)
         .orderBy(asc(events.id))
         .toSQL();
-      const cursor = rawSql.exec(query, ...params);
+      const cursor = rawSql.exec<StoredEvent>(query, ...params);
       for (const row of cursor) {
-        yield row as StoredEvent;
+        yield row;
       }
     },
 
