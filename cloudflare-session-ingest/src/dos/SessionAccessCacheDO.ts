@@ -25,13 +25,12 @@ export class SessionAccessCacheDO extends DurableObject<Env> {
   }
 
   async has(sessionId: string): Promise<boolean> {
-    const rows = this.db
+    const row = this.db
       .select({ ok: sql<number>`1` })
       .from(sessions)
       .where(eq(sessions.session_id, sessionId))
-      .limit(1)
-      .all();
-    return rows.length > 0;
+      .get();
+    return row !== undefined;
   }
 
   async add(sessionId: string): Promise<void> {

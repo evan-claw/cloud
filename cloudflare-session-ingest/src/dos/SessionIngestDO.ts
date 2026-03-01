@@ -43,9 +43,8 @@ function writeIngestMetaIfChanged(
     .select({ value: ingestMeta.value })
     .from(ingestMeta)
     .where(eq(ingestMeta.key, params.key))
-    .limit(1)
-    .all();
-  const currentValue = existing[0]?.value ?? null;
+    .get();
+  const currentValue = existing?.value ?? null;
 
   if (currentValue === params.incomingValue) {
     return { changed: false, value: params.incomingValue };
@@ -220,13 +219,12 @@ export class SessionIngestDO extends DurableObject<Env> {
     closeReason: TerminationReason,
     ingestVersion: number
   ): Promise<boolean> {
-    const emittedRows = this.db
+    const emittedRow = this.db
       .select({ value: ingestMeta.value })
       .from(ingestMeta)
       .where(eq(ingestMeta.key, 'metricsEmitted'))
-      .limit(1)
-      .all();
-    if (emittedRows[0]?.value === 'true') {
+      .get();
+    if (emittedRow?.value === 'true') {
       return false;
     }
 
@@ -250,8 +248,7 @@ export class SessionIngestDO extends DurableObject<Env> {
       .select({ item_data: ingestItems.item_data })
       .from(ingestItems)
       .where(eq(ingestItems.item_id, 'model'))
-      .limit(1)
-      .all()[0];
+      .get();
     let model: string | undefined;
     if (modelRow) {
       try {
@@ -329,6 +326,7 @@ export class SessionIngestDO extends DurableObject<Env> {
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    migrate(this.db, migrations);
   }
 }
 
