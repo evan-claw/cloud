@@ -38,6 +38,7 @@ const config: Config = {
     '<rootDir>/cloudflare-app-builder/',
     '<rootDir>/cloudflare-webhook-agent-ingest/',
     '<rootDir>/cloudflare-session-ingest/',
+    '<rootDir>/cloudflare-gastown/',
     '<rootDir>/kiloclaw/',
   ],
   transformIgnorePatterns: [

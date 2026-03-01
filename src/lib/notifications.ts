@@ -49,6 +49,7 @@ const normalUnconditionalNotifications: KiloNotification[] = [
       actionText: 'Learn more',
       actionURL: 'https://kilo.ai/docs/cli',
     },
+    showIn: ['extension'],
   },
   {
     id: 'kilo-cloud-agents-jan-15',
