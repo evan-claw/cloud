@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { HonoContext } from '../index';
 import { internalApiMiddleware } from '../util/auth';
 import { logger } from '../util/logger';
-import { resError, resSuccess, withDORetry } from '@kilocode/worker-utils';
+import { resError, resSuccess } from '@kilocode/worker-utils';
+import { withDORetry } from '../util/do-retry';
 
 const callbacks = new Hono<HonoContext>();
 

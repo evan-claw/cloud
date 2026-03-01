@@ -32,7 +32,7 @@ import type {
   MCPServerConfig,
 } from './persistence/types.js';
 import { MetadataSchema } from './persistence/schemas.js';
-import { withDORetry } from '@kilocode/worker-utils';
+import { withDORetry } from './utils/do-retry.js';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
 import type { EncryptedSecrets, Images } from './router/schemas.js';
 
@@ -418,7 +418,7 @@ export class SessionService {
     };
   }
 
-  private async getSaferEnvVars(
+  private getSaferEnvVars(
     userEnvVars: Record<string, string> | undefined,
     sessionHome: string,
     sessionId: string,
@@ -432,7 +432,7 @@ export class SessionService {
     gitUrl?: string,
     gitToken?: string,
     platform?: 'github' | 'gitlab'
-  ): Promise<Record<string, string>> {
+  ): Record<string, string> {
     // Use override if available, otherwise use original values from API
     const kilocodeToken = env.KILOCODE_TOKEN_OVERRIDE ?? originalToken;
     const kilocodeOrganizationId = env.KILOCODE_ORG_ID_OVERRIDE ?? originalOrgId;
@@ -448,7 +448,7 @@ export class SessionService {
           'Encrypted secrets provided but AGENT_ENV_VARS_PRIVATE_KEY is not configured on the worker'
         );
       }
-      baseEnvVars = await mergeEnvVarsWithSecrets(baseEnvVars, encryptedSecrets, privateKey);
+      baseEnvVars = mergeEnvVarsWithSecrets(baseEnvVars, encryptedSecrets, privateKey);
       logger
         .withTags({ secretCount: Object.keys(encryptedSecrets).length })
         .info('Decrypted and merged encrypted secrets');
@@ -538,7 +538,7 @@ export class SessionService {
     const { sessionId, sessionHome, workspacePath, envVars } = context;
 
     // Decrypt secrets and merge with env vars (just-in-time decryption)
-    const saferEnvVars = await this.getSaferEnvVars(
+    const saferEnvVars = this.getSaferEnvVars(
       envVars,
       sessionHome,
       sessionId,

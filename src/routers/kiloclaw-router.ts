@@ -59,32 +59,36 @@ const patchChannelsSchema = z.object({
  * Build the worker provision payload from plaintext channel tokens.
  * The worker expects the flat encrypted envelope shape for channels.
  */
-async function buildWorkerChannels(channels: z.infer<typeof updateConfigSchema>['channels']) {
+function buildWorkerChannels(channels: z.infer<typeof updateConfigSchema>['channels']) {
   if (!channels) return undefined;
-
-  const [telegramBotToken, discordBotToken, slackBotToken, slackAppToken] = await Promise.all([
-    channels.telegramBotToken ? encryptKiloClawSecret(channels.telegramBotToken) : undefined,
-    channels.discordBotToken ? encryptKiloClawSecret(channels.discordBotToken) : undefined,
-    channels.slackBotToken ? encryptKiloClawSecret(channels.slackBotToken) : undefined,
-    channels.slackAppToken ? encryptKiloClawSecret(channels.slackAppToken) : undefined,
-  ]);
-
-  return { telegramBotToken, discordBotToken, slackBotToken, slackAppToken };
+  return {
+    telegramBotToken: channels.telegramBotToken
+      ? encryptKiloClawSecret(channels.telegramBotToken)
+      : undefined,
+    discordBotToken: channels.discordBotToken
+      ? encryptKiloClawSecret(channels.discordBotToken)
+      : undefined,
+    slackBotToken: channels.slackBotToken
+      ? encryptKiloClawSecret(channels.slackBotToken)
+      : undefined,
+    slackAppToken: channels.slackAppToken
+      ? encryptKiloClawSecret(channels.slackAppToken)
+      : undefined,
+  };
 }
 
 /**
  * Encrypt channel tokens for a PATCH (supports null for removal).
  */
-async function buildWorkerChannelsPatch(channels: z.infer<typeof patchChannelsSchema>) {
-  const entries = Object.entries(channels).filter(
-    (entry): entry is [string, string | null] => entry[1] !== undefined
-  );
+function buildWorkerChannelsPatch(channels: z.infer<typeof patchChannelsSchema>) {
+  const result: Record<string, ReturnType<typeof encryptKiloClawSecret> | null | undefined> = {};
 
-  const encrypted = await Promise.all(
-    entries.map(([, value]) => (value === null ? null : encryptKiloClawSecret(value)))
-  );
+  for (const [key, value] of Object.entries(channels)) {
+    if (value === undefined) continue;
+    result[key] = value === null ? null : encryptKiloClawSecret(value);
+  }
 
-  return Object.fromEntries(entries.map(([key], i) => [key, encrypted[i]]));
+  return result;
 }
 
 type KiloCodeConfigPublicResponse = Pick<
@@ -109,9 +113,7 @@ async function provisionInstance(
 
   const encryptedSecrets = input.secrets
     ? Object.fromEntries(
-        await Promise.all(
-          Object.entries(input.secrets).map(async ([k, v]) => [k, await encryptKiloClawSecret(v)])
-        )
+        Object.entries(input.secrets).map(([k, v]) => [k, encryptKiloClawSecret(v)])
       )
     : undefined;
 
@@ -125,7 +127,7 @@ async function provisionInstance(
   return client.provision(user.id, {
     envVars: input.envVars,
     encryptedSecrets,
-    channels: await buildWorkerChannels(input.channels),
+    channels: buildWorkerChannels(input.channels),
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
@@ -255,7 +257,7 @@ export const kiloclawRouter = createTRPCRouter({
   patchChannels: baseProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
     const client = new KiloClawInternalClient();
     return client.patchChannels(ctx.user.id, {
-      channels: await buildWorkerChannelsPatch(input),
+      channels: buildWorkerChannelsPatch(input),
     });
   }),
 

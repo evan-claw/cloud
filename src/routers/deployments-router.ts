@@ -123,7 +123,7 @@ export const deploymentsRouter = createTRPCRouter({
       const { deploymentId, key, value, isSecret } = input;
       const plaintextEnvVar = markAsPlaintext({ key, value, isSecret });
       // Encrypt before storing
-      const [encryptedEnvVar] = await envVarsService.encryptEnvVars([plaintextEnvVar]);
+      const [encryptedEnvVar] = envVarsService.encryptEnvVars([plaintextEnvVar]);
       await envVarsService.setEnvVar(deploymentId, encryptedEnvVar, {
         type: 'user',
         id: ctx.user.id,

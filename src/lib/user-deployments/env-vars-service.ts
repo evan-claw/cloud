@@ -19,28 +19,26 @@ import { USER_DEPLOYMENTS_ENV_VARS_PUBLIC_KEY } from '@/lib/config.server';
  * Non-secret variables are returned as-is.
  * The builder will decrypt secrets using the private key.
  */
-export async function encryptEnvVars(envVars: PlaintextEnvVar[]): Promise<EncryptedEnvVar[]> {
+export function encryptEnvVars(envVars: PlaintextEnvVar[]): EncryptedEnvVar[] {
   if (envVars.length === 0) {
     return [];
   }
 
-  const publicKey = Buffer.from(USER_DEPLOYMENTS_ENV_VARS_PUBLIC_KEY, 'base64').toString();
+  const publicKey = Buffer.from(USER_DEPLOYMENTS_ENV_VARS_PUBLIC_KEY, 'base64');
 
-  return await Promise.all(
-    envVars.map(async v => {
-      if (!v.isSecret) {
-        // Non-secrets can be marked as encrypted (value remains plaintext)
-        return markAsEncrypted({ key: v.key, value: v.value, isSecret: v.isSecret });
-      }
+  return envVars.map(v => {
+    if (!v.isSecret) {
+      // Non-secrets can be marked as encrypted (value remains plaintext)
+      return markAsEncrypted({ key: v.key, value: v.value, isSecret: v.isSecret });
+    }
 
-      const envelope = await encryptWithPublicKey(v.value, publicKey);
-      return markAsEncrypted({
-        key: v.key,
-        value: JSON.stringify(envelope),
-        isSecret: v.isSecret,
-      });
-    })
-  );
+    const envelope = encryptWithPublicKey(v.value, publicKey);
+    return markAsEncrypted({
+      key: v.key,
+      value: JSON.stringify(envelope),
+      isSecret: v.isSecret,
+    });
+  });
 }
 
 /**

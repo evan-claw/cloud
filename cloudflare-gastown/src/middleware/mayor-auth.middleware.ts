@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { verifyAgentJWT } from '../util/jwt.util';
 import { resError } from '../util/res.util';
 import type { GastownEnv } from '../gastown.worker';
-
+import { extractBearerToken } from '@kilocode/worker-utils';
 import { resolveSecret } from '../util/secret.util';
 
 /**
@@ -15,14 +15,9 @@ import { resolveSecret } from '../util/secret.util';
  * Sets `agentJWT` on the Hono context.
  */
 export const mayorAuthMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.toLowerCase().startsWith('bearer ')) {
-    return c.json(resError('Authentication required'), 401);
-  }
-
-  const token = authHeader.slice(7).trim();
+  const token = extractBearerToken(c.req.header('Authorization'));
   if (!token) {
-    return c.json(resError('Missing token'), 401);
+    return c.json(resError('Authentication required'), 401);
   }
 
   const secret = await resolveSecret(c.env.GASTOWN_JWT_SECRET);

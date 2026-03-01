@@ -2,7 +2,7 @@ import type { WebhookDeliveryMessage } from './util/queue';
 import type { TriggerConfig, TriggerDO } from './dos/TriggerDO';
 import { renderPromptTemplate } from './util/prompt-template';
 import { logger } from './util/logger';
-import { withDORetry } from '@kilocode/worker-utils';
+import { withDORetry } from './util/do-retry';
 import { getTokenMintingService } from './services/token-minting-service.js';
 import { getProfileResolutionService } from './services/profile-resolution-service.js';
 import { z } from 'zod';

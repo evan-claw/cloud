@@ -11,7 +11,7 @@ import { verifyProfileOwnership } from './profile-utils';
 /**
  * Encrypt a value using the agent env vars public key.
  */
-async function encryptValue(value: string): Promise<string> {
+function encryptValue(value: string): string {
   if (!AGENT_ENV_VARS_PUBLIC_KEY) {
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
@@ -19,8 +19,8 @@ async function encryptValue(value: string): Promise<string> {
     });
   }
 
-  const publicKey = Buffer.from(AGENT_ENV_VARS_PUBLIC_KEY, 'base64').toString();
-  const envelope = await encryptWithPublicKey(value, publicKey);
+  const publicKey = Buffer.from(AGENT_ENV_VARS_PUBLIC_KEY, 'base64');
+  const envelope = encryptWithPublicKey(value, publicKey);
   return JSON.stringify(envelope);
 }
 
@@ -37,7 +37,7 @@ export async function setVar(
 ): Promise<void> {
   await verifyProfileOwnership(profileId, owner);
 
-  const storedValue = isSecret ? await encryptValue(value) : value;
+  const storedValue = isSecret ? encryptValue(value) : value;
 
   await db
     .insert(agent_environment_profile_vars)
@@ -162,14 +162,12 @@ export async function setVars(
     return;
   }
 
-  const values = await Promise.all(
-    vars.map(async v => ({
-      profile_id: profileId,
-      key: v.key,
-      value: v.isSecret ? await encryptValue(v.value) : v.value,
-      is_secret: v.isSecret,
-    }))
-  );
+  const values = vars.map(v => ({
+    profile_id: profileId,
+    key: v.key,
+    value: v.isSecret ? encryptValue(v.value) : v.value,
+    is_secret: v.isSecret,
+  }));
 
   await db.transaction(async tx => {
     for (const val of values) {

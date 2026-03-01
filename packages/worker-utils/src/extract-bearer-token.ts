@@ -4,8 +4,8 @@
  * Returns `null` if the header is missing or malformed.
  */
 export function extractBearerToken(authHeader: string | null | undefined): string | null {
-  if (!authHeader || authHeader.slice(0, 7).toLowerCase() !== 'bearer ') {
-    return null;
-  }
-  return authHeader.slice(7);
+  if (!authHeader) return null;
+  const trimmed = authHeader.trim();
+  if (trimmed.slice(0, 7).toLowerCase() !== 'bearer ') return null;
+  return trimmed.slice(7).trim() || null;
 }

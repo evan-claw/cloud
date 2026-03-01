@@ -14,36 +14,34 @@ import { EnvDecryptionError } from './errors';
  * @param privateKey - RSA private key in PEM format for decryption
  * @returns Array of decrypted plaintext environment variables
  */
-export default async function decryptEnvVars(
+export default function decryptEnvVars(
   envVars: EncryptedEnvVar[],
   privateKey: Buffer
-): Promise<PlaintextEnvVar[]> {
+): PlaintextEnvVar[] {
   if (envVars.length === 0) {
     return [];
   }
 
-  return Promise.all(
-    envVars.map(async v => {
-      if (!v.isSecret) {
-        // Non-secret values are already plaintext
-        return markAsPlaintext({ key: v.key, value: v.value, isSecret: v.isSecret });
-      }
+  return envVars.map(v => {
+    if (!v.isSecret) {
+      // Non-secret values are already plaintext
+      return markAsPlaintext({ key: v.key, value: v.value, isSecret: v.isSecret });
+    }
 
-      try {
-        // Parse the encrypted value as JSON to get the envelope
-        const envelope = JSON.parse(v.value) as EncryptedEnvelope;
+    try {
+      // Parse the encrypted value as JSON to get the envelope
+      const envelope = JSON.parse(v.value) as EncryptedEnvelope;
 
-        // Decrypt using the private key
-        const decryptedValue = await decryptWithPrivateKey(envelope, privateKey.toString());
+      // Decrypt using the private key
+      const decryptedValue = decryptWithPrivateKey(envelope, privateKey);
 
-        return markAsPlaintext({
-          key: v.key,
-          value: decryptedValue,
-          isSecret: v.isSecret,
-        });
-      } catch (error) {
-        throw new EnvDecryptionError(`Failed to process secret environment variable`, v.key, error);
-      }
-    })
-  );
+      return markAsPlaintext({
+        key: v.key,
+        value: decryptedValue,
+        isSecret: v.isSecret,
+      });
+    } catch (error) {
+      throw new EnvDecryptionError(`Failed to process secret environment variable`, v.key, error);
+    }
+  });
 }

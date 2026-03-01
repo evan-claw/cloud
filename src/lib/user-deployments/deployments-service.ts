@@ -604,7 +604,7 @@ async function getAppBuilderDbEnvVars(appId: string): Promise<EncryptedEnvVar[]>
     return [];
   }
 
-  return await encryptEnvVars([
+  return encryptEnvVars([
     markAsPlaintext({ key: 'DB_URL', value: dbCredentials.dbUrl, isSecret: false }),
     markAsPlaintext({ key: 'DB_TOKEN', value: dbCredentials.dbToken ?? '', isSecret: true }),
   ]);
@@ -681,7 +681,7 @@ export async function createDeployment(params: {
   const resolved = await resolveSource(owner, source);
 
   // Encrypt user-provided env vars first
-  const encryptedUserEnvVars = envVars && envVars.length > 0 ? await encryptEnvVars(envVars) : [];
+  const encryptedUserEnvVars = envVars && envVars.length > 0 ? encryptEnvVars(envVars) : [];
 
   // For app-builder deployments, fetch DB credentials dynamically (already encrypted)
   let encryptedDBEnvVars: EncryptedEnvVar[] = [];

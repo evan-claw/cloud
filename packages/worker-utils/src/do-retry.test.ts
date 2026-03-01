@@ -1,21 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { withDORetry, type DORetryConfig } from './do-retry.js';
 
-// Mock scheduler.wait (Cloudflare Workers global)
-const mockSchedulerWait = vi.fn().mockResolvedValue(undefined);
-vi.stubGlobal('scheduler', { wait: mockSchedulerWait });
-
 const mockLogger = {
   warn: vi.fn(),
   error: vi.fn(),
 };
 
+// Track delay values passed to setTimeout while resolving immediately
+const recordedDelays: number[] = [];
+let originalSetTimeout: typeof globalThis.setTimeout;
+
 describe('withDORetry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recordedDelays.length = 0;
+    originalSetTimeout = globalThis.setTimeout;
+    // Replace setTimeout to record delays but resolve immediately
+    vi.stubGlobal('setTimeout', (fn: () => void, delay?: number) => {
+      recordedDelays.push(delay ?? 0);
+      return originalSetTimeout(fn, 0);
+    });
   });
 
   afterEach(() => {
+    vi.stubGlobal('setTimeout', originalSetTimeout);
     vi.restoreAllMocks();
   });
 
@@ -35,7 +43,7 @@ describe('withDORetry', () => {
       expect(result).toEqual({ id: '123' });
       expect(getStub).toHaveBeenCalledTimes(1);
       expect(mockStub.getMetadata).toHaveBeenCalledTimes(1);
-      expect(mockSchedulerWait).not.toHaveBeenCalled();
+      expect(recordedDelays).toHaveLength(0);
     });
 
     it('returns result after retry on retryable error', async () => {
@@ -59,7 +67,7 @@ describe('withDORetry', () => {
 
       expect(result).toEqual({ id: '456' });
       expect(getStub).toHaveBeenCalledTimes(2);
-      expect(mockSchedulerWait).toHaveBeenCalledTimes(1);
+      expect(recordedDelays).toHaveLength(1);
     });
 
     it('creates fresh stub for each retry attempt', async () => {
@@ -120,6 +128,7 @@ describe('withDORetry', () => {
 
       for (const message of errorMessages) {
         vi.clearAllMocks();
+        recordedDelays.length = 0;
         const error = new Error(message);
         const mockStub = { op: vi.fn().mockRejectedValue(error) };
         const getStub = vi.fn().mockReturnValue(mockStub);
@@ -136,7 +145,7 @@ describe('withDORetry', () => {
 
         // Should NOT retry - fails immediately
         expect(getStub).toHaveBeenCalledTimes(1);
-        expect(mockSchedulerWait).not.toHaveBeenCalled();
+        expect(recordedDelays).toHaveLength(0);
       }
     });
 
@@ -179,7 +188,7 @@ describe('withDORetry', () => {
       ).rejects.toThrow('Validation failed: invalid data');
 
       expect(getStub).toHaveBeenCalledTimes(1);
-      expect(mockSchedulerWait).not.toHaveBeenCalled();
+      expect(recordedDelays).toHaveLength(0);
     });
 
     it('throws immediately when .retryable = false', async () => {
@@ -236,7 +245,7 @@ describe('withDORetry', () => {
 
       // Default is 3 attempts
       expect(getStub).toHaveBeenCalledTimes(3);
-      expect(mockSchedulerWait).toHaveBeenCalledTimes(2); // 2 waits between 3 attempts
+      expect(recordedDelays).toHaveLength(2); // 2 waits between 3 attempts
     });
 
     it('respects custom maxAttempts config', async () => {
@@ -255,7 +264,7 @@ describe('withDORetry', () => {
       ).rejects.toThrow('Error');
 
       expect(getStub).toHaveBeenCalledTimes(5);
-      expect(mockSchedulerWait).toHaveBeenCalledTimes(4);
+      expect(recordedDelays).toHaveLength(4);
     });
 
     it('respects maxAttempts: 1 (no retries at all)', async () => {
@@ -274,7 +283,7 @@ describe('withDORetry', () => {
       ).rejects.toThrow('fail');
 
       expect(operation).toHaveBeenCalledTimes(1);
-      expect(mockSchedulerWait).not.toHaveBeenCalled();
+      expect(recordedDelays).toHaveLength(0);
     });
   });
 
@@ -301,9 +310,9 @@ describe('withDORetry', () => {
 
       // First backoff: 100 * 0.5 * 2^0 = 50ms
       // Second backoff: 100 * 0.5 * 2^1 = 100ms
-      expect(mockSchedulerWait).toHaveBeenCalledTimes(2);
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(1, 50);
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(2, 100);
+      expect(recordedDelays).toHaveLength(2);
+      expect(recordedDelays[0]).toBe(50);
+      expect(recordedDelays[1]).toBe(100);
 
       randomSpy.mockRestore();
     });
@@ -330,10 +339,10 @@ describe('withDORetry', () => {
       // Attempt 1: 1000 * 1 * 2^1 = 2000ms (at cap)
       // Attempt 2: 1000 * 1 * 2^2 = 4000ms -> capped to 2000ms
       // Attempt 3: 1000 * 1 * 2^3 = 8000ms -> capped to 2000ms
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(1, 1000);
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(2, 2000);
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(3, 2000);
-      expect(mockSchedulerWait).toHaveBeenNthCalledWith(4, 2000);
+      expect(recordedDelays[0]).toBe(1000);
+      expect(recordedDelays[1]).toBe(2000);
+      expect(recordedDelays[2]).toBe(2000);
+      expect(recordedDelays[3]).toBe(2000);
 
       randomSpy.mockRestore();
     });
@@ -395,6 +404,7 @@ describe('withDORetry', () => {
         operation: 'myOp',
         attempt: 1,
         error: 'app error',
+        retryable: false,
       });
     });
 

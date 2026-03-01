@@ -208,9 +208,9 @@ export type GetSessionInput = {
 /** Execution state from cloud-agent DO */
 export type ExecutionState = {
   id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'interrupted';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted';
   startedAt?: number;
-  lastHeartbeat?: number;
+  lastHeartbeat?: number | null;
   processId?: string | null;
   error?: string | null;
   health?: 'healthy' | 'stale' | 'unknown';
