@@ -157,10 +157,11 @@ export class CloudAgentSession extends DurableObject {
     this.sessionId = sessionIdPart ? (sessionIdPart as SessionId) : undefined;
 
     const db = drizzle(ctx.storage, { logger: false });
+    const rawSql = ctx.storage.sql;
 
     this.executionQueries = createExecutionQueries(ctx.storage);
-    this.eventQueries = createEventQueries(db);
-    this.leaseQueries = createLeaseQueries(db);
+    this.eventQueries = createEventQueries(db, rawSql);
+    this.leaseQueries = createLeaseQueries(db, rawSql);
 
     void ctx.blockConcurrencyWhile(async () => {
       migrate(db, migrations);

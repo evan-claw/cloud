@@ -2,6 +2,8 @@ import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { eq, lt, asc, and, count } from 'drizzle-orm';
 import { commandQueue } from '../../db/sqlite-schema.js';
 
+type SqlStorage = DurableObjectState['storage']['sql'];
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -12,7 +14,7 @@ export type QueuedCommand = typeof commandQueue.$inferSelect;
 // Factory Function
 // ---------------------------------------------------------------------------
 
-export function createCommandQueueQueries(db: DrizzleSqliteDODatabase) {
+export function createCommandQueueQueries(db: DrizzleSqliteDODatabase, rawSql: SqlStorage) {
   return {
     enqueue(sessionId: string, executionId: string, messageJson: string): number {
       const now = Date.now();
@@ -54,22 +56,20 @@ export function createCommandQueueQueries(db: DrizzleSqliteDODatabase) {
     },
 
     deleteOlderThan(timestamp: number): number {
-      const deleted = db
+      const { sql: query, params } = db
         .delete(commandQueue)
         .where(lt(commandQueue.created_at, timestamp))
-        .returning({ id: commandQueue.id })
-        .all();
-      return deleted.length;
+        .toSQL();
+      return rawSql.exec(query, ...params).rowsWritten;
     },
 
     deleteExpired(sessionId: string, expiryMs: number = 60 * 60 * 1000): number {
       const cutoff = Date.now() - expiryMs;
-      const deleted = db
+      const { sql: query, params } = db
         .delete(commandQueue)
         .where(and(eq(commandQueue.session_id, sessionId), lt(commandQueue.created_at, cutoff)))
-        .returning({ id: commandQueue.id })
-        .all();
-      return deleted.length;
+        .toSQL();
+      return rawSql.exec(query, ...params).rowsWritten;
     },
   };
 }

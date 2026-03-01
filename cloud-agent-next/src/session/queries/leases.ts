@@ -4,6 +4,8 @@ import { Ok, Err, type Result } from '../../lib/result.js';
 import { calculateExpiry, isExpired } from '../../core/lease.js';
 import { executionLeases } from '../../db/sqlite-schema.js';
 
+type SqlStorage = DurableObjectState['storage']['sql'];
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -45,7 +47,7 @@ function toLeaseRecord(row: DbLeaseRow): LeaseRecord {
 // Factory Function
 // ---------------------------------------------------------------------------
 
-export function createLeaseQueries(db: DrizzleSqliteDODatabase) {
+export function createLeaseQueries(db: DrizzleSqliteDODatabase, rawSql: SqlStorage) {
   return {
     /**
      * Try to acquire a lease atomically.
@@ -147,15 +149,13 @@ export function createLeaseQueries(db: DrizzleSqliteDODatabase) {
     },
 
     release(executionId: string, leaseId: string): boolean {
-      const deleted = db
+      const { sql: query, params } = db
         .delete(executionLeases)
         .where(
           and(eq(executionLeases.execution_id, executionId), eq(executionLeases.lease_id, leaseId))
         )
-        .returning({ execution_id: executionLeases.execution_id })
-        .all();
-
-      return deleted.length > 0;
+        .toSQL();
+      return rawSql.exec(query, ...params).rowsWritten > 0;
     },
 
     get(executionId: string): LeaseRecord | null {
@@ -186,12 +186,11 @@ export function createLeaseQueries(db: DrizzleSqliteDODatabase) {
     },
 
     deleteExpired(now: number = Date.now()): number {
-      const deleted = db
+      const { sql: query, params } = db
         .delete(executionLeases)
         .where(lt(executionLeases.lease_expires_at, now))
-        .returning({ execution_id: executionLeases.execution_id })
-        .all();
-      return deleted.length;
+        .toSQL();
+      return rawSql.exec(query, ...params).rowsWritten;
     },
   };
 }

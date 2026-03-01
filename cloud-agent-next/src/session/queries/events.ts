@@ -5,6 +5,8 @@ import type { EventId } from '../../types/ids.js';
 import { events } from '../../db/sqlite-schema.js';
 import type { SQL } from 'drizzle-orm';
 
+type SqlStorage = DurableObjectState['storage']['sql'];
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -31,12 +33,6 @@ export type EventQueryFilters = {
   /** Maximum number of events to return */
   limit?: number;
 };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const ITERATE_BATCH_SIZE = 500;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +64,7 @@ function buildConditions(filters: Omit<EventQueryFilters, 'limit'>): SQL[] {
 // Factory Function
 // ---------------------------------------------------------------------------
 
-export function createEventQueries(db: DrizzleSqliteDODatabase) {
+export function createEventQueries(db: DrizzleSqliteDODatabase, rawSql: SqlStorage) {
   return {
     insert(params: InsertEventParams): EventId {
       const row = db
@@ -99,35 +95,30 @@ export function createEventQueries(db: DrizzleSqliteDODatabase) {
       return query.all() satisfies StoredEvent[];
     },
 
-    // Drizzle's durable-sqlite driver doesn't expose a lazy cursor, so we
-    // paginate in batches to bound memory instead of loading all rows at once.
+    // Uses toSQL() + raw exec() for true lazy cursor-based iteration.
+    // Drizzle's durable-sqlite .all() materializes everything; the raw
+    // SqlStorageCursor lets callers break early without loading all rows.
     *iterateByFilters(filters: Omit<EventQueryFilters, 'limit'>): Generator<StoredEvent> {
-      let lastId: number | undefined = filters.fromId;
-
-      for (;;) {
-        const conditions = buildConditions({ ...filters, fromId: lastId });
-        const where = conditions.length > 0 ? and(...conditions) : undefined;
-        const batch = db
-          .select()
-          .from(events)
-          .where(where)
-          .orderBy(asc(events.id))
-          .limit(ITERATE_BATCH_SIZE)
-          .all();
-
-        if (batch.length === 0) break;
-        yield* batch;
-        lastId = batch[batch.length - 1].id;
+      const conditions = buildConditions(filters);
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+      const { sql: query, params } = db
+        .select()
+        .from(events)
+        .where(where)
+        .orderBy(asc(events.id))
+        .toSQL();
+      const cursor = rawSql.exec(query, ...params);
+      for (const row of cursor) {
+        yield row as StoredEvent;
       }
     },
 
     deleteOlderThan(timestamp: number): number {
-      const deleted = db
+      const { sql: query, params } = db
         .delete(events)
         .where(lt(events.timestamp, timestamp))
-        .returning({ id: events.id })
-        .all();
-      return deleted.length;
+        .toSQL();
+      return rawSql.exec(query, ...params).rowsWritten;
     },
 
     countByExecutionId(executionId: string): number {
