@@ -33,6 +33,12 @@ export type EventQueryFilters = {
 };
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const ITERATE_BATCH_SIZE = 500;
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -93,11 +99,26 @@ export function createEventQueries(db: DrizzleSqliteDODatabase) {
       return query.all() satisfies StoredEvent[];
     },
 
+    // Drizzle's durable-sqlite driver doesn't expose a lazy cursor, so we
+    // paginate in batches to bound memory instead of loading all rows at once.
     *iterateByFilters(filters: Omit<EventQueryFilters, 'limit'>): Generator<StoredEvent> {
-      const conditions = buildConditions(filters);
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
-      const rows = db.select().from(events).where(where).orderBy(asc(events.id)).all();
-      yield* rows;
+      let lastId: number | undefined = filters.fromId;
+
+      for (;;) {
+        const conditions = buildConditions({ ...filters, fromId: lastId });
+        const where = conditions.length > 0 ? and(...conditions) : undefined;
+        const batch = db
+          .select()
+          .from(events)
+          .where(where)
+          .orderBy(asc(events.id))
+          .limit(ITERATE_BATCH_SIZE)
+          .all();
+
+        if (batch.length === 0) break;
+        yield* batch;
+        lastId = batch[batch.length - 1].id;
+      }
     },
 
     deleteOlderThan(timestamp: number): number {
