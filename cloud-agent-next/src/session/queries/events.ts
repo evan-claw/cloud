@@ -142,10 +142,10 @@ export function createEventQueries(db: DrizzleSqliteDODatabase) {
 
     getLatestEventId(): EventId | null {
       const row = db
-        .select({ max_id: max(events.id) })
+        .select({ maxId: max(events.id) })
         .from(events)
         .get();
-      return row?.max_id ?? null;
+      return row?.maxId ?? null;
     },
   };
 }
