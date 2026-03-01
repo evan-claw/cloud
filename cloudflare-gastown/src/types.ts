@@ -30,7 +30,8 @@ export type BeadPriority = z.infer<typeof BeadPriority>;
 
 export type Bead = Omit<BeadsSelect, 'labels' | 'metadata'> & {
   labels: string[];
-  metadata: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `unknown` breaks Rpc.Serializable<T>
+  metadata: Record<string, any>;
 };
 
 export type CreateBeadInput = {
@@ -39,7 +40,8 @@ export type CreateBeadInput = {
   body?: string;
   priority?: BeadPriority;
   labels?: string[];
-  metadata?: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `unknown` breaks Rpc.Serializable<T>
+  metadata?: Record<string, any>;
   assignee_agent_bead_id?: string;
   parent_bead_id?: string;
   rig_id?: string;
@@ -154,7 +156,8 @@ export type MoleculeStatus = z.infer<typeof MoleculeStatus>;
 export type Molecule = {
   id: string;
   bead_id: string;
-  formula: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `unknown` breaks Rpc.Serializable<T>
+  formula: any;
   current_step: number;
   status: MoleculeStatus;
   created_at: string;
@@ -253,12 +256,14 @@ export type AgentConfigOverrides = z.infer<typeof AgentConfigOverridesSchema>;
 
 // Re-export satellite metadata types for convenience
 export type AgentMetadataRecord = Omit<AgentMetadataSelect, 'checkpoint'> & {
-  checkpoint: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `unknown` breaks Rpc.Serializable<T>
+  checkpoint: any;
 };
 export type ReviewMetadataRecord = ReviewMetadataSelect;
 export type EscalationMetadataRecord = EscalationMetadataSelect;
 export type ConvoyMetadataRecord = ConvoyMetadataSelect;
 export type BeadEventRecord = Omit<BeadEventsSelect, 'metadata'> & {
-  metadata: Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- `unknown` breaks Rpc.Serializable<T>
+  metadata: Record<string, any>;
 };
 export type BeadDependencyRecord = BeadDependenciesSelect;
