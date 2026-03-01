@@ -6,6 +6,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 import migrations from '../drizzle/migrations';
 import git from '@ashishkumar472/cf-git';
@@ -17,7 +18,7 @@ import { logger, withLogTags, formatError } from './utils/logger';
 import type { Env, GitObject, RepositoryStats } from './types';
 
 export class GitRepositoryDO extends DurableObject<Env> {
-  private db;
+  private db: DrizzleSqliteDODatabase;
   private fs: SqliteFS | null = null;
   private _initialized = false;
 

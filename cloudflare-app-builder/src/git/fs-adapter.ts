@@ -55,7 +55,6 @@ export class SqliteFS {
       .select({
         path: gitObjects.path,
         data: gitObjects.data,
-        is_dir: gitObjects.is_dir,
       })
       .from(gitObjects)
       .where(eq(gitObjects.is_dir, 0))
@@ -379,11 +378,11 @@ export class SqliteFS {
       throw error;
     }
 
-    // Check if directory is empty (has no children)
+    // Check if directory is empty (has no direct children)
     const children = this.db
       .select({ path: gitObjects.path })
       .from(gitObjects)
-      .where(like(gitObjects.path, normalized + '/%'))
+      .where(eq(gitObjects.parent_path, normalized))
       .limit(1)
       .all();
 
@@ -484,17 +483,14 @@ export class SqliteFS {
       .select({
         path: gitObjects.path,
         data: gitObjects.data,
-        is_dir: gitObjects.is_dir,
       })
       .from(gitObjects)
-      .where(like(gitObjects.path, '.git/%'))
+      .where(and(like(gitObjects.path, '.git/%'), eq(gitObjects.is_dir, 0)))
       .all();
 
     const exported: Array<{ path: string; data: Uint8Array }> = [];
 
     for (const obj of objects) {
-      if (obj.is_dir === 1) continue; // Skip directories, only export files
-
       // Decode base64 to binary
       const binaryString = atob(obj.data);
       const bytes = new Uint8Array(binaryString.length);
