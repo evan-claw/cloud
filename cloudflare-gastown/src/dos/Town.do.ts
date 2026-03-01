@@ -340,7 +340,7 @@ export class TownDO extends DurableObject<Env> {
     const bead = beadOps.updateBeadStatus(this.db, beadId, validStatus, agentId);
 
     // If closed and part of a convoy (via bead_dependencies), notify
-    if (status === 'closed') {
+    if (validStatus === 'closed') {
       const convoyRows = this.db
         .select({ depends_on_bead_id: bead_dependencies.depends_on_bead_id })
         .from(bead_dependencies)
