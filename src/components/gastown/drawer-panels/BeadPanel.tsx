@@ -18,6 +18,11 @@ import {
   GitBranch,
   ChevronRight,
   Bot,
+  Network,
+  ArrowUpRight,
+  ArrowDownRight,
+  GitPullRequest,
+  CircleDot,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -65,6 +70,10 @@ export function BeadPanel({
     : null;
 
   const townId = rigQuery.data?.town_id;
+
+  // Build related beads from the flat list (no extra API needed)
+  const allBeads = beadsQuery.data ?? [];
+  const relatedBeads = buildRelatedBeads(bead, allBeads);
 
   return (
     <div className="flex flex-col gap-0">
@@ -156,6 +165,46 @@ export function BeadPanel({
         )}
       </div>
 
+      {/* Related Beads DAG */}
+      {relatedBeads.length > 0 && (
+        <div className="border-b border-white/[0.06] px-5 py-4">
+          <div className="mb-3 flex items-center gap-1.5">
+            <Network className="size-3 text-white/25" />
+            <span className="text-[10px] font-medium tracking-wide text-white/30 uppercase">
+              Related Beads
+            </span>
+          </div>
+          <div className="flex flex-col gap-1">
+            {relatedBeads.map(rel => (
+              <button
+                key={`${rel.relation}-${rel.bead.bead_id}`}
+                onClick={() => push({ type: 'bead', beadId: rel.bead.bead_id, rigId })}
+                className="group/rel flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-white/[0.04]"
+              >
+                <rel.icon className="size-3.5 shrink-0 text-white/30" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-white/35">{rel.label}</span>
+                    <Badge variant="outline" className="px-1 py-0 text-[9px]">
+                      {rel.bead.type.replace('_', ' ')}
+                    </Badge>
+                    <span
+                      className={`ml-auto inline-flex items-center rounded-md border px-1.5 py-0 text-[9px] font-medium ${STATUS_STYLES[rel.bead.status] ?? 'border-white/10 text-white/50'}`}
+                    >
+                      {rel.bead.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <span className="truncate text-xs text-white/65">{rel.bead.title}</span>
+                    <ChevronRight className="size-3 shrink-0 text-white/10 transition-colors group-hover/rel:text-white/25" />
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Body (markdown) */}
       {bead.body && bead.body.trim().length > 0 && (
         <div className="border-b border-white/[0.06] px-5 py-4">
@@ -209,4 +258,58 @@ function MetaCell({
       </div>
     </div>
   );
+}
+
+// ── Related beads DAG ─────────────────────────────────────────────────
+
+type BeadLike = {
+  bead_id: string;
+  type: string;
+  status: string;
+  title: string;
+  parent_bead_id: string | null;
+  metadata: Record<string, unknown>;
+};
+
+type RelatedBead = {
+  relation: string;
+  label: string;
+  icon: typeof Clock;
+  bead: BeadLike;
+};
+
+/** Compute the DAG neighborhood of a bead from the flat list. */
+function buildRelatedBeads(bead: BeadLike, allBeads: BeadLike[]): RelatedBead[] {
+  const related: RelatedBead[] = [];
+
+  // Parent bead (already shown in metadata grid, but include in DAG for completeness)
+  // Skip — the metadata grid already renders a clickable parent link.
+
+  // Child beads (beads whose parent_bead_id = this bead)
+  for (const b of allBeads) {
+    if (b.parent_bead_id === bead.bead_id) {
+      related.push({ relation: 'child', label: 'Child', icon: ArrowDownRight, bead: b });
+    }
+  }
+
+  // For merge_request beads: link back to the source bead
+  if (bead.type === 'merge_request' && typeof bead.metadata?.source_bead_id === 'string') {
+    const source = allBeads.find(b => b.bead_id === bead.metadata.source_bead_id);
+    if (source) {
+      related.push({ relation: 'source', label: 'Source Work', icon: CircleDot, bead: source });
+    }
+  }
+
+  // For non-MR beads: find any MR beads that track this bead
+  if (bead.type !== 'merge_request') {
+    for (const b of allBeads) {
+      if (b.type === 'merge_request' && b.metadata?.source_bead_id === bead.bead_id) {
+        related.push({ relation: 'review', label: 'Review', icon: GitPullRequest, bead: b });
+      }
+    }
+  }
+
+  // Beads that share the same parent (siblings) — skip, too noisy for now
+
+  return related;
 }

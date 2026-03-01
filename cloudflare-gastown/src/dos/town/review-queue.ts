@@ -108,6 +108,19 @@ export function submitToReviewQueue(sql: SqlStorage, input: ReviewQueueInput): v
     ]
   );
 
+  // Link MR bead → source bead via bead_dependencies so the DAG is queryable
+  query(
+    sql,
+    /* sql */ `
+      INSERT INTO ${bead_dependencies} (
+        ${bead_dependencies.columns.bead_id},
+        ${bead_dependencies.columns.depends_on_bead_id},
+        ${bead_dependencies.columns.dependency_type}
+      ) VALUES (?, ?, 'tracks')
+    `,
+    [id, input.bead_id]
+  );
+
   // Create the review_metadata satellite
   query(
     sql,
