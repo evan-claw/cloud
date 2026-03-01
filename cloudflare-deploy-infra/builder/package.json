@@ -16,6 +16,7 @@
     "postdeploy": "pnpm sentry:sourcemaps"
   },
   "dependencies": {
+    "@kilocode/encryption": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
     "@sentry/cloudflare": "^10.25.0",
     "hono": "catalog:",

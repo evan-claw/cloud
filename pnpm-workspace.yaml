@@ -18,6 +18,7 @@ catalog:
 packages:
   - 'packages/db'
   - 'packages/worker-utils'
+  - 'packages/encryption'
   - 'storybook'
   - 'cloudflare-deploy-infra/builder'
   - 'cloudflare-deploy-infra/dispatcher'

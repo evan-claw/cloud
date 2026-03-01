@@ -42,6 +42,7 @@ const config: Config = {
     '<rootDir>/cloudflare-session-ingest/',
     '<rootDir>/cloudflare-gastown/',
     '<rootDir>/kiloclaw/',
+    '<rootDir>/packages/encryption/',
     '<rootDir>/packages/worker-utils/',
   ],
   transformIgnorePatterns: [

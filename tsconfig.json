@@ -11,7 +11,8 @@
     "paths": {
       "@/*": ["./src/*"],
       "@kilocode/db": ["./packages/db/src/index.ts"],
-      "@kilocode/db/*": ["./packages/db/src/*"]
+      "@kilocode/db/*": ["./packages/db/src/*"],
+      "@kilocode/encryption": ["./packages/encryption/src/index.ts"]
     },
     "allowJs": true,
     "noEmit": true,
