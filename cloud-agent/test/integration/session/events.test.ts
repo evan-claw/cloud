@@ -29,7 +29,8 @@ describe('Event Storage', () => {
     // The DO auto-runs migrations in constructor via blockConcurrencyWhile
     const result = await runInDurableObject(stub, async (_instance, state) => {
       // Create a fresh queries instance using the same storage
-      const events = createEventQueries(drizzle(state.storage, { logger: false }));
+      const db = drizzle(state.storage, { logger: false });
+      const events = createEventQueries(db, state.storage.sql);
       const eventId = events.insert({
         executionId: 'exec_123',
         sessionId: 'sess_1',
@@ -50,7 +51,8 @@ describe('Event Storage', () => {
     const stub = env.CLOUD_AGENT_SESSION.get(id);
 
     const result = await runInDurableObject(stub, async (_instance, state) => {
-      const events = createEventQueries(drizzle(state.storage, { logger: false }));
+      const db = drizzle(state.storage, { logger: false });
+      const events = createEventQueries(db, state.storage.sql);
       const now = Date.now();
 
       // Insert multiple events
@@ -136,7 +138,8 @@ describe('Event Storage', () => {
     const stub = env.CLOUD_AGENT_SESSION.get(id);
 
     const result = await runInDurableObject(stub, async (_instance, state) => {
-      const events = createEventQueries(drizzle(state.storage, { logger: false }));
+      const db = drizzle(state.storage, { logger: false });
+      const events = createEventQueries(db, state.storage.sql);
       const now = Date.now();
 
       // Insert events at different times
@@ -182,7 +185,8 @@ describe('Event Storage', () => {
     const stub = env.CLOUD_AGENT_SESSION.get(id);
 
     const result = await runInDurableObject(stub, async (_instance, state) => {
-      const events = createEventQueries(drizzle(state.storage, { logger: false }));
+      const db = drizzle(state.storage, { logger: false });
+      const events = createEventQueries(db, state.storage.sql);
       const now = Date.now();
 
       // Insert events in sequence
