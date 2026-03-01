@@ -3,49 +3,24 @@
  * Rigs are now SQL rows in the Town DO instead of KV entries.
  */
 
-import { z } from 'zod';
-import { query } from '../../util/query.util';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { eq, asc, sql } from 'drizzle-orm';
+import { rigs } from '../../db/sqlite-schema';
+import type { RigsSelect } from '../../db/sqlite-schema';
 
-const RIG_TABLE_CREATE = /* sql */ `
-  CREATE TABLE IF NOT EXISTS "rigs" (
-    "id" TEXT PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "git_url" TEXT NOT NULL DEFAULT '',
-    "default_branch" TEXT NOT NULL DEFAULT 'main',
-    "config" TEXT DEFAULT '{}',
-    "created_at" TEXT NOT NULL
-  )
-`;
+export type RigRecord = Omit<RigsSelect, 'config'> & {
+  config: Record<string, unknown>;
+};
 
-const RIG_INDEX = /* sql */ `CREATE UNIQUE INDEX IF NOT EXISTS idx_rigs_name ON rigs(name)`;
-
-export const RigRecord = z.object({
-  id: z.string(),
-  name: z.string(),
-  git_url: z.string(),
-  default_branch: z.string(),
-  config: z
-    .string()
-    .transform(v => {
-      try {
-        return JSON.parse(v);
-      } catch {
-        return {};
-      }
-    })
-    .pipe(z.record(z.string(), z.unknown())),
-  created_at: z.string(),
-});
-
-export type RigRecord = z.output<typeof RigRecord>;
-
-export function initRigTables(sql: SqlStorage): void {
-  query(sql, RIG_TABLE_CREATE, []);
-  query(sql, RIG_INDEX, []);
+function parseRig(row: RigsSelect): RigRecord {
+  return {
+    ...row,
+    config: JSON.parse(row.config ?? '{}') as Record<string, unknown>,
+  };
 }
 
 export function addRig(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   input: {
     rigId: string;
     name: string;
@@ -54,35 +29,41 @@ export function addRig(
   }
 ): RigRecord {
   const timestamp = new Date().toISOString();
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO rigs (id, name, git_url, default_branch, config, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        git_url = excluded.git_url,
-        default_branch = excluded.default_branch
-    `,
-    [input.rigId, input.name, input.gitUrl, input.defaultBranch, '{}', timestamp]
-  );
 
-  const rig = getRig(sql, input.rigId);
+  db.insert(rigs)
+    .values({
+      id: input.rigId,
+      name: input.name,
+      git_url: input.gitUrl,
+      default_branch: input.defaultBranch,
+      config: '{}',
+      created_at: timestamp,
+    })
+    .onConflictDoUpdate({
+      target: rigs.id,
+      set: {
+        name: sql`excluded.name`,
+        git_url: sql`excluded.git_url`,
+        default_branch: sql`excluded.default_branch`,
+      },
+    })
+    .run();
+
+  const rig = getRig(db, input.rigId);
   if (!rig) throw new Error('Failed to create rig');
   return rig;
 }
 
-export function getRig(sql: SqlStorage, rigId: string): RigRecord | null {
-  const rows = [...query(sql, /* sql */ `SELECT * FROM rigs WHERE id = ?`, [rigId])];
-  if (rows.length === 0) return null;
-  return RigRecord.parse(rows[0]);
+export function getRig(db: DrizzleSqliteDODatabase, rigId: string): RigRecord | null {
+  const row = db.select().from(rigs).where(eq(rigs.id, rigId)).get();
+  if (!row) return null;
+  return parseRig(row);
 }
 
-export function listRigs(sql: SqlStorage): RigRecord[] {
-  const rows = [...query(sql, /* sql */ `SELECT * FROM rigs ORDER BY created_at ASC`, [])];
-  return RigRecord.array().parse(rows);
+export function listRigs(db: DrizzleSqliteDODatabase): RigRecord[] {
+  return db.select().from(rigs).orderBy(asc(rigs.created_at)).all().map(parseRig);
 }
 
-export function removeRig(sql: SqlStorage, rigId: string): void {
-  query(sql, /* sql */ `DELETE FROM rigs WHERE id = ?`, [rigId]);
+export function removeRig(db: DrizzleSqliteDODatabase, rigId: string): void {
+  db.delete(rigs).where(eq(rigs.id, rigId)).run();
 }

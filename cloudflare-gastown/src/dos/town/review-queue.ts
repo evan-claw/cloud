@@ -7,11 +7,15 @@
  */
 
 import { z } from 'zod';
-import { beads, BeadRecord, MergeRequestBeadRecord } from '../../db/tables/beads.table';
-import { review_metadata } from '../../db/tables/review-metadata.table';
-import { bead_dependencies } from '../../db/tables/bead-dependencies.table';
-import { agent_metadata } from '../../db/tables/agent-metadata.table';
-import { query } from '../../util/query.util';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { eq, and, asc, lt, sql, getTableColumns } from 'drizzle-orm';
+import {
+  beads,
+  review_metadata,
+  bead_dependencies,
+  agent_metadata,
+  type BeadsSelect,
+} from '../../db/sqlite-schema';
 import { logBeadEvent, getBead, closeBead, updateBeadStatus, createBead } from './beads';
 import { getAgent, unhookBead } from './agents';
 import type { ReviewQueueInput, ReviewQueueEntry, AgentDoneInput, Molecule } from '../../types';
@@ -27,34 +31,67 @@ function now(): string {
   return new Date().toISOString();
 }
 
-export function initReviewQueueTables(_sql: SqlStorage): void {
-  // Review queue and molecule tables are now part of beads + satellite tables.
-  // Initialization happens in beads.initBeadTables().
+function parseBead(row: BeadsSelect) {
+  return {
+    ...row,
+    labels: JSON.parse(row.labels ?? '[]') as string[],
+    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
+  };
 }
 
 // ── Review Queue ────────────────────────────────────────────────────
 
-const REVIEW_JOIN = /* sql */ `
-  SELECT ${beads}.*,
-         ${review_metadata.branch}, ${review_metadata.target_branch},
-         ${review_metadata.merge_commit}, ${review_metadata.pr_url},
-         ${review_metadata.retry_count}
-  FROM ${beads}
-  INNER JOIN ${review_metadata} ON ${beads.bead_id} = ${review_metadata.bead_id}
-`;
+const reviewJoinColumns = {
+  ...getTableColumns(beads),
+  branch: review_metadata.branch,
+  target_branch: review_metadata.target_branch,
+  merge_commit: review_metadata.merge_commit,
+  pr_url: review_metadata.pr_url,
+  retry_count: review_metadata.retry_count,
+};
 
-/** Map a parsed MergeRequestBeadRecord to the ReviewQueueEntry API type. */
-function toReviewQueueEntry(row: MergeRequestBeadRecord): ReviewQueueEntry {
+type ReviewJoinRow = {
+  bead_id: string;
+  type: string;
+  status: string;
+  title: string;
+  body: string | null;
+  rig_id: string | null;
+  parent_bead_id: string | null;
+  assignee_agent_bead_id: string | null;
+  priority: string | null;
+  labels: string | null;
+  metadata: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  branch: string;
+  target_branch: string;
+  merge_commit: string | null;
+  pr_url: string | null;
+  retry_count: number | null;
+};
+
+function reviewJoinQuery(db: DrizzleSqliteDODatabase) {
+  return db
+    .select(reviewJoinColumns)
+    .from(beads)
+    .innerJoin(review_metadata, eq(beads.bead_id, review_metadata.bead_id));
+}
+
+/** Map a review join row to the ReviewQueueEntry API type. */
+function toReviewQueueEntry(row: ReviewJoinRow): ReviewQueueEntry {
+  const metadata = JSON.parse(row.metadata ?? '{}') as Record<string, unknown>;
   return {
     id: row.bead_id,
     // The polecat that submitted the review — stored in metadata (not assignee,
     // which is set to the refinery when it claims the MR bead via hookBead).
     agent_id:
-      typeof row.metadata?.source_agent_id === 'string'
-        ? row.metadata.source_agent_id
+      typeof metadata?.source_agent_id === 'string'
+        ? metadata.source_agent_id
         : (row.created_by ?? ''),
-    bead_id:
-      typeof row.metadata?.source_bead_id === 'string' ? row.metadata.source_bead_id : row.bead_id,
+    bead_id: typeof metadata?.source_bead_id === 'string' ? metadata.source_bead_id : row.bead_id,
     rig_id: row.rig_id ?? '',
     branch: row.branch,
     pr_url: row.pr_url,
@@ -72,69 +109,58 @@ function toReviewQueueEntry(row: MergeRequestBeadRecord): ReviewQueueEntry {
   };
 }
 
-export function submitToReviewQueue(sql: SqlStorage, input: ReviewQueueInput): void {
+export function initReviewQueueTables(_db: DrizzleSqliteDODatabase): void {
+  // Review queue and molecule tables are now part of beads + satellite tables.
+  // Initialization happens in beads.initBeadTables().
+}
+
+export function submitToReviewQueue(db: DrizzleSqliteDODatabase, input: ReviewQueueInput): void {
   const id = generateId();
   const timestamp = now();
 
   // Create the merge_request bead
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${beads} (
-        ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-        ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-        ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-        ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-        ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-        ${beads.columns.closed_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      id,
-      'merge_request',
-      'open',
-      `Review: ${input.branch}`,
-      input.summary ?? null,
-      input.rig_id,
-      null,
-      null, // assignee left null — refinery claims it via hookBead
-      'medium',
-      JSON.stringify(['gt:merge-request']),
-      JSON.stringify({ source_bead_id: input.bead_id, source_agent_id: input.agent_id }),
-      input.agent_id, // created_by records who submitted
-      timestamp,
-      timestamp,
-      null,
-    ]
-  );
+  db.insert(beads)
+    .values({
+      bead_id: id,
+      type: 'merge_request',
+      status: 'open',
+      title: `Review: ${input.branch}`,
+      body: input.summary ?? null,
+      rig_id: input.rig_id,
+      parent_bead_id: null,
+      assignee_agent_bead_id: null, // assignee left null — refinery claims it via hookBead
+      priority: 'medium',
+      labels: JSON.stringify(['gt:merge-request']),
+      metadata: JSON.stringify({ source_bead_id: input.bead_id, source_agent_id: input.agent_id }),
+      created_by: input.agent_id, // created_by records who submitted
+      created_at: timestamp,
+      updated_at: timestamp,
+      closed_at: null,
+    })
+    .run();
 
   // Link MR bead → source bead via bead_dependencies so the DAG is queryable
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${bead_dependencies} (
-        ${bead_dependencies.columns.bead_id},
-        ${bead_dependencies.columns.depends_on_bead_id},
-        ${bead_dependencies.columns.dependency_type}
-      ) VALUES (?, ?, 'tracks')
-    `,
-    [id, input.bead_id]
-  );
+  db.insert(bead_dependencies)
+    .values({
+      bead_id: id,
+      depends_on_bead_id: input.bead_id,
+      dependency_type: 'tracks',
+    })
+    .run();
 
   // Create the review_metadata satellite
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${review_metadata} (
-        ${review_metadata.columns.bead_id}, ${review_metadata.columns.branch},
-        ${review_metadata.columns.target_branch}, ${review_metadata.columns.merge_commit},
-        ${review_metadata.columns.pr_url}, ${review_metadata.columns.retry_count}
-      ) VALUES (?, ?, ?, ?, ?, ?)
-    `,
-    [id, input.branch, 'main', null, input.pr_url ?? null, 0]
-  );
+  db.insert(review_metadata)
+    .values({
+      bead_id: id,
+      branch: input.branch,
+      target_branch: 'main',
+      merge_commit: null,
+      pr_url: input.pr_url ?? null,
+      retry_count: 0,
+    })
+    .run();
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId: input.bead_id,
     agentId: input.agent_id,
     eventType: 'review_submitted',
@@ -143,64 +169,47 @@ export function submitToReviewQueue(sql: SqlStorage, input: ReviewQueueInput): v
   });
 }
 
-export function popReviewQueue(sql: SqlStorage): ReviewQueueEntry | null {
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        ${REVIEW_JOIN}
-        WHERE ${beads.status} = 'open'
-        ORDER BY ${beads.created_at} ASC
-        LIMIT 1
-      `,
-      []
-    ),
-  ];
+export function popReviewQueue(db: DrizzleSqliteDODatabase): ReviewQueueEntry | null {
+  const row = reviewJoinQuery(db)
+    .where(eq(beads.status, 'open'))
+    .orderBy(asc(beads.created_at))
+    .limit(1)
+    .get();
 
-  if (rows.length === 0) return null;
-  const parsed = MergeRequestBeadRecord.parse(rows[0]);
-  const entry = toReviewQueueEntry(parsed);
+  if (!row) return null;
+  const entry = toReviewQueueEntry(row as ReviewJoinRow);
 
   // Mark as running (in_progress)
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = 'in_progress',
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.bead_id} = ?
-    `,
-    [now(), entry.id]
-  );
+  db.update(beads)
+    .set({ status: 'in_progress', updated_at: now() })
+    .where(eq(beads.bead_id, entry.id))
+    .run();
 
   return { ...entry, status: 'running', processed_at: now() };
 }
 
 export function completeReview(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   entryId: string,
   status: 'merged' | 'failed'
 ): void {
   const beadStatus = status === 'merged' ? 'closed' : 'failed';
   const timestamp = now();
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = ?,
-          ${beads.columns.updated_at} = ?,
-          ${beads.columns.closed_at} = ?
-      WHERE ${beads.bead_id} = ?
-    `,
-    [beadStatus, timestamp, beadStatus === 'closed' ? timestamp : null, entryId]
-  );
+  db.update(beads)
+    .set({
+      status: beadStatus,
+      updated_at: timestamp,
+      closed_at: beadStatus === 'closed' ? timestamp : null,
+    })
+    .where(eq(beads.bead_id, entryId))
+    .run();
 }
 
 /**
  * Complete a review with full result handling (close bead on merge, escalate on conflict).
  */
 export function completeReviewWithResult(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   input: {
     entry_id: string;
     status: 'merged' | 'failed' | 'conflict';
@@ -210,17 +219,14 @@ export function completeReviewWithResult(
 ): void {
   // On conflict, mark the review entry as failed and create an escalation bead
   const resolvedStatus = input.status === 'conflict' ? 'failed' : input.status;
-  completeReview(sql, input.entry_id, resolvedStatus);
+  completeReview(db, input.entry_id, resolvedStatus);
 
   // Find the review entry to get agent IDs
-  const entryRows = [
-    ...query(sql, /* sql */ `${REVIEW_JOIN} WHERE ${beads.bead_id} = ?`, [input.entry_id]),
-  ];
-  if (entryRows.length === 0) return;
-  const parsed = MergeRequestBeadRecord.parse(entryRows[0]);
-  const entry = toReviewQueueEntry(parsed);
+  const row = reviewJoinQuery(db).where(eq(beads.bead_id, input.entry_id)).get();
+  if (!row) return;
+  const entry = toReviewQueueEntry(row as ReviewJoinRow);
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId: entry.bead_id,
     agentId: entry.agent_id,
     eventType: 'review_completed',
@@ -232,10 +238,10 @@ export function completeReviewWithResult(
   });
 
   if (input.status === 'merged') {
-    closeBead(sql, entry.bead_id, entry.agent_id);
+    closeBead(db, entry.bead_id, entry.agent_id);
   } else if (input.status === 'conflict') {
     // Create an escalation bead so the conflict is visible and actionable
-    createBead(sql, {
+    createBead(db, {
       type: 'escalation',
       title: `Merge conflict: ${input.message ?? entry.branch}`,
       body: input.message,
@@ -250,26 +256,28 @@ export function completeReviewWithResult(
   }
 }
 
-export function recoverStuckReviews(sql: SqlStorage): void {
+export function recoverStuckReviews(db: DrizzleSqliteDODatabase): void {
   const timeout = new Date(Date.now() - REVIEW_RUNNING_TIMEOUT_MS).toISOString();
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = 'open',
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.type} = 'merge_request'
-        AND ${beads.status} = 'in_progress'
-        AND ${beads.updated_at} < ?
-    `,
-    [now(), timeout]
-  );
+  db.update(beads)
+    .set({ status: 'open', updated_at: now() })
+    .where(
+      and(
+        eq(beads.type, 'merge_request'),
+        eq(beads.status, 'in_progress'),
+        lt(beads.updated_at, timeout)
+      )
+    )
+    .run();
 }
 
 // ── Agent Done ──────────────────────────────────────────────────────
 
-export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInput): void {
-  const agent = getAgent(sql, agentId);
+export function agentDone(
+  db: DrizzleSqliteDODatabase,
+  agentId: string,
+  input: AgentDoneInput
+): void {
+  const agent = getAgent(db, agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
   if (!agent.current_hook_bead_id) throw new Error(`Agent ${agentId} has no hooked bead`);
 
@@ -277,8 +285,8 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
     // The refinery is hooked to the MR bead. Mark it as merged and log
     // the review_completed event on the source bead.
     const mrBeadId = agent.current_hook_bead_id;
-    completeReviewFromMRBead(sql, mrBeadId, agentId);
-    unhookBead(sql, agentId);
+    completeReviewFromMRBead(db, mrBeadId, agentId);
+    unhookBead(db, agentId);
     return;
   }
 
@@ -290,7 +298,7 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
     );
   }
 
-  submitToReviewQueue(sql, {
+  submitToReviewQueue(db, {
     agent_id: agentId,
     bead_id: sourceBead,
     rig_id: agent.rig_id ?? '',
@@ -302,8 +310,8 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
   // Close the source bead (matches upstream gt done behavior). The polecat's
   // work is done — the MR bead now tracks the merge lifecycle. The source
   // bead retains its assignee so we know which agent worked on it.
-  unhookBead(sql, agentId);
-  closeBead(sql, sourceBead, agentId);
+  unhookBead(db, agentId);
+  closeBead(db, sourceBead, agentId);
 }
 
 /**
@@ -312,8 +320,12 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
  * event on the source bead. The source bead itself is already closed by
  * the polecat's agentDone path.
  */
-function completeReviewFromMRBead(sql: SqlStorage, mrBeadId: string, agentId: string): void {
-  const mrBead = getBead(sql, mrBeadId);
+function completeReviewFromMRBead(
+  db: DrizzleSqliteDODatabase,
+  mrBeadId: string,
+  agentId: string
+): void {
+  const mrBead = getBead(db, mrBeadId);
   if (!mrBead) {
     console.error(
       `[review-queue] completeReviewFromMRBead: MR bead ${mrBeadId} not found — data integrity issue`
@@ -322,10 +334,10 @@ function completeReviewFromMRBead(sql: SqlStorage, mrBeadId: string, agentId: st
   }
   const sourceBeadId = mrBead.metadata?.source_bead_id;
 
-  completeReview(sql, mrBeadId, 'merged');
+  completeReview(db, mrBeadId, 'merged');
 
   if (typeof sourceBeadId === 'string') {
-    logBeadEvent(sql, {
+    logBeadEvent(db, {
       beadId: sourceBeadId,
       agentId,
       eventType: 'review_completed',
@@ -340,30 +352,24 @@ function completeReviewFromMRBead(sql: SqlStorage, mrBeadId: string, agentId: st
  * Closes/fails the bead and unhooks the agent.
  */
 export function agentCompleted(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   agentId: string,
   input: { status: 'completed' | 'failed'; reason?: string }
 ): void {
-  const agent = getAgent(sql, agentId);
+  const agent = getAgent(db, agentId);
   if (!agent) return;
 
   if (agent.current_hook_bead_id) {
     const beadStatus = input.status === 'completed' ? 'closed' : 'failed';
-    updateBeadStatus(sql, agent.current_hook_bead_id, beadStatus, agentId);
-    unhookBead(sql, agentId);
+    updateBeadStatus(db, agent.current_hook_bead_id, beadStatus, agentId);
+    unhookBead(db, agentId);
   }
 
   // Mark agent idle
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.status} = 'idle',
-          ${agent_metadata.columns.dispatch_attempts} = 0
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [agentId]
-  );
+  db.update(agent_metadata)
+    .set({ status: 'idle', dispatch_attempts: 0 })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
 }
 
 // ── Molecules ───────────────────────────────────────────────────────
@@ -372,42 +378,35 @@ export function agentCompleted(
  * Create a molecule: a parent bead with type='molecule', child step beads
  * linked via parent_bead_id, and step ordering via bead_dependencies.
  */
-export function createMolecule(sql: SqlStorage, beadId: string, formula: unknown): Molecule {
+export function createMolecule(
+  db: DrizzleSqliteDODatabase,
+  beadId: string,
+  formula: unknown
+): Molecule {
   const id = generateId();
   const timestamp = now();
   const formulaArr = Array.isArray(formula) ? formula : [];
 
   // Create the molecule parent bead
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${beads} (
-        ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-        ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-        ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-        ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-        ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-        ${beads.columns.closed_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      id,
-      'molecule',
-      'open',
-      `Molecule for bead ${beadId}`,
-      null,
-      null,
-      null,
-      null,
-      'medium',
-      JSON.stringify(['gt:molecule']),
-      JSON.stringify({ source_bead_id: beadId, formula }),
-      null,
-      timestamp,
-      timestamp,
-      null,
-    ]
-  );
+  db.insert(beads)
+    .values({
+      bead_id: id,
+      type: 'molecule',
+      status: 'open',
+      title: `Molecule for bead ${beadId}`,
+      body: null,
+      rig_id: null,
+      parent_bead_id: null,
+      assignee_agent_bead_id: null,
+      priority: 'medium',
+      labels: JSON.stringify(['gt:molecule']),
+      metadata: JSON.stringify({ source_bead_id: beadId, formula }),
+      created_by: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      closed_at: null,
+    })
+    .run();
 
   // Create child step beads and dependency chain
   let prevStepId: string | null = null;
@@ -415,66 +414,48 @@ export function createMolecule(sql: SqlStorage, beadId: string, formula: unknown
     const stepId = generateId();
     const step = formulaArr[i];
 
-    query(
-      sql,
-      /* sql */ `
-        INSERT INTO ${beads} (
-          ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-          ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-          ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-          ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-          ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-          ${beads.columns.closed_at}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        stepId,
-        'issue',
-        'open',
-        z.object({ title: z.string() }).safeParse(step).data?.title ?? `Step ${i + 1}`,
-        typeof step === 'string' ? step : JSON.stringify(step),
-        null,
-        id,
-        null,
-        'medium',
-        JSON.stringify([`gt:molecule-step`, `step:${i}`]),
-        JSON.stringify({ step_index: i, step_data: step }),
-        null,
-        timestamp,
-        timestamp,
-        null,
-      ]
-    );
+    db.insert(beads)
+      .values({
+        bead_id: stepId,
+        type: 'issue',
+        status: 'open',
+        title: z.object({ title: z.string() }).safeParse(step).data?.title ?? `Step ${i + 1}`,
+        body: typeof step === 'string' ? step : JSON.stringify(step),
+        rig_id: null,
+        parent_bead_id: id,
+        assignee_agent_bead_id: null,
+        priority: 'medium',
+        labels: JSON.stringify(['gt:molecule-step', `step:${i}`]),
+        metadata: JSON.stringify({ step_index: i, step_data: step }),
+        created_by: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+        closed_at: null,
+      })
+      .run();
 
     // Chain dependencies: each step blocks on the previous
     if (prevStepId) {
-      query(
-        sql,
-        /* sql */ `
-          INSERT INTO ${bead_dependencies} (
-            ${bead_dependencies.columns.bead_id},
-            ${bead_dependencies.columns.depends_on_bead_id},
-            ${bead_dependencies.columns.dependency_type}
-          ) VALUES (?, ?, ?)
-        `,
-        [stepId, prevStepId, 'blocks']
-      );
+      db.insert(bead_dependencies)
+        .values({
+          bead_id: stepId,
+          depends_on_bead_id: prevStepId,
+          dependency_type: 'blocks',
+        })
+        .run();
     }
     prevStepId = stepId;
   }
 
   // Link molecule to source bead in metadata
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.metadata} = json_set(${beads.metadata}, '$.molecule_bead_id', ?)
-      WHERE ${beads.bead_id} = ?
-    `,
-    [id, beadId]
-  );
+  db.update(beads)
+    .set({
+      metadata: sql`json_set(${beads.metadata}, '$.molecule_bead_id', ${id})`,
+    })
+    .where(eq(beads.bead_id, beadId))
+    .run();
 
-  const mol = getMolecule(sql, id);
+  const mol = getMolecule(db, id);
   if (!mol) throw new Error('Failed to create molecule');
   return mol;
 }
@@ -482,11 +463,11 @@ export function createMolecule(sql: SqlStorage, beadId: string, formula: unknown
 /**
  * Get a molecule by its bead_id. Derives current_step and status from children.
  */
-export function getMolecule(sql: SqlStorage, moleculeId: string): Molecule | null {
-  const bead = getBead(sql, moleculeId);
+export function getMolecule(db: DrizzleSqliteDODatabase, moleculeId: string): Molecule | null {
+  const bead = getBead(db, moleculeId);
   if (!bead || bead.type !== 'molecule') return null;
 
-  const steps = getStepBeads(sql, moleculeId);
+  const steps = getStepBeads(db, moleculeId);
   const closedCount = steps.filter(s => s.status === 'closed').length;
   const failedCount = steps.filter(s => s.status === 'failed').length;
 
@@ -511,37 +492,34 @@ export function getMolecule(sql: SqlStorage, moleculeId: string): Molecule | nul
   };
 }
 
-function getStepBeads(sql: SqlStorage, moleculeId: string): BeadRecord[] {
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT * FROM ${beads}
-        WHERE ${beads.parent_bead_id} = ?
-        ORDER BY ${beads.created_at} ASC
-      `,
-      [moleculeId]
-    ),
-  ];
-  return BeadRecord.array().parse(rows);
+type ParsedBead = ReturnType<typeof parseBead>;
+
+function getStepBeads(db: DrizzleSqliteDODatabase, moleculeId: string): ParsedBead[] {
+  const rows = db
+    .select()
+    .from(beads)
+    .where(eq(beads.parent_bead_id, moleculeId))
+    .orderBy(asc(beads.created_at))
+    .all();
+  return rows.map(parseBead);
 }
 
-export function getMoleculeForBead(sql: SqlStorage, beadId: string): Molecule | null {
-  const bead = getBead(sql, beadId);
+export function getMoleculeForBead(db: DrizzleSqliteDODatabase, beadId: string): Molecule | null {
+  const bead = getBead(db, beadId);
   if (!bead) return null;
   const moleculeId = bead.metadata?.molecule_bead_id;
   if (typeof moleculeId !== 'string') return null;
-  return getMolecule(sql, moleculeId);
+  return getMolecule(db, moleculeId);
 }
 
 export function getMoleculeCurrentStep(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   agentId: string
 ): { molecule: Molecule; step: unknown } | null {
-  const agent = getAgent(sql, agentId);
+  const agent = getAgent(db, agentId);
   if (!agent?.current_hook_bead_id) return null;
 
-  const mol = getMoleculeForBead(sql, agent.current_hook_bead_id);
+  const mol = getMoleculeForBead(db, agent.current_hook_bead_id);
   if (!mol || mol.status !== 'active') return null;
 
   const formula = mol.formula;
@@ -552,31 +530,24 @@ export function getMoleculeCurrentStep(
 }
 
 export function advanceMoleculeStep(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   agentId: string,
   _summary: string
 ): Molecule | null {
-  const current = getMoleculeCurrentStep(sql, agentId);
+  const current = getMoleculeCurrentStep(db, agentId);
   if (!current) return null;
 
   const { molecule } = current;
 
   // Close the current step bead
-  const steps = getStepBeads(sql, molecule.id);
+  const steps = getStepBeads(db, molecule.id);
   const currentStepBead = steps[molecule.current_step];
   if (currentStepBead) {
     const timestamp = now();
-    query(
-      sql,
-      /* sql */ `
-        UPDATE ${beads}
-        SET ${beads.columns.status} = 'closed',
-            ${beads.columns.closed_at} = ?,
-            ${beads.columns.updated_at} = ?
-        WHERE ${beads.bead_id} = ?
-      `,
-      [timestamp, timestamp, currentStepBead.bead_id]
-    );
+    db.update(beads)
+      .set({ status: 'closed', closed_at: timestamp, updated_at: timestamp })
+      .where(eq(beads.bead_id, currentStepBead.bead_id))
+      .run();
   }
 
   // Check if molecule is now complete
@@ -587,18 +558,11 @@ export function advanceMoleculeStep(
   if (isComplete) {
     // Close the molecule bead itself
     const timestamp = now();
-    query(
-      sql,
-      /* sql */ `
-        UPDATE ${beads}
-        SET ${beads.columns.status} = 'closed',
-            ${beads.columns.closed_at} = ?,
-            ${beads.columns.updated_at} = ?
-        WHERE ${beads.bead_id} = ?
-      `,
-      [timestamp, timestamp, molecule.id]
-    );
+    db.update(beads)
+      .set({ status: 'closed', closed_at: timestamp, updated_at: timestamp })
+      .where(eq(beads.bead_id, molecule.id))
+      .run();
   }
 
-  return getMolecule(sql, molecule.id);
+  return getMolecule(db, molecule.id);
 }

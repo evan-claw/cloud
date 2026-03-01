@@ -5,9 +5,10 @@
  * joined with agent_metadata for operational state.
  */
 
-import { beads, BeadRecord, AgentBeadRecord } from '../../db/tables/beads.table';
-import { agent_metadata } from '../../db/tables/agent-metadata.table';
-import { query } from '../../util/query.util';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import type { SQL } from 'drizzle-orm';
+import { eq, and, or, asc, desc, isNull, inArray, ne, getTableColumns } from 'drizzle-orm';
+import { beads, agent_metadata, type BeadsSelect } from '../../db/sqlite-schema';
 import { logBeadEvent, getBead, deleteBead } from './beads';
 import { readAndDeliverMail } from './mail';
 import type {
@@ -51,177 +52,173 @@ function now(): string {
   return new Date().toISOString();
 }
 
-/** Map a parsed AgentBeadRecord to the Agent API type. */
-function toAgent(row: AgentBeadRecord): Agent {
+// Agent join: select all bead columns except status (which comes from agent_metadata)
+const { status: _beadStatus, ...beadColumns } = getTableColumns(beads);
+const agentJoinColumns = {
+  ...beadColumns,
+  role: agent_metadata.role,
+  identity: agent_metadata.identity,
+  container_process_id: agent_metadata.container_process_id,
+  status: agent_metadata.status,
+  current_hook_bead_id: agent_metadata.current_hook_bead_id,
+  dispatch_attempts: agent_metadata.dispatch_attempts,
+  last_activity_at: agent_metadata.last_activity_at,
+  checkpoint: agent_metadata.checkpoint,
+};
+
+type AgentJoinRow = {
+  bead_id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  rig_id: string | null;
+  parent_bead_id: string | null;
+  assignee_agent_bead_id: string | null;
+  priority: string | null;
+  labels: string | null;
+  metadata: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  role: string;
+  identity: string;
+  container_process_id: string | null;
+  status: string;
+  current_hook_bead_id: string | null;
+  dispatch_attempts: number;
+  last_activity_at: string | null;
+  checkpoint: string | null;
+};
+
+/** Map an agent join row to the Agent API type. */
+function toAgent(row: AgentJoinRow): Agent {
   return {
     id: row.bead_id,
     rig_id: row.rig_id,
-    role: row.role,
+    role: row.role as Agent['role'],
     name: row.title,
     identity: row.identity,
-    status: row.status,
+    status: row.status as Agent['status'],
     current_hook_bead_id: row.current_hook_bead_id,
     dispatch_attempts: row.dispatch_attempts,
     last_activity_at: row.last_activity_at,
-    checkpoint: row.checkpoint,
+    checkpoint: row.checkpoint ? JSON.parse(row.checkpoint) : null,
     created_at: row.created_at,
   };
 }
 
-/**
- * SQL fragment for joining beads + agent_metadata.
- * Uses SELECT ${beads}.* so all bead columns are available, then selects
- * the agent_metadata columns explicitly (since status conflicts).
- * agent_metadata.status is aliased to avoid colliding with beads.status.
- */
-const AGENT_JOIN = /* sql */ `
-  SELECT ${beads}.*,
-         ${agent_metadata.role}, ${agent_metadata.identity},
-         ${agent_metadata.container_process_id},
-         ${agent_metadata.status} AS status,
-         ${agent_metadata.current_hook_bead_id},
-         ${agent_metadata.dispatch_attempts}, ${agent_metadata.last_activity_at},
-         ${agent_metadata.checkpoint}
-  FROM ${beads}
-  INNER JOIN ${agent_metadata} ON ${beads.bead_id} = ${agent_metadata.bead_id}
-`;
+function agentJoinQuery(db: DrizzleSqliteDODatabase) {
+  return db
+    .select(agentJoinColumns)
+    .from(beads)
+    .innerJoin(agent_metadata, eq(beads.bead_id, agent_metadata.bead_id));
+}
 
-export function initAgentTables(_sql: SqlStorage): void {
+export function initAgentTables(_db: DrizzleSqliteDODatabase): void {
   // Agent tables are now initialized in beads.initBeadTables()
   // (beads table + agent_metadata satellite)
 }
 
-export function registerAgent(sql: SqlStorage, input: RegisterAgentInput): Agent {
+export function registerAgent(db: DrizzleSqliteDODatabase, input: RegisterAgentInput): Agent {
   const id = generateId();
   const timestamp = now();
 
   // Create the agent bead
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${beads} (
-        ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-        ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-        ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-        ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-        ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-        ${beads.columns.closed_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      id,
-      'agent',
-      'open',
-      input.name,
-      null,
-      input.rig_id ?? null,
-      null,
-      null,
-      'medium',
-      '[]',
-      '{}',
-      null,
-      timestamp,
-      timestamp,
-      null,
-    ]
-  );
+  db.insert(beads)
+    .values({
+      bead_id: id,
+      type: 'agent',
+      status: 'open',
+      title: input.name,
+      body: null,
+      rig_id: input.rig_id ?? null,
+      parent_bead_id: null,
+      assignee_agent_bead_id: null,
+      priority: 'medium',
+      labels: '[]',
+      metadata: '{}',
+      created_by: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      closed_at: null,
+    })
+    .run();
 
   // Create the agent_metadata satellite row
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${agent_metadata} (
-        ${agent_metadata.columns.bead_id}, ${agent_metadata.columns.role},
-        ${agent_metadata.columns.identity}, ${agent_metadata.columns.container_process_id},
-        ${agent_metadata.columns.status}, ${agent_metadata.columns.current_hook_bead_id},
-        ${agent_metadata.columns.dispatch_attempts}, ${agent_metadata.columns.checkpoint},
-        ${agent_metadata.columns.last_activity_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [id, input.role, input.identity, null, 'idle', null, 0, null, null]
-  );
+  db.insert(agent_metadata)
+    .values({
+      bead_id: id,
+      role: input.role,
+      identity: input.identity,
+      container_process_id: null,
+      status: 'idle',
+      current_hook_bead_id: null,
+      dispatch_attempts: 0,
+      checkpoint: null,
+      last_activity_at: null,
+    })
+    .run();
 
-  const agent = getAgent(sql, id);
+  const agent = getAgent(db, id);
   if (!agent) throw new Error('Failed to create agent');
   return agent;
 }
 
-export function getAgent(sql: SqlStorage, agentId: string): Agent | null {
-  const rows = [...query(sql, /* sql */ `${AGENT_JOIN} WHERE ${beads.bead_id} = ?`, [agentId])];
-  if (rows.length === 0) return null;
-  return toAgent(AgentBeadRecord.parse(rows[0]));
+export function getAgent(db: DrizzleSqliteDODatabase, agentId: string): Agent | null {
+  const row = agentJoinQuery(db).where(eq(beads.bead_id, agentId)).get();
+  if (!row) return null;
+  return toAgent(row as AgentJoinRow);
 }
 
-export function getAgentByIdentity(sql: SqlStorage, identity: string): Agent | null {
-  const rows = [
-    ...query(sql, /* sql */ `${AGENT_JOIN} WHERE ${agent_metadata.identity} = ?`, [identity]),
-  ];
-  if (rows.length === 0) return null;
-  return toAgent(AgentBeadRecord.parse(rows[0]));
+export function getAgentByIdentity(db: DrizzleSqliteDODatabase, identity: string): Agent | null {
+  const row = agentJoinQuery(db).where(eq(agent_metadata.identity, identity)).get();
+  if (!row) return null;
+  return toAgent(row as AgentJoinRow);
 }
 
-export function listAgents(sql: SqlStorage, filter?: AgentFilter): Agent[] {
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        ${AGENT_JOIN}
-        WHERE (? IS NULL OR ${agent_metadata.role} = ?)
-          AND (? IS NULL OR ${agent_metadata.status} = ?)
-          AND (? IS NULL OR ${beads.rig_id} = ?)
-        ORDER BY ${beads.created_at} ASC
-      `,
-      [
-        filter?.role ?? null,
-        filter?.role ?? null,
-        filter?.status ?? null,
-        filter?.status ?? null,
-        filter?.rig_id ?? null,
-        filter?.rig_id ?? null,
-      ]
-    ),
-  ];
-  return AgentBeadRecord.array().parse(rows).map(toAgent);
+export function listAgents(db: DrizzleSqliteDODatabase, filter?: AgentFilter): Agent[] {
+  const conditions: SQL[] = [];
+  if (filter?.role) conditions.push(eq(agent_metadata.role, filter.role));
+  if (filter?.status) conditions.push(eq(agent_metadata.status, filter.status));
+  if (filter?.rig_id) conditions.push(eq(beads.rig_id, filter.rig_id));
+
+  const query = agentJoinQuery(db).$dynamic();
+  if (conditions.length > 0) query.where(and(...conditions));
+
+  const rows = query.orderBy(asc(beads.created_at)).all();
+  return (rows as AgentJoinRow[]).map(toAgent);
 }
 
-export function updateAgentStatus(sql: SqlStorage, agentId: string, status: string): void {
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.status} = ?
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [status, agentId]
-  );
+export function updateAgentStatus(
+  db: DrizzleSqliteDODatabase,
+  agentId: string,
+  status: string
+): void {
+  db.update(agent_metadata)
+    .set({ status: status as 'idle' })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
 }
 
-export function deleteAgent(sql: SqlStorage, agentId: string): void {
+export function deleteAgent(db: DrizzleSqliteDODatabase, agentId: string): void {
   // Unassign beads that reference this agent
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.assignee_agent_bead_id} = NULL,
-          ${beads.columns.status} = 'open',
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.assignee_agent_bead_id} = ?
-    `,
-    [now(), agentId]
-  );
+  db.update(beads)
+    .set({ assignee_agent_bead_id: null, status: 'open', updated_at: now() })
+    .where(eq(beads.assignee_agent_bead_id, agentId))
+    .run();
 
   // deleteBead cascades to agent_metadata, bead_events, bead_dependencies, etc.
-  deleteBead(sql, agentId);
+  deleteBead(db, agentId);
 }
 
 // ── Hooks (GUPP) ────────────────────────────────────────────────────
 
-export function hookBead(sql: SqlStorage, agentId: string, beadId: string): void {
-  const agent = getAgent(sql, agentId);
+export function hookBead(db: DrizzleSqliteDODatabase, agentId: string, beadId: string): void {
+  const agent = getAgent(db, agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
 
-  const bead = getBead(sql, beadId);
+  const bead = getBead(db, beadId);
   if (!bead) throw new Error(`Bead ${beadId} not found`);
 
   // Already hooked to this bead — idempotent
@@ -234,32 +231,26 @@ export function hookBead(sql: SqlStorage, agentId: string, beadId: string): void
     );
   }
 
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.current_hook_bead_id} = ?,
-          ${agent_metadata.columns.status} = 'idle',
-          ${agent_metadata.columns.dispatch_attempts} = 0,
-          ${agent_metadata.columns.last_activity_at} = ?
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [beadId, now(), agentId]
-  );
+  db.update(agent_metadata)
+    .set({
+      current_hook_bead_id: beadId,
+      status: 'idle',
+      dispatch_attempts: 0,
+      last_activity_at: now(),
+    })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
 
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = 'in_progress',
-          ${beads.columns.assignee_agent_bead_id} = ?,
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.bead_id} = ?
-    `,
-    [agentId, now(), beadId]
-  );
+  db.update(beads)
+    .set({
+      status: 'in_progress',
+      assignee_agent_bead_id: agentId,
+      updated_at: now(),
+    })
+    .where(eq(beads.bead_id, beadId))
+    .run();
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId,
     agentId,
     eventType: 'hooked',
@@ -267,24 +258,18 @@ export function hookBead(sql: SqlStorage, agentId: string, beadId: string): void
   });
 }
 
-export function unhookBead(sql: SqlStorage, agentId: string): void {
-  const agent = getAgent(sql, agentId);
+export function unhookBead(db: DrizzleSqliteDODatabase, agentId: string): void {
+  const agent = getAgent(db, agentId);
   if (!agent || !agent.current_hook_bead_id) return;
 
   const beadId = agent.current_hook_bead_id;
 
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.current_hook_bead_id} = NULL,
-          ${agent_metadata.columns.status} = 'idle'
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [agentId]
-  );
+  db.update(agent_metadata)
+    .set({ current_hook_bead_id: null, status: 'idle' })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId,
     agentId,
     eventType: 'unhooked',
@@ -292,10 +277,10 @@ export function unhookBead(sql: SqlStorage, agentId: string): void {
   });
 }
 
-export function getHookedBead(sql: SqlStorage, agentId: string): Bead | null {
-  const agent = getAgent(sql, agentId);
+export function getHookedBead(db: DrizzleSqliteDODatabase, agentId: string): Bead | null {
+  const agent = getAgent(db, agentId);
   if (!agent?.current_hook_bead_id) return null;
-  return getBead(sql, agent.current_hook_bead_id);
+  return getBead(db, agent.current_hook_bead_id);
 }
 
 // ── Name Allocation ─────────────────────────────────────────────────
@@ -305,23 +290,15 @@ export function getHookedBead(sql: SqlStorage, agentId: string): Bead | null {
  * Names are town-global (agents belong to the town, not rigs) so we
  * check all existing polecats across every rig.
  */
-export function allocatePolecatName(sql: SqlStorage): string {
-  const usedNames = new Set(
-    BeadRecord.pick({ title: true })
-      .array()
-      .parse([
-        ...query(
-          sql,
-          /* sql */ `
-            SELECT ${beads.title} FROM ${beads}
-            INNER JOIN ${agent_metadata} ON ${beads.bead_id} = ${agent_metadata.bead_id}
-            WHERE ${agent_metadata.role} = 'polecat'
-          `,
-          []
-        ),
-      ])
-      .map(r => r.title)
-  );
+export function allocatePolecatName(db: DrizzleSqliteDODatabase): string {
+  const rows = db
+    .select({ title: beads.title })
+    .from(beads)
+    .innerJoin(agent_metadata, eq(beads.bead_id, agent_metadata.bead_id))
+    .where(eq(agent_metadata.role, 'polecat'))
+    .all();
+
+  const usedNames = new Set(rows.map(r => r.title));
 
   for (const name of POLECAT_NAME_POOL) {
     if (!usedNames.has(name)) return name;
@@ -337,7 +314,7 @@ export function allocatePolecatName(sql: SqlStorage): string {
  * For polecats, create a new one.
  */
 export function getOrCreateAgent(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   role: AgentRole,
   rigId: string,
   townId: string
@@ -346,63 +323,60 @@ export function getOrCreateAgent(
   const townSingletonRoles = ['witness', 'mayor'];
 
   if (townSingletonRoles.includes(role)) {
-    const existing = listAgents(sql, { role });
+    const existing = listAgents(db, { role });
     if (existing.length > 0) return existing[0];
   } else {
     // Per-rig agents (polecat, refinery): reuse an idle one in the SAME rig.
     // Agents are tied to a rig's worktree/repo — reusing one from a different
     // rig would dispatch it into the wrong repository.
-    const idle = [
-      ...query(
-        sql,
-        /* sql */ `
-          ${AGENT_JOIN}
-          WHERE ${agent_metadata.role} = ?
-            AND ${agent_metadata.status} = 'idle'
-            AND ${agent_metadata.current_hook_bead_id} IS NULL
-            AND ${beads.rig_id} = ?
-          LIMIT 1
-        `,
-        [role, rigId]
-      ),
-    ];
-    if (idle.length > 0) return toAgent(AgentBeadRecord.parse(idle[0]));
+    const row = agentJoinQuery(db)
+      .where(
+        and(
+          eq(agent_metadata.role, role),
+          eq(agent_metadata.status, 'idle'),
+          isNull(agent_metadata.current_hook_bead_id),
+          eq(beads.rig_id, rigId)
+        )
+      )
+      .limit(1)
+      .get();
+    if (row) return toAgent(row as AgentJoinRow);
   }
 
   // Create a new agent
-  const name = role === 'polecat' ? allocatePolecatName(sql) : role;
+  const name = role === 'polecat' ? allocatePolecatName(db) : role;
   const identity = `${name}-${role}-${rigId.slice(0, 8)}@${townId.slice(0, 8)}`;
 
-  return registerAgent(sql, { role, name, identity, rig_id: rigId });
+  return registerAgent(db, { role, name, identity, rig_id: rigId });
 }
 
 // ── Prime Context ───────────────────────────────────────────────────
 
-export function prime(sql: SqlStorage, agentId: string): PrimeContext {
-  const agent = getAgent(sql, agentId);
+export function prime(db: DrizzleSqliteDODatabase, agentId: string): PrimeContext {
+  const agent = getAgent(db, agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
 
-  const hookedBead = agent.current_hook_bead_id ? getBead(sql, agent.current_hook_bead_id) : null;
+  const hookedBead = agent.current_hook_bead_id ? getBead(db, agent.current_hook_bead_id) : null;
 
-  const undeliveredMail = readAndDeliverMail(sql, agentId);
+  const undeliveredMail = readAndDeliverMail(db, agentId);
 
   // Open beads (for context awareness, scoped to agent's rig)
-  const openBeadRows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT * FROM ${beads}
-        WHERE ${beads.status} IN ('open', 'in_progress')
-          AND ${beads.type} != 'agent'
-          AND ${beads.type} != 'message'
-          AND (${beads.rig_id} IS NULL OR ${beads.rig_id} = ?)
-        ORDER BY ${beads.created_at} DESC
-        LIMIT 20
-      `,
-      [agent.rig_id]
-    ),
-  ];
-  const openBeads = BeadRecord.array().parse(openBeadRows);
+  const openBeadRows = db
+    .select()
+    .from(beads)
+    .where(
+      and(
+        inArray(beads.status, ['open', 'in_progress']),
+        ne(beads.type, 'agent'),
+        ne(beads.type, 'message'),
+        or(isNull(beads.rig_id), eq(beads.rig_id, agent.rig_id ?? ''))
+      )
+    )
+    .orderBy(desc(beads.created_at))
+    .limit(20)
+    .all();
+
+  const openBeads = openBeadRows.map(parseBead);
 
   return {
     agent,
@@ -412,36 +386,34 @@ export function prime(sql: SqlStorage, agentId: string): PrimeContext {
   };
 }
 
-// ── Checkpoint ──────────────────────────────────────────────────────
-
-export function writeCheckpoint(sql: SqlStorage, agentId: string, data: unknown): void {
-  const serialized = data === null || data === undefined ? null : JSON.stringify(data);
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.checkpoint} = ?
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [serialized, agentId]
-  );
+function parseBead(row: BeadsSelect): Bead {
+  return {
+    ...row,
+    labels: JSON.parse(row.labels ?? '[]') as string[],
+    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
+  };
 }
 
-export function readCheckpoint(sql: SqlStorage, agentId: string): unknown {
-  const agent = getAgent(sql, agentId);
+// ── Checkpoint ──────────────────────────────────────────────────────
+
+export function writeCheckpoint(db: DrizzleSqliteDODatabase, agentId: string, data: unknown): void {
+  const serialized = data === null || data === undefined ? null : JSON.stringify(data);
+  db.update(agent_metadata)
+    .set({ checkpoint: serialized })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
+}
+
+export function readCheckpoint(db: DrizzleSqliteDODatabase, agentId: string): unknown {
+  const agent = getAgent(db, agentId);
   return agent?.checkpoint ?? null;
 }
 
 // ── Touch (heartbeat helper) ────────────────────────────────────────
 
-export function touchAgent(sql: SqlStorage, agentId: string): void {
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.last_activity_at} = ?
-      WHERE ${agent_metadata.bead_id} = ?
-    `,
-    [now(), agentId]
-  );
+export function touchAgent(db: DrizzleSqliteDODatabase, agentId: string): void {
+  db.update(agent_metadata)
+    .set({ last_activity_at: now() })
+    .where(eq(agent_metadata.bead_id, agentId))
+    .run();
 }

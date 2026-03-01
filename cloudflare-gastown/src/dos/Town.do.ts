@@ -15,6 +15,22 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { z } from 'zod';
+import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import {
+  eq,
+  and,
+  or,
+  sql,
+  count,
+  desc,
+  inArray,
+  isNull,
+  isNotNull,
+  getTableColumns,
+} from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import migrations from '../../drizzle/migrations';
 
 // Sub-modules (plain functions, not classes — per coding style)
 import * as beadOps from './town/beads';
@@ -25,23 +41,19 @@ import * as config from './town/config';
 import * as rigs from './town/rigs';
 import * as dispatch from './town/container-dispatch';
 
-// Table imports for beads-centric operations
+// Table + type imports for beads-centric operations
 import {
   beads,
-  BeadRecord,
-  AgentBeadRecord,
-  EscalationBeadRecord,
-  ConvoyBeadRecord,
-} from '../db/tables/beads.table';
-import { agent_metadata, AgentMetadataRecord } from '../db/tables/agent-metadata.table';
-import { escalation_metadata } from '../db/tables/escalation-metadata.table';
-import { convoy_metadata } from '../db/tables/convoy-metadata.table';
-import { bead_dependencies, BeadDependencyRecord } from '../db/tables/bead-dependencies.table';
-import { query } from '../util/query.util';
+  agent_metadata,
+  escalation_metadata,
+  convoy_metadata,
+  bead_dependencies,
+  type BeadsSelect,
+} from '../db/sqlite-schema';
 import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
 
-import { BeadPriority } from '../types';
+import { BeadPriority, BeadStatus } from '../types';
 import type {
   TownConfig,
   TownConfigUpdate,
@@ -95,7 +107,81 @@ type RigConfig = {
   platformIntegrationId?: string;
 };
 
-// ── Escalation API type (derived from EscalationBeadRecord) ─────────
+// ── Drizzle join column sets ────────────────────────────────────────
+
+const escalationJoinColumns = {
+  ...getTableColumns(beads),
+  severity: escalation_metadata.severity,
+  category: escalation_metadata.category,
+  acknowledged: escalation_metadata.acknowledged,
+  re_escalation_count: escalation_metadata.re_escalation_count,
+  acknowledged_at: escalation_metadata.acknowledged_at,
+};
+
+const convoyJoinColumns = {
+  ...getTableColumns(beads),
+  total_beads: convoy_metadata.total_beads,
+  closed_beads: convoy_metadata.closed_beads,
+  landed_at: convoy_metadata.landed_at,
+};
+
+// ── Parse helpers for joined rows ───────────────────────────────────
+
+function parseBead(row: BeadsSelect): Bead {
+  return {
+    ...row,
+    labels: JSON.parse(row.labels ?? '[]'),
+    metadata: JSON.parse(row.metadata ?? '{}'),
+  };
+}
+
+// Escalation join row — the shape returned by selecting escalationJoinColumns
+type EscalationJoinRow = {
+  bead_id: string;
+  type: string;
+  status: string;
+  title: string;
+  body: string | null;
+  rig_id: string | null;
+  parent_bead_id: string | null;
+  assignee_agent_bead_id: string | null;
+  priority: string | null;
+  labels: string | null;
+  metadata: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  severity: string;
+  category: string | null;
+  acknowledged: number;
+  re_escalation_count: number;
+  acknowledged_at: string | null;
+};
+
+// Convoy join row — the shape returned by selecting convoyJoinColumns
+type ConvoyJoinRow = {
+  bead_id: string;
+  type: string;
+  status: string;
+  title: string;
+  body: string | null;
+  rig_id: string | null;
+  parent_bead_id: string | null;
+  assignee_agent_bead_id: string | null;
+  priority: string | null;
+  labels: string | null;
+  metadata: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  total_beads: number;
+  closed_beads: number;
+  landed_at: string | null;
+};
+
+// ── Escalation API type ─────────────────────────────────────────────
 type EscalationEntry = {
   id: string;
   source_rig_id: string;
@@ -109,12 +195,12 @@ type EscalationEntry = {
   acknowledged_at: string | null;
 };
 
-function toEscalation(row: EscalationBeadRecord): EscalationEntry {
+function toEscalation(row: EscalationJoinRow): EscalationEntry {
   return {
     id: row.bead_id,
     source_rig_id: row.rig_id ?? '',
     source_agent_id: row.created_by,
-    severity: row.severity,
+    severity: row.severity as EscalationEntry['severity'],
     category: row.category,
     message: row.body ?? row.title,
     acknowledged: row.acknowledged,
@@ -124,7 +210,7 @@ function toEscalation(row: EscalationBeadRecord): EscalationEntry {
   };
 }
 
-// ── Convoy API type (derived from ConvoyBeadRecord) ─────────────────
+// ── Convoy API type ─────────────────────────────────────────────────
 type ConvoyEntry = {
   id: string;
   title: string;
@@ -136,7 +222,7 @@ type ConvoyEntry = {
   landed_at: string | null;
 };
 
-function toConvoy(row: ConvoyBeadRecord): ConvoyEntry {
+function toConvoy(row: ConvoyJoinRow): ConvoyEntry {
   return {
     id: row.bead_id,
     title: row.title,
@@ -149,60 +235,18 @@ function toConvoy(row: ConvoyBeadRecord): ConvoyEntry {
   };
 }
 
-const CONVOY_JOIN = /* sql */ `
-  SELECT ${beads}.*,
-         ${convoy_metadata.total_beads}, ${convoy_metadata.closed_beads},
-         ${convoy_metadata.landed_at}
-  FROM ${beads}
-  INNER JOIN ${convoy_metadata} ON ${beads.bead_id} = ${convoy_metadata.bead_id}
-`;
-
-const ESCALATION_JOIN = /* sql */ `
-  SELECT ${beads}.*,
-         ${escalation_metadata.severity}, ${escalation_metadata.category},
-         ${escalation_metadata.acknowledged}, ${escalation_metadata.re_escalation_count},
-         ${escalation_metadata.acknowledged_at}
-  FROM ${beads}
-  INNER JOIN ${escalation_metadata} ON ${beads.bead_id} = ${escalation_metadata.bead_id}
-`;
-
 export class TownDO extends DurableObject<Env> {
-  private sql: SqlStorage;
-  private initPromise: Promise<void> | null = null;
+  private db: DrizzleSqliteDODatabase;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
-
+    this.db = drizzle(ctx.storage, { logger: false });
     void ctx.blockConcurrencyWhile(async () => {
-      await this.ensureInitialized();
+      migrate(this.db, migrations);
+      // Load persisted town ID if available
+      const storedId = await ctx.storage.get<string>('town:id');
+      if (storedId) this._townId = storedId;
     });
-  }
-
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.initializeDatabase();
-    }
-    await this.initPromise;
-  }
-
-  private async initializeDatabase(): Promise<void> {
-    // Load persisted town ID if available
-    const storedId = await this.ctx.storage.get<string>('town:id');
-    if (storedId) this._townId = storedId;
-
-    // All tables are now initialized via beads.initBeadTables():
-    // beads, bead_events, bead_dependencies, agent_metadata, review_metadata,
-    // escalation_metadata, convoy_metadata
-    beadOps.initBeadTables(this.sql);
-
-    // These are no-ops now but kept for clarity
-    agents.initAgentTables(this.sql);
-    mail.initMailTables(this.sql);
-    reviewQueue.initReviewQueueTables(this.sql);
-
-    // Rig registry
-    rigs.initRigTables(this.sql);
   }
 
   private _townId: string | null = null;
@@ -243,37 +287,29 @@ export class TownDO extends DurableObject<Env> {
     gitUrl: string;
     defaultBranch: string;
   }): Promise<rigs.RigRecord> {
-    await this.ensureInitialized();
-    return rigs.addRig(this.sql, input);
+    return rigs.addRig(this.db, input);
   }
 
   async removeRig(rigId: string): Promise<void> {
-    await this.ensureInitialized();
-    rigs.removeRig(this.sql, rigId);
+    rigs.removeRig(this.db, rigId);
     await this.ctx.storage.delete(`rig:${rigId}:config`);
     // Delete all beads belonging to this rig (cascades to satellite tables via deleteBead)
-    const rigBeads = BeadRecord.pick({ bead_id: true })
-      .array()
-      .parse([
-        ...query(
-          this.sql,
-          /* sql */ `SELECT ${beads.bead_id} FROM ${beads} WHERE ${beads.rig_id} = ?`,
-          [rigId]
-        ),
-      ]);
+    const rigBeads = this.db
+      .select({ bead_id: beads.bead_id })
+      .from(beads)
+      .where(eq(beads.rig_id, rigId))
+      .all();
     for (const { bead_id } of rigBeads) {
-      beadOps.deleteBead(this.sql, bead_id);
+      beadOps.deleteBead(this.db, bead_id);
     }
   }
 
   async listRigs(): Promise<rigs.RigRecord[]> {
-    await this.ensureInitialized();
-    return rigs.listRigs(this.sql);
+    return rigs.listRigs(this.db);
   }
 
   async getRigAsync(rigId: string): Promise<rigs.RigRecord | null> {
-    await this.ensureInitialized();
-    return rigs.getRig(this.sql, rigId);
+    return rigs.getRig(this.db, rigId);
   }
 
   // ── Rig Config (KV, per-rig — configuration needed for container dispatch) ──
@@ -325,42 +361,34 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async createBead(input: CreateBeadInput): Promise<Bead> {
-    await this.ensureInitialized();
-    return beadOps.createBead(this.sql, input);
+    return beadOps.createBead(this.db, input);
   }
 
   async getBeadAsync(beadId: string): Promise<Bead | null> {
-    await this.ensureInitialized();
-    return beadOps.getBead(this.sql, beadId);
+    return beadOps.getBead(this.db, beadId);
   }
 
   async listBeads(filter: BeadFilter): Promise<Bead[]> {
-    await this.ensureInitialized();
-    return beadOps.listBeads(this.sql, filter);
+    return beadOps.listBeads(this.db, filter);
   }
 
   async updateBeadStatus(beadId: string, status: string, agentId: string): Promise<Bead> {
-    await this.ensureInitialized();
-    const bead = beadOps.updateBeadStatus(this.sql, beadId, status, agentId);
+    const validStatus = BeadStatus.parse(status);
+    const bead = beadOps.updateBeadStatus(this.db, beadId, validStatus, agentId);
 
     // If closed and part of a convoy (via bead_dependencies), notify
     if (status === 'closed') {
-      const convoyRows = [
-        ...query(
-          this.sql,
-          /* sql */ `
-            SELECT ${bead_dependencies.depends_on_bead_id}
-            FROM ${bead_dependencies}
-            WHERE ${bead_dependencies.bead_id} = ?
-              AND ${bead_dependencies.dependency_type} = 'tracks'
-          `,
-          [beadId]
-        ),
-      ];
-      const parsed = BeadDependencyRecord.pick({ depends_on_bead_id: true })
-        .array()
-        .parse(convoyRows);
-      for (const { depends_on_bead_id } of parsed) {
+      const convoyRows = this.db
+        .select({ depends_on_bead_id: bead_dependencies.depends_on_bead_id })
+        .from(bead_dependencies)
+        .where(
+          and(
+            eq(bead_dependencies.bead_id, beadId),
+            eq(bead_dependencies.dependency_type, 'tracks')
+          )
+        )
+        .all();
+      for (const { depends_on_bead_id } of convoyRows) {
         this.onBeadClosed({ convoyId: depends_on_bead_id, beadId }).catch(() => {});
       }
     }
@@ -373,8 +401,7 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async deleteBead(beadId: string): Promise<void> {
-    await this.ensureInitialized();
-    beadOps.deleteBead(this.sql, beadId);
+    beadOps.deleteBead(this.db, beadId);
   }
 
   async listBeadEvents(options: {
@@ -382,8 +409,7 @@ export class TownDO extends DurableObject<Env> {
     since?: string;
     limit?: number;
   }): Promise<BeadEventRecord[]> {
-    await this.ensureInitialized();
-    return beadOps.listBeadEvents(this.sql, options);
+    return beadOps.listBeadEvents(this.db, options);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -391,33 +417,27 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async registerAgent(input: RegisterAgentInput): Promise<Agent> {
-    await this.ensureInitialized();
-    return agents.registerAgent(this.sql, input);
+    return agents.registerAgent(this.db, input);
   }
 
   async getAgentAsync(agentId: string): Promise<Agent | null> {
-    await this.ensureInitialized();
-    return agents.getAgent(this.sql, agentId);
+    return agents.getAgent(this.db, agentId);
   }
 
   async getAgentByIdentity(identity: string): Promise<Agent | null> {
-    await this.ensureInitialized();
-    return agents.getAgentByIdentity(this.sql, identity);
+    return agents.getAgentByIdentity(this.db, identity);
   }
 
   async listAgents(filter?: AgentFilter): Promise<Agent[]> {
-    await this.ensureInitialized();
-    return agents.listAgents(this.sql, filter);
+    return agents.listAgents(this.db, filter);
   }
 
   async updateAgentStatus(agentId: string, status: string): Promise<void> {
-    await this.ensureInitialized();
-    agents.updateAgentStatus(this.sql, agentId, status);
+    agents.updateAgentStatus(this.db, agentId, status);
   }
 
   async deleteAgent(agentId: string): Promise<void> {
-    await this.ensureInitialized();
-    agents.deleteAgent(this.sql, agentId);
+    agents.deleteAgent(this.db, agentId);
     try {
       const agentDO = getAgentDOStub(this.env, agentId);
       await agentDO.destroy();
@@ -427,24 +447,20 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async hookBead(agentId: string, beadId: string): Promise<void> {
-    await this.ensureInitialized();
-    agents.hookBead(this.sql, agentId, beadId);
+    agents.hookBead(this.db, agentId, beadId);
     await this.armAlarmIfNeeded();
   }
 
   async unhookBead(agentId: string): Promise<void> {
-    await this.ensureInitialized();
-    agents.unhookBead(this.sql, agentId);
+    agents.unhookBead(this.db, agentId);
   }
 
   async getHookedBead(agentId: string): Promise<Bead | null> {
-    await this.ensureInitialized();
-    return agents.getHookedBead(this.sql, agentId);
+    return agents.getHookedBead(this.db, agentId);
   }
 
   async getOrCreateAgent(role: AgentRole, rigId: string): Promise<Agent> {
-    await this.ensureInitialized();
-    return agents.getOrCreateAgent(this.sql, role, rigId, this.townId);
+    return agents.getOrCreateAgent(this.db, role, rigId, this.townId);
   }
 
   // ── Agent Events (delegated to AgentDO) ───────────────────────────
@@ -462,25 +478,21 @@ export class TownDO extends DurableObject<Env> {
   // ── Prime & Checkpoint ────────────────────────────────────────────
 
   async prime(agentId: string): Promise<PrimeContext> {
-    await this.ensureInitialized();
-    return agents.prime(this.sql, agentId);
+    return agents.prime(this.db, agentId);
   }
 
   async writeCheckpoint(agentId: string, data: unknown): Promise<void> {
-    await this.ensureInitialized();
-    agents.writeCheckpoint(this.sql, agentId, data);
+    agents.writeCheckpoint(this.db, agentId, data);
   }
 
   async readCheckpoint(agentId: string): Promise<unknown> {
-    await this.ensureInitialized();
-    return agents.readCheckpoint(this.sql, agentId);
+    return agents.readCheckpoint(this.db, agentId);
   }
 
   // ── Heartbeat ─────────────────────────────────────────────────────
 
   async touchAgentHeartbeat(agentId: string): Promise<void> {
-    await this.ensureInitialized();
-    agents.touchAgent(this.sql, agentId);
+    agents.touchAgent(this.db, agentId);
     await this.armAlarmIfNeeded();
   }
 
@@ -489,13 +501,11 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async sendMail(input: SendMailInput): Promise<void> {
-    await this.ensureInitialized();
-    mail.sendMail(this.sql, input);
+    mail.sendMail(this.db, input);
   }
 
   async checkMail(agentId: string): Promise<Mail[]> {
-    await this.ensureInitialized();
-    return mail.checkMail(this.sql, agentId);
+    return mail.checkMail(this.db, agentId);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -503,19 +513,16 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async submitToReviewQueue(input: ReviewQueueInput): Promise<void> {
-    await this.ensureInitialized();
-    reviewQueue.submitToReviewQueue(this.sql, input);
+    reviewQueue.submitToReviewQueue(this.db, input);
     await this.armAlarmIfNeeded();
   }
 
   async popReviewQueue(): Promise<ReviewQueueEntry | null> {
-    await this.ensureInitialized();
-    return reviewQueue.popReviewQueue(this.sql);
+    return reviewQueue.popReviewQueue(this.db);
   }
 
   async completeReview(entryId: string, status: 'merged' | 'failed'): Promise<void> {
-    await this.ensureInitialized();
-    reviewQueue.completeReview(this.sql, entryId, status);
+    reviewQueue.completeReview(this.db, entryId, status);
   }
 
   async completeReviewWithResult(input: {
@@ -524,13 +531,11 @@ export class TownDO extends DurableObject<Env> {
     message?: string;
     commit_sha?: string;
   }): Promise<void> {
-    await this.ensureInitialized();
-    reviewQueue.completeReviewWithResult(this.sql, input);
+    reviewQueue.completeReviewWithResult(this.db, input);
   }
 
   async agentDone(agentId: string, input: AgentDoneInput): Promise<void> {
-    await this.ensureInitialized();
-    reviewQueue.agentDone(this.sql, agentId, input);
+    reviewQueue.agentDone(this.db, agentId, input);
     await this.armAlarmIfNeeded();
   }
 
@@ -538,32 +543,28 @@ export class TownDO extends DurableObject<Env> {
     agentId: string,
     input: { status: 'completed' | 'failed'; reason?: string }
   ): Promise<void> {
-    await this.ensureInitialized();
     let resolvedAgentId = agentId;
     if (!resolvedAgentId) {
-      const mayor = agents.listAgents(this.sql, { role: 'mayor' })[0];
+      const mayor = agents.listAgents(this.db, { role: 'mayor' })[0];
       if (mayor) resolvedAgentId = mayor.id;
     }
     if (resolvedAgentId) {
-      reviewQueue.agentCompleted(this.sql, resolvedAgentId, input);
+      reviewQueue.agentCompleted(this.db, resolvedAgentId, input);
     }
   }
 
   async createMolecule(beadId: string, formula: unknown): Promise<Molecule> {
-    await this.ensureInitialized();
-    return reviewQueue.createMolecule(this.sql, beadId, formula);
+    return reviewQueue.createMolecule(this.db, beadId, formula);
   }
 
   async getMoleculeCurrentStep(
     agentId: string
   ): Promise<{ molecule: Molecule; step: unknown } | null> {
-    await this.ensureInitialized();
-    return reviewQueue.getMoleculeCurrentStep(this.sql, agentId);
+    return reviewQueue.getMoleculeCurrentStep(this.db, agentId);
   }
 
   async advanceMoleculeStep(agentId: string, summary: string): Promise<Molecule | null> {
-    await this.ensureInitialized();
-    return reviewQueue.advanceMoleculeStep(this.sql, agentId, summary);
+    return reviewQueue.advanceMoleculeStep(this.db, agentId, summary);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -577,9 +578,7 @@ export class TownDO extends DurableObject<Env> {
     priority?: string;
     metadata?: Record<string, unknown>;
   }): Promise<{ bead: Bead; agent: Agent }> {
-    await this.ensureInitialized();
-
-    const createdBead = beadOps.createBead(this.sql, {
+    const createdBead = beadOps.createBead(this.db, {
       type: 'issue',
       title: input.title,
       body: input.body,
@@ -588,12 +587,12 @@ export class TownDO extends DurableObject<Env> {
       metadata: input.metadata,
     });
 
-    const agent = agents.getOrCreateAgent(this.sql, 'polecat', input.rigId, this.townId);
-    agents.hookBead(this.sql, agent.id, createdBead.bead_id);
+    const agent = agents.getOrCreateAgent(this.db, 'polecat', input.rigId, this.townId);
+    agents.hookBead(this.db, agent.id, createdBead.bead_id);
 
     // Re-read bead and agent after hook (hookBead updates both)
-    const bead = beadOps.getBead(this.sql, createdBead.bead_id) ?? createdBead;
-    const hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
+    const bead = beadOps.getBead(this.db, createdBead.bead_id) ?? createdBead;
+    const hookedAgent = agents.getAgent(this.db, agent.id) ?? agent;
 
     // Fire-and-forget dispatch so the sling call returns immediately.
     // The alarm loop retries if this fails.
@@ -612,13 +611,12 @@ export class TownDO extends DurableObject<Env> {
     message: string,
     model?: string
   ): Promise<{ agentId: string; sessionStatus: 'idle' | 'active' | 'starting' }> {
-    await this.ensureInitialized();
     const townId = this.townId;
 
-    let mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
+    let mayor = agents.listAgents(this.db, { role: 'mayor' })[0] ?? null;
     if (!mayor) {
       const identity = `mayor-${townId.slice(0, 8)}`;
-      mayor = agents.registerAgent(this.sql, {
+      mayor = agents.registerAgent(this.db, {
         role: 'mayor',
         name: 'mayor',
         identity,
@@ -674,7 +672,7 @@ export class TownDO extends DurableObject<Env> {
       });
 
       if (started) {
-        agents.updateAgentStatus(this.sql, mayor.id, 'working');
+        agents.updateAgentStatus(this.db, mayor.id, 'working');
         sessionStatus = 'starting';
       } else {
         sessionStatus = 'idle';
@@ -691,13 +689,12 @@ export class TownDO extends DurableObject<Env> {
    * without requiring the user to send a message first.
    */
   async ensureMayor(): Promise<{ agentId: string; sessionStatus: 'idle' | 'active' | 'starting' }> {
-    await this.ensureInitialized();
     const townId = this.townId;
 
-    let mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
+    let mayor = agents.listAgents(this.db, { role: 'mayor' })[0] ?? null;
     if (!mayor) {
       const identity = `mayor-${townId.slice(0, 8)}`;
-      mayor = agents.registerAgent(this.sql, {
+      mayor = agents.registerAgent(this.db, {
         role: 'mayor',
         name: 'mayor',
         identity,
@@ -756,7 +753,7 @@ export class TownDO extends DurableObject<Env> {
     });
 
     if (started) {
-      agents.updateAgentStatus(this.sql, mayor.id, 'working');
+      agents.updateAgentStatus(this.db, mayor.id, 'working');
       return { agentId: mayor.id, sessionStatus: 'starting' };
     }
 
@@ -773,8 +770,7 @@ export class TownDO extends DurableObject<Env> {
       lastActivityAt: string;
     } | null;
   }> {
-    await this.ensureInitialized();
-    const mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
+    const mayor = agents.listAgents(this.db, { role: 'mayor' })[0] ?? null;
 
     const mapStatus = (agentStatus: string): 'idle' | 'active' | 'starting' => {
       switch (agentStatus) {
@@ -802,7 +798,7 @@ export class TownDO extends DurableObject<Env> {
   }
 
   private async getMayorRigConfig(): Promise<RigConfig | null> {
-    const rigList = rigs.listRigs(this.sql);
+    const rigList = rigs.listRigs(this.db);
     if (rigList.length === 0) return null;
     return this.getRigConfig(rigList[0].id);
   }
@@ -811,7 +807,7 @@ export class TownDO extends DurableObject<Env> {
     const townConfig = await this.getTownConfig();
     if (townConfig.kilocode_token) return townConfig.kilocode_token;
 
-    const rigList = rigs.listRigs(this.sql);
+    const rigList = rigs.listRigs(this.db);
     for (const rig of rigList) {
       const rc = await this.getRigConfig(rig.id);
       if (rc?.kilocodeToken) {
@@ -832,7 +828,6 @@ export class TownDO extends DurableObject<Env> {
     beads: Array<{ bead_id: string; rig_id: string }>;
     created_by?: string;
   }): Promise<ConvoyEntry> {
-    await this.ensureInitialized();
     const parsed = z
       .object({
         title: z.string().min(1),
@@ -845,62 +840,48 @@ export class TownDO extends DurableObject<Env> {
     const timestamp = now();
 
     // Create the convoy bead
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${beads} (
-          ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-          ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-          ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-          ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-          ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-          ${beads.columns.closed_at}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        convoyId,
-        'convoy',
-        'open',
-        parsed.title,
-        null,
-        null,
-        null,
-        null,
-        'medium',
-        JSON.stringify(['gt:convoy']),
-        '{}',
-        parsed.created_by ?? null,
-        timestamp,
-        timestamp,
-        null,
-      ]
-    );
+    this.db
+      .insert(beads)
+      .values({
+        bead_id: convoyId,
+        type: 'convoy',
+        status: 'open',
+        title: parsed.title,
+        body: null,
+        rig_id: null,
+        parent_bead_id: null,
+        assignee_agent_bead_id: null,
+        priority: 'medium',
+        labels: JSON.stringify(['gt:convoy']),
+        metadata: '{}',
+        created_by: parsed.created_by ?? null,
+        created_at: timestamp,
+        updated_at: timestamp,
+        closed_at: null,
+      })
+      .run();
 
     // Create convoy_metadata
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${convoy_metadata} (
-          ${convoy_metadata.columns.bead_id}, ${convoy_metadata.columns.total_beads},
-          ${convoy_metadata.columns.closed_beads}, ${convoy_metadata.columns.landed_at}
-        ) VALUES (?, ?, ?, ?)
-      `,
-      [convoyId, parsed.beads.length, 0, null]
-    );
+    this.db
+      .insert(convoy_metadata)
+      .values({
+        bead_id: convoyId,
+        total_beads: parsed.beads.length,
+        closed_beads: 0,
+        landed_at: null,
+      })
+      .run();
 
     // Track beads via bead_dependencies
     for (const bead of parsed.beads) {
-      query(
-        this.sql,
-        /* sql */ `
-          INSERT INTO ${bead_dependencies} (
-            ${bead_dependencies.columns.bead_id},
-            ${bead_dependencies.columns.depends_on_bead_id},
-            ${bead_dependencies.columns.dependency_type}
-          ) VALUES (?, ?, ?)
-        `,
-        [bead.bead_id, convoyId, 'tracks']
-      );
+      this.db
+        .insert(bead_dependencies)
+        .values({
+          bead_id: bead.bead_id,
+          depends_on_bead_id: convoyId,
+          dependency_type: 'tracks',
+        })
+        .run();
     }
 
     const convoy = this.getConvoy(convoyId);
@@ -909,66 +890,54 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async onBeadClosed(input: { convoyId: string; beadId: string }): Promise<ConvoyEntry | null> {
-    await this.ensureInitialized();
-
     // Count closed tracked beads
-    const closedRows = [
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT COUNT(1) AS count FROM ${bead_dependencies}
-          INNER JOIN ${beads} ON ${bead_dependencies.bead_id} = ${beads.bead_id}
-          WHERE ${bead_dependencies.depends_on_bead_id} = ?
-            AND ${bead_dependencies.dependency_type} = 'tracks'
-            AND ${beads.status} = 'closed'
-        `,
-        [input.convoyId]
-      ),
-    ];
-    const closedCount = z.object({ count: z.number() }).parse(closedRows[0] ?? { count: 0 }).count;
+    const closedResult = this.db
+      .select({ count: count() })
+      .from(bead_dependencies)
+      .innerJoin(beads, eq(bead_dependencies.bead_id, beads.bead_id))
+      .where(
+        and(
+          eq(bead_dependencies.depends_on_bead_id, input.convoyId),
+          eq(bead_dependencies.dependency_type, 'tracks'),
+          eq(beads.status, 'closed')
+        )
+      )
+      .get();
+    const closedCount = closedResult?.count ?? 0;
 
-    query(
-      this.sql,
-      /* sql */ `
-        UPDATE ${convoy_metadata}
-        SET ${convoy_metadata.columns.closed_beads} = ?
-        WHERE ${convoy_metadata.bead_id} = ?
-      `,
-      [closedCount, input.convoyId]
-    );
+    this.db
+      .update(convoy_metadata)
+      .set({ closed_beads: closedCount })
+      .where(eq(convoy_metadata.bead_id, input.convoyId))
+      .run();
 
     const convoy = this.getConvoy(input.convoyId);
     if (convoy && convoy.status === 'active' && convoy.closed_beads >= convoy.total_beads) {
       const timestamp = now();
-      query(
-        this.sql,
-        /* sql */ `
-          UPDATE ${beads}
-          SET ${beads.columns.status} = 'closed', ${beads.columns.closed_at} = ?, ${beads.columns.updated_at} = ?
-          WHERE ${beads.bead_id} = ?
-        `,
-        [timestamp, timestamp, input.convoyId]
-      );
-      query(
-        this.sql,
-        /* sql */ `
-          UPDATE ${convoy_metadata}
-          SET ${convoy_metadata.columns.landed_at} = ?
-          WHERE ${convoy_metadata.bead_id} = ?
-        `,
-        [timestamp, input.convoyId]
-      );
+      this.db
+        .update(beads)
+        .set({ status: 'closed', closed_at: timestamp, updated_at: timestamp })
+        .where(eq(beads.bead_id, input.convoyId))
+        .run();
+      this.db
+        .update(convoy_metadata)
+        .set({ landed_at: timestamp })
+        .where(eq(convoy_metadata.bead_id, input.convoyId))
+        .run();
       return this.getConvoy(input.convoyId);
     }
     return convoy;
   }
 
   private getConvoy(convoyId: string): ConvoyEntry | null {
-    const rows = [
-      ...query(this.sql, /* sql */ `${CONVOY_JOIN} WHERE ${beads.bead_id} = ?`, [convoyId]),
-    ];
-    if (rows.length === 0) return null;
-    return toConvoy(ConvoyBeadRecord.parse(rows[0]));
+    const row = this.db
+      .select(convoyJoinColumns)
+      .from(beads)
+      .innerJoin(convoy_metadata, eq(beads.bead_id, convoy_metadata.bead_id))
+      .where(eq(beads.bead_id, convoyId))
+      .get();
+    if (!row) return null;
+    return toConvoy(row);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -976,38 +945,33 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async acknowledgeEscalation(escalationId: string): Promise<EscalationEntry | null> {
-    await this.ensureInitialized();
-    query(
-      this.sql,
-      /* sql */ `
-        UPDATE ${escalation_metadata}
-        SET ${escalation_metadata.columns.acknowledged} = 1, ${escalation_metadata.columns.acknowledged_at} = ?
-        WHERE ${escalation_metadata.bead_id} = ? AND ${escalation_metadata.acknowledged} = 0
-      `,
-      [now(), escalationId]
-    );
+    this.db
+      .update(escalation_metadata)
+      .set({ acknowledged: 1, acknowledged_at: now() })
+      .where(
+        and(eq(escalation_metadata.bead_id, escalationId), eq(escalation_metadata.acknowledged, 0))
+      )
+      .run();
     return this.getEscalation(escalationId);
   }
 
   async listEscalations(filter?: { acknowledged?: boolean }): Promise<EscalationEntry[]> {
-    await this.ensureInitialized();
-    const rows =
-      filter?.acknowledged !== undefined
-        ? [
-            ...query(
-              this.sql,
-              /* sql */ `${ESCALATION_JOIN} WHERE ${escalation_metadata.acknowledged} = ? ORDER BY ${beads.created_at} DESC LIMIT 100`,
-              [filter.acknowledged ? 1 : 0]
-            ),
-          ]
-        : [
-            ...query(
-              this.sql,
-              /* sql */ `${ESCALATION_JOIN} ORDER BY ${beads.created_at} DESC LIMIT 100`,
-              []
-            ),
-          ];
-    return EscalationBeadRecord.array().parse(rows).map(toEscalation);
+    const conditions: SQL[] = [];
+    if (filter?.acknowledged !== undefined) {
+      conditions.push(eq(escalation_metadata.acknowledged, filter.acknowledged ? 1 : 0));
+    }
+
+    const q = this.db
+      .select(escalationJoinColumns)
+      .from(beads)
+      .innerJoin(escalation_metadata, eq(beads.bead_id, escalation_metadata.bead_id));
+
+    const rows = (conditions.length > 0 ? q.where(and(...conditions)) : q)
+      .orderBy(desc(beads.created_at))
+      .limit(100)
+      .all();
+
+    return rows.map(toEscalation);
   }
 
   async routeEscalation(input: {
@@ -1018,54 +982,48 @@ export class TownDO extends DurableObject<Env> {
     category?: string;
     message: string;
   }): Promise<EscalationEntry> {
-    await this.ensureInitialized();
     const beadId = generateId();
     const timestamp = now();
 
     // Create the escalation bead
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${beads} (
-          ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-          ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-          ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-          ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-          ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-          ${beads.columns.closed_at}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        beadId,
-        'escalation',
-        'open',
-        `Escalation: ${input.message.slice(0, 100)}`,
-        input.message,
-        input.source_rig_id,
-        null,
-        null,
-        input.severity === 'critical' ? 'critical' : input.severity === 'high' ? 'high' : 'medium',
-        JSON.stringify(['gt:escalation', `severity:${input.severity}`]),
-        '{}',
-        input.source_agent_id ?? null,
-        timestamp,
-        timestamp,
-        null,
-      ]
-    );
+    this.db
+      .insert(beads)
+      .values({
+        bead_id: beadId,
+        type: 'escalation',
+        status: 'open',
+        title: `Escalation: ${input.message.slice(0, 100)}`,
+        body: input.message,
+        rig_id: input.source_rig_id,
+        parent_bead_id: null,
+        assignee_agent_bead_id: null,
+        priority:
+          input.severity === 'critical'
+            ? 'critical'
+            : input.severity === 'high'
+              ? 'high'
+              : 'medium',
+        labels: JSON.stringify(['gt:escalation', `severity:${input.severity}`]),
+        metadata: '{}',
+        created_by: input.source_agent_id ?? null,
+        created_at: timestamp,
+        updated_at: timestamp,
+        closed_at: null,
+      })
+      .run();
 
     // Create escalation_metadata
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${escalation_metadata} (
-          ${escalation_metadata.columns.bead_id}, ${escalation_metadata.columns.severity},
-          ${escalation_metadata.columns.category}, ${escalation_metadata.columns.acknowledged},
-          ${escalation_metadata.columns.re_escalation_count}, ${escalation_metadata.columns.acknowledged_at}
-        ) VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [beadId, input.severity, input.category ?? null, 0, 0, null]
-    );
+    this.db
+      .insert(escalation_metadata)
+      .values({
+        bead_id: beadId,
+        severity: input.severity,
+        category: input.category ?? null,
+        acknowledged: 0,
+        re_escalation_count: 0,
+        acknowledged_at: null,
+      })
+      .run();
 
     const escalation = this.getEscalation(beadId);
     if (!escalation) throw new Error('Failed to create escalation');
@@ -1077,7 +1035,7 @@ export class TownDO extends DurableObject<Env> {
       ).catch(err => {
         console.warn(`${TOWN_LOG} routeEscalation: failed to notify mayor:`, err);
         try {
-          beadOps.logBeadEvent(this.sql, {
+          beadOps.logBeadEvent(this.db, {
             beadId,
             agentId: input.source_agent_id ?? null,
             eventType: 'notification_failed',
@@ -1100,11 +1058,14 @@ export class TownDO extends DurableObject<Env> {
   }
 
   private getEscalation(escalationId: string): EscalationEntry | null {
-    const rows = [
-      ...query(this.sql, /* sql */ `${ESCALATION_JOIN} WHERE ${beads.bead_id} = ?`, [escalationId]),
-    ];
-    if (rows.length === 0) return null;
-    return toEscalation(EscalationBeadRecord.parse(rows[0]));
+    const row = this.db
+      .select(escalationJoinColumns)
+      .from(beads)
+      .innerJoin(escalation_metadata, eq(beads.bead_id, escalation_metadata.bead_id))
+      .where(eq(beads.bead_id, escalationId))
+      .get();
+    if (!row) return null;
+    return toEscalation(row);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -1112,11 +1073,10 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async alarm(): Promise<void> {
-    await this.ensureInitialized();
     const townId = this.townId;
     console.log(`${TOWN_LOG} alarm: fired for town=${townId}`);
 
-    const hasRigs = rigs.listRigs(this.sql).length > 0;
+    const hasRigs = rigs.listRigs(this.db).length > 0;
     if (hasRigs) {
       try {
         await this.ensureContainerReady();
@@ -1158,32 +1118,22 @@ export class TownDO extends DurableObject<Env> {
   }
 
   private hasActiveWork(): boolean {
-    const activeAgentRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${agent_metadata} WHERE ${agent_metadata.status} IN ('working', 'stalled')`,
-        []
-      ),
-    ];
-    const pendingBeadRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${agent_metadata} WHERE ${agent_metadata.status} = 'idle' AND ${agent_metadata.current_hook_bead_id} IS NOT NULL`,
-        []
-      ),
-    ];
-    const pendingReviewRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${beads} WHERE ${beads.type} = 'merge_request' AND ${beads.status} IN ('open', 'in_progress')`,
-        []
-      ),
-    ];
-    return (
-      Number(activeAgentRows[0]?.cnt ?? 0) > 0 ||
-      Number(pendingBeadRows[0]?.cnt ?? 0) > 0 ||
-      Number(pendingReviewRows[0]?.cnt ?? 0) > 0
-    );
+    const active = this.db
+      .select({ cnt: count() })
+      .from(agent_metadata)
+      .where(inArray(agent_metadata.status, ['working', 'stalled']))
+      .get();
+    const pending = this.db
+      .select({ cnt: count() })
+      .from(agent_metadata)
+      .where(and(eq(agent_metadata.status, 'idle'), isNotNull(agent_metadata.current_hook_bead_id)))
+      .get();
+    const reviews = this.db
+      .select({ cnt: count() })
+      .from(beads)
+      .where(and(eq(beads.type, 'merge_request'), inArray(beads.status, ['open', 'in_progress'])))
+      .get();
+    return (active?.cnt ?? 0) > 0 || (pending?.cnt ?? 0) > 0 || (reviews?.cnt ?? 0) > 0;
   }
 
   /**
@@ -1193,7 +1143,7 @@ export class TownDO extends DurableObject<Env> {
    */
   private async dispatchAgent(agent: Agent, bead: Bead): Promise<boolean> {
     try {
-      const rigId = agent.rig_id ?? rigs.listRigs(this.sql)[0]?.id ?? '';
+      const rigId = agent.rig_id ?? rigs.listRigs(this.db)[0]?.id ?? '';
       const rigConfig = rigId ? await this.getRigConfig(rigId) : null;
       if (!rigConfig) {
         console.warn(`${TOWN_LOG} dispatchAgent: no rig config for agent=${agent.id} rig=${rigId}`);
@@ -1206,16 +1156,14 @@ export class TownDO extends DurableObject<Env> {
       // Mark dispatch in progress: set last_activity_at so schedulePendingWork
       // skips this agent while the container start is in flight, and bump
       // dispatch_attempts for the retry budget.
-      query(
-        this.sql,
-        /* sql */ `
-          UPDATE ${agent_metadata}
-          SET ${agent_metadata.columns.dispatch_attempts} = ${agent_metadata.columns.dispatch_attempts} + 1,
-              ${agent_metadata.columns.last_activity_at} = ?
-          WHERE ${agent_metadata.bead_id} = ?
-        `,
-        [now(), agent.id]
-      );
+      this.db
+        .update(agent_metadata)
+        .set({
+          dispatch_attempts: sql`${agent_metadata.dispatch_attempts} + 1`,
+          last_activity_at: now(),
+        })
+        .where(eq(agent_metadata.bead_id, agent.id))
+        .run();
 
       const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
         townId: this.townId,
@@ -1237,17 +1185,15 @@ export class TownDO extends DurableObject<Env> {
       });
 
       if (started) {
-        query(
-          this.sql,
-          /* sql */ `
-            UPDATE ${agent_metadata}
-            SET ${agent_metadata.columns.status} = 'working',
-                ${agent_metadata.columns.dispatch_attempts} = 0,
-                ${agent_metadata.columns.last_activity_at} = ?
-            WHERE ${agent_metadata.bead_id} = ?
-          `,
-          [now(), agent.id]
-        );
+        this.db
+          .update(agent_metadata)
+          .set({
+            status: 'working',
+            dispatch_attempts: 0,
+            last_activity_at: now(),
+          })
+          .where(eq(agent_metadata.bead_id, agent.id))
+          .run();
         console.log(`${TOWN_LOG} dispatchAgent: started agent=${agent.name}(${agent.id})`);
       }
       return started;
@@ -1264,41 +1210,51 @@ export class TownDO extends DurableObject<Env> {
    */
   private async schedulePendingWork(): Promise<void> {
     const cooldownCutoff = new Date(Date.now() - DISPATCH_COOLDOWN_MS).toISOString();
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT ${beads}.*,
-                 ${agent_metadata.role}, ${agent_metadata.identity},
-                 ${agent_metadata.container_process_id},
-                 ${agent_metadata.status} AS status,
-                 ${agent_metadata.current_hook_bead_id},
-                 ${agent_metadata.dispatch_attempts}, ${agent_metadata.last_activity_at},
-                 ${agent_metadata.checkpoint}
-          FROM ${beads}
-          INNER JOIN ${agent_metadata} ON ${beads.bead_id} = ${agent_metadata.bead_id}
-          WHERE ${agent_metadata.status} = 'idle'
-            AND ${agent_metadata.current_hook_bead_id} IS NOT NULL
-            AND (${agent_metadata.last_activity_at} IS NULL OR ${agent_metadata.last_activity_at} < ?)
-        `,
-        [cooldownCutoff]
-      ),
-    ];
-    const pendingAgents: Agent[] = AgentBeadRecord.array()
-      .parse(rows)
-      .map(row => ({
-        id: row.bead_id,
-        rig_id: row.rig_id,
-        role: row.role,
-        name: row.title,
-        identity: row.identity,
-        status: row.status,
-        current_hook_bead_id: row.current_hook_bead_id,
-        dispatch_attempts: row.dispatch_attempts,
-        last_activity_at: row.last_activity_at,
-        checkpoint: row.checkpoint,
-        created_at: row.created_at,
-      }));
+
+    // Exclude beads.status from the join columns since agent_metadata.status
+    // shadows it and we need the agent status, not the bead status.
+    const { status: _beadStatus, ...beadCols } = getTableColumns(beads);
+    const pendingAgentColumns = {
+      ...beadCols,
+      role: agent_metadata.role,
+      identity: agent_metadata.identity,
+      container_process_id: agent_metadata.container_process_id,
+      status: agent_metadata.status,
+      current_hook_bead_id: agent_metadata.current_hook_bead_id,
+      dispatch_attempts: agent_metadata.dispatch_attempts,
+      last_activity_at: agent_metadata.last_activity_at,
+      checkpoint: agent_metadata.checkpoint,
+    };
+
+    const rows = this.db
+      .select(pendingAgentColumns)
+      .from(beads)
+      .innerJoin(agent_metadata, eq(beads.bead_id, agent_metadata.bead_id))
+      .where(
+        and(
+          eq(agent_metadata.status, 'idle'),
+          isNotNull(agent_metadata.current_hook_bead_id),
+          or(
+            isNull(agent_metadata.last_activity_at),
+            sql`${agent_metadata.last_activity_at} < ${cooldownCutoff}`
+          )
+        )
+      )
+      .all();
+
+    const pendingAgents: Agent[] = rows.map(row => ({
+      id: row.bead_id,
+      rig_id: row.rig_id,
+      role: row.role,
+      name: row.title,
+      identity: row.identity,
+      status: row.status,
+      current_hook_bead_id: row.current_hook_bead_id,
+      dispatch_attempts: row.dispatch_attempts,
+      last_activity_at: row.last_activity_at,
+      checkpoint: row.checkpoint,
+      created_at: row.created_at,
+    }));
 
     console.log(`${TOWN_LOG} schedulePendingWork: found ${pendingAgents.length} pending agents`);
     if (pendingAgents.length === 0) return;
@@ -1308,12 +1264,12 @@ export class TownDO extends DurableObject<Env> {
     for (const agent of pendingAgents) {
       const beadId = agent.current_hook_bead_id;
       if (!beadId) continue;
-      const bead = beadOps.getBead(this.sql, beadId);
+      const bead = beadOps.getBead(this.db, beadId);
       if (!bead) continue;
 
       if (agent.dispatch_attempts >= MAX_DISPATCH_ATTEMPTS) {
-        beadOps.updateBeadStatus(this.sql, beadId, 'failed', agent.id);
-        agents.unhookBead(this.sql, agent.id);
+        beadOps.updateBeadStatus(this.db, beadId, 'failed', agent.id);
+        agents.unhookBead(this.db, agent.id);
         continue;
       }
 
@@ -1334,22 +1290,15 @@ export class TownDO extends DurableObject<Env> {
     const townId = this.townId;
     const guppThreshold = new Date(Date.now() - GUPP_THRESHOLD_MS).toISOString();
 
-    const WorkingAgentRow = AgentMetadataRecord.pick({
-      bead_id: true,
-      current_hook_bead_id: true,
-      last_activity_at: true,
-    });
-    const workingAgents = WorkingAgentRow.array().parse([
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT ${agent_metadata.bead_id}, ${agent_metadata.current_hook_bead_id}, ${agent_metadata.last_activity_at}
-          FROM ${agent_metadata}
-          WHERE ${agent_metadata.status} IN ('working', 'stalled')
-        `,
-        []
-      ),
-    ]);
+    const workingAgents = this.db
+      .select({
+        bead_id: agent_metadata.bead_id,
+        current_hook_bead_id: agent_metadata.current_hook_bead_id,
+        last_activity_at: agent_metadata.last_activity_at,
+      })
+      .from(agent_metadata)
+      .where(inArray(agent_metadata.status, ['working', 'stalled']))
+      .all();
 
     for (const working of workingAgents) {
       const agentId = working.bead_id;
@@ -1360,36 +1309,35 @@ export class TownDO extends DurableObject<Env> {
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
         if (containerInfo.exitReason === 'completed') {
-          reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });
+          reviewQueue.agentCompleted(this.db, agentId, { status: 'completed' });
           continue;
         }
-        query(
-          this.sql,
-          /* sql */ `UPDATE ${agent_metadata} SET ${agent_metadata.columns.status} = 'idle', ${agent_metadata.columns.last_activity_at} = ? WHERE ${agent_metadata.bead_id} = ?`,
-          [now(), agentId]
-        );
+        this.db
+          .update(agent_metadata)
+          .set({ status: 'idle', last_activity_at: now() })
+          .where(eq(agent_metadata.bead_id, agentId))
+          .run();
         continue;
       }
 
       // GUPP violation check
       if (lastActivity && lastActivity < guppThreshold) {
         // Check for existing GUPP mail
-        const existingGupp = [
-          ...query(
-            this.sql,
-            /* sql */ `
-              SELECT ${beads.bead_id} FROM ${beads}
-              WHERE ${beads.type} = 'message'
-                AND ${beads.assignee_agent_bead_id} = ?
-                AND ${beads.title} = 'GUPP_CHECK'
-                AND ${beads.status} = 'open'
-              LIMIT 1
-            `,
-            [agentId]
-          ),
-        ];
+        const existingGupp = this.db
+          .select({ bead_id: beads.bead_id })
+          .from(beads)
+          .where(
+            and(
+              eq(beads.type, 'message'),
+              eq(beads.assignee_agent_bead_id, agentId),
+              eq(beads.title, 'GUPP_CHECK'),
+              eq(beads.status, 'open')
+            )
+          )
+          .limit(1)
+          .all();
         if (existingGupp.length === 0) {
-          mail.sendMail(this.sql, {
+          mail.sendMail(this.db, {
             from_agent_id: 'witness',
             to_agent_id: agentId,
             subject: 'GUPP_CHECK',
@@ -1408,7 +1356,7 @@ export class TownDO extends DurableObject<Env> {
    * it isn't sent again on the next alarm tick.
    */
   private async deliverPendingMail(): Promise<void> {
-    const pendingByAgent = mail.getPendingMailForWorkingAgents(this.sql);
+    const pendingByAgent = mail.getPendingMailForWorkingAgents(this.db);
     if (pendingByAgent.size === 0) return;
 
     console.log(
@@ -1423,7 +1371,7 @@ export class TownDO extends DurableObject<Env> {
 
       if (sent) {
         // Mark delivered only after the container accepted the message
-        mail.readAndDeliverMail(this.sql, agentId);
+        mail.readAndDeliverMail(this.db, agentId);
         console.log(
           `${TOWN_LOG} deliverPendingMail: delivered ${messages.length} message(s) to agent=${agentId}`
         );
@@ -1441,9 +1389,9 @@ export class TownDO extends DurableObject<Env> {
    * Process the review queue: pop pending entries and trigger merge.
    */
   private async processReviewQueue(): Promise<void> {
-    reviewQueue.recoverStuckReviews(this.sql);
+    reviewQueue.recoverStuckReviews(this.db);
 
-    const entry = reviewQueue.popReviewQueue(this.sql);
+    const entry = reviewQueue.popReviewQueue(this.db);
     if (!entry) return;
 
     // Resolve rig from the merge_request bead — not rigList[0] which would
@@ -1451,12 +1399,12 @@ export class TownDO extends DurableObject<Env> {
     const rigId = entry.rig_id;
     if (!rigId) {
       console.error(`${TOWN_LOG} processReviewQueue: entry ${entry.id} has no rig_id, skipping`);
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      reviewQueue.completeReview(this.db, entry.id, 'failed');
       return;
     }
     const rigConfig = await this.getRigConfig(rigId);
     if (!rigConfig) {
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      reviewQueue.completeReview(this.db, entry.id, 'failed');
       return;
     }
 
@@ -1464,7 +1412,7 @@ export class TownDO extends DurableObject<Env> {
     const gates = townConfig.refinery?.gates ?? [];
 
     if (gates.length > 0) {
-      const refineryAgent = agents.getOrCreateAgent(this.sql, 'refinery', rigId, this.townId);
+      const refineryAgent = agents.getOrCreateAgent(this.db, 'refinery', rigId, this.townId);
 
       const { buildRefinerySystemPrompt } = await import('../prompts/refinery-system.prompt');
       const systemPrompt = buildRefinerySystemPrompt({
@@ -1480,7 +1428,7 @@ export class TownDO extends DurableObject<Env> {
       // Hook the refinery to the MR bead (entry.id), not the source bead
       // (entry.bead_id). The source bead stays closed with its original
       // polecat assignee preserved.
-      agents.hookBead(this.sql, refineryAgent.id, entry.id);
+      agents.hookBead(this.db, refineryAgent.id, entry.id);
 
       const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
         townId: this.townId,
@@ -1503,7 +1451,7 @@ export class TownDO extends DurableObject<Env> {
       });
 
       if (!started) {
-        agents.unhookBead(this.sql, refineryAgent.id);
+        agents.unhookBead(this.db, refineryAgent.id);
         await this.triggerDeterministicMerge(rigConfig, entry, townConfig);
       }
     } else {
@@ -1529,7 +1477,7 @@ export class TownDO extends DurableObject<Env> {
       townConfig,
     });
     if (!ok) {
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      reviewQueue.completeReview(this.db, entry.id, 'failed');
     }
   }
 
@@ -1537,13 +1485,18 @@ export class TownDO extends DurableObject<Env> {
    * Bump severity of stale unacknowledged escalations.
    */
   private async reEscalateStaleEscalations(): Promise<void> {
-    const candidates = [
-      ...query(
-        this.sql,
-        /* sql */ `${ESCALATION_JOIN} WHERE ${escalation_metadata.acknowledged} = 0 AND ${escalation_metadata.re_escalation_count} < ?`,
-        [MAX_RE_ESCALATIONS]
-      ),
-    ].map(r => toEscalation(EscalationBeadRecord.parse(r)));
+    const candidates = this.db
+      .select(escalationJoinColumns)
+      .from(beads)
+      .innerJoin(escalation_metadata, eq(beads.bead_id, escalation_metadata.bead_id))
+      .where(
+        and(
+          eq(escalation_metadata.acknowledged, 0),
+          sql`${escalation_metadata.re_escalation_count} < ${MAX_RE_ESCALATIONS}`
+        )
+      )
+      .all()
+      .map(toEscalation);
 
     const nowMs = Date.now();
     for (const esc of candidates) {
@@ -1555,16 +1508,14 @@ export class TownDO extends DurableObject<Env> {
       if (currentIdx < 0 || currentIdx >= SEVERITY_ORDER.length - 1) continue;
 
       const newSeverity = SEVERITY_ORDER[currentIdx + 1];
-      query(
-        this.sql,
-        /* sql */ `
-          UPDATE ${escalation_metadata}
-          SET ${escalation_metadata.columns.severity} = ?,
-              ${escalation_metadata.columns.re_escalation_count} = ${escalation_metadata.columns.re_escalation_count} + 1
-          WHERE ${escalation_metadata.bead_id} = ?
-        `,
-        [newSeverity, esc.id]
-      );
+      this.db
+        .update(escalation_metadata)
+        .set({
+          severity: newSeverity,
+          re_escalation_count: sql`${escalation_metadata.re_escalation_count} + 1`,
+        })
+        .where(eq(escalation_metadata.bead_id, esc.id))
+        .run();
 
       if (newSeverity !== 'low') {
         this.sendMayorMessage(
@@ -1572,7 +1523,7 @@ export class TownDO extends DurableObject<Env> {
         ).catch(err => {
           console.warn(`${TOWN_LOG} re-escalation: failed to notify mayor:`, err);
           try {
-            beadOps.logBeadEvent(this.sql, {
+            beadOps.logBeadEvent(this.db, {
               beadId: esc.id,
               agentId: null,
               eventType: 'notification_failed',
@@ -1595,12 +1546,12 @@ export class TownDO extends DurableObject<Env> {
   }
 
   private async ensureContainerReady(): Promise<void> {
-    const hasRigs = rigs.listRigs(this.sql).length > 0;
+    const hasRigs = rigs.listRigs(this.db).length > 0;
     if (!hasRigs) return;
 
     const hasWork = this.hasActiveWork();
     if (!hasWork) {
-      const rigList = rigs.listRigs(this.sql);
+      const rigList = rigs.listRigs(this.db);
       const newestRigAge = rigList.reduce((min, r) => {
         const age = Date.now() - new Date(r.created_at).getTime();
         return Math.min(min, age);
@@ -1637,7 +1588,7 @@ export class TownDO extends DurableObject<Env> {
     console.log(`${TOWN_LOG} destroy: clearing all storage and alarms`);
 
     try {
-      const allAgents = agents.listAgents(this.sql);
+      const allAgents = agents.listAgents(this.db);
       await Promise.allSettled(
         allAgents.map(agent => getAgentDOStub(this.env, agent.id).destroy())
       );

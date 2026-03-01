@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.1.0",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "itty-time": "^1.0.6",
     "jsonwebtoken": "catalog:",
@@ -29,6 +30,7 @@
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
+    "drizzle-kit": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"

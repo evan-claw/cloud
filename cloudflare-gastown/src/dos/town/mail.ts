@@ -6,9 +6,9 @@
  * is stored in labels and metadata.
  */
 
-import { beads, BeadRecord } from '../../db/tables/beads.table';
-import { agent_metadata } from '../../db/tables/agent-metadata.table';
-import { query } from '../../util/query.util';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { eq, and, asc, getTableColumns } from 'drizzle-orm';
+import { beads, agent_metadata, type BeadsSelect } from '../../db/sqlite-schema';
 import { logBeadEvent } from './beads';
 import { getAgent } from './agents';
 import type { SendMailInput, Mail } from '../../types';
@@ -21,12 +21,20 @@ function now(): string {
   return new Date().toISOString();
 }
 
-export function initMailTables(_sql: SqlStorage): void {
+function parseBead(row: BeadsSelect) {
+  return {
+    ...row,
+    labels: JSON.parse(row.labels ?? '[]') as string[],
+    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
+  };
+}
+
+export function initMailTables(_db: DrizzleSqliteDODatabase): void {
   // Mail tables are now part of the beads table (type='message').
   // Initialization happens in beads.initBeadTables().
 }
 
-export function sendMail(sql: SqlStorage, input: SendMailInput): void {
+export function sendMail(db: DrizzleSqliteDODatabase, input: SendMailInput): void {
   const id = generateId();
   const timestamp = now();
 
@@ -36,41 +44,30 @@ export function sendMail(sql: SqlStorage, input: SendMailInput): void {
     to_agent_id: input.to_agent_id,
   });
 
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${beads} (
-        ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
-        ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
-        ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
-        ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
-        ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
-        ${beads.columns.closed_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      id,
-      'message',
-      'open',
-      input.subject,
-      input.body,
-      null,
-      null,
-      input.to_agent_id,
-      'medium',
+  db.insert(beads)
+    .values({
+      bead_id: id,
+      type: 'message',
+      status: 'open',
+      title: input.subject,
+      body: input.body,
+      rig_id: null,
+      parent_bead_id: null,
+      assignee_agent_bead_id: input.to_agent_id,
+      priority: 'medium',
       labels,
       metadata,
-      input.from_agent_id,
-      timestamp,
-      timestamp,
-      null,
-    ]
-  );
+      created_by: input.from_agent_id,
+      created_at: timestamp,
+      updated_at: timestamp,
+      closed_at: null,
+    })
+    .run();
 
   // Log bead event if the recipient has a hooked bead
-  const recipient = getAgent(sql, input.to_agent_id);
+  const recipient = getAgent(db, input.to_agent_id);
   if (recipient?.current_hook_bead_id) {
-    logBeadEvent(sql, {
+    logBeadEvent(db, {
       beadId: recipient.current_hook_bead_id,
       agentId: input.from_agent_id,
       eventType: 'mail_sent',
@@ -83,23 +80,23 @@ export function sendMail(sql: SqlStorage, input: SendMailInput): void {
  * Read and deliver undelivered mail for an agent.
  * Returns the mail items and batch-closes the message beads in a single UPDATE.
  */
-export function readAndDeliverMail(sql: SqlStorage, agentId: string): Mail[] {
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT * FROM ${beads}
-        WHERE ${beads.type} = 'message'
-          AND ${beads.assignee_agent_bead_id} = ?
-          AND ${beads.status} = 'open'
-        ORDER BY ${beads.created_at} ASC
-      `,
-      [agentId]
-    ),
-  ];
+export function readAndDeliverMail(db: DrizzleSqliteDODatabase, agentId: string): Mail[] {
+  const rows = db
+    .select()
+    .from(beads)
+    .where(
+      and(
+        eq(beads.type, 'message'),
+        eq(beads.assignee_agent_bead_id, agentId),
+        eq(beads.status, 'open')
+      )
+    )
+    .orderBy(asc(beads.created_at))
+    .all();
 
-  const mailBeads = BeadRecord.array().parse(rows);
-  if (mailBeads.length === 0) return [];
+  if (rows.length === 0) return [];
+
+  const mailBeads = rows.map(parseBead);
 
   const messages: Mail[] = mailBeads.map(mb => ({
     id: mb.bead_id,
@@ -114,25 +111,22 @@ export function readAndDeliverMail(sql: SqlStorage, agentId: string): Mail[] {
 
   // Batch-close all open message beads for this agent in a single UPDATE
   const timestamp = now();
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = 'closed',
-          ${beads.columns.closed_at} = ?,
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.type} = 'message'
-        AND ${beads.assignee_agent_bead_id} = ?
-        AND ${beads.status} = 'open'
-    `,
-    [timestamp, timestamp, agentId]
-  );
+  db.update(beads)
+    .set({ status: 'closed', closed_at: timestamp, updated_at: timestamp })
+    .where(
+      and(
+        eq(beads.type, 'message'),
+        eq(beads.assignee_agent_bead_id, agentId),
+        eq(beads.status, 'open')
+      )
+    )
+    .run();
 
   return messages;
 }
 
-export function checkMail(sql: SqlStorage, agentId: string): Mail[] {
-  return readAndDeliverMail(sql, agentId);
+export function checkMail(db: DrizzleSqliteDODatabase, agentId: string): Mail[] {
+  return readAndDeliverMail(db, agentId);
 }
 
 /**
@@ -143,28 +137,21 @@ export function checkMail(sql: SqlStorage, agentId: string): Mail[] {
  * Calling this does NOT mark mail as delivered — the caller should call
  * `readAndDeliverMail` after successfully pushing the messages.
  */
-export function getPendingMailForWorkingAgents(sql: SqlStorage): Map<string, Mail[]> {
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT ${beads}.*
-        FROM ${beads}
-        INNER JOIN ${agent_metadata}
-          ON ${beads.assignee_agent_bead_id} = ${agent_metadata.bead_id}
-        WHERE ${beads.type} = 'message'
-          AND ${beads.status} = 'open'
-          AND ${agent_metadata.status} = 'working'
-        ORDER BY ${beads.created_at} ASC
-      `,
-      []
-    ),
-  ];
+export function getPendingMailForWorkingAgents(db: DrizzleSqliteDODatabase): Map<string, Mail[]> {
+  const rows = db
+    .select(getTableColumns(beads))
+    .from(beads)
+    .innerJoin(agent_metadata, eq(beads.assignee_agent_bead_id, agent_metadata.bead_id))
+    .where(
+      and(eq(beads.type, 'message'), eq(beads.status, 'open'), eq(agent_metadata.status, 'working'))
+    )
+    .orderBy(asc(beads.created_at))
+    .all();
 
-  const mailBeads = BeadRecord.array().parse(rows);
   const grouped = new Map<string, Mail[]>();
 
-  for (const mb of mailBeads) {
+  for (const row of rows) {
+    const mb = parseBead(row);
     const recipientId = mb.assignee_agent_bead_id ?? '';
     if (!recipientId) continue;
 

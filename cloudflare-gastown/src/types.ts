@@ -1,10 +1,13 @@
 import { z } from 'zod';
-import type { BeadRecord } from './db/tables/beads.table';
-import type { AgentMetadataRecord } from './db/tables/agent-metadata.table';
-import type { ReviewMetadataRecord } from './db/tables/review-metadata.table';
-import type { EscalationMetadataRecord } from './db/tables/escalation-metadata.table';
-import type { ConvoyMetadataRecord } from './db/tables/convoy-metadata.table';
-import type { BeadEventRecord } from './db/tables/bead-events.table';
+import type {
+  BeadsSelect,
+  AgentMetadataSelect,
+  ReviewMetadataSelect,
+  EscalationMetadataSelect,
+  ConvoyMetadataSelect,
+  BeadEventsSelect,
+  BeadDependenciesSelect,
+} from './db/sqlite-schema';
 
 // -- Beads --
 
@@ -25,7 +28,10 @@ export type BeadType = z.infer<typeof BeadType>;
 export const BeadPriority = z.enum(['low', 'medium', 'high', 'critical']);
 export type BeadPriority = z.infer<typeof BeadPriority>;
 
-export type Bead = BeadRecord;
+export type Bead = Omit<BeadsSelect, 'labels' | 'metadata'> & {
+  labels: string[];
+  metadata: Record<string, unknown>;
+};
 
 export type CreateBeadInput = {
   type: BeadType;
@@ -243,9 +249,13 @@ export const AgentConfigOverridesSchema = z.object({
 export type AgentConfigOverrides = z.infer<typeof AgentConfigOverridesSchema>;
 
 // Re-export satellite metadata types for convenience
-export type { AgentMetadataRecord } from './db/tables/agent-metadata.table';
-export type { ReviewMetadataRecord } from './db/tables/review-metadata.table';
-export type { EscalationMetadataRecord } from './db/tables/escalation-metadata.table';
-export type { ConvoyMetadataRecord } from './db/tables/convoy-metadata.table';
-export type { BeadEventRecord } from './db/tables/bead-events.table';
-export type { BeadDependencyRecord } from './db/tables/bead-dependencies.table';
+export type AgentMetadataRecord = Omit<AgentMetadataSelect, 'checkpoint'> & {
+  checkpoint: unknown;
+};
+export type ReviewMetadataRecord = ReviewMetadataSelect;
+export type EscalationMetadataRecord = EscalationMetadataSelect;
+export type ConvoyMetadataRecord = ConvoyMetadataSelect;
+export type BeadEventRecord = Omit<BeadEventsSelect, 'metadata'> & {
+  metadata: Record<string, unknown>;
+};
+export type BeadDependencyRecord = BeadDependenciesSelect;

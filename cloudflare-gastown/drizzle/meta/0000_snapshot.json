@@ -1,0 +1,853 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "ce126ed7-fbd1-4d8d-91de-5c9114db2a0b",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "agent_metadata": {
+      "name": "agent_metadata",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identity": {
+          "name": "identity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "container_process_id": {
+          "name": "container_process_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'idle'"
+        },
+        "current_hook_bead_id": {
+          "name": "current_hook_bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "dispatch_attempts": {
+          "name": "dispatch_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "checkpoint": {
+          "name": "checkpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_activity_at": {
+          "name": "last_activity_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "agent_metadata_identity_unique": {
+          "name": "agent_metadata_identity_unique",
+          "columns": ["identity"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "agent_metadata_bead_id_beads_bead_id_fk": {
+          "name": "agent_metadata_bead_id_beads_bead_id_fk",
+          "tableFrom": "agent_metadata",
+          "tableTo": "beads",
+          "columnsFrom": ["bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_metadata_current_hook_bead_id_beads_bead_id_fk": {
+          "name": "agent_metadata_current_hook_bead_id_beads_bead_id_fk",
+          "tableFrom": "agent_metadata",
+          "tableTo": "beads",
+          "columnsFrom": ["current_hook_bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "check_agent_metadata_role": {
+          "name": "check_agent_metadata_role",
+          "value": "\"agent_metadata\".\"role\" in ('polecat', 'refinery', 'mayor', 'witness')"
+        },
+        "check_agent_metadata_status": {
+          "name": "check_agent_metadata_status",
+          "value": "\"agent_metadata\".\"status\" in ('idle', 'working', 'stalled', 'dead')"
+        }
+      }
+    },
+    "bead_dependencies": {
+      "name": "bead_dependencies",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "depends_on_bead_id": {
+          "name": "depends_on_bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dependency_type": {
+          "name": "dependency_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'blocks'"
+        }
+      },
+      "indexes": {
+        "idx_bead_deps_pk": {
+          "name": "idx_bead_deps_pk",
+          "columns": ["bead_id", "depends_on_bead_id"],
+          "isUnique": true
+        },
+        "idx_bead_deps_depends_on": {
+          "name": "idx_bead_deps_depends_on",
+          "columns": ["depends_on_bead_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "bead_dependencies_bead_id_beads_bead_id_fk": {
+          "name": "bead_dependencies_bead_id_beads_bead_id_fk",
+          "tableFrom": "bead_dependencies",
+          "tableTo": "beads",
+          "columnsFrom": ["bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "bead_dependencies_depends_on_bead_id_beads_bead_id_fk": {
+          "name": "bead_dependencies_depends_on_bead_id_beads_bead_id_fk",
+          "tableFrom": "bead_dependencies",
+          "tableTo": "beads",
+          "columnsFrom": ["depends_on_bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "check_bead_deps_type": {
+          "name": "check_bead_deps_type",
+          "value": "\"bead_dependencies\".\"dependency_type\" in ('blocks', 'tracks', 'parent-child')"
+        }
+      }
+    },
+    "bead_events": {
+      "name": "bead_events",
+      "columns": {
+        "bead_event_id": {
+          "name": "bead_event_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "old_value": {
+          "name": "old_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "new_value": {
+          "name": "new_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_bead_events_bead": {
+          "name": "idx_bead_events_bead",
+          "columns": ["bead_id"],
+          "isUnique": false
+        },
+        "idx_bead_events_created": {
+          "name": "idx_bead_events_created",
+          "columns": ["created_at"],
+          "isUnique": false
+        },
+        "idx_bead_events_type": {
+          "name": "idx_bead_events_type",
+          "columns": ["event_type"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "beads": {
+      "name": "beads",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rig_id": {
+          "name": "rig_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parent_bead_id": {
+          "name": "parent_bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "assignee_agent_bead_id": {
+          "name": "assignee_agent_bead_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "priority": {
+          "name": "priority",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'medium'"
+        },
+        "labels": {
+          "name": "labels",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_beads_type_status": {
+          "name": "idx_beads_type_status",
+          "columns": ["type", "status"],
+          "isUnique": false
+        },
+        "idx_beads_parent": {
+          "name": "idx_beads_parent",
+          "columns": ["parent_bead_id"],
+          "isUnique": false
+        },
+        "idx_beads_rig_status": {
+          "name": "idx_beads_rig_status",
+          "columns": ["rig_id", "status"],
+          "isUnique": false
+        },
+        "idx_beads_assignee": {
+          "name": "idx_beads_assignee",
+          "columns": ["assignee_agent_bead_id", "type", "status"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "beads_parent_bead_id_beads_bead_id_fk": {
+          "name": "beads_parent_bead_id_beads_bead_id_fk",
+          "tableFrom": "beads",
+          "tableTo": "beads",
+          "columnsFrom": ["parent_bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "check_beads_type": {
+          "name": "check_beads_type",
+          "value": "\"beads\".\"type\" in ('issue', 'message', 'escalation', 'merge_request', 'convoy', 'molecule', 'agent')"
+        },
+        "check_beads_status": {
+          "name": "check_beads_status",
+          "value": "\"beads\".\"status\" in ('open', 'in_progress', 'closed', 'failed')"
+        },
+        "check_beads_priority": {
+          "name": "check_beads_priority",
+          "value": "\"beads\".\"priority\" in ('low', 'medium', 'high', 'critical')"
+        }
+      }
+    },
+    "convoy_metadata": {
+      "name": "convoy_metadata",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "total_beads": {
+          "name": "total_beads",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "closed_beads": {
+          "name": "closed_beads",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "landed_at": {
+          "name": "landed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "convoy_metadata_bead_id_beads_bead_id_fk": {
+          "name": "convoy_metadata_bead_id_beads_bead_id_fk",
+          "tableFrom": "convoy_metadata",
+          "tableTo": "beads",
+          "columnsFrom": ["bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "escalation_metadata": {
+      "name": "escalation_metadata",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "severity": {
+          "name": "severity",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "acknowledged": {
+          "name": "acknowledged",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "re_escalation_count": {
+          "name": "re_escalation_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "acknowledged_at": {
+          "name": "acknowledged_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "escalation_metadata_bead_id_beads_bead_id_fk": {
+          "name": "escalation_metadata_bead_id_beads_bead_id_fk",
+          "tableFrom": "escalation_metadata",
+          "tableTo": "beads",
+          "columnsFrom": ["bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "check_escalation_severity": {
+          "name": "check_escalation_severity",
+          "value": "\"escalation_metadata\".\"severity\" in ('low', 'medium', 'high', 'critical')"
+        }
+      }
+    },
+    "review_metadata": {
+      "name": "review_metadata",
+      "columns": {
+        "bead_id": {
+          "name": "bead_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_branch": {
+          "name": "target_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'main'"
+        },
+        "merge_commit": {
+          "name": "merge_commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_url": {
+          "name": "pr_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "retry_count": {
+          "name": "retry_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "review_metadata_bead_id_beads_bead_id_fk": {
+          "name": "review_metadata_bead_id_beads_bead_id_fk",
+          "tableFrom": "review_metadata",
+          "tableTo": "beads",
+          "columnsFrom": ["bead_id"],
+          "columnsTo": ["bead_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "rig_agent_events": {
+      "name": "rig_agent_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "data": {
+          "name": "data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_rig_agent_events_agent_id": {
+          "name": "idx_rig_agent_events_agent_id",
+          "columns": ["agent_id"],
+          "isUnique": false
+        },
+        "idx_rig_agent_events_agent_created": {
+          "name": "idx_rig_agent_events_agent_created",
+          "columns": ["agent_id", "id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "rigs": {
+      "name": "rigs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "git_url": {
+          "name": "git_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "default_branch": {
+          "name": "default_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'main'"
+        },
+        "config": {
+          "name": "config",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_rigs_name": {
+          "name": "idx_rigs_name",
+          "columns": ["name"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "user_rigs": {
+      "name": "user_rigs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "town_id": {
+          "name": "town_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "git_url": {
+          "name": "git_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "default_branch": {
+          "name": "default_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'main'"
+        },
+        "platform_integration_id": {
+          "name": "platform_integration_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "user_towns": {
+      "name": "user_towns",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

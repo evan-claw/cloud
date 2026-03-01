@@ -8,81 +8,60 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-import {
-  rig_agent_events,
-  RigAgentEventRecord,
-  createTableRigAgentEvents,
-  getIndexesRigAgentEvents,
-} from '../db/tables/rig-agent-events.table';
-import { query } from '../util/query.util';
+import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import { gt, asc, sql } from 'drizzle-orm';
+import migrations from '../../drizzle/migrations';
+import { rig_agent_events, type RigAgentEventsSelect } from '../db/sqlite-schema';
 
 const AGENT_DO_LOG = '[Agent.do]';
 
+type RigAgentEvent = Omit<RigAgentEventsSelect, 'data'> & { data: Record<string, unknown> };
+
+function parseRigAgentEvent(row: RigAgentEventsSelect): RigAgentEvent {
+  return { ...row, data: JSON.parse(row.data) as Record<string, unknown> };
+}
+
 export class AgentDO extends DurableObject<Env> {
-  private sql: SqlStorage;
-  private initPromise: Promise<void> | null = null;
+  private db: DrizzleSqliteDODatabase;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
-
+    this.db = drizzle(ctx.storage, { logger: false });
     void ctx.blockConcurrencyWhile(async () => {
-      await this.ensureInitialized();
+      migrate(this.db, migrations);
     });
-  }
-
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.initializeDatabase();
-    }
-    await this.initPromise;
-  }
-
-  private async initializeDatabase(): Promise<void> {
-    query(this.sql, createTableRigAgentEvents(), []);
-    for (const idx of getIndexesRigAgentEvents()) {
-      query(this.sql, idx, []);
-    }
   }
 
   /**
    * Append an event. Returns the auto-incremented event ID.
    */
   async appendEvent(eventType: string, data: unknown): Promise<number> {
-    await this.ensureInitialized();
     const dataStr = typeof data === 'string' ? data : JSON.stringify(data ?? {});
     const timestamp = new Date().toISOString();
 
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${rig_agent_events} (
-          ${rig_agent_events.columns.agent_id},
-          ${rig_agent_events.columns.event_type},
-          ${rig_agent_events.columns.data},
-          ${rig_agent_events.columns.created_at}
-        ) VALUES (?, ?, ?, ?)
-      `,
-      [this.ctx.id.name ?? '', eventType, dataStr, timestamp]
-    );
+    const row = this.db
+      .insert(rig_agent_events)
+      .values({
+        agent_id: this.ctx.id.name ?? '',
+        event_type: eventType,
+        data: dataStr,
+        created_at: timestamp,
+      })
+      .returning({ id: rig_agent_events.id })
+      .get();
 
-    // Return the last inserted rowid
-    const rows = [...this.sql.exec('SELECT last_insert_rowid() as id')];
-    const insertedId = Number(rows[0]?.id ?? 0);
+    const insertedId = row?.id ?? 0;
 
     // Prune old events if count exceeds 10000
-    query(
-      this.sql,
-      /* sql */ `
-        DELETE FROM ${rig_agent_events}
-        WHERE ${rig_agent_events.columns.id} NOT IN (
-          SELECT ${rig_agent_events.columns.id} FROM ${rig_agent_events}
-          ORDER BY ${rig_agent_events.columns.id} DESC
-          LIMIT 10000
-        )
-      `,
-      []
-    );
+    this.db.run(sql`
+      DELETE FROM ${rig_agent_events}
+      WHERE ${rig_agent_events.id} NOT IN (
+        SELECT ${rig_agent_events.id} FROM ${rig_agent_events}
+        ORDER BY ${rig_agent_events.id} DESC
+        LIMIT 10000
+      )
+    `);
 
     return insertedId;
   }
@@ -90,21 +69,16 @@ export class AgentDO extends DurableObject<Env> {
   /**
    * Query events for backfill. Returns events with id > afterId, up to limit.
    */
-  async getEvents(afterId = 0, limit = 500): Promise<RigAgentEventRecord[]> {
-    await this.ensureInitialized();
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT * FROM ${rig_agent_events}
-          WHERE ${rig_agent_events.columns.id} > ?
-          ORDER BY ${rig_agent_events.columns.id} ASC
-          LIMIT ?
-        `,
-        [afterId, limit]
-      ),
-    ];
-    return RigAgentEventRecord.array().parse(rows);
+  async getEvents(afterId = 0, limit = 500): Promise<RigAgentEvent[]> {
+    const rows = this.db
+      .select()
+      .from(rig_agent_events)
+      .where(gt(rig_agent_events.id, afterId))
+      .orderBy(asc(rig_agent_events.id))
+      .limit(limit)
+      .all();
+
+    return rows.map(parseRigAgentEvent);
   }
 
   /**

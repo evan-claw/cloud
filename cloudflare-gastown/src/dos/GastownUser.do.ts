@@ -1,7 +1,14 @@
 import { DurableObject } from 'cloudflare:workers';
-import { createTableUserTowns, user_towns, UserTownRecord } from '../db/tables/user-towns.table';
-import { createTableUserRigs, user_rigs, UserRigRecord } from '../db/tables/user-rigs.table';
-import { query } from '../util/query.util';
+import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import { eq, desc } from 'drizzle-orm';
+import migrations from '../../drizzle/migrations';
+import {
+  user_towns,
+  user_rigs,
+  type UserTownsSelect,
+  type UserRigsSelect,
+} from '../db/sqlite-schema';
 
 const USER_LOG = '[GastownUser.do]';
 
@@ -27,51 +34,33 @@ function now(): string {
  * Cross-rig coordination will be added in Phase 2 (#215).
  */
 export class GastownUserDO extends DurableObject<Env> {
-  private sql: SqlStorage;
-  private initPromise: Promise<void> | null = null;
+  private db: DrizzleSqliteDODatabase;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
-
+    this.db = drizzle(ctx.storage, { logger: false });
     void ctx.blockConcurrencyWhile(async () => {
-      await this.ensureInitialized();
+      migrate(this.db, migrations);
     });
-  }
-
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.initializeDatabase();
-    }
-    await this.initPromise;
-  }
-
-  private async initializeDatabase(): Promise<void> {
-    query(this.sql, createTableUserTowns(), []);
-    query(this.sql, createTableUserRigs(), []);
   }
 
   // ── Towns ─────────────────────────────────────────────────────────────
 
-  async createTown(input: { name: string; owner_user_id: string }): Promise<UserTownRecord> {
-    await this.ensureInitialized();
+  async createTown(input: { name: string; owner_user_id: string }): Promise<UserTownsSelect> {
     const id = generateId();
     const timestamp = now();
     console.log(`${USER_LOG} createTown: id=${id} name=${input.name} owner=${input.owner_user_id}`);
 
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${user_towns} (
-          ${user_towns.columns.id},
-          ${user_towns.columns.name},
-          ${user_towns.columns.owner_user_id},
-          ${user_towns.columns.created_at},
-          ${user_towns.columns.updated_at}
-        ) VALUES (?, ?, ?, ?, ?)
-      `,
-      [id, input.name, input.owner_user_id, timestamp, timestamp]
-    );
+    this.db
+      .insert(user_towns)
+      .values({
+        id,
+        name: input.name,
+        owner_user_id: input.owner_user_id,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+      .run();
 
     const town = this.getTown(id);
     if (!town) throw new Error('Failed to create town');
@@ -82,33 +71,16 @@ export class GastownUserDO extends DurableObject<Env> {
     return town;
   }
 
-  async getTownAsync(townId: string): Promise<UserTownRecord | null> {
-    await this.ensureInitialized();
+  async getTownAsync(townId: string): Promise<UserTownsSelect | null> {
     return this.getTown(townId);
   }
 
-  private getTown(townId: string): UserTownRecord | null {
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT * FROM ${user_towns} WHERE ${user_towns.columns.id} = ?`,
-        [townId]
-      ),
-    ];
-    if (rows.length === 0) return null;
-    return UserTownRecord.parse(rows[0]);
+  private getTown(townId: string): UserTownsSelect | null {
+    return this.db.select().from(user_towns).where(eq(user_towns.id, townId)).get() ?? null;
   }
 
-  async listTowns(): Promise<UserTownRecord[]> {
-    await this.ensureInitialized();
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT * FROM ${user_towns} ORDER BY ${user_towns.columns.created_at} DESC`,
-        []
-      ),
-    ];
-    return UserTownRecord.array().parse(rows);
+  async listTowns(): Promise<UserTownsSelect[]> {
+    return this.db.select().from(user_towns).orderBy(desc(user_towns.created_at)).all();
   }
 
   // ── Rigs ──────────────────────────────────────────────────────────────
@@ -119,8 +91,7 @@ export class GastownUserDO extends DurableObject<Env> {
     git_url: string;
     default_branch: string;
     platform_integration_id?: string;
-  }): Promise<UserRigRecord> {
-    await this.ensureInitialized();
+  }): Promise<UserRigsSelect> {
     console.log(
       `${USER_LOG} createRig: town_id=${input.town_id} name=${input.name} git_url=${input.git_url} default_branch=${input.default_branch} integration=${input.platform_integration_id ?? 'none'}`
     );
@@ -135,31 +106,19 @@ export class GastownUserDO extends DurableObject<Env> {
     const id = generateId();
     const timestamp = now();
 
-    query(
-      this.sql,
-      /* sql */ `
-        INSERT INTO ${user_rigs} (
-          ${user_rigs.columns.id},
-          ${user_rigs.columns.town_id},
-          ${user_rigs.columns.name},
-          ${user_rigs.columns.git_url},
-          ${user_rigs.columns.default_branch},
-          ${user_rigs.columns.platform_integration_id},
-          ${user_rigs.columns.created_at},
-          ${user_rigs.columns.updated_at}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
+    this.db
+      .insert(user_rigs)
+      .values({
         id,
-        input.town_id,
-        input.name,
-        input.git_url,
-        input.default_branch,
-        input.platform_integration_id ?? null,
-        timestamp,
-        timestamp,
-      ]
-    );
+        town_id: input.town_id,
+        name: input.name,
+        git_url: input.git_url,
+        default_branch: input.default_branch,
+        platform_integration_id: input.platform_integration_id ?? null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+      .run();
 
     const rig = this.getRig(id);
     if (!rig) throw new Error('Failed to create rig');
@@ -167,56 +126,34 @@ export class GastownUserDO extends DurableObject<Env> {
     return rig;
   }
 
-  async getRigAsync(rigId: string): Promise<UserRigRecord | null> {
-    await this.ensureInitialized();
+  async getRigAsync(rigId: string): Promise<UserRigsSelect | null> {
     return this.getRig(rigId);
   }
 
-  private getRig(rigId: string): UserRigRecord | null {
-    const rows = [
-      ...query(this.sql, /* sql */ `SELECT * FROM ${user_rigs} WHERE ${user_rigs.columns.id} = ?`, [
-        rigId,
-      ]),
-    ];
-    if (rows.length === 0) return null;
-    return UserRigRecord.parse(rows[0]);
+  private getRig(rigId: string): UserRigsSelect | null {
+    return this.db.select().from(user_rigs).where(eq(user_rigs.id, rigId)).get() ?? null;
   }
 
-  async listRigs(townId: string): Promise<UserRigRecord[]> {
-    await this.ensureInitialized();
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT * FROM ${user_rigs}
-          WHERE ${user_rigs.columns.town_id} = ?
-          ORDER BY ${user_rigs.columns.created_at} DESC
-        `,
-        [townId]
-      ),
-    ];
-    return UserRigRecord.array().parse(rows);
+  async listRigs(townId: string): Promise<UserRigsSelect[]> {
+    return this.db
+      .select()
+      .from(user_rigs)
+      .where(eq(user_rigs.town_id, townId))
+      .orderBy(desc(user_rigs.created_at))
+      .all();
   }
 
   async deleteRig(rigId: string): Promise<boolean> {
-    await this.ensureInitialized();
     if (!this.getRig(rigId)) return false;
-    query(this.sql, /* sql */ `DELETE FROM ${user_rigs} WHERE ${user_rigs.columns.id} = ?`, [
-      rigId,
-    ]);
+    this.db.delete(user_rigs).where(eq(user_rigs.id, rigId)).run();
     return true;
   }
 
   async deleteTown(townId: string): Promise<boolean> {
-    await this.ensureInitialized();
     if (!this.getTown(townId)) return false;
     // Cascade: delete all rigs belonging to this town first
-    query(this.sql, /* sql */ `DELETE FROM ${user_rigs} WHERE ${user_rigs.columns.town_id} = ?`, [
-      townId,
-    ]);
-    query(this.sql, /* sql */ `DELETE FROM ${user_towns} WHERE ${user_towns.columns.id} = ?`, [
-      townId,
-    ]);
+    this.db.delete(user_rigs).where(eq(user_rigs.town_id, townId)).run();
+    this.db.delete(user_towns).where(eq(user_towns.id, townId)).run();
     return true;
   }
 

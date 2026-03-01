@@ -3,28 +3,35 @@
  * After the beads-centric refactor (#441), all object types are beads.
  */
 
-import { beads, BeadRecord, createTableBeads, getIndexesBeads } from '../../db/tables/beads.table';
+import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import type { SQL } from 'drizzle-orm';
+import { eq, and, or, desc, gt, sql } from 'drizzle-orm';
 import {
+  beads,
   bead_events,
-  BeadEventRecord,
-  createTableBeadEvents,
-  getIndexesBeadEvents,
-} from '../../db/tables/bead-events.table';
-import {
   bead_dependencies,
-  createTableBeadDependencies,
-  getIndexesBeadDependencies,
-} from '../../db/tables/bead-dependencies.table';
-import { agent_metadata, createTableAgentMetadata } from '../../db/tables/agent-metadata.table';
-import { review_metadata, createTableReviewMetadata } from '../../db/tables/review-metadata.table';
-import {
+  agent_metadata,
+  review_metadata,
   escalation_metadata,
-  createTableEscalationMetadata,
-} from '../../db/tables/escalation-metadata.table';
-import { convoy_metadata, createTableConvoyMetadata } from '../../db/tables/convoy-metadata.table';
-import { query } from '../../util/query.util';
-import type { CreateBeadInput, BeadFilter, Bead } from '../../types';
-import type { BeadEventType } from '../../db/tables/bead-events.table';
+  convoy_metadata,
+} from '../../db/sqlite-schema';
+import type { BeadsSelect, BeadEventsSelect } from '../../db/sqlite-schema';
+import type { CreateBeadInput, BeadFilter, Bead, BeadEventRecord, BeadStatus } from '../../types';
+
+export type BeadEventType =
+  | 'created'
+  | 'assigned'
+  | 'hooked'
+  | 'unhooked'
+  | 'status_changed'
+  | 'closed'
+  | 'escalated'
+  | 'notification_failed'
+  | 'mail_sent'
+  | 'review_submitted'
+  | 'review_completed'
+  | 'agent_spawned'
+  | 'agent_exited';
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -34,77 +41,51 @@ function now(): string {
   return new Date().toISOString();
 }
 
-export function initBeadTables(sql: SqlStorage): void {
-  query(sql, createTableBeads(), []);
-  for (const idx of getIndexesBeads()) {
-    query(sql, idx, []);
-  }
-  query(sql, createTableBeadEvents(), []);
-  for (const idx of getIndexesBeadEvents()) {
-    query(sql, idx, []);
-  }
-  query(sql, createTableBeadDependencies(), []);
-  for (const idx of getIndexesBeadDependencies()) {
-    query(sql, idx, []);
-  }
-  // Satellite metadata tables
-  query(sql, createTableAgentMetadata(), []);
-  query(sql, createTableReviewMetadata(), []);
-  query(sql, createTableEscalationMetadata(), []);
-  query(sql, createTableConvoyMetadata(), []);
+function parseBead(row: BeadsSelect): Bead {
+  return {
+    ...row,
+    labels: JSON.parse(row.labels ?? '[]') as string[],
+    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
+  };
 }
 
-export function createBead(sql: SqlStorage, input: CreateBeadInput): Bead {
+function parseBeadEvent(row: BeadEventsSelect): BeadEventRecord {
+  return {
+    ...row,
+    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
+  };
+}
+
+// ── Bead CRUD ───────────────────────────────────────────────────────
+
+export function createBead(db: DrizzleSqliteDODatabase, input: CreateBeadInput): Bead {
   const id = generateId();
   const timestamp = now();
 
-  const labels = JSON.stringify(input.labels ?? []);
-  const metadata = JSON.stringify(input.metadata ?? {});
+  db.insert(beads)
+    .values({
+      bead_id: id,
+      type: input.type,
+      status: 'open',
+      title: input.title,
+      body: input.body ?? null,
+      rig_id: input.rig_id ?? null,
+      parent_bead_id: input.parent_bead_id ?? null,
+      assignee_agent_bead_id: input.assignee_agent_bead_id ?? null,
+      priority: input.priority ?? 'medium',
+      labels: JSON.stringify(input.labels ?? []),
+      metadata: JSON.stringify(input.metadata ?? {}),
+      created_by: input.created_by ?? null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      closed_at: null,
+    })
+    .run();
 
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${beads} (
-        ${beads.columns.bead_id},
-        ${beads.columns.type},
-        ${beads.columns.status},
-        ${beads.columns.title},
-        ${beads.columns.body},
-        ${beads.columns.rig_id},
-        ${beads.columns.parent_bead_id},
-        ${beads.columns.assignee_agent_bead_id},
-        ${beads.columns.priority},
-        ${beads.columns.labels},
-        ${beads.columns.metadata},
-        ${beads.columns.created_by},
-        ${beads.columns.created_at},
-        ${beads.columns.updated_at},
-        ${beads.columns.closed_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      id,
-      input.type,
-      'open',
-      input.title,
-      input.body ?? null,
-      input.rig_id ?? null,
-      input.parent_bead_id ?? null,
-      input.assignee_agent_bead_id ?? null,
-      input.priority ?? 'medium',
-      labels,
-      metadata,
-      input.created_by ?? null,
-      timestamp,
-      timestamp,
-      null,
-    ]
-  );
-
-  const bead = getBead(sql, id);
+  const bead = getBead(db, id);
   if (!bead) throw new Error('Failed to create bead');
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId: id,
     agentId: input.assignee_agent_bead_id ?? null,
     eventType: 'created',
@@ -115,58 +96,43 @@ export function createBead(sql: SqlStorage, input: CreateBeadInput): Bead {
   return bead;
 }
 
-export function getBead(sql: SqlStorage, beadId: string): Bead | null {
-  const rows = [
-    ...query(sql, /* sql */ `SELECT * FROM ${beads} WHERE ${beads.bead_id} = ?`, [beadId]),
-  ];
-  if (rows.length === 0) return null;
-  return BeadRecord.parse(rows[0]);
+export function getBead(db: DrizzleSqliteDODatabase, beadId: string): Bead | null {
+  const row = db.select().from(beads).where(eq(beads.bead_id, beadId)).get();
+  if (!row) return null;
+  return parseBead(row);
 }
 
-export function listBeads(sql: SqlStorage, filter: BeadFilter): Bead[] {
+export function listBeads(db: DrizzleSqliteDODatabase, filter: BeadFilter): Bead[] {
   const limit = filter.limit ?? 100;
   const offset = filter.offset ?? 0;
 
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT * FROM ${beads}
-        WHERE (? IS NULL OR ${beads.status} = ?)
-          AND (? IS NULL OR ${beads.type} = ?)
-          AND (? IS NULL OR ${beads.assignee_agent_bead_id} = ?)
-          AND (? IS NULL OR ${beads.parent_bead_id} = ?)
-          AND (? IS NULL OR ${beads.rig_id} = ?)
-        ORDER BY ${beads.created_at} DESC
-        LIMIT ? OFFSET ?
-      `,
-      [
-        filter.status ?? null,
-        filter.status ?? null,
-        filter.type ?? null,
-        filter.type ?? null,
-        filter.assignee_agent_bead_id ?? null,
-        filter.assignee_agent_bead_id ?? null,
-        filter.parent_bead_id ?? null,
-        filter.parent_bead_id ?? null,
-        filter.rig_id ?? null,
-        filter.rig_id ?? null,
-        limit,
-        offset,
-      ]
-    ),
-  ];
+  const conditions: SQL[] = [];
+  if (filter.status) conditions.push(eq(beads.status, filter.status));
+  if (filter.type) conditions.push(eq(beads.type, filter.type));
+  if (filter.assignee_agent_bead_id)
+    conditions.push(eq(beads.assignee_agent_bead_id, filter.assignee_agent_bead_id));
+  if (filter.parent_bead_id) conditions.push(eq(beads.parent_bead_id, filter.parent_bead_id));
+  if (filter.rig_id) conditions.push(eq(beads.rig_id, filter.rig_id));
 
-  return BeadRecord.array().parse(rows);
+  const rows = db
+    .select()
+    .from(beads)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(beads.created_at))
+    .limit(limit)
+    .offset(offset)
+    .all();
+
+  return rows.map(parseBead);
 }
 
 export function updateBeadStatus(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   beadId: string,
-  status: string,
+  status: BeadStatus,
   agentId: string
 ): Bead {
-  const bead = getBead(sql, beadId);
+  const bead = getBead(db, beadId);
   if (!bead) throw new Error(`Bead ${beadId} not found`);
 
   // No-op if already in the target status — avoids redundant events
@@ -176,19 +142,12 @@ export function updateBeadStatus(
   const timestamp = now();
   const closedAt = status === 'closed' ? timestamp : bead.closed_at;
 
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = ?,
-          ${beads.columns.updated_at} = ?,
-          ${beads.columns.closed_at} = ?
-      WHERE ${beads.bead_id} = ?
-    `,
-    [status, timestamp, closedAt, beadId]
-  );
+  db.update(beads)
+    .set({ status, updated_at: timestamp, closed_at: closedAt })
+    .where(eq(beads.bead_id, beadId))
+    .run();
 
-  logBeadEvent(sql, {
+  logBeadEvent(db, {
     beadId,
     agentId,
     eventType: 'status_changed',
@@ -196,74 +155,56 @@ export function updateBeadStatus(
     newValue: status,
   });
 
-  const updated = getBead(sql, beadId);
+  const updated = getBead(db, beadId);
   if (!updated) throw new Error(`Bead ${beadId} not found after update`);
   return updated;
 }
 
-export function closeBead(sql: SqlStorage, beadId: string, agentId: string): Bead {
-  return updateBeadStatus(sql, beadId, 'closed', agentId);
+export function closeBead(db: DrizzleSqliteDODatabase, beadId: string, agentId: string): Bead {
+  return updateBeadStatus(db, beadId, 'closed', agentId);
 }
 
-export function deleteBead(sql: SqlStorage, beadId: string): void {
+export function deleteBead(db: DrizzleSqliteDODatabase, beadId: string): void {
   // Recursively delete child beads (e.g. molecule steps) before the parent
-  const children = BeadRecord.pick({ bead_id: true })
-    .array()
-    .parse([
-      ...query(
-        sql,
-        /* sql */ `SELECT ${beads.bead_id} FROM ${beads} WHERE ${beads.parent_bead_id} = ?`,
-        [beadId]
-      ),
-    ]);
+  const children = db
+    .select({ bead_id: beads.bead_id })
+    .from(beads)
+    .where(eq(beads.parent_bead_id, beadId))
+    .all();
   for (const { bead_id } of children) {
-    deleteBead(sql, bead_id);
+    deleteBead(db, bead_id);
   }
 
   // Unhook any agent assigned to this bead
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${agent_metadata}
-      SET ${agent_metadata.columns.current_hook_bead_id} = NULL,
-          ${agent_metadata.columns.status} = 'idle'
-      WHERE ${agent_metadata.current_hook_bead_id} = ?
-    `,
-    [beadId]
-  );
+  db.update(agent_metadata)
+    .set({ current_hook_bead_id: null, status: 'idle' })
+    .where(eq(agent_metadata.current_hook_bead_id, beadId))
+    .run();
 
   // Delete dependencies referencing this bead
-  query(
-    sql,
-    /* sql */ `DELETE FROM ${bead_dependencies} WHERE ${bead_dependencies.bead_id} = ? OR ${bead_dependencies.depends_on_bead_id} = ?`,
-    [beadId, beadId]
-  );
+  db.delete(bead_dependencies)
+    .where(
+      or(eq(bead_dependencies.bead_id, beadId), eq(bead_dependencies.depends_on_bead_id, beadId))
+    )
+    .run();
 
-  query(sql, /* sql */ `DELETE FROM ${bead_events} WHERE ${bead_events.bead_id} = ?`, [beadId]);
+  // Delete events
+  db.delete(bead_events).where(eq(bead_events.bead_id, beadId)).run();
 
-  // Delete satellite metadata if present
-  query(sql, /* sql */ `DELETE FROM ${agent_metadata} WHERE ${agent_metadata.bead_id} = ?`, [
-    beadId,
-  ]);
-  query(sql, /* sql */ `DELETE FROM ${review_metadata} WHERE ${review_metadata.bead_id} = ?`, [
-    beadId,
-  ]);
-  query(
-    sql,
-    /* sql */ `DELETE FROM ${escalation_metadata} WHERE ${escalation_metadata.bead_id} = ?`,
-    [beadId]
-  );
-  query(sql, /* sql */ `DELETE FROM ${convoy_metadata} WHERE ${convoy_metadata.bead_id} = ?`, [
-    beadId,
-  ]);
+  // Delete satellite metadata
+  db.delete(agent_metadata).where(eq(agent_metadata.bead_id, beadId)).run();
+  db.delete(review_metadata).where(eq(review_metadata.bead_id, beadId)).run();
+  db.delete(escalation_metadata).where(eq(escalation_metadata.bead_id, beadId)).run();
+  db.delete(convoy_metadata).where(eq(convoy_metadata.bead_id, beadId)).run();
 
-  query(sql, /* sql */ `DELETE FROM ${beads} WHERE ${beads.bead_id} = ?`, [beadId]);
+  // Delete the bead itself
+  db.delete(beads).where(eq(beads.bead_id, beadId)).run();
 }
 
 // ── Bead Events ─────────────────────────────────────────────────────
 
 export function logBeadEvent(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   params: {
     beadId: string;
     agentId: string | null;
@@ -273,35 +214,22 @@ export function logBeadEvent(
     metadata?: Record<string, unknown>;
   }
 ): void {
-  query(
-    sql,
-    /* sql */ `
-      INSERT INTO ${bead_events} (
-        ${bead_events.columns.bead_event_id},
-        ${bead_events.columns.bead_id},
-        ${bead_events.columns.agent_id},
-        ${bead_events.columns.event_type},
-        ${bead_events.columns.old_value},
-        ${bead_events.columns.new_value},
-        ${bead_events.columns.metadata},
-        ${bead_events.columns.created_at}
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      generateId(),
-      params.beadId,
-      params.agentId,
-      params.eventType,
-      params.oldValue ?? null,
-      params.newValue ?? null,
-      JSON.stringify(params.metadata ?? {}),
-      now(),
-    ]
-  );
+  db.insert(bead_events)
+    .values({
+      bead_event_id: generateId(),
+      bead_id: params.beadId,
+      agent_id: params.agentId,
+      event_type: params.eventType,
+      old_value: params.oldValue ?? null,
+      new_value: params.newValue ?? null,
+      metadata: JSON.stringify(params.metadata ?? {}),
+      created_at: now(),
+    })
+    .run();
 }
 
 export function listBeadEvents(
-  sql: SqlStorage,
+  db: DrizzleSqliteDODatabase,
   options: {
     beadId?: string;
     since?: string;
@@ -309,24 +237,18 @@ export function listBeadEvents(
   }
 ): BeadEventRecord[] {
   const limit = options.limit ?? 100;
-  const rows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT * FROM ${bead_events}
-        WHERE (? IS NULL OR ${bead_events.bead_id} = ?)
-          AND (? IS NULL OR ${bead_events.created_at} > ?)
-        ORDER BY ${bead_events.created_at} DESC
-        LIMIT ?
-      `,
-      [
-        options.beadId ?? null,
-        options.beadId ?? null,
-        options.since ?? null,
-        options.since ?? null,
-        limit,
-      ]
-    ),
-  ];
-  return BeadEventRecord.array().parse(rows);
+
+  const conditions: SQL[] = [];
+  if (options.beadId) conditions.push(eq(bead_events.bead_id, options.beadId));
+  if (options.since) conditions.push(gt(bead_events.created_at, options.since));
+
+  const rows = db
+    .select()
+    .from(bead_events)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(bead_events.created_at))
+    .limit(limit)
+    .all();
+
+  return rows.map(parseBeadEvent);
 }
