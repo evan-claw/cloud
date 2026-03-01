@@ -342,14 +342,14 @@ export function getOrCreateAgent(
   rigId: string,
   townId: string
 ): Agent {
-  const singletonRoles = ['witness', 'refinery', 'mayor'];
+  // Town-wide singletons: one per town, not tied to a rig.
+  const townSingletonRoles = ['witness', 'mayor'];
 
-  if (singletonRoles.includes(role)) {
-    // Try to find an existing agent with this role
+  if (townSingletonRoles.includes(role)) {
     const existing = listAgents(sql, { role });
     if (existing.length > 0) return existing[0];
   } else {
-    // For polecats, try to find an idle one without a hook in the SAME rig.
+    // Per-rig agents (polecat, refinery): reuse an idle one in the SAME rig.
     // Agents are tied to a rig's worktree/repo — reusing one from a different
     // rig would dispatch it into the wrong repository.
     const idle = [
@@ -357,13 +357,13 @@ export function getOrCreateAgent(
         sql,
         /* sql */ `
           ${AGENT_JOIN}
-          WHERE ${agent_metadata.role} = 'polecat'
+          WHERE ${agent_metadata.role} = ?
             AND ${agent_metadata.status} = 'idle'
             AND ${agent_metadata.current_hook_bead_id} IS NULL
             AND ${beads.rig_id} = ?
           LIMIT 1
         `,
-        [rigId]
+        [role, rigId]
       ),
     ];
     if (idle.length > 0) return toAgent(AgentBeadRecord.parse(idle[0]));

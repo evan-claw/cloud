@@ -169,6 +169,9 @@ export function updateBeadStatus(
   const bead = getBead(sql, beadId);
   if (!bead) throw new Error(`Bead ${beadId} not found`);
 
+  // No-op if already in the target status — avoids redundant events
+  if (bead.status === status) return bead;
+
   const oldStatus = bead.status;
   const timestamp = now();
   const closedAt = status === 'closed' ? timestamp : bead.closed_at;

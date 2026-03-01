@@ -367,6 +367,7 @@ describe('TownDO', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/fix-widget',
         pr_url: 'https://github.com/org/repo/pull/1',
         summary: 'Fixed the widget',
@@ -394,6 +395,7 @@ describe('TownDO', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/fix',
       });
 
@@ -418,6 +420,7 @@ describe('TownDO', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/merge-test',
       });
 
@@ -452,6 +455,7 @@ describe('TownDO', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/conflict-test',
       });
 
@@ -751,6 +755,7 @@ describe('TownDO', () => {
       await town.submitToReviewQueue({
         agent_id: agent.id,
         bead_id: bead.id,
+        rig_id: 'test-rig',
         branch: 'feature/test',
       });
 

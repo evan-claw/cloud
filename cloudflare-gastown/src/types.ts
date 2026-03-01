@@ -119,6 +119,7 @@ export type ReviewQueueEntry = {
   id: string;
   agent_id: string;
   bead_id: string;
+  rig_id: string;
   branch: string;
   pr_url: string | null;
   status: ReviewStatus;
@@ -130,6 +131,7 @@ export type ReviewQueueEntry = {
 export type ReviewQueueInput = {
   agent_id: string;
   bead_id: string;
+  rig_id: string;
   branch: string;
   pr_url?: string;
   summary?: string;
