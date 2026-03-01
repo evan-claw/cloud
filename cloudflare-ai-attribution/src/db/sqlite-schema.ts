@@ -28,7 +28,9 @@ export const linesAdded = sqliteTable(
   'lines_added',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    attributions_metadata_id: integer('attributions_metadata_id').notNull(),
+    attributions_metadata_id: integer('attributions_metadata_id')
+      .notNull()
+      .references(() => attributionsMetadata.id),
     line_number: integer('line_number').notNull(),
     line_hash: text('line_hash').notNull(),
   },
@@ -42,7 +44,9 @@ export const linesRemoved = sqliteTable(
   'lines_removed',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    attributions_metadata_id: integer('attributions_metadata_id').notNull(),
+    attributions_metadata_id: integer('attributions_metadata_id')
+      .notNull()
+      .references(() => attributionsMetadata.id),
     line_number: integer('line_number').notNull(),
     line_hash: text('line_hash').notNull(),
   },

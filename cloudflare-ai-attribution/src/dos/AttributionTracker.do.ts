@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import { logger } from '../util/logger';
 import {
   attributionsMetadata,
@@ -55,48 +55,20 @@ export class AttributionTrackerDO extends DurableObject<Env> {
   }
 
   insertAttributionMetadata(data: AttributionsMetadataInsert): AttributionsMetadataSelect {
-    return this.db
-      .insert(attributionsMetadata)
-      .values({
-        user_id: data.user_id,
-        project_id: data.project_id,
-        organization_id: data.organization_id,
-        branch: data.branch,
-        file_path: data.file_path,
-        status: data.status,
-        task_id: data.task_id,
-      })
-      .returning()
-      .get();
+    return this.db.insert(attributionsMetadata).values(data).returning().get();
   }
 
   insertLinesAdded(data: LinesAddedInsert): LinesAddedSelect {
-    return this.db
-      .insert(linesAdded)
-      .values({
-        attributions_metadata_id: data.attributions_metadata_id,
-        line_number: data.line_number,
-        line_hash: data.line_hash,
-      })
-      .returning()
-      .get();
+    return this.db.insert(linesAdded).values(data).returning().get();
   }
 
   insertLinesRemoved(data: LinesRemovedInsert): LinesRemovedSelect {
-    return this.db
-      .insert(linesRemoved)
-      .values({
-        attributions_metadata_id: data.attributions_metadata_id,
-        line_number: data.line_number,
-        line_hash: data.line_hash,
-      })
-      .returning()
-      .get();
+    return this.db.insert(linesRemoved).values(data).returning().get();
   }
 
-  async trackAttribution(
+  trackAttribution(
     params: AttributionsTrackRequestBody & { user_id: string; organization_id: string }
-  ): Promise<AttributionsMetadataSelect & { linesAdded: number; linesRemoved: number }> {
+  ): AttributionsMetadataSelect & { linesAdded: number; linesRemoved: number } {
     const metadata = this.insertAttributionMetadata(params);
     const attributionId = metadata.id;
 
@@ -223,7 +195,7 @@ export class AttributionTrackerDO extends DurableObject<Env> {
     const metadataRows = this.db
       .select()
       .from(attributionsMetadata)
-      .orderBy(sql`${attributionsMetadata.created_at} DESC`)
+      .orderBy(desc(attributionsMetadata.created_at))
       .all();
 
     const attributions: Array<

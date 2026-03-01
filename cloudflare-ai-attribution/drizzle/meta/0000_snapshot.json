@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "03ad1e8d-d401-4a91-a744-3d82a790f3b5",
+  "id": "b9a13810-a423-474f-9be4-28e037b617eb",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "attributions_metadata": {
@@ -143,7 +143,17 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "lines_added_attributions_metadata_id_attributions_metadata_id_fk": {
+          "name": "lines_added_attributions_metadata_id_attributions_metadata_id_fk",
+          "tableFrom": "lines_added",
+          "tableTo": "attributions_metadata",
+          "columnsFrom": ["attributions_metadata_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -192,7 +202,17 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "lines_removed_attributions_metadata_id_attributions_metadata_id_fk": {
+          "name": "lines_removed_attributions_metadata_id_attributions_metadata_id_fk",
+          "tableFrom": "lines_removed",
+          "tableTo": "attributions_metadata",
+          "columnsFrom": ["attributions_metadata_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
