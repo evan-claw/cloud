@@ -190,6 +190,25 @@ describe('generateBaseConfig', () => {
     expect(config.models.providers.kilocode.models).toEqual([{ id: 'kept/model', name: 'Kept' }]);
   });
 
+  it('removes agents.defaults.models allowlist left by openclaw onboard', () => {
+    const existing = JSON.stringify({
+      agents: {
+        defaults: {
+          model: { primary: 'kilocode/anthropic/claude-opus-4.6' },
+          models: {
+            'kilocode/anthropic/claude-opus-4.6': { alias: 'Kilo Gateway' },
+          },
+        },
+      },
+    });
+    const { deps } = fakeDeps(existing);
+    const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
+
+    expect(config.agents.defaults.models).toBeUndefined();
+    // model.primary should still be preserved
+    expect(config.agents.defaults.model.primary).toBe('kilocode/anthropic/claude-opus-4.6');
+  });
+
   it('overrides default model only when KILOCODE_DEFAULT_MODEL is set', () => {
     const { deps } = fakeDeps();
     const env = { ...minimalEnv(), KILOCODE_DEFAULT_MODEL: 'kilocode/openai/gpt-5' };
