@@ -252,6 +252,43 @@ export function createSessionManagementHandlers() {
               })
               .info('Session interruption completed');
 
+            // If no processes were killed but there's still an active execution,
+            // the wrapper is already dead — clear the stale execution immediately
+            if (result.killedProcessIds.length === 0 && activeExecutionId) {
+              logger
+                .withFields({ executionId: activeExecutionId })
+                .info('No processes found during interrupt - clearing stale active execution');
+
+              await withDORetry(
+                getStub,
+                async stub => {
+                  await stub.updateExecutionStatus({
+                    executionId: activeExecutionId,
+                    status: 'failed',
+                    error: 'Interrupted - no running processes found',
+                    completedAt: Date.now(),
+                  });
+                },
+                'updateExecutionStatus'
+              );
+
+              await withDORetry(
+                getStub,
+                stub => stub.clearActiveExecution(),
+                'clearActiveExecution'
+              );
+
+              await withDORetry(
+                getStub,
+                stub =>
+                  stub.emitExecutionError(
+                    activeExecutionId,
+                    'Interrupted - no running processes found'
+                  ),
+                'emitExecutionError'
+              );
+            }
+
             return result;
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);

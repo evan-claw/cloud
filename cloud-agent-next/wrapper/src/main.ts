@@ -240,6 +240,7 @@ async function main() {
       openConnection: () => connectionManager.open(),
       getMaxRuntimeMs: () => getLifecycleManager().getMaxRuntimeMs(),
       setAborted: () => getLifecycleManager().setAborted(),
+      resetLifecycle: () => getLifecycleManager().reset(),
     },
     () => getLifecycleManager().triggerDrainAndClose()
   );

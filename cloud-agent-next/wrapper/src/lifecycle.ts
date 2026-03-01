@@ -82,6 +82,8 @@ export type LifecycleManager = {
   signalCompletion: () => void;
   /** Set the aborted flag to prevent post-completion tasks from running */
   setAborted: () => void;
+  /** Reset lifecycle state for a new execution (clears isAborted, isDraining, etc.) */
+  reset: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -488,5 +490,16 @@ export function createLifecycleManager(
     },
 
     getMaxRuntimeMs: () => config.maxRuntimeMs,
+
+    reset: () => {
+      isAborted = false;
+      isDraining = false;
+      postProcessingCompleted = false;
+      postProcessingResolve = null;
+      if (drainTimeout) {
+        clearTimeout(drainTimeout);
+        drainTimeout = null;
+      }
+    },
   };
 }

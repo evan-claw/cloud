@@ -133,6 +133,7 @@ export class WrapperState {
     this.job = context;
     this._lastError = null;
     this.messageCounter = 0;
+    this.lastSseEventAt = 0;
     this.updateActivity();
   }
 

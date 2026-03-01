@@ -1338,7 +1338,7 @@ export class SessionService {
           label,
           pattern,
         });
-        return session.exec(`pkill -f '${pattern}'`);
+        return session.exec(`pkill -f -- '${pattern}'`);
       };
 
       let execIdError: string | null = null;
