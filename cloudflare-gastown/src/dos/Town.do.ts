@@ -48,7 +48,6 @@ import {
   escalation_metadata,
   convoy_metadata,
   bead_dependencies,
-  type BeadsSelect,
 } from '../db/sqlite-schema';
 import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
@@ -73,6 +72,7 @@ import type {
   Molecule,
   BeadEventRecord,
 } from '../types';
+import { AgentStatus } from '../types';
 
 const TOWN_LOG = '[Town.do]';
 
@@ -125,61 +125,24 @@ const convoyJoinColumns = {
   landed_at: convoy_metadata.landed_at,
 };
 
-// ── Parse helpers for joined rows ───────────────────────────────────
-
-function parseBead(row: BeadsSelect): Bead {
-  return {
-    ...row,
-    labels: JSON.parse(row.labels ?? '[]'),
-    metadata: JSON.parse(row.metadata ?? '{}'),
-  };
+// Helper query functions defined before their row types so types can be derived.
+function escalationJoinQuery(db: DrizzleSqliteDODatabase) {
+  return db
+    .select(escalationJoinColumns)
+    .from(beads)
+    .innerJoin(escalation_metadata, eq(beads.bead_id, escalation_metadata.bead_id));
 }
 
-// Escalation join row — the shape returned by selecting escalationJoinColumns
-type EscalationJoinRow = {
-  bead_id: string;
-  type: string;
-  status: string;
-  title: string;
-  body: string | null;
-  rig_id: string | null;
-  parent_bead_id: string | null;
-  assignee_agent_bead_id: string | null;
-  priority: string | null;
-  labels: string | null;
-  metadata: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  closed_at: string | null;
-  severity: string;
-  category: string | null;
-  acknowledged: number;
-  re_escalation_count: number;
-  acknowledged_at: string | null;
-};
+function convoyJoinQuery(db: DrizzleSqliteDODatabase) {
+  return db
+    .select(convoyJoinColumns)
+    .from(beads)
+    .innerJoin(convoy_metadata, eq(beads.bead_id, convoy_metadata.bead_id));
+}
 
-// Convoy join row — the shape returned by selecting convoyJoinColumns
-type ConvoyJoinRow = {
-  bead_id: string;
-  type: string;
-  status: string;
-  title: string;
-  body: string | null;
-  rig_id: string | null;
-  parent_bead_id: string | null;
-  assignee_agent_bead_id: string | null;
-  priority: string | null;
-  labels: string | null;
-  metadata: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  closed_at: string | null;
-  total_beads: number;
-  closed_beads: number;
-  landed_at: string | null;
-};
+// Derive row types from the query builders — keeps enums narrow without manual maintenance.
+type EscalationJoinRow = NonNullable<ReturnType<ReturnType<typeof escalationJoinQuery>['get']>>;
+type ConvoyJoinRow = NonNullable<ReturnType<ReturnType<typeof convoyJoinQuery>['get']>>;
 
 // ── Escalation API type ─────────────────────────────────────────────
 type EscalationEntry = {
@@ -200,7 +163,7 @@ function toEscalation(row: EscalationJoinRow): EscalationEntry {
     id: row.bead_id,
     source_rig_id: row.rig_id ?? '',
     source_agent_id: row.created_by,
-    severity: row.severity as EscalationEntry['severity'],
+    severity: row.severity,
     category: row.category,
     message: row.body ?? row.title,
     acknowledged: row.acknowledged,
@@ -433,7 +396,8 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async updateAgentStatus(agentId: string, status: string): Promise<void> {
-    agents.updateAgentStatus(this.db, agentId, status);
+    const validStatus = AgentStatus.parse(status);
+    agents.updateAgentStatus(this.db, agentId, validStatus);
   }
 
   async deleteAgent(agentId: string): Promise<void> {

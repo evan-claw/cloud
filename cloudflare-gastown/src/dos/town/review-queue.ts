@@ -9,14 +9,8 @@
 import { z } from 'zod';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { eq, and, asc, lt, sql, getTableColumns } from 'drizzle-orm';
-import {
-  beads,
-  review_metadata,
-  bead_dependencies,
-  agent_metadata,
-  type BeadsSelect,
-} from '../../db/sqlite-schema';
-import { logBeadEvent, getBead, closeBead, updateBeadStatus, createBead } from './beads';
+import { beads, review_metadata, bead_dependencies, agent_metadata } from '../../db/sqlite-schema';
+import { logBeadEvent, getBead, closeBead, updateBeadStatus, createBead, parseBead } from './beads';
 import { getAgent, unhookBead } from './agents';
 import type { ReviewQueueInput, ReviewQueueEntry, AgentDoneInput, Molecule } from '../../types';
 
@@ -31,14 +25,6 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function parseBead(row: BeadsSelect) {
-  return {
-    ...row,
-    labels: JSON.parse(row.labels ?? '[]') as string[],
-    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
-  };
-}
-
 // ── Review Queue ────────────────────────────────────────────────────
 
 const reviewJoinColumns = {
@@ -50,35 +36,15 @@ const reviewJoinColumns = {
   retry_count: review_metadata.retry_count,
 };
 
-type ReviewJoinRow = {
-  bead_id: string;
-  type: string;
-  status: string;
-  title: string;
-  body: string | null;
-  rig_id: string | null;
-  parent_bead_id: string | null;
-  assignee_agent_bead_id: string | null;
-  priority: string | null;
-  labels: string | null;
-  metadata: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  closed_at: string | null;
-  branch: string;
-  target_branch: string;
-  merge_commit: string | null;
-  pr_url: string | null;
-  retry_count: number | null;
-};
-
 function reviewJoinQuery(db: DrizzleSqliteDODatabase) {
   return db
     .select(reviewJoinColumns)
     .from(beads)
     .innerJoin(review_metadata, eq(beads.bead_id, review_metadata.bead_id));
 }
+
+// Derive the row type from the query builder — stays in sync with schema automatically.
+type ReviewJoinRow = NonNullable<ReturnType<ReturnType<typeof reviewJoinQuery>['get']>>;
 
 /** Map a review join row to the ReviewQueueEntry API type. */
 function toReviewQueueEntry(row: ReviewJoinRow): ReviewQueueEntry {
@@ -107,11 +73,6 @@ function toReviewQueueEntry(row: ReviewJoinRow): ReviewQueueEntry {
     created_at: row.created_at,
     processed_at: row.updated_at === row.created_at ? null : row.updated_at,
   };
-}
-
-export function initReviewQueueTables(_db: DrizzleSqliteDODatabase): void {
-  // Review queue and molecule tables are now part of beads + satellite tables.
-  // Initialization happens in beads.initBeadTables().
 }
 
 export function submitToReviewQueue(db: DrizzleSqliteDODatabase, input: ReviewQueueInput): void {
@@ -177,7 +138,7 @@ export function popReviewQueue(db: DrizzleSqliteDODatabase): ReviewQueueEntry | 
     .get();
 
   if (!row) return null;
-  const entry = toReviewQueueEntry(row as ReviewJoinRow);
+  const entry = toReviewQueueEntry(row);
 
   // Mark as running (in_progress)
   db.update(beads)
@@ -224,7 +185,7 @@ export function completeReviewWithResult(
   // Find the review entry to get agent IDs
   const row = reviewJoinQuery(db).where(eq(beads.bead_id, input.entry_id)).get();
   if (!row) return;
-  const entry = toReviewQueueEntry(row as ReviewJoinRow);
+  const entry = toReviewQueueEntry(row);
 
   logBeadEvent(db, {
     beadId: entry.bead_id,

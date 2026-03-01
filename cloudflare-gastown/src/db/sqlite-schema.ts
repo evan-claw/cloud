@@ -21,7 +21,7 @@ export const beads = sqliteTable(
     title: text('title').notNull(),
     body: text('body'),
     rig_id: text('rig_id'),
-    parent_bead_id: text('parent_bead_id').references((): any => beads.bead_id),
+    parent_bead_id: text('parent_bead_id').references((): any => beads.bead_id), // self-ref requires any — drizzle limitation
     assignee_agent_bead_id: text('assignee_agent_bead_id'),
     priority: text('priority', {
       enum: ['low', 'medium', 'high', 'critical'],

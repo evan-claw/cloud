@@ -8,8 +8,8 @@
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import type { SQL } from 'drizzle-orm';
 import { eq, and, or, asc, desc, isNull, inArray, ne, getTableColumns } from 'drizzle-orm';
-import { beads, agent_metadata, type BeadsSelect } from '../../db/sqlite-schema';
-import { logBeadEvent, getBead, deleteBead } from './beads';
+import { beads, agent_metadata, type AgentMetadataSelect } from '../../db/sqlite-schema';
+import { logBeadEvent, getBead, deleteBead, parseBead } from './beads';
 import { readAndDeliverMail } from './mail';
 import type {
   RegisterAgentInput,
@@ -66,48 +66,6 @@ const agentJoinColumns = {
   checkpoint: agent_metadata.checkpoint,
 };
 
-type AgentJoinRow = {
-  bead_id: string;
-  type: string;
-  title: string;
-  body: string | null;
-  rig_id: string | null;
-  parent_bead_id: string | null;
-  assignee_agent_bead_id: string | null;
-  priority: string | null;
-  labels: string | null;
-  metadata: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  closed_at: string | null;
-  role: string;
-  identity: string;
-  container_process_id: string | null;
-  status: string;
-  current_hook_bead_id: string | null;
-  dispatch_attempts: number;
-  last_activity_at: string | null;
-  checkpoint: string | null;
-};
-
-/** Map an agent join row to the Agent API type. */
-function toAgent(row: AgentJoinRow): Agent {
-  return {
-    id: row.bead_id,
-    rig_id: row.rig_id,
-    role: row.role as Agent['role'],
-    name: row.title,
-    identity: row.identity,
-    status: row.status as Agent['status'],
-    current_hook_bead_id: row.current_hook_bead_id,
-    dispatch_attempts: row.dispatch_attempts,
-    last_activity_at: row.last_activity_at,
-    checkpoint: row.checkpoint ? JSON.parse(row.checkpoint) : null,
-    created_at: row.created_at,
-  };
-}
-
 function agentJoinQuery(db: DrizzleSqliteDODatabase) {
   return db
     .select(agentJoinColumns)
@@ -115,9 +73,25 @@ function agentJoinQuery(db: DrizzleSqliteDODatabase) {
     .innerJoin(agent_metadata, eq(beads.bead_id, agent_metadata.bead_id));
 }
 
-export function initAgentTables(_db: DrizzleSqliteDODatabase): void {
-  // Agent tables are now initialized in beads.initBeadTables()
-  // (beads table + agent_metadata satellite)
+// Derive the row type from the query builder — keeps enums narrow (role, status)
+// without manual maintenance or 'as' casts.
+type AgentJoinRow = NonNullable<ReturnType<ReturnType<typeof agentJoinQuery>['get']>>;
+
+/** Map an agent join row to the Agent API type. */
+function toAgent(row: AgentJoinRow): Agent {
+  return {
+    id: row.bead_id,
+    rig_id: row.rig_id,
+    role: row.role,
+    name: row.title,
+    identity: row.identity,
+    status: row.status,
+    current_hook_bead_id: row.current_hook_bead_id,
+    dispatch_attempts: row.dispatch_attempts,
+    last_activity_at: row.last_activity_at,
+    checkpoint: row.checkpoint ? JSON.parse(row.checkpoint) : null,
+    created_at: row.created_at,
+  };
 }
 
 export function registerAgent(db: DrizzleSqliteDODatabase, input: RegisterAgentInput): Agent {
@@ -193,12 +167,9 @@ export function listAgents(db: DrizzleSqliteDODatabase, filter?: AgentFilter): A
 export function updateAgentStatus(
   db: DrizzleSqliteDODatabase,
   agentId: string,
-  status: string
+  status: AgentMetadataSelect['status']
 ): void {
-  db.update(agent_metadata)
-    .set({ status: status as 'idle' })
-    .where(eq(agent_metadata.bead_id, agentId))
-    .run();
+  db.update(agent_metadata).set({ status }).where(eq(agent_metadata.bead_id, agentId)).run();
 }
 
 export function deleteAgent(db: DrizzleSqliteDODatabase, agentId: string): void {
@@ -383,14 +354,6 @@ export function prime(db: DrizzleSqliteDODatabase, agentId: string): PrimeContex
     hooked_bead: hookedBead,
     undelivered_mail: undeliveredMail,
     open_beads: openBeads,
-  };
-}
-
-function parseBead(row: BeadsSelect): Bead {
-  return {
-    ...row,
-    labels: JSON.parse(row.labels ?? '[]') as string[],
-    metadata: JSON.parse(row.metadata ?? '{}') as Record<string, unknown>,
   };
 }
 

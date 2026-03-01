@@ -41,7 +41,7 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function parseBead(row: BeadsSelect): Bead {
+export function parseBead(row: BeadsSelect): Bead {
   return {
     ...row,
     labels: JSON.parse(row.labels ?? '[]') as string[],

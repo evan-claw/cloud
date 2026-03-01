@@ -53,7 +53,9 @@ export class AgentDO extends DurableObject<Env> {
 
     const insertedId = row?.id ?? 0;
 
-    // Prune old events if count exceeds 10000
+    // Prune old events if count exceeds 10000.
+    // NOT IN subquery can't be expressed via drizzle's query builder;
+    // sql template tag still provides column-safe escaping.
     this.db.run(sql`
       DELETE FROM ${rig_agent_events}
       WHERE ${rig_agent_events.id} NOT IN (

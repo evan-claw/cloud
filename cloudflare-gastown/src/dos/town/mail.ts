@@ -29,11 +29,6 @@ function parseBead(row: BeadsSelect) {
   };
 }
 
-export function initMailTables(_db: DrizzleSqliteDODatabase): void {
-  // Mail tables are now part of the beads table (type='message').
-  // Initialization happens in beads.initBeadTables().
-}
-
 export function sendMail(db: DrizzleSqliteDODatabase, input: SendMailInput): void {
   const id = generateId();
   const timestamp = now();

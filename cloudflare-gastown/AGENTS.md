@@ -28,7 +28,7 @@
 - Use `eq()`, `and()`, `or()`, `inArray()`, `gt()`, `lt()`, `isNull()`, `isNotNull()` from `drizzle-orm` for WHERE conditions.
 - Use `.innerJoin(table, condition)` for joins.
 - For conditional filters, build a `conditions: SQL[]` array and pass to `and(...conditions)`.
-- Reference `docs/do-sqlite-drizzle.md` for the drizzle migration workflow (schema changes, generating migrations).
+- Reference `docs/do-sqlite-drizzle.md` (repo root) for the drizzle migration workflow (schema changes, generating migrations).
 
 ## HTTP routes
 
