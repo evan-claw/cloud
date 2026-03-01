@@ -977,13 +977,21 @@ export class CloudAgentSession extends DurableObject {
           })
           .info('Marking stale execution as failed');
 
-        // Mark as failed
-        await this.updateExecutionStatus({
+        // Mark as failed — if another codepath already moved it to a terminal
+        // state (e.g. webSocketClose), skip cleanup and broadcast.
+        const statusResult = await this.updateExecutionStatus({
           executionId: activeExecutionId,
           status: 'failed',
           error: 'Execution timeout - no heartbeat received',
           completedAt: now,
         });
+
+        if (!statusResult.ok) {
+          logger
+            .withFields({ executionId: activeExecutionId, error: statusResult.error })
+            .info('Skipping reaper cleanup - status transition failed');
+          return;
+        }
 
         // Clear active execution (updateStatus should do this, but ensure it)
         await this.executionQueries.clearActiveExecution();
@@ -1021,12 +1029,21 @@ export class CloudAgentSession extends DurableObject {
           })
           .info('Marking stuck pending execution as failed');
 
-        await this.updateExecutionStatus({
+        // Mark as failed — if another codepath already moved it to a terminal
+        // state, skip cleanup and broadcast.
+        const statusResult = await this.updateExecutionStatus({
           executionId: activeExecutionId,
           status: 'failed',
           error: 'Execution timeout - wrapper never connected',
           completedAt: now,
         });
+
+        if (!statusResult.ok) {
+          logger
+            .withFields({ executionId: activeExecutionId, error: statusResult.error })
+            .info('Skipping pending timeout cleanup - status transition failed');
+          return;
+        }
 
         await this.executionQueries.clearActiveExecution();
         await this.executionQueries.clearInterrupt();
