@@ -80,6 +80,7 @@ export class InstallationLookupService {
           eq(platform_integrations.integration_status, 'active'),
           eq(platform_integrations.platform_account_login, repoOwner),
           isNotNull(platform_integrations.platform_installation_id),
+          isNotNull(platform_integrations.platform_account_login),
           or(
             // Org installation: must match org ID AND user must be a member
             and(

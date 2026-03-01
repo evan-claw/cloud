@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import type { MiddlewareHandler } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import { TriggerDO } from './dos/TriggerDO';
 import { logger } from './util/logger';
@@ -19,8 +18,8 @@ export type HonoContext = {
 
 const app = new Hono<HonoContext>();
 
-// workers-tagged-logger returns Handler typed against an older hono; cast needed to bridge hono 4.12+ type change
-app.use('*', useWorkersLogger('webhook-agent') as unknown as MiddlewareHandler);
+// @ts-expect-error workers-tagged-logger returns Handler typed against an older hono; incompatible with hono 4.12+
+app.use('*', useWorkersLogger('webhook-agent'));
 
 app.get('/health', c => {
   return c.json(

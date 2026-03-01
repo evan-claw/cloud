@@ -3,7 +3,6 @@
  */
 
 import { Hono } from 'hono';
-import type { MiddlewareHandler } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import { AttributionTrackerDO, getAttributionTrackerDO } from './dos/AttributionTracker.do';
 import { logger } from './util/logger';
@@ -31,8 +30,8 @@ export type HonoContext = {
 
 const app = new Hono<HonoContext>();
 
-// workers-tagged-logger returns Handler typed against an older hono; cast needed to bridge hono 4.12+ type change
-app.use('*', useWorkersLogger('ai-attribution') as unknown as MiddlewareHandler);
+// @ts-expect-error workers-tagged-logger returns Handler typed against an older hono; incompatible with hono 4.12+
+app.use('*', useWorkersLogger('ai-attribution'));
 
 // Health check endpoint (no auth required)
 app.get('/health', c => {
