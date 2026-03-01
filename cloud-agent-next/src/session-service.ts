@@ -1275,8 +1275,10 @@ export class SessionService {
         `Session ${sessionId} has no kiloSessionId in metadata. Cannot restore snapshot.`
       );
     }
-    await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
 
+    // Clone first so .git exists when `kilo import` runs — the CLI derives the
+    // project ID from the repo's root commit hash; without a repo the FK on
+    // session.project_id fails.
     await restoreWorkspace(session, context.workspacePath, context.branchName, {
       githubRepo: metadata.githubRepo,
       githubToken: freshGithubToken ?? metadata.githubToken,
@@ -1285,6 +1287,8 @@ export class SessionService {
       gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
       lastSeenBranch: metadata.upstreamBranch,
     });
+
+    await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
 
     // Re-run setup commands (fresh clone, need to reinstall)
     if (metadata.setupCommands && metadata.setupCommands.length > 0) {

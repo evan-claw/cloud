@@ -369,12 +369,13 @@ describe('analysis-service', () => {
     });
 
     expect(result.started).toBe(false);
-    expect(result.error).toBe('Sandbox unavailable');
+    expect(result.error).toBe('Sandbox analysis failed to start. Please try again.');
+    expect(result.errorCode).toBe('SANDBOX_FAILED');
     // Should attempt to clean up the prepared session
     expect(mockDeleteSession).toHaveBeenCalledWith('agent-session-xyz');
     // Should mark finding as failed
     expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(findingId, 'failed', {
-      error: 'Sandbox unavailable',
+      error: 'Sandbox analysis failed to start. Please try again.',
     });
   });
 

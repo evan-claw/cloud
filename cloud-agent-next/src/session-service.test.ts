@@ -52,6 +52,7 @@ describe('SessionService', () => {
   });
 
   const mockedSetupWorkspace = vi.mocked(mockSetupWorkspace);
+  const mockedRestoreWorkspace = vi.mocked(mockRestoreWorkspace);
 
   // Mock environment for tests
   const mockEnv: PersistenceEnv = {
@@ -826,7 +827,7 @@ describe('SessionService', () => {
       ).rejects.toThrow('workspace is missing and metadata could not be retrieved');
     });
 
-    it('restores session snapshot before reclone when workspace is missing', async () => {
+    it('restores workspace then session snapshot when workspace is missing', async () => {
       const mockDOGetMetadata = vi.fn();
       const payload = JSON.stringify({ info: {}, messages: [] });
       const exportSessionMock = vi.fn().mockResolvedValue(payload);
@@ -901,6 +902,15 @@ describe('SessionService', () => {
       );
       expect(result.context.githubRepo).toBe('facebook/react');
       expect(result.context.githubToken).toBe('test-token');
+
+      // Verify restoreWorkspace (git clone) ran before kilo import
+      const kiloImportCallIndex = fakeSession.exec.mock.calls.findIndex(
+        (args: string[]) => typeof args[0] === 'string' && args[0].includes('kilo import')
+      );
+      expect(kiloImportCallIndex).toBeGreaterThanOrEqual(0);
+      const restoreWorkspaceOrder = mockedRestoreWorkspace.mock.invocationCallOrder[0];
+      const kiloImportOrder = fakeSession.exec.mock.invocationCallOrder[kiloImportCallIndex];
+      expect(restoreWorkspaceOrder).toBeLessThan(kiloImportOrder);
     });
   });
 

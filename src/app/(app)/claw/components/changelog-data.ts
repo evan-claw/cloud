@@ -11,6 +11,20 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-03-01',
+    description:
+      'Fixed model picker showing unsupported models. If you encounter model-not-found errors, use Settings > Set Default to select a supported model and restart the gateway.',
+    category: 'bugfix',
+    deployHint: null,
+  },
+  {
+    date: '2026-03-01',
+    description:
+      'Fixed an issue where only 2 models were visible in OpenClaw. All models currently available in openclaw are now visible after a redeploy.',
+    category: 'bugfix',
+    deployHint: 'redeploy_suggested',
+  },
+  {
     date: '2026-02-27',
     description:
       'Updated OpenClaw to 2026.2.26. Added 1Password CLI, build-essential, python3, ffmpeg, tmux, and mcporter to the default image.',

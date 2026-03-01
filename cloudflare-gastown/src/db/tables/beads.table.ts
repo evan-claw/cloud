@@ -49,7 +49,8 @@ export const BeadRecord = z.object({
         return {};
       }
     })
-    .pipe(z.record(z.string(), z.unknown())),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see Agent.checkpoint in types.ts
+    .pipe(z.record(z.string(), z.any())),
   created_by: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),

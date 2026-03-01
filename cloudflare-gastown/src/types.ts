@@ -73,7 +73,10 @@ export type Agent = {
   current_hook_bead_id: string | null;
   dispatch_attempts: number;
   last_activity_at: string | null;
-  checkpoint: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Opaque JSON blob from
+  // SQLite; `unknown` breaks Cloudflare's Rpc.Serializable<T> type inference, and recursive
+  // JSON types cause "excessively deep" instantiation. Zod validates at runtime.
+  checkpoint: any;
   created_at: string;
 };
 

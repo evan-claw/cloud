@@ -28,7 +28,6 @@ export const MISTRAL_API_KEY = getEnvVariable('MISTRAL_API_KEY');
 export const OPENAI_API_KEY = getEnvVariable('OPENAI_API_KEY');
 export const INTERNAL_API_SECRET = getEnvVariable('INTERNAL_API_SECRET');
 export const CODE_REVIEW_WORKER_AUTH_TOKEN = getEnvVariable('CODE_REVIEW_WORKER_AUTH_TOKEN');
-export const MANAGED_INDEXING_ENABLED = true;
 
 if (!NEXTAUTH_SECRET) throw new Error('NEXTAUTH_SECRET is required JWT signing');
 if (!TURNSTILE_SECRET_KEY) throw new Error('NEXTAUTH_SECRET is required JWT signing');
@@ -112,7 +111,6 @@ export const SLACK_USER_FEEDBACK_WEBHOOK_URL = getEnvVariable('SLACK_USER_FEEDBA
 // Posts deploy threat alerts to a dedicated Slack channel.
 // Expected to be a Slack Incoming Webhook URL.
 export const SLACK_DEPLOY_THREAT_WEBHOOK_URL = getEnvVariable('SLACK_DEPLOY_THREAT_WEBHOOK_URL');
-export const ENABLE_MILVUS_DUAL_WRITE = true;
 
 // AI Attribution Service
 export const AI_ATTRIBUTION_ADMIN_SECRET = getEnvVariable('AI_ATTRIBUTION_ADMIN_SECRET');

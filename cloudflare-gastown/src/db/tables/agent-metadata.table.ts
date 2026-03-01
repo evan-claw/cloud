@@ -24,7 +24,8 @@ export const AgentMetadataRecord = z.object({
         return null;
       }
     })
-    .pipe(z.unknown()),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see Agent.checkpoint in types.ts
+    .pipe(z.any()),
   last_activity_at: z.string().nullable(),
 });
 

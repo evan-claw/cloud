@@ -42,6 +42,7 @@ const config: Config = {
     '<rootDir>/cloudflare-session-ingest/',
     '<rootDir>/cloudflare-gastown/',
     '<rootDir>/kiloclaw/',
+    '<rootDir>/packages/worker-utils/',
   ],
   transformIgnorePatterns: [
     'node_modules/.pnpm/(?!(@octokit|universal-user-agent|before-after-hook|bottleneck))',
