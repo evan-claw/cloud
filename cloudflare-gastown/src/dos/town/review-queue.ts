@@ -274,8 +274,8 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
   if (!agent.current_hook_bead_id) throw new Error(`Agent ${agentId} has no hooked bead`);
 
   if (agent.role === 'refinery') {
-    // The refinery is hooked to the MR bead. Complete it and close the
-    // source bead (read from the MR's metadata).
+    // The refinery is hooked to the MR bead. Mark it as merged and log
+    // the review_completed event on the source bead.
     const mrBeadId = agent.current_hook_bead_id;
     completeReviewFromMRBead(sql, mrBeadId, agentId);
     unhookBead(sql, agentId);
@@ -283,6 +283,12 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
   }
 
   const sourceBead = agent.current_hook_bead_id;
+
+  if (!agent.rig_id) {
+    console.warn(
+      `[review-queue] agentDone: agent ${agentId} has null rig_id — review entry may fail in processReviewQueue`
+    );
+  }
 
   submitToReviewQueue(sql, {
     agent_id: agentId,
@@ -302,13 +308,19 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
 
 /**
  * Complete a review given the MR bead id directly (the refinery is hooked
- * to the MR bead). Marks the MR as merged and closes the source bead
- * referenced in the MR's metadata.
+ * to the MR bead). Marks the MR as merged and logs a review_completed
+ * event on the source bead. The source bead itself is already closed by
+ * the polecat's agentDone path.
  */
 function completeReviewFromMRBead(sql: SqlStorage, mrBeadId: string, agentId: string): void {
-  // Read the source_bead_id from the MR bead's metadata
   const mrBead = getBead(sql, mrBeadId);
-  const sourceBeadId = mrBead?.metadata?.source_bead_id;
+  if (!mrBead) {
+    console.error(
+      `[review-queue] completeReviewFromMRBead: MR bead ${mrBeadId} not found — data integrity issue`
+    );
+    return;
+  }
+  const sourceBeadId = mrBead.metadata?.source_bead_id;
 
   completeReview(sql, mrBeadId, 'merged');
 

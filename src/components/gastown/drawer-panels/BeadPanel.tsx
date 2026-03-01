@@ -19,7 +19,6 @@ import {
   ChevronRight,
   Bot,
   Network,
-  ArrowUpRight,
   ArrowDownRight,
   GitPullRequest,
   CircleDot,
