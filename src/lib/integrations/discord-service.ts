@@ -13,16 +13,18 @@ import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
+import { linkAuthorizedDiscordUser } from '@/lib/discord/authorized-users';
 
 // Default model for Discord integrations - mirrors the Slack default
 const DISCORD_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
   ? minimax_m25_free_model.public_id
   : CLAUDE_OPUS_CURRENT_MODEL_ID;
 
-// Discord OAuth2 scopes for the bot integration
-// 'bot' scope is needed for the bot to join servers
-// 'guilds' scope allows reading basic guild info
-const DISCORD_SCOPES = ['bot', 'guilds', 'applications.commands'];
+// Discord OAuth2 scopes for installing/updating the bot integration
+const DISCORD_INSTALL_SCOPES = ['bot', 'guilds', 'identify', 'applications.commands'];
+
+// Discord OAuth2 scopes for linking an individual Discord user to an existing integration
+const DISCORD_USER_LINK_SCOPES = ['identify'];
 
 // Discord bot permissions (bitfield)
 // Includes: Send Messages, Read Message History, Add Reactions, Use Slash Commands, Embed Links, Attach Files
@@ -45,6 +47,21 @@ export type DiscordOAuth2Response = {
     icon: string | null;
   };
 };
+
+type DiscordOAuthUser = {
+  id: string;
+};
+
+function isDiscordOAuthUser(value: unknown): value is DiscordOAuthUser {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'id' in value &&
+    typeof value.id === 'string' &&
+    value.id.length > 0
+  );
+}
 
 function getOwnershipConditions(owner: Owner) {
   return owner.type === 'user'
@@ -69,7 +86,27 @@ export function getDiscordOAuthUrl(state: string): string {
   const params = new URLSearchParams({
     client_id: DISCORD_CLIENT_ID,
     permissions: DISCORD_BOT_PERMISSIONS,
-    scope: DISCORD_SCOPES.join(' '),
+    scope: DISCORD_INSTALL_SCOPES.join(' '),
+    redirect_uri: DISCORD_REDIRECT_URI,
+    response_type: 'code',
+    state,
+  });
+
+  return `https://discord.com/oauth2/authorize?${params.toString()}`;
+}
+
+/**
+ * Get Discord OAuth URL for linking an individual Discord user.
+ * This flow does not require server admin permissions.
+ */
+export function getDiscordUserLinkOAuthUrl(state: string): string {
+  if (!DISCORD_CLIENT_ID) {
+    throw new Error('DISCORD_CLIENT_ID is not configured');
+  }
+
+  const params = new URLSearchParams({
+    client_id: DISCORD_CLIENT_ID,
+    scope: DISCORD_USER_LINK_SCOPES.join(' '),
     redirect_uri: DISCORD_REDIRECT_URI,
     response_type: 'code',
     state,
@@ -112,6 +149,29 @@ export async function exchangeDiscordCode(code: string): Promise<DiscordOAuth2Re
   }
 
   return data;
+}
+
+/**
+ * Fetch the Discord user ID associated with an OAuth access token.
+ */
+export async function getDiscordOAuthUserId(accessToken: string): Promise<string> {
+  const response = await fetch('https://discord.com/api/v10/users/@me', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Discord OAuth user lookup error: ${errorText}`);
+  }
+
+  const userData: unknown = await response.json();
+  if (!isDiscordOAuthUser(userData)) {
+    throw new Error('Discord OAuth user lookup error: No user ID in response');
+  }
+
+  return userData.id;
 }
 
 /**
@@ -168,7 +228,8 @@ export function getOwnerFromInstallation(integration: PlatformIntegration): Owne
  */
 export async function upsertDiscordInstallation(
   owner: Owner,
-  oauthResponse: DiscordOAuth2Response
+  oauthResponse: DiscordOAuth2Response,
+  authorizedRequester: { kiloUserId: string; discordUserId: string }
 ): Promise<PlatformIntegration> {
   if (!oauthResponse.guild?.id) {
     throw new Error(
@@ -188,16 +249,15 @@ export async function upsertDiscordInstallation(
 
   if (existing) {
     // Preserve existing model_slug when re-authorizing
-    const existingMetadata = existing.metadata || {};
-    const updatedMetadata = {
-      ...existingMetadata,
-      guild_icon: oauthResponse.guild.icon,
-    };
+    const updatedMetadata = linkAuthorizedDiscordUser(existing.metadata, authorizedRequester);
+    updatedMetadata.guild_icon = oauthResponse.guild.icon;
 
     const [updated] = await db
       .update(platform_integrations)
       .set({
         platform_account_id: guildId,
+        platform_requester_account_id: authorizedRequester.discordUserId,
+        kilo_requester_user_id: authorizedRequester.kiloUserId,
         platform_account_login: guildName,
         scopes,
         integration_status: INTEGRATION_STATUS.ACTIVE,
@@ -222,24 +282,57 @@ export async function upsertDiscordInstallation(
     model_slug: defaultModel,
   };
 
+  const linkedMetadata = linkAuthorizedDiscordUser(metadata, authorizedRequester);
+
   const [created] = await db
     .insert(platform_integrations)
     .values({
       owned_by_user_id: owner.type === 'user' ? owner.id : null,
       owned_by_organization_id: owner.type === 'org' ? owner.id : null,
+      created_by_user_id: authorizedRequester.kiloUserId,
       platform: PLATFORM.DISCORD,
       integration_type: 'oauth',
       platform_installation_id: guildId,
+      platform_requester_account_id: authorizedRequester.discordUserId,
+      kilo_requester_user_id: authorizedRequester.kiloUserId,
       platform_account_id: guildId,
       platform_account_login: guildName,
       scopes,
       integration_status: INTEGRATION_STATUS.ACTIVE,
-      metadata,
+      metadata: linkedMetadata,
       installed_at: new Date().toISOString(),
     })
     .returning();
 
   return created;
+}
+
+/**
+ * Link a Discord requester to an existing installation owner.
+ */
+export async function linkDiscordRequesterToOwner(
+  owner: Owner,
+  authorizedRequester: { kiloUserId: string; discordUserId: string }
+): Promise<PlatformIntegration | null> {
+  const existing = await getInstallation(owner);
+  if (!existing) {
+    return null;
+  }
+
+  const updatedMetadata = linkAuthorizedDiscordUser(existing.metadata, authorizedRequester);
+
+  const [updated] = await db
+    .update(platform_integrations)
+    .set({
+      platform_requester_account_id: authorizedRequester.discordUserId,
+      kilo_requester_user_id: authorizedRequester.kiloUserId,
+      metadata: updatedMetadata,
+      updated_at: new Date().toISOString(),
+    })
+    .where(eq(platform_integrations.id, existing.id))
+    .returning();
+
+  return updated || null;
 }
 
 /**
@@ -399,7 +492,10 @@ export async function updateModel(
 export async function postDiscordMessage(
   channelId: string,
   content: string,
-  options?: { messageReference?: { message_id: string } }
+  options?: {
+    messageReference?: { message_id: string };
+    linkButton?: { label: string; url: string };
+  }
 ): Promise<{ ok: boolean; messageId?: string; error?: string }> {
   if (!DISCORD_BOT_TOKEN) {
     return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
@@ -409,6 +505,21 @@ export async function postDiscordMessage(
     const body: Record<string, unknown> = { content };
     if (options?.messageReference) {
       body.message_reference = options.messageReference;
+    }
+    if (options?.linkButton) {
+      body.components = [
+        {
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 5,
+              label: options.linkButton.label,
+              url: options.linkButton.url,
+            },
+          ],
+        },
+      ];
     }
 
     const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {

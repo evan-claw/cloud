@@ -25,9 +25,10 @@ import {
   getDiscordConversationContext,
   type DiscordEventContext,
 } from '@/lib/discord-bot/discord-channel-context';
-import { getDiscordBotAuthTokenForOwner } from '@/lib/discord/auth';
+import { getDiscordAuthTokenForRequester } from '@/lib/discord/auth';
 import { buildDiscordMessageLink } from '@/lib/discord-bot/discord-utils';
 import type { PlatformIntegration } from '@kilocode/db';
+import { APP_URL } from '@/lib/constants';
 
 // Version string for API requests
 const DISCORD_BOT_VERSION = '5.0.0';
@@ -42,8 +43,18 @@ export type DiscordBotMessageResult = {
   toolCallsMade: string[];
   cloudAgentSessionId?: string;
   error?: string;
+  linkDiscordAccountUrl?: string;
   installation: PlatformIntegration | null;
 };
+
+function buildDiscordAccountLinkUrl(owner: Owner): string {
+  const params = new URLSearchParams({
+    ownerType: owner.type,
+    ownerId: owner.id,
+  });
+
+  return `${APP_URL}/integrations/discord/link?${params.toString()}`;
+}
 
 const KILO_BOT_SYSTEM_PROMPT = `You are Kilo Bot, a helpful AI assistant integrated into Discord.
 
@@ -258,8 +269,23 @@ export async function processDiscordBotMessage(
   }
   console.log('[DiscordBot] Using model:', selectedModel);
 
-  const authResult = await getDiscordBotAuthTokenForOwner(owner);
+  const authResult = await getDiscordAuthTokenForRequester(owner, {
+    metadata: installation.metadata,
+    discordUserId: discordEventContext?.userId,
+  });
   if ('error' in authResult) {
+    if (authResult.errorCode === 'unlinked_requester') {
+      return {
+        response:
+          'Link your Discord account to Kilo before using this integration. Click the button below to connect now.',
+        modelUsed: '',
+        toolCallsMade: [],
+        error: authResult.error,
+        linkDiscordAccountUrl: buildDiscordAccountLinkUrl(owner),
+        installation,
+      };
+    }
+
     return {
       response: `Error: ${authResult.error}`,
       modelUsed: '',

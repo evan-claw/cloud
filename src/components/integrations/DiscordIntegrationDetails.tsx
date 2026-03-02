@@ -274,7 +274,17 @@ export function DiscordIntegrationDetails({
               </div>
 
               {/* Actions */}
+              <Alert>
+                <AlertDescription>
+                  Each team member who wants to use Kilo in Discord must link their own Discord
+                  account.
+                </AlertDescription>
+              </Alert>
+
               <div className="flex flex-wrap gap-3">
+                <Button variant="outline" onClick={handleInstall} disabled={!oauthUrlData?.url}>
+                  Link My Discord Account
+                </Button>
                 <Button
                   variant="outline"
                   onClick={handleTestConnection}

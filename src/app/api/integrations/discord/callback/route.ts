@@ -4,7 +4,12 @@ import { getUserFromAuth } from '@/lib/user.server';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import type { Owner } from '@/lib/integrations/core/types';
 import { captureException, captureMessage } from '@sentry/nextjs';
-import { exchangeDiscordCode, upsertDiscordInstallation } from '@/lib/integrations/discord-service';
+import {
+  exchangeDiscordCode,
+  getDiscordOAuthUserId,
+  linkDiscordRequesterToOwner,
+  upsertDiscordInstallation,
+} from '@/lib/integrations/discord-service';
 import { verifyOAuthState } from '@/lib/integrations/oauth-state';
 import { APP_URL } from '@/lib/constants';
 
@@ -121,14 +126,37 @@ export async function GET(request: NextRequest) {
     // 7. Exchange code for access token
     const oauthData = await exchangeDiscordCode(code);
 
-    // 8. Store installation in database
-    await upsertDiscordInstallation(owner, oauthData);
+    // 8. Resolve the Discord requester identity and persist authorization mapping
+    const discordUserId = await getDiscordOAuthUserId(oauthData.access_token);
+    const authorizedRequester = {
+      kiloUserId: user.id,
+      discordUserId,
+    };
+
+    const isInstallFlow = Boolean(oauthData.guild?.id);
+    if (isInstallFlow) {
+      await upsertDiscordInstallation(owner, oauthData, authorizedRequester);
+    } else {
+      const linked = await linkDiscordRequesterToOwner(owner, authorizedRequester);
+      if (!linked) {
+        captureMessage('Discord user link callback without an existing installation', {
+          level: 'warning',
+          tags: { endpoint: 'discord/callback', source: 'discord_oauth' },
+          extra: { owner, userId: user.id },
+        });
+
+        return NextResponse.redirect(
+          new URL(buildDiscordRedirectPath(state, 'error=installation_missing'), APP_URL)
+        );
+      }
+    }
 
     // 9. Redirect to success page
+    const successQuery = isInstallFlow ? 'success=installed' : 'success=linked_user';
     const successPath =
       owner.type === 'org'
-        ? `/organizations/${owner.id}/integrations/discord?success=installed`
-        : `/integrations/discord?success=installed`;
+        ? `/organizations/${owner.id}/integrations/discord?${successQuery}`
+        : `/integrations/discord?${successQuery}`;
 
     return NextResponse.redirect(new URL(successPath, APP_URL));
   } catch (error) {

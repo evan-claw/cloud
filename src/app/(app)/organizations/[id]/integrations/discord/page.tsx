@@ -52,7 +52,7 @@ export default async function OrgDiscordIntegrationPage({
           >
             <DiscordIntegrationDetails
               organizationId={organization.id}
-              success={search.success === 'installed'}
+              success={search.success === 'installed' || search.success === 'linked_user'}
               error={search.error}
             />
           </Suspense>

@@ -43,7 +43,10 @@ export default async function UserDiscordIntegrationPage({
           </Card>
         }
       >
-        <DiscordIntegrationDetails success={search.success === 'installed'} error={search.error} />
+        <DiscordIntegrationDetails
+          success={search.success === 'installed' || search.success === 'linked_user'}
+          error={search.error}
+        />
       </Suspense>
     </PageLayout>
   );

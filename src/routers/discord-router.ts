@@ -48,10 +48,21 @@ export const discordRouter = createTRPCRouter({
     if (input?.organizationId) {
       await ensureOrganizationAccess(ctx, input.organizationId);
     }
+
+    const owner = resolveOwner(ctx, input?.organizationId);
+    const installation = await discordService.getInstallation(owner);
+
     const statePrefix = input?.organizationId
       ? `org_${input.organizationId}`
       : `user_${ctx.user.id}`;
     const state = createOAuthState(statePrefix, ctx.user.id);
+
+    if (installation?.integration_status === 'active') {
+      return {
+        url: discordService.getDiscordUserLinkOAuthUrl(state),
+      };
+    }
+
     return {
       url: discordService.getDiscordOAuthUrl(state),
     };

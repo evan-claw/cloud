@@ -171,6 +171,12 @@ async function processGatewayMessage(event: ForwardedGatewayEvent) {
   const responseText = truncateForDiscord(responseWithDevInfo);
   const postResult = await postDiscordMessage(channelId, responseText, {
     messageReference: { message_id: messageId },
+    linkButton: result.linkDiscordAccountUrl
+      ? {
+          label: 'Link My Discord Account',
+          url: result.linkDiscordAccountUrl,
+        }
+      : undefined,
   });
 
   console.log(
