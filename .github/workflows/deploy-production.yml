@@ -332,6 +332,32 @@ jobs:
     uses: ./.github/workflows/deploy-git-token-service.yml
     secrets: inherit
 
+  check-security-sync-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs['security-sync'] }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for security-sync changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            security-sync:
+              - 'cloudflare-security-sync/**'
+
+  deploy-security-sync:
+    needs: [check-security-sync-changes]
+    if: needs.check-security-sync-changes.outputs.changed == 'true'
+    uses: ./.github/workflows/deploy-security-sync.yml
+    secrets: inherit
+    with:
+      environment: prod
+
   check-deployment-dispatcher-changes:
     runs-on: ubuntu-latest
     outputs:
