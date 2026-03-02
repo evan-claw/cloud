@@ -1,8 +1,11 @@
 import type { User } from '@kilocode/db';
+import type { CustomLlm } from '@kilocode/db/schema';
 import type { Env } from '../env';
 import type { AnonymousUserContext } from '../lib/anonymous';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from './request';
+import type { Provider, SecretsBundle } from '../lib/providers';
+import type { BYOKResult } from '../lib/byok';
 
 // Hono app context — bindings + all middleware variables.
 export type HonoContext = {
@@ -37,4 +40,10 @@ export type Variables = {
 
   // anonymous-gate.ts — always set once this middleware runs
   user: User | AnonymousUserContext;
+
+  // provider-resolution.ts — set after secrets are fetched and provider is chosen
+  provider: Provider;
+  userByok: BYOKResult[] | null;
+  customLlm: CustomLlm | null;
+  secrets: SecretsBundle;
 };

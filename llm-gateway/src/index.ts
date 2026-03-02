@@ -8,6 +8,10 @@ import { extractIpMiddleware } from './middleware/extract-ip';
 import { resolveAutoModelMiddleware } from './middleware/resolve-auto-model';
 import { authMiddleware } from './middleware/auth';
 import { anonymousGateMiddleware } from './middleware/anonymous-gate';
+import { freeModelRateLimitMiddleware } from './middleware/free-model-rate-limit';
+import { promotionLimitMiddleware } from './middleware/promotion-limit';
+import { logFreeModelUsageMiddleware } from './middleware/log-free-model-usage';
+import { providerResolutionMiddleware } from './middleware/provider-resolution';
 
 const app = new Hono<HonoContext>();
 
@@ -26,7 +30,11 @@ function registerChatCompletions(path: string) {
     resolveAutoModelMiddleware,
     authMiddleware,
     anonymousGateMiddleware,
-    // Remaining middleware (rate limiting, provider resolution, proxy) added in later phases.
+    freeModelRateLimitMiddleware,
+    promotionLimitMiddleware,
+    logFreeModelUsageMiddleware,
+    providerResolutionMiddleware,
+    // Remaining middleware (request validation, balance, transform, proxy) added in later phases.
     notImplemented
   );
 }

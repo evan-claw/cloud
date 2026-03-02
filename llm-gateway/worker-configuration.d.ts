@@ -5,7 +5,19 @@ declare namespace Cloudflare {
   interface Env {
     HYPERDRIVE: Hyperdrive;
     USER_EXISTS_CACHE: KVNamespace;
+    RATE_LIMIT_KV: KVNamespace;
+    // Secrets Store
     NEXTAUTH_SECRET_PROD: SecretsStoreSecret;
+    OPENROUTER_API_KEY: SecretsStoreSecret;
+    GIGAPOTATO_API_KEY: SecretsStoreSecret;
+    CORETHINK_API_KEY: SecretsStoreSecret;
+    MARTIAN_API_KEY: SecretsStoreSecret;
+    MISTRAL_API_KEY: SecretsStoreSecret;
+    VERCEL_AI_GATEWAY_API_KEY: SecretsStoreSecret;
+    BYOK_ENCRYPTION_KEY: SecretsStoreSecret;
+    // Vars
+    GIGAPOTATO_API_URL: string;
+    OPENROUTER_ORG_ID: string;
   }
 }
 interface Env extends Cloudflare.Env {}

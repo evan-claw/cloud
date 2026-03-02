@@ -16,7 +16,11 @@ function makeApp() {
   return app;
 }
 
-async function post(app: ReturnType<typeof makeApp>, body: unknown, headers?: HeadersInit) {
+async function post(
+  app: ReturnType<typeof makeApp>,
+  body: unknown,
+  headers?: Record<string, string>
+) {
   return app.fetch(
     new Request('http://x/test', {
       method: 'POST',
@@ -26,12 +30,14 @@ async function post(app: ReturnType<typeof makeApp>, body: unknown, headers?: He
   );
 }
 
+type JsonData = Record<string, unknown>;
+
 describe('parseBodyMiddleware', () => {
   it('sets requestBody, resolvedModel, and stream_options', async () => {
     const app = makeApp();
     const res = await post(app, { model: 'anthropic/claude-3-5-sonnet', messages: [] });
     expect(res.status).toBe(200);
-    const data = await res.json();
+    const data = (await res.json()) as JsonData;
     expect(data.model).toBe('anthropic/claude-3-5-sonnet');
     expect(data.resolvedModel).toBe('anthropic/claude-3-5-sonnet');
     expect(data.stream_options).toEqual({ include_usage: true });
@@ -40,7 +46,7 @@ describe('parseBodyMiddleware', () => {
   it('lowercases resolvedModel', async () => {
     const app = makeApp();
     const res = await post(app, { model: 'Anthropic/Claude-3-5-Sonnet', messages: [] });
-    const data = await res.json();
+    const data = (await res.json()) as JsonData;
     expect(data.resolvedModel).toBe('anthropic/claude-3-5-sonnet');
   });
 
@@ -51,7 +57,7 @@ describe('parseBodyMiddleware', () => {
       messages: [],
       stream_options: { include_usage: false },
     });
-    const data = await res.json();
+    const data = (await res.json()) as JsonData;
     expect(data.stream_options).toEqual({ include_usage: true });
   });
 
@@ -86,7 +92,7 @@ describe('parseBodyMiddleware', () => {
       { model: 'gpt-4', messages: [] },
       { 'x-kilocode-feature': 'vscode-extension' }
     );
-    const data = await res.json();
+    const data = (await res.json()) as JsonData;
     expect(data.feature).toBe('vscode-extension');
   });
 
@@ -97,7 +103,7 @@ describe('parseBodyMiddleware', () => {
       { model: 'gpt-4', messages: [] },
       { 'x-kilocode-feature': 'unknown-tool' }
     );
-    const data = await res.json();
+    const data = (await res.json()) as JsonData;
     expect(data.feature).toBeNull();
   });
 });
