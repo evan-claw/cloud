@@ -35,11 +35,17 @@ describe('configureKilocode', () => {
         execute?: {
           denied?: string[];
         };
+        write?: {
+          enabled?: boolean;
+          protected?: boolean;
+        };
       };
     };
 
     expect(config.autoApproval?.execute?.denied).toContain('git commit');
     expect(config.autoApproval?.execute?.denied).toContain('gh pr merge');
+    expect(config.autoApproval?.write?.enabled).toBe(false);
+    expect(config.autoApproval?.write?.protected).toBe(true);
   });
 });
 
