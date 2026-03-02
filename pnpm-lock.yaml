@@ -1130,6 +1130,9 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.19.1
+      drizzle-kit:
+        specifier: 'catalog:'
+        version: 0.31.9
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
