@@ -402,28 +402,27 @@ export class CloudAgentSession extends DurableObject {
               logger
                 .withFields({ executionId: activeExecutionId, error: statusResult.error })
                 .info('Skipping disconnect cleanup - status transition failed');
-              return;
+            } else {
+              // Clear active execution (updateStatus should do this, but ensure it)
+              await this.executionQueries.clearActiveExecution();
+
+              // Clear interrupt flag if set
+              await this.executionQueries.clearInterrupt();
+
+              // Insert a synthetic wrapper_disconnected event so /stream clients are notified
+              const sessionId = await this.requireSessionId();
+              this.insertAndBroadcastEvent({
+                executionId: activeExecutionId,
+                sessionId,
+                streamEventType: 'wrapper_disconnected',
+                payload: JSON.stringify({
+                  reason: 'Wrapper disconnected',
+                  wsCloseCode: code,
+                  wsCloseReason: reason,
+                }),
+                timestamp: now,
+              });
             }
-
-            // Clear active execution (updateStatus should do this, but ensure it)
-            await this.executionQueries.clearActiveExecution();
-
-            // Clear interrupt flag if set
-            await this.executionQueries.clearInterrupt();
-
-            // Insert a synthetic wrapper_disconnected event so /stream clients are notified
-            const sessionId = await this.requireSessionId();
-            this.insertAndBroadcastEvent({
-              executionId: activeExecutionId,
-              sessionId,
-              streamEventType: 'wrapper_disconnected',
-              payload: JSON.stringify({
-                reason: 'Wrapper disconnected',
-                wsCloseCode: code,
-                wsCloseReason: reason,
-              }),
-              timestamp: now,
-            });
           }
         }
       }
