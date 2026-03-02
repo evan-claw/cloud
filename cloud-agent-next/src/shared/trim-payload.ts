@@ -33,7 +33,7 @@ function trimToolCompleted(state: Record<string, unknown>): Record<string, unkno
   }
   const attachments = out.attachments;
   if (Array.isArray(attachments)) {
-    out.attachments = attachments.map(a => (isRecord(a) ? stripFilePartFields(a) : a));
+    out.attachments = attachments.map((a: unknown) => (isRecord(a) ? stripFilePartFields(a) : a));
   }
   return out;
 }
