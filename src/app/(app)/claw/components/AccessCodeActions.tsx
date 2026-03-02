@@ -30,7 +30,10 @@ export function AccessCodeActions({
       if (code) {
         const url = new URL(gatewayUrl, window.location.origin);
         url.searchParams.set('auth_code', code);
-        window.open(url.toString(), '_blank', 'noopener,noreferrer');
+        const win = window.open(url.toString(), '_blank', 'noopener,noreferrer');
+        if (!win) {
+          toast.error('Popup blocked — please allow popups and try again');
+        }
       }
     } catch {
       toast.error('Failed to generate access code for auto-login');
@@ -73,7 +76,7 @@ export function AccessCodeActions({
       <Button
         variant="primary"
         className={OPEN_BUTTON_ACCENT_CLASS}
-        disabled={isOpening}
+        disabled={isOpening || isGenerating}
         onClick={openWithAutoAuth}
       >
         {isOpening ? (
