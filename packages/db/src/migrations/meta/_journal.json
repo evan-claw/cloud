@@ -260,6 +260,13 @@
       "when": 1772457937366,
       "tag": "0036_early_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1772472147057,
+      "tag": "0037_magical_captain_britain",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
-  "id": "ee710077-4ffe-4b56-b079-0aae744efb2a",
-  "prevId": "b51f45f7-a19e-40c2-bf00-72aac398b43c",
+  "id": "346c8139-0d84-459f-9080-24f87916a781",
+  "prevId": "bec5782c-1827-4b47-b0ce-309628287e4e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5007,6 +5007,45 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.discord_gateway_listener": {
+      "name": "discord_gateway_listener",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "listener_id": {
+          "name": "listener_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.editor_name": {
       "name": "editor_name",
       "schema": "",
@@ -6723,6 +6762,98 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.kiloclaw_version_pins": {
+      "name": "kiloclaw_version_pins",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "image_tag": {
+          "name": "image_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pinned_by": {
+          "name": "pinned_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "kiloclaw_version_pins_user_id_kilocode_users_id_fk": {
+          "name": "kiloclaw_version_pins_user_id_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kilocode_users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "kiloclaw_version_pins_image_tag_kiloclaw_image_catalog_image_tag_fk": {
+          "name": "kiloclaw_version_pins_image_tag_kiloclaw_image_catalog_image_tag_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kiloclaw_image_catalog",
+          "columnsFrom": ["image_tag"],
+          "columnsTo": ["image_tag"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk": {
+          "name": "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kilocode_users",
+          "columnsFrom": ["pinned_by"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "kiloclaw_version_pins_user_id_unique": {
+          "name": "kiloclaw_version_pins_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["user_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.kilocode_users": {
       "name": "kilocode_users",
       "schema": "",
@@ -6880,9 +7011,32 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "openrouter_upstream_safety_identifier": {
+          "name": "openrouter_upstream_safety_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "UQ_kilocode_users_openrouter_upstream_safety_identifier": {
+          "name": "UQ_kilocode_users_openrouter_upstream_safety_identifier",
+          "columns": [
+            {
+              "expression": "openrouter_upstream_safety_identifier",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"kilocode_users\".\"openrouter_upstream_safety_identifier\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {

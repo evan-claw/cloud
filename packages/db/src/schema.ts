@@ -3145,7 +3145,7 @@ export const kiloclaw_image_catalog = pgTable(
     variant: text().notNull().default('default'),
     image_tag: text().notNull().unique(),
     image_digest: text(),
-    status: text().$type<'available' | 'deprecated' | 'disabled'>().notNull().default('available'),
+    status: text().$type<'available' | 'disabled'>().notNull().default('available'),
     description: text(),
     updated_by: text(),
     published_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
@@ -3178,3 +3178,27 @@ export const discord_gateway_listener = pgTable('discord_gateway_listener', {
 });
 
 export type DiscordGatewayListener = typeof discord_gateway_listener.$inferSelect;
+
+// KiloClaw Version Pins — one row per user, tracks who pinned them and why.
+// Both admins and end users can pin (distinguished by pinned_by).
+export const kiloclaw_version_pins = pgTable('kiloclaw_version_pins', {
+  id: uuid()
+    .default(sql`gen_random_uuid()`)
+    .primaryKey()
+    .notNull(),
+  user_id: text()
+    .notNull()
+    .references(() => kilocode_users.id, { onDelete: 'cascade' })
+    .unique(),
+  image_tag: text()
+    .notNull()
+    .references(() => kiloclaw_image_catalog.image_tag, { onDelete: 'restrict' }),
+  pinned_by: text()
+    .notNull()
+    .references(() => kilocode_users.id),
+  reason: text(),
+  created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+});
+
+export type KiloClawVersionPin = typeof kiloclaw_version_pins.$inferSelect;
