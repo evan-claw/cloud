@@ -23,31 +23,26 @@ const kilocodeDefaultModelSchema = z
     'kilocodeDefaultModel must start with kilocode/ and include a provider'
   );
 
+const channelsSchema = z
+  .object({
+    telegramBotToken: z.string().optional(),
+    discordBotToken: z.string().optional(),
+    slackBotToken: z.string().optional(),
+    slackAppToken: z.string().optional(),
+  })
+  .optional();
+
 const updateConfigSchema = z.object({
   envVars: z.record(z.string(), z.string()).optional(),
   secrets: z.record(z.string(), z.string()).optional(),
-  channels: z
-    .object({
-      telegramBotToken: z.string().optional(),
-      discordBotToken: z.string().optional(),
-      slackBotToken: z.string().optional(),
-      slackAppToken: z.string().optional(),
-    })
-    .optional(),
+  channels: channelsSchema,
   kilocodeDefaultModel: kilocodeDefaultModelSchema.nullable().optional(),
 });
 
 const provisionSchema = z.object({
   envVars: z.record(z.string(), z.string()).optional(),
   secrets: z.record(z.string(), z.string()).optional(),
-  channels: z
-    .object({
-      telegramBotToken: z.string().optional(),
-      discordBotToken: z.string().optional(),
-      slackBotToken: z.string().optional(),
-      slackAppToken: z.string().optional(),
-    })
-    .optional(),
+  channels: channelsSchema,
   kilocodeDefaultModel: kilocodeDefaultModelSchema,
 });
 
