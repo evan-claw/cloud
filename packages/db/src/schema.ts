@@ -3193,7 +3193,9 @@ export const kiloclaw_version_pins = pgTable('kiloclaw_version_pins', {
   image_tag: text()
     .notNull()
     .references(() => kiloclaw_image_catalog.image_tag, { onDelete: 'restrict' }),
-  pinned_by: text().notNull(),
+  pinned_by: text()
+    .notNull()
+    .references(() => kilocode_users.id),
   reason: text(),
   created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
   updated_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),

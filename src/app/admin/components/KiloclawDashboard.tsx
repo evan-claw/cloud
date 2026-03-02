@@ -6,8 +6,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KiloclawInstancesPage } from './KiloclawInstances/KiloclawInstancesPage';
 import { VersionsTab, PinsTab } from './KiloclawVersions/KiloclawVersionsPage';
 
-const VALID_TABS = ['instances', 'versions', 'pins'] as const;
-type Tab = (typeof VALID_TABS)[number];
+const VALID_TABS: readonly string[] = ['instances', 'versions', 'pins'];
+type Tab = 'instances' | 'versions' | 'pins';
+const isValidTab = (value: string | null): value is Tab =>
+  value !== null && VALID_TABS.includes(value);
 
 const tabTriggerClass =
   'text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none';
@@ -18,7 +20,7 @@ export function KiloclawDashboard() {
   const pathname = usePathname();
 
   const tabParam = searchParams.get('tab');
-  const activeTab: Tab = VALID_TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'instances';
+  const activeTab: Tab = isValidTab(tabParam) ? tabParam : 'instances';
 
   const onTabChange = useCallback(
     (value: string) => {

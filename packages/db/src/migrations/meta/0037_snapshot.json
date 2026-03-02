@@ -1,5 +1,5 @@
 {
-  "id": "38ba9ab0-f42b-4a09-a99b-e7802011f94b",
+  "id": "346c8139-0d84-459f-9080-24f87916a781",
   "prevId": "bec5782c-1827-4b47-b0ce-309628287e4e",
   "version": "7",
   "dialect": "postgresql",
@@ -6830,6 +6830,15 @@
           "columnsFrom": ["image_tag"],
           "columnsTo": ["image_tag"],
           "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk": {
+          "name": "kiloclaw_version_pins_pinned_by_kilocode_users_id_fk",
+          "tableFrom": "kiloclaw_version_pins",
+          "tableTo": "kilocode_users",
+          "columnsFrom": ["pinned_by"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

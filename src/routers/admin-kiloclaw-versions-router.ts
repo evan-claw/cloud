@@ -201,6 +201,7 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
   searchUsers: adminProcedure
     .input(z.object({ query: z.string().min(1) }))
     .query(async ({ input }) => {
+      const escaped = input.query.replace(/%/g, '\\%').replace(/_/g, '\\_');
       const result = await db
         .select({
           id: kilocode_users.id,
@@ -210,8 +211,8 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
         .from(kilocode_users)
         .where(
           or(
-            ilike(kilocode_users.google_user_email, `%${input.query}%`),
-            ilike(kilocode_users.google_user_name, `%${input.query}%`),
+            ilike(kilocode_users.google_user_email, `%${escaped}%`),
+            ilike(kilocode_users.google_user_name, `%${escaped}%`),
             eq(kilocode_users.id, input.query)
           )
         )

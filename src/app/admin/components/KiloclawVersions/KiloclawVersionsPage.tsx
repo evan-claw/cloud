@@ -60,14 +60,14 @@ export function VersionsTab() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'disabled'>('all');
   const limit = 25;
 
   const { data, isLoading } = useQuery(
     trpc.admin.kiloclawVersions.listVersions.queryOptions({
       offset: page * limit,
       limit,
-      status: statusFilter === 'all' ? undefined : (statusFilter as 'available' | 'disabled'),
+      status: statusFilter === 'all' ? undefined : statusFilter,
     })
   );
 
@@ -90,9 +90,11 @@ export function VersionsTab() {
       <div className="flex items-center gap-2">
         <Select
           value={statusFilter}
-          onValueChange={v => {
-            setStatusFilter(v);
-            setPage(0);
+          onValueChange={(v: string) => {
+            if (v === 'all' || v === 'available' || v === 'disabled') {
+              setStatusFilter(v);
+              setPage(0);
+            }
           }}
         >
           <SelectTrigger className="w-[180px]">
@@ -160,12 +162,11 @@ export function VersionsTab() {
                   <TableCell>
                     <Select
                       value={version.status}
-                      onValueChange={newStatus =>
-                        void updateStatus({
-                          imageTag: version.image_tag,
-                          status: newStatus as 'available' | 'disabled',
-                        })
-                      }
+                      onValueChange={newStatus => {
+                        if (newStatus === 'available' || newStatus === 'disabled') {
+                          void updateStatus({ imageTag: version.image_tag, status: newStatus });
+                        }
+                      }}
                     >
                       <SelectTrigger className="w-[130px]">
                         <SelectValue />
