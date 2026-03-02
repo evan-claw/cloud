@@ -82,18 +82,27 @@ export class ReviewCommentWebhookProcessor {
 
     // 3. Build owner object
     // For org owners, userId is temporarily set to the org ID; it gets resolved
-    // to the bot user ID before dispatch (see step 10 below).
-    const owner: Owner = integration.owned_by_organization_id
-      ? {
-          type: 'org',
-          id: integration.owned_by_organization_id,
-          userId: integration.owned_by_organization_id,
-        }
-      : {
-          type: 'user',
-          id: integration.owned_by_user_id || '',
-          userId: integration.owned_by_user_id || '',
-        };
+    // to the bot user ID before dispatch (see step 8 below).
+    let owner: Owner;
+    if (integration.owned_by_organization_id) {
+      owner = {
+        type: 'org',
+        id: integration.owned_by_organization_id,
+        userId: integration.owned_by_organization_id,
+      };
+    } else if (integration.owned_by_user_id) {
+      owner = {
+        type: 'user',
+        id: integration.owned_by_user_id,
+        userId: integration.owned_by_user_id,
+      };
+    } else {
+      errorExceptInTest(
+        '[ReviewCommentWebhookProcessor] Integration has no owner (neither user nor org)',
+        { integrationId: integration.id }
+      );
+      return;
+    }
 
     // 4. Get Auto Fix agent config
     const agentConfig = await getAgentConfigForOwner(owner, 'auto_fix', 'github');
