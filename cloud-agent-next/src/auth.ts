@@ -1,5 +1,11 @@
 import jwt from 'jsonwebtoken';
-import { verifyKiloToken, extractBearerToken } from '@kilocode/worker-utils';
+import {
+  verifyKiloToken,
+  extractBearerToken,
+  UserNotFoundError,
+  TokenRevokedError,
+} from '@kilocode/worker-utils';
+import type { WorkerDb } from '@kilocode/db/client';
 
 type StreamTicketPayload = {
   type: 'stream_ticket';
@@ -13,7 +19,8 @@ type StreamTicketPayload = {
 
 export async function validateKiloToken(
   authHeader: string | null,
-  secret: string
+  secret: string,
+  db: WorkerDb
 ): Promise<
   | { success: true; userId: string; token: string; botId?: string }
   | { success: false; error: string }
@@ -28,9 +35,12 @@ export async function validateKiloToken(
   }
 
   try {
-    const payload = await verifyKiloToken(token, secret);
+    const payload = await verifyKiloToken(token, secret, db);
     return { success: true, userId: payload.kiloUserId, token, botId: payload.botId };
   } catch (err) {
+    if (err instanceof UserNotFoundError || err instanceof TokenRevokedError) {
+      return { success: false, error: err.message };
+    }
     const message = err instanceof Error ? err.message : 'JWT verification failed';
     return { success: false, error: message };
   }

@@ -4,18 +4,25 @@ import { SignJWT } from 'jose';
 import type { AppEnv } from '../types';
 import { authMiddleware, internalApiMiddleware } from './middleware';
 import { KILO_TOKEN_VERSION, KILOCLAW_AUTH_COOKIE } from '../config';
+import { UserNotFoundError, TokenRevokedError, JwtVerificationError } from '@kilocode/worker-utils';
+import type * as WorkerUtilsModule from '@kilocode/worker-utils';
 
 vi.mock('../db', () => ({
   getWorkerDb: vi.fn(() => ({})),
-  findPepperByUserId: vi.fn(async (_db: unknown, userId: string) => ({
-    id: userId,
-    api_token_pepper: `pepper_for_${userId}`,
-  })),
 }));
+
+vi.mock('@kilocode/worker-utils', async importOriginal => {
+  const actual = await importOriginal<typeof WorkerUtilsModule>();
+  return {
+    ...actual,
+    verifyKiloToken: vi.fn(),
+  };
+});
+
+import { verifyKiloToken } from '@kilocode/worker-utils';
 
 const TEST_SECRET = 'test-nextauth-secret';
 
-/** Sign a test token with a pepper that matches the mock DB */
 async function signToken(payload: Record<string, unknown>, secret?: string) {
   return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
@@ -24,21 +31,14 @@ async function signToken(payload: Record<string, unknown>, secret?: string) {
     .sign(new TextEncoder().encode(secret ?? TEST_SECRET));
 }
 
-/** Helper: pepper value the mock DB returns for a given userId */
-function pepperFor(userId: string) {
-  return `pepper_for_${userId}`;
-}
-
 function createTestApp() {
   const app = new Hono<AppEnv>();
 
-  // Auth-protected route
   app.use('/protected/*', authMiddleware);
   app.get('/protected/whoami', c => {
     return c.json({ userId: c.get('userId'), authToken: c.get('authToken') });
   });
 
-  // Internal API route
   app.use('/internal/*', internalApiMiddleware);
   app.get('/internal/status', c => {
     return c.json({ ok: true });
@@ -51,7 +51,6 @@ async function jsonBody(res: Response): Promise<Record<string, unknown>> {
   return res.json();
 }
 
-/** Env bindings with HYPERDRIVE configured (required for pepper validation) */
 const ENV_WITH_HYPERDRIVE = {
   NEXTAUTH_SECRET: TEST_SECRET,
   HYPERDRIVE: { connectionString: 'postgresql://fake' },
@@ -62,6 +61,7 @@ describe('authMiddleware', () => {
 
   beforeEach(() => {
     app = createTestApp();
+    vi.mocked(verifyKiloToken).mockReset();
   });
 
   it('rejects when no NEXTAUTH_SECRET is configured', async () => {
@@ -72,15 +72,9 @@ describe('authMiddleware', () => {
   });
 
   it('rejects when HYPERDRIVE is not configured', async () => {
-    const token = await signToken({
-      kiloUserId: 'user_123',
-      apiTokenPepper: 'some_pepper',
-      version: KILO_TOKEN_VERSION,
-    });
-
     const res = await app.request(
       '/protected/whoami',
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Authorization: 'Bearer some-token' } },
       { NEXTAUTH_SECRET: TEST_SECRET } as never
     );
     expect(res.status).toBe(500);
@@ -98,8 +92,13 @@ describe('authMiddleware', () => {
   it('authenticates via Bearer header', async () => {
     const token = await signToken({
       kiloUserId: 'user_123',
-      apiTokenPepper: pepperFor('user_123'),
+      apiTokenPepper: 'pepper_abc',
       version: KILO_TOKEN_VERSION,
+    });
+    vi.mocked(verifyKiloToken).mockResolvedValueOnce({
+      version: 3,
+      kiloUserId: 'user_123',
+      apiTokenPepper: 'pepper_abc',
     });
 
     const res = await app.request(
@@ -116,8 +115,11 @@ describe('authMiddleware', () => {
   it('authenticates via cookie fallback', async () => {
     const token = await signToken({
       kiloUserId: 'user_cookie',
-      apiTokenPepper: pepperFor('user_cookie'),
       version: KILO_TOKEN_VERSION,
+    });
+    vi.mocked(verifyKiloToken).mockResolvedValueOnce({
+      version: 3,
+      kiloUserId: 'user_cookie',
     });
 
     const res = await app.request(
@@ -131,15 +133,11 @@ describe('authMiddleware', () => {
   });
 
   it('prefers Bearer header over cookie', async () => {
-    const bearerToken = await signToken({
+    const bearerToken = await signToken({ kiloUserId: 'user_bearer', version: KILO_TOKEN_VERSION });
+    const cookieToken = await signToken({ kiloUserId: 'user_cookie', version: KILO_TOKEN_VERSION });
+    vi.mocked(verifyKiloToken).mockResolvedValueOnce({
+      version: 3,
       kiloUserId: 'user_bearer',
-      apiTokenPepper: pepperFor('user_bearer'),
-      version: KILO_TOKEN_VERSION,
-    });
-    const cookieToken = await signToken({
-      kiloUserId: 'user_cookie',
-      apiTokenPepper: pepperFor('user_cookie'),
-      version: KILO_TOKEN_VERSION,
     });
 
     const res = await app.request(
@@ -157,12 +155,9 @@ describe('authMiddleware', () => {
     expect(body.userId).toBe('user_bearer');
   });
 
-  it('rejects when pepper does not match', async () => {
-    const token = await signToken({
-      kiloUserId: 'user_123',
-      apiTokenPepper: 'wrong_pepper',
-      version: KILO_TOKEN_VERSION,
-    });
+  it('rejects when pepper does not match (TokenRevokedError)', async () => {
+    const token = await signToken({ kiloUserId: 'user_123', version: KILO_TOKEN_VERSION });
+    vi.mocked(verifyKiloToken).mockRejectedValueOnce(new TokenRevokedError('user_123'));
 
     const res = await app.request(
       '/protected/whoami',
@@ -171,10 +166,42 @@ describe('authMiddleware', () => {
     );
     expect(res.status).toBe(401);
     const body = await jsonBody(res);
-    expect(body.error).toContain('revoked');
+    expect(body.error).toBe('Authentication failed');
+  });
+
+  it('rejects when user not found (UserNotFoundError)', async () => {
+    const token = await signToken({ kiloUserId: 'ghost', version: KILO_TOKEN_VERSION });
+    vi.mocked(verifyKiloToken).mockRejectedValueOnce(new UserNotFoundError('ghost'));
+
+    const res = await app.request(
+      '/protected/whoami',
+      { headers: { Authorization: `Bearer ${token}` } },
+      ENV_WITH_HYPERDRIVE
+    );
+    expect(res.status).toBe(401);
+    const body = await jsonBody(res);
+    expect(body.error).toBe('Authentication failed');
+  });
+
+  it('returns 500 on DB connectivity error', async () => {
+    const token = await signToken({ kiloUserId: 'user_123', version: KILO_TOKEN_VERSION });
+    vi.mocked(verifyKiloToken).mockRejectedValueOnce(new Error('connection refused'));
+
+    const res = await app.request(
+      '/protected/whoami',
+      { headers: { Authorization: `Bearer ${token}` } },
+      ENV_WITH_HYPERDRIVE
+    );
+    expect(res.status).toBe(500);
+    const body = await jsonBody(res);
+    expect(body.error).toContain('unavailable');
   });
 
   it('rejects invalid token', async () => {
+    vi.mocked(verifyKiloToken).mockRejectedValueOnce(
+      new JwtVerificationError(new Error('JWT parse error'))
+    );
+
     const res = await app.request(
       '/protected/whoami',
       { headers: { Authorization: 'Bearer not-a-jwt' } },
@@ -184,11 +211,10 @@ describe('authMiddleware', () => {
   });
 
   it('rejects token with wrong version', async () => {
-    const token = await signToken({
-      kiloUserId: 'user_123',
-      apiTokenPepper: pepperFor('user_123'),
-      version: KILO_TOKEN_VERSION - 1,
-    });
+    const token = await signToken({ kiloUserId: 'user_123', version: KILO_TOKEN_VERSION - 1 });
+    vi.mocked(verifyKiloToken).mockRejectedValueOnce(
+      new JwtVerificationError(new Error('invalid version'))
+    );
 
     const res = await app.request(
       '/protected/whoami',
@@ -201,8 +227,12 @@ describe('authMiddleware', () => {
   it('validates env match when WORKER_ENV is set', async () => {
     const token = await signToken({
       kiloUserId: 'user_123',
-      apiTokenPepper: pepperFor('user_123'),
       version: KILO_TOKEN_VERSION,
+      env: 'production',
+    });
+    vi.mocked(verifyKiloToken).mockResolvedValueOnce({
+      version: 3,
+      kiloUserId: 'user_123',
       env: 'production',
     });
 

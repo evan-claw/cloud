@@ -5,11 +5,13 @@ import { validateKiloToken } from '../auth.js';
 import { logger } from '../logger.js';
 import { buildTrpcErrorResponse } from '../trpc-error.js';
 import { extractProcedureName } from '../balance-validation.js';
+import { getWorkerDb } from '@kilocode/db/client';
 
 export const authMiddleware = createMiddleware<HonoContext>(
   async (c: Context<HonoContext>, next: Next) => {
     const authHeader = c.req.header('authorization');
-    const result = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+    const db = getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '');
+    const result = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET, db);
 
     if (!result.success) {
       logger.withFields({ error: result.error }).warn('Authentication failed');

@@ -28,6 +28,7 @@
     "wrangler": "catalog:"
   },
   "dependencies": {
+    "@kilocode/db": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",

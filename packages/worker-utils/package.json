@@ -13,7 +13,9 @@
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "dependencies": {
+    "@kilocode/db": "workspace:*",
     "aws4fetch": "catalog:",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "jose": "catalog:",
     "zod": "catalog:"

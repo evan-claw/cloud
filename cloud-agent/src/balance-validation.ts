@@ -1,4 +1,5 @@
 import { validateKiloToken } from './auth.js';
+import { getWorkerDb } from '@kilocode/db/client';
 import { DEFAULT_BACKEND_URL } from './constants.js';
 import { logger } from './logger.js';
 import type { Env } from './types.js';
@@ -28,7 +29,8 @@ export async function validateAuthAndBalance(
   env: Env
 ): Promise<BalanceValidationResult> {
   // Validate JWT first
-  const authResult = await validateKiloToken(authHeader, env.NEXTAUTH_SECRET);
+  const db = getWorkerDb(env.HYPERDRIVE?.connectionString ?? '');
+  const authResult = await validateKiloToken(authHeader, env.NEXTAUTH_SECRET, db);
   if (!authResult.success) {
     return { success: false, status: 401, message: authResult.error };
   }

@@ -6,6 +6,7 @@ import type { Env } from './types.js';
 import type { HonoContext } from './hono-context.js';
 import { logger, withLogTags } from './logger.js';
 import { validateStreamTicket, validateKiloToken } from './auth.js';
+import { getWorkerDb } from '@kilocode/db/client';
 import { createErrorHandler, createNotFoundHandler } from '@kilocode/worker-utils';
 import { createCallbackQueueConsumer } from './callbacks/index.js';
 import type { CallbackJob } from './callbacks/index.js';
@@ -94,7 +95,11 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
 
   const sessionId = c.req.param('sessionId');
   const authHeader = c.req.header('Authorization');
-  const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+  const authResult = await validateKiloToken(
+    authHeader ?? null,
+    c.env.NEXTAUTH_SECRET,
+    getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '')
+  );
   if (!authResult.success) {
     return c.text(authResult.error, 401);
   }
@@ -129,7 +134,11 @@ app.put(
     }
 
     const authHeader = c.req.header('Authorization');
-    const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+    const authResult = await validateKiloToken(
+      authHeader ?? null,
+      c.env.NEXTAUTH_SECRET,
+      getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '')
+    );
     if (!authResult.success) {
       return c.text(authResult.error, 401);
     }

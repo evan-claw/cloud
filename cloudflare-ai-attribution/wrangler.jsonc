@@ -14,6 +14,13 @@
     "ENVIRONMENT": "production",
   },
   "routes": ["ai-attribution.kiloapps.io/*"],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "624ec80650dd414199349f4e217ddb10",
+      "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

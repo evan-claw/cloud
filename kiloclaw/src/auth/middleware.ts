@@ -4,21 +4,26 @@ import { timingSafeEqual } from '@kilocode/encryption';
 import type { AppEnv } from '../types';
 import { KILOCLAW_AUTH_COOKIE } from '../config';
 import { validateKiloToken } from './jwt';
-import { getWorkerDb, findPepperByUserId } from '../db';
+import { getWorkerDb } from '../db';
 
 /**
  * Auth middleware for user-facing routes.
  *
  * 1. Extract JWT from Authorization: Bearer header
  * 2. Fallback: extract from kilo-worker-auth cookie
- * 3. Verify HS256 with NEXTAUTH_SECRET; check version and env
- * 4. Validate apiTokenPepper against DB via Hyperdrive
+ * 3. Get Hyperdrive DB connection
+ * 4. Verify HS256 with NEXTAUTH_SECRET; check version, env, and pepper via DB
  * 5. Set ctx.userId, ctx.authToken on context
  */
 export async function authMiddleware(c: Context<AppEnv>, next: Next) {
   const secret = c.env.NEXTAUTH_SECRET;
   if (!secret) {
     console.error('[auth] NEXTAUTH_SECRET not configured');
+    return c.json({ error: 'Server configuration error' }, 500);
+  }
+
+  if (!c.env.HYPERDRIVE?.connectionString) {
+    console.error('[auth] HYPERDRIVE not configured -- cannot validate token pepper');
     return c.json({ error: 'Server configuration error' }, 500);
   }
 
@@ -36,38 +41,19 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
     return c.json({ error: 'Authentication required' }, 401);
   }
 
-  const result = await validateKiloToken(token, secret, c.env.WORKER_ENV);
+  const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+
+  let result: Awaited<ReturnType<typeof validateKiloToken>>;
+  try {
+    result = await validateKiloToken(token, secret, c.env.WORKER_ENV, db);
+  } catch (err) {
+    console.error('[auth] Authentication service error:', err);
+    return c.json({ error: 'Authentication service unavailable' }, 500);
+  }
+
   if (!result.success) {
     console.warn('[auth] Token validation failed:', result.error);
     return c.json({ error: 'Authentication failed' }, 401);
-  }
-
-  // Validate pepper against DB via Hyperdrive.
-  // Both the JWT pepper and DB pepper must match:
-  // - JWT null + DB null: user never rotated, valid
-  // - JWT string + DB same string: pepper matches, valid
-  // - JWT null + DB string: pre-rotation token used after rotation, revoked
-  // - JWT string + DB different string: wrong pepper, revoked
-  if (!c.env.HYPERDRIVE?.connectionString) {
-    console.error('[auth] HYPERDRIVE not configured -- cannot validate token pepper');
-    return c.json({ error: 'Server configuration error' }, 500);
-  }
-
-  try {
-    const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
-    const user = await findPepperByUserId(db, result.userId);
-    if (!user) {
-      console.warn('[auth] User not found in DB:', result.userId);
-      return c.json({ error: 'User not found' }, 401);
-    }
-    const dbPepper = user.api_token_pepper ?? null;
-    if (dbPepper !== result.pepper) {
-      console.warn('[auth] Pepper mismatch for user:', result.userId);
-      return c.json({ error: 'Token revoked' }, 401);
-    }
-  } catch (err) {
-    console.error('[auth] Pepper validation failed:', err);
-    return c.json({ error: 'Authentication service unavailable' }, 500);
   }
 
   c.set('userId', result.userId);

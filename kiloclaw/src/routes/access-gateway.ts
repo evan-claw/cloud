@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { AppEnv } from '../types';
 import { KILOCLAW_AUTH_COOKIE, KILOCLAW_AUTH_COOKIE_MAX_AGE } from '../config';
+import type { WorkerDb } from '@kilocode/db/client';
 import { getWorkerDb, validateAndRedeemAccessCode, findPepperByUserId } from '../db';
 import { signKiloToken, validateKiloToken } from '../auth/jwt';
 import { deriveGatewayToken } from '../auth/gateway-token';
@@ -141,22 +142,23 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Check if the user already has a valid auth cookie.
- * Returns true if the cookie JWT is valid and the userId matches.
- *
- * Note: this only checks the JWT signature/expiry/version — it does NOT
- * validate the pepper against the DB. If the pepper was rotated, authMiddleware
- * will catch it on the next real request and return 401.
+ * Check if the user already has a valid auth cookie, including pepper verification.
+ * Returns true if the cookie JWT is valid, the userId matches, and the pepper is current.
  */
 async function hasValidCookie(
   cookieValue: string | undefined,
   userId: string,
   secret: string,
-  workerEnv: string | undefined
+  workerEnv: string | undefined,
+  db: WorkerDb
 ): Promise<boolean> {
   if (!cookieValue) return false;
-  const result = await validateKiloToken(cookieValue, secret, workerEnv);
-  return result.success && result.userId === userId;
+  try {
+    const result = await validateKiloToken(cookieValue, secret, workerEnv, db);
+    return result.success && result.userId === userId;
+  } catch {
+    return false;
+  }
 }
 
 accessGatewayRoutes.get('/kilo-access-gateway', async c => {
@@ -167,9 +169,11 @@ accessGatewayRoutes.get('/kilo-access-gateway', async c => {
 
   // If the user already has a valid cookie, derive the gateway token and redirect
   const secret = c.env.NEXTAUTH_SECRET;
-  if (secret) {
+  const connectionString = c.env.HYPERDRIVE?.connectionString;
+  if (secret && connectionString) {
     const cookie = getCookie(c, KILOCLAW_AUTH_COOKIE);
-    if (await hasValidCookie(cookie, userId, secret, c.env.WORKER_ENV)) {
+    const db = getWorkerDb(connectionString);
+    if (await hasValidCookie(cookie, userId, secret, c.env.WORKER_ENV, db)) {
       const redirectUrl = await buildRedirectUrl(userId, c.env.GATEWAY_TOKEN_SECRET);
       return c.redirect(redirectUrl);
     }

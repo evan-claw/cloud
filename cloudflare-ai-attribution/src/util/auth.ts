@@ -1,5 +1,12 @@
 import { createMiddleware } from 'hono/factory';
-import { verifyKiloToken, extractBearerToken } from '@kilocode/worker-utils';
+import {
+  verifyKiloToken,
+  extractBearerToken,
+  UserNotFoundError,
+  TokenRevokedError,
+} from '@kilocode/worker-utils';
+import { getWorkerDb } from '@kilocode/db/client';
+import type { WorkerDb } from '@kilocode/db/client';
 import { logger } from './logger';
 import type { HonoContext } from '../ai-attribution.worker';
 import { OrganizationJWTPayload } from '../schemas';
@@ -9,7 +16,8 @@ import { OrganizationJWTPayload } from '../schemas';
  */
 export async function validateKiloToken(
   authHeader: string | null,
-  secret: string
+  secret: string,
+  db: WorkerDb
 ): Promise<
   | ({ success: true; token: string } & Pick<
       OrganizationJWTPayload,
@@ -23,7 +31,7 @@ export async function validateKiloToken(
   }
 
   try {
-    const raw = await verifyKiloToken(token, secret);
+    const raw = await verifyKiloToken(token, secret, db);
     const payload = OrganizationJWTPayload.parse(raw);
 
     return {
@@ -33,7 +41,10 @@ export async function validateKiloToken(
       organizationId: payload.organizationId,
       organizationRole: payload.organizationRole,
     };
-  } catch {
+  } catch (err) {
+    if (err instanceof UserNotFoundError || err instanceof TokenRevokedError) {
+      return { success: false, error: err.message };
+    }
     return { success: false, error: 'Invalid or expired token' };
   }
 }
@@ -42,9 +53,11 @@ export async function validateKiloToken(
  * Hono middleware for authenticating requests with Kilo API tokens
  */
 export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
+  const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
   const result = await validateKiloToken(
     c.req.header('Authorization') ?? null,
-    await c.env.NEXTAUTH_SECRET.get()
+    await c.env.NEXTAUTH_SECRET.get(),
+    db
   );
 
   if (!result.success) {
