@@ -105,6 +105,7 @@ export function DiscordIntegrationDetails({
   };
 
   const handleModelChange = (modelSlug: string) => {
+    const previousModel = selectedModel;
     setSelectedModel(modelSlug);
     updateModel.mutate(
       { modelSlug, organizationId },
@@ -113,12 +114,14 @@ export function DiscordIntegrationDetails({
           if (result.success) {
             toast.success('Model updated successfully');
           } else {
+            setSelectedModel(previousModel);
             toast.error('Failed to update model', {
               description: result.error,
             });
           }
         },
         onError: err => {
+          setSelectedModel(previousModel);
           toast.error('Failed to update model', {
             description: err.message,
           });
