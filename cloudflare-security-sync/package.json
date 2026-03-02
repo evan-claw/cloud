@@ -6,6 +6,7 @@
     "dev": "wrangler dev --env dev",
     "deploy:prod": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
+    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts"
   },
@@ -15,6 +16,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@kilocode/eslint-config": "workspace:*",
     "@types/node": "^22",
     "typescript": "catalog:",
     "wrangler": "^4.61.0"
