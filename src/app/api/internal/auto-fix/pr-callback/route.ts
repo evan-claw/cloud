@@ -31,6 +31,7 @@ import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { postIssueComment } from '@/lib/auto-fix/github/post-comment';
 import { generateGitHubInstallationToken } from '@/lib/integrations/platforms/github/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
+import { handleCommentReply } from '@/lib/auto-fix/github/handle-comment-reply';
 
 type LegacyCallbackPayload = {
   sessionId: string;
@@ -132,26 +133,15 @@ export async function POST(req: NextRequest) {
       });
 
       if (ticket.trigger_source === 'review_comment') {
-        const commentReplyResponse = await fetch(
-          new URL('/api/internal/auto-fix/comment-reply', req.url),
-          {
-            method: 'POST',
-            headers: {
-              'X-Internal-Secret': INTERNAL_API_SECRET,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              ticketId,
-              sessionId,
-              outcome: 'failed',
-              errorMessage: errorMessage || `Auto-fix execution ${status}`,
-            }),
-          }
-        );
+        const replyResult = await handleCommentReply({
+          ticketId,
+          sessionId,
+          outcome: 'failed',
+          errorMessage: errorMessage || `Auto-fix execution ${status}`,
+        });
 
-        if (!commentReplyResponse.ok) {
-          const replyError = await commentReplyResponse.text();
-          throw new Error(`Failed to post review-comment failure reply: ${replyError}`);
+        if (!replyResult.ok) {
+          throw new Error(`Failed to post review-comment failure reply: ${replyResult.error}`);
         }
       } else {
         // Update ticket to failed
@@ -218,26 +208,15 @@ export async function POST(req: NextRequest) {
     });
 
     if (ticket.trigger_source === 'review_comment') {
-      const commentReplyResponse = await fetch(
-        new URL('/api/internal/auto-fix/comment-reply', req.url),
-        {
-          method: 'POST',
-          headers: {
-            'X-Internal-Secret': INTERNAL_API_SECRET,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            ticketId,
-            sessionId,
-            outcome: 'success',
-            prBranch: lastSeenBranch,
-          }),
-        }
-      );
+      const replyResult = await handleCommentReply({
+        ticketId,
+        sessionId,
+        outcome: 'success',
+        prBranch: lastSeenBranch,
+      });
 
-      if (!commentReplyResponse.ok) {
-        const replyError = await commentReplyResponse.text();
-        throw new Error(`Failed to post review-comment success reply: ${replyError}`);
+      if (!replyResult.ok) {
+        throw new Error(`Failed to post review-comment success reply: ${replyResult.error}`);
       }
     } else {
       await createIssueFixPullRequest(req, {
