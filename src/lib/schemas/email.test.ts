@@ -3,6 +3,8 @@ import {
   validateMagicLinkSignupEmail,
   magicLinkSignupEmailSchema,
   MAGIC_LINK_EMAIL_ERRORS,
+  hasBlockedTLD,
+  BLOCKED_SIGNUP_TLDS,
 } from './email';
 
 describe('validateMagicLinkSignupEmail', () => {
@@ -42,6 +44,26 @@ describe('validateMagicLinkSignupEmail', () => {
     // Uppercase check happens first, even for kilocode.ai
     const result = validateMagicLinkSignupEmail('User+tag@kilocode.ai');
     expect(result).toEqual({ valid: false, error: MAGIC_LINK_EMAIL_ERRORS.LOWERCASE });
+  });
+
+  it('should reject email with blocked TLD .shop', () => {
+    const result = validateMagicLinkSignupEmail('user@example.shop');
+    expect(result).toEqual({ valid: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+  });
+
+  it('should reject email with blocked TLD .top', () => {
+    const result = validateMagicLinkSignupEmail('user@example.top');
+    expect(result).toEqual({ valid: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+  });
+
+  it('should reject email with blocked TLD .xyz', () => {
+    const result = validateMagicLinkSignupEmail('user@example.xyz');
+    expect(result).toEqual({ valid: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+  });
+
+  it('should not reject email with allowed TLD', () => {
+    const result = validateMagicLinkSignupEmail('user@example.com');
+    expect(result).toEqual({ valid: true, error: null });
   });
 });
 
@@ -84,5 +106,79 @@ describe('magicLinkSignupEmailSchema', () => {
     if (!result.success) {
       expect(result.error.issues[0].message).toBe('Email address cannot contain a + character');
     }
+  });
+
+  it('should reject email with blocked TLD .shop', () => {
+    const result = magicLinkSignupEmailSchema.safeParse('user@example.shop');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe(
+        'Signups from this email domain are not currently supported.'
+      );
+    }
+  });
+
+  it('should reject email with blocked TLD .top', () => {
+    const result = magicLinkSignupEmailSchema.safeParse('user@example.top');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe(
+        'Signups from this email domain are not currently supported.'
+      );
+    }
+  });
+
+  it('should reject email with blocked TLD .xyz', () => {
+    const result = magicLinkSignupEmailSchema.safeParse('user@example.xyz');
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe(
+        'Signups from this email domain are not currently supported.'
+      );
+    }
+  });
+});
+
+describe('hasBlockedTLD', () => {
+  it('should block .shop TLD', () => {
+    expect(hasBlockedTLD('user@example.shop')).toBe(true);
+  });
+
+  it('should block .top TLD', () => {
+    expect(hasBlockedTLD('user@example.top')).toBe(true);
+  });
+
+  it('should block .xyz TLD', () => {
+    expect(hasBlockedTLD('user@example.xyz')).toBe(true);
+  });
+
+  it('should be case-insensitive', () => {
+    expect(hasBlockedTLD('user@example.SHOP')).toBe(true);
+    expect(hasBlockedTLD('user@example.Top')).toBe(true);
+    expect(hasBlockedTLD('user@example.XYZ')).toBe(true);
+  });
+
+  it('should not block .com TLD', () => {
+    expect(hasBlockedTLD('user@example.com')).toBe(false);
+  });
+
+  it('should not block .org TLD', () => {
+    expect(hasBlockedTLD('user@example.org')).toBe(false);
+  });
+
+  it('should not block domains that merely contain a blocked TLD as a substring', () => {
+    // "workshop.com" contains "shop" but is not a .shop TLD
+    expect(hasBlockedTLD('user@workshop.com')).toBe(false);
+    // "laptop.com" contains "top" but is not a .top TLD
+    expect(hasBlockedTLD('user@laptop.com')).toBe(false);
+  });
+
+  it('should block subdomains of blocked TLDs', () => {
+    expect(hasBlockedTLD('user@mail.example.shop')).toBe(true);
+    expect(hasBlockedTLD('user@subdomain.example.top')).toBe(true);
+  });
+
+  it('should contain the expected TLDs', () => {
+    expect(BLOCKED_SIGNUP_TLDS).toEqual(['.shop', '.top', '.xyz']);
   });
 });

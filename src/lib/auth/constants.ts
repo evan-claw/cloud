@@ -1,5 +1,6 @@
 export type AuthErrorType =
   | 'BLOCKED'
+  | 'BLOCKED-TLD'
   | 'DIFFERENT-OAUTH'
   | 'ACCOUNT-ALREADY-LINKED'
   | 'PROVIDER-ALREADY-LINKED'

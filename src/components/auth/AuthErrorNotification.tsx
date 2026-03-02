@@ -59,6 +59,15 @@ export function AuthErrorNotification({ error }: { error: string }) {
       </div>
     );
 
+  if (error === 'BLOCKED-TLD')
+    return (
+      <div data-error-notification>
+        <ErrorNotificationBox title="Unsupported Email Domain">
+          Signups from this email domain are not currently supported.
+        </ErrorNotificationBox>
+      </div>
+    );
+
   return (
     <div data-error-notification>
       <ErrorNotificationBox title="Error">

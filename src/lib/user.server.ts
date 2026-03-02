@@ -63,6 +63,7 @@ import type { UUID } from 'node:crypto';
 import { logExceptInTest, sentryLogger } from '@/lib/utils.server';
 import { processSSOUserLogin } from '@/lib/sso-user';
 import { getLowerDomainFromEmail } from '@/lib/utils';
+import { hasBlockedTLD } from '@/lib/schemas/email';
 import { z } from 'zod';
 import { v5 as uuidv5 } from 'uuid';
 
@@ -441,6 +442,15 @@ const authOptions: NextAuthOptions = {
           if (primaryEmailDomain) {
             domainToCheck = primaryEmailDomain;
           }
+        }
+
+        // Block new signups from abusive TLDs (existing users can still sign in)
+        if (!existingUser && hasBlockedTLD(accountInfo.google_user_email)) {
+          sentryLogger('auth', 'warning')(
+            `SECURITY: Blocked TLD signup: ${accountInfo.google_user_email}`,
+            accountInfo
+          );
+          return redirectUrlForCode('BLOCKED-TLD', accountInfo.google_user_email);
         }
 
         // we don't need to check gmail domains for SSO for now.

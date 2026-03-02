@@ -196,5 +196,52 @@ describe('POST /api/auth/magic-link', () => {
       expect(data.success).toBe(true);
       expect(mockCreateMagicLinkToken).toHaveBeenCalledWith('user@example.com');
     });
+
+    it('should reject .shop TLD email for new users', async () => {
+      mockFindUserByEmail.mockResolvedValue(undefined); // New user
+
+      const response = await POST(createRequest({ email: 'user@example.shop' }));
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({ success: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+      expect(mockCreateMagicLinkToken).not.toHaveBeenCalled();
+    });
+
+    it('should reject .top TLD email for new users', async () => {
+      mockFindUserByEmail.mockResolvedValue(undefined); // New user
+
+      const response = await POST(createRequest({ email: 'user@example.top' }));
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({ success: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+      expect(mockCreateMagicLinkToken).not.toHaveBeenCalled();
+    });
+
+    it('should reject .xyz TLD email for new users', async () => {
+      mockFindUserByEmail.mockResolvedValue(undefined); // New user
+
+      const response = await POST(createRequest({ email: 'user@example.xyz' }));
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data).toEqual({ success: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD });
+      expect(mockCreateMagicLinkToken).not.toHaveBeenCalled();
+    });
+
+    it('should allow blocked TLD email for existing users (sign-in)', async () => {
+      mockFindUserByEmail.mockResolvedValue({
+        id: 'existing-user-id',
+        google_user_email: 'user@example.shop',
+      } as Awaited<ReturnType<typeof findUserByEmail>>);
+
+      const response = await POST(createRequest({ email: 'user@example.shop' }));
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(mockCreateMagicLinkToken).toHaveBeenCalledWith('user@example.shop');
+    });
   });
 });

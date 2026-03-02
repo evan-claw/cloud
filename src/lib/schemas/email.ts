@@ -11,7 +11,14 @@ export const emailSchema = z.object({
 export const MAGIC_LINK_EMAIL_ERRORS = {
   LOWERCASE: 'EMAIL-MUST-BE-LOWERCASE',
   NO_PLUS: 'EMAIL-CANNOT-CONTAIN-PLUS',
+  BLOCKED_TLD: 'BLOCKED-TLD',
 } as const;
+
+/**
+ * TLDs blocked from new signups due to abuse.
+ * Add new entries here to block additional TLDs.
+ */
+export const BLOCKED_SIGNUP_TLDS = ['.shop', '.top', '.xyz'] as const;
 
 /**
  * Domain that is allowed to use + in email addresses for internal testing.
@@ -31,9 +38,18 @@ function isKilocodeDomain(email: string): boolean {
 }
 
 /**
+ * Checks if an email uses a TLD that is blocked from new signups.
+ */
+export function hasBlockedTLD(email: string): boolean {
+  const lower = email.toLowerCase();
+  return BLOCKED_SIGNUP_TLDS.some(tld => lower.endsWith(tld));
+}
+
+/**
  * Validates that an email is suitable for magic link signup:
  * - Must be lowercase
  * - Must not contain a + character (except for @kilocode.ai emails)
+ * - Must not use a blocked TLD (.shop, .top, .xyz)
  *
  * This is NOT enforced during sign-in to existing accounts.
  * Returns error codes that can be displayed via AuthErrorNotification.
@@ -48,6 +64,9 @@ export function validateMagicLinkSignupEmail(email: string): {
   if (email.includes('+') && !isKilocodeDomain(email)) {
     return { valid: false, error: MAGIC_LINK_EMAIL_ERRORS.NO_PLUS };
   }
+  if (hasBlockedTLD(email)) {
+    return { valid: false, error: MAGIC_LINK_EMAIL_ERRORS.BLOCKED_TLD };
+  }
   return { valid: true, error: null };
 }
 
@@ -58,4 +77,7 @@ export const magicLinkSignupEmailSchema = z
   })
   .refine(email => !email.includes('+') || isKilocodeDomain(email), {
     message: 'Email address cannot contain a + character',
+  })
+  .refine(email => !hasBlockedTLD(email), {
+    message: 'Signups from this email domain are not currently supported.',
   });

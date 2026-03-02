@@ -7,7 +7,7 @@ import { captureException } from '@sentry/nextjs';
 import type { AuthProviderId } from '@/lib/auth/provider-metadata';
 import { ProdNonSSOAuthProviders } from '@/lib/auth/provider-metadata';
 import { useSignInHint, type SignInHint } from '@/hooks/useSignInHint';
-import { emailSchema, validateMagicLinkSignupEmail } from '@/lib/schemas/email';
+import { emailSchema, validateMagicLinkSignupEmail, hasBlockedTLD } from '@/lib/schemas/email';
 import { sendMagicLink } from '@/lib/auth/send-magic-link';
 import type { SSOOrganizationsResponse } from '@/lib/schemas/sso-organizations';
 
@@ -198,6 +198,10 @@ export function useSignInFlow({
         error: result.error.issues[0]?.message || 'Invalid email',
       };
     }
+    // Block signups from abusive TLDs across all providers
+    if (isSignUp && hasBlockedTLD(email)) {
+      return { isValid: false, error: 'Signups from this email domain are not currently supported.' };
+    }
     // For signup pages with magic link selected, validate email restrictions
     // Only show this on explicit signup pages (isSignUp=true) when user has selected email provider
     // Don't show on sign-in pages to avoid confusing existing users
@@ -290,6 +294,14 @@ export function useSignInFlow({
 
       let providersToShow: AuthProviderId[];
       if (isNewUser) {
+        // Block new signups from abusive TLDs entirely
+        if (hasBlockedTLD(email)) {
+          setIsVerifying(false);
+          setShowTurnstile(false);
+          setError('Signups from this email domain are not currently supported.');
+          setFlowState('landing');
+          return;
+        }
         // New user: show all available providers (they can choose any to create account)
         providersToShow = [...ProdNonSSOAuthProviders];
         // For new users (signup), filter out magic link if email is invalid
