@@ -32,7 +32,7 @@ import type {
   MCPServerConfig,
 } from './persistence/types.js';
 import { MetadataSchema } from './persistence/schemas.js';
-import { withDORetry } from './utils/do-retry.js';
+import { withDORetry } from '@kilocode/worker-utils';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
 import type { EncryptedSecrets, Images } from './router/schemas.js';
 
