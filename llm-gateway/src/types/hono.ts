@@ -6,6 +6,7 @@ import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from './request';
 import type { Provider, SecretsBundle } from '../lib/providers';
 import type { BYOKResult } from '../lib/byok';
+import type { FraudDetectionHeaders } from '../lib/extract-headers';
 
 // Hono app context — bindings + all middleware variables.
 export type HonoContext = {
@@ -46,4 +47,16 @@ export type Variables = {
   userByok: BYOKResult[] | null;
   customLlm: CustomLlm | null;
   secrets: SecretsBundle;
+
+  // request-transform.ts — extracted from request headers, stored for Phase 6 background tasks
+  fraudHeaders: FraudDetectionHeaders;
+  projectId: string | null;
+  taskId: string | null;
+  editorName: string | null;
+  machineId: string | null;
+  xKiloCodeVersion: string | null;
+  numericKiloCodeVersion: number;
+
+  // request-transform.ts — extra headers to forward to the upstream provider
+  extraHeaders: Record<string, string>;
 };

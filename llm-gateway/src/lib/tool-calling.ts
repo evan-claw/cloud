@@ -94,6 +94,8 @@ function deduplicateToolUses(assistantMessage: AssistantMessage) {
   });
 }
 
+export const ENABLE_TOOL_REPAIR = true;
+
 export function repairTools(requestToMutate: OpenRouterChatCompletionRequest) {
   if (!Array.isArray(requestToMutate.messages)) return;
   const groups = groupByAssistantMessage(requestToMutate.messages);

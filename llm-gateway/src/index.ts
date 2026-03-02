@@ -12,6 +12,9 @@ import { freeModelRateLimitMiddleware } from './middleware/free-model-rate-limit
 import { promotionLimitMiddleware } from './middleware/promotion-limit';
 import { logFreeModelUsageMiddleware } from './middleware/log-free-model-usage';
 import { providerResolutionMiddleware } from './middleware/provider-resolution';
+import { requestValidationMiddleware } from './middleware/request-validation';
+import { balanceAndOrgCheckMiddleware } from './middleware/balance-and-org';
+import { requestTransformMiddleware } from './middleware/request-transform';
 
 const app = new Hono<HonoContext>();
 
@@ -34,7 +37,10 @@ function registerChatCompletions(path: string) {
     promotionLimitMiddleware,
     logFreeModelUsageMiddleware,
     providerResolutionMiddleware,
-    // Remaining middleware (request validation, balance, transform, proxy) added in later phases.
+    requestValidationMiddleware,
+    balanceAndOrgCheckMiddleware,
+    requestTransformMiddleware,
+    // proxyHandler added in Phase 5
     notImplemented
   );
 }
