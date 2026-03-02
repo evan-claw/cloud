@@ -37,7 +37,7 @@ declare type ExecutionContext = {
 };
 
 declare type CloudflareEnv = {
-  SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL: string;
+  SECURITY_SYNC_BETTERSTACK_HEARTBEAT_URL: string | undefined;
   SYNC_QUEUE: Queue<import('./src/index').SecuritySyncMessage>;
   HYPERDRIVE: Hyperdrive;
   GIT_TOKEN_SERVICE: GitTokenService;

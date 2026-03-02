@@ -67,7 +67,10 @@ async function enqueueOwners(
   return messages.length;
 }
 
-async function sendBetterStackHeartbeat(heartbeatUrl: string, failed: boolean): Promise<void> {
+async function sendBetterStackHeartbeat(
+  heartbeatUrl: string | undefined,
+  failed: boolean
+): Promise<void> {
   if (!heartbeatUrl) return;
   const url = failed ? `${heartbeatUrl}/fail` : heartbeatUrl;
   try {
