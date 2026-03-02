@@ -912,10 +912,10 @@ export class SessionService {
           if (
             event.streamEventType === 'kilocode' &&
             event.payload?.event === 'session_created' &&
-            event.payload?.sessionId &&
+            typeof event.payload?.sessionId === 'string' &&
             !capturedKiloSessionId
           ) {
-            capturedKiloSessionId = String(event.payload.sessionId);
+            capturedKiloSessionId = event.payload.sessionId;
             logger.setTags({ kiloSessionId: capturedKiloSessionId });
           }
           yield event;

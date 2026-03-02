@@ -19,7 +19,8 @@ async function proxyToContainer(
   const method = init?.method ?? 'GET';
   console.log(`${CONTAINER_LOG} proxyToContainer: ${method} ${path}`);
   if (init?.body) {
-    console.log(`${CONTAINER_LOG} proxyToContainer: body=${String(init.body).slice(0, 300)}`);
+    const bodyStr = typeof init.body === 'string' ? init.body : '[non-string body]';
+    console.log(`${CONTAINER_LOG} proxyToContainer: body=${bodyStr.slice(0, 300)}`);
   }
   try {
     const response = await container.fetch(`http://container${path}`, init);

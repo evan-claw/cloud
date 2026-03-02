@@ -76,7 +76,7 @@ function createTarStream(paths: Array<string>): TarStream | undefined {
     },
   });
 
-  return { stream, kill: () => proc.kill() };
+  return { stream: stream as ReadableStream<Uint8Array>, kill: () => proc.kill() };
 }
 
 export function createLogUploader(opts: LogUploaderOpts): LogUploader {

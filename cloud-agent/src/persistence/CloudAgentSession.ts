@@ -1397,12 +1397,13 @@ export class CloudAgentSession extends DurableObject {
   }
 
   private getGitHubTokenService(): GitHubTokenService {
+    const env = this.env as unknown as WorkerEnv;
     return new GitHubTokenService({
-      GITHUB_TOKEN_CACHE: Reflect.get(this.env, 'GITHUB_TOKEN_CACHE'),
-      GITHUB_APP_ID: Reflect.get(this.env, 'GITHUB_APP_ID'),
-      GITHUB_APP_PRIVATE_KEY: Reflect.get(this.env, 'GITHUB_APP_PRIVATE_KEY'),
-      GITHUB_LITE_APP_ID: Reflect.get(this.env, 'GITHUB_LITE_APP_ID'),
-      GITHUB_LITE_APP_PRIVATE_KEY: Reflect.get(this.env, 'GITHUB_LITE_APP_PRIVATE_KEY'),
+      GITHUB_TOKEN_CACHE: env.GITHUB_TOKEN_CACHE,
+      GITHUB_APP_ID: env.GITHUB_APP_ID,
+      GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY,
+      GITHUB_LITE_APP_ID: env.GITHUB_LITE_APP_ID,
+      GITHUB_LITE_APP_PRIVATE_KEY: env.GITHUB_LITE_APP_PRIVATE_KEY,
     });
   }
 

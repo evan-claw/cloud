@@ -1021,7 +1021,7 @@ describe('SessionService', () => {
           PASSWORD: 'p@ssw0rd!#$%',
           JSON_CONFIG: '{"key":"value with spaces"}',
           PATH_WITH_COLON: '/usr/bin:/usr/local/bin',
-        }),
+        }) as unknown,
         cwd: `/workspace/org/user/sessions/${sessionId}`,
       });
     });
@@ -1097,7 +1097,7 @@ describe('SessionService', () => {
     };
 
     const getConfigContent = (sandboxCreateSession: ReturnType<typeof vi.fn>) => {
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
       return JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
         permission: { question?: string; external_directory?: Record<string, string> };
       };
@@ -1183,7 +1183,7 @@ describe('SessionService', () => {
         createdOnPlatform: 'code-review',
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
       const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
         autoApproval?: {
           execute?: {
@@ -1244,7 +1244,7 @@ describe('SessionService', () => {
         expect.objectContaining({
           env: expect.objectContaining({
             GH_TOKEN: 'ghp_test123',
-          }),
+          }) as unknown,
         })
       );
     });
@@ -1294,7 +1294,7 @@ describe('SessionService', () => {
         expect.objectContaining({
           env: expect.objectContaining({
             GH_TOKEN: userProvidedToken,
-          }),
+          }) as unknown,
         })
       );
     });
@@ -1334,7 +1334,7 @@ describe('SessionService', () => {
         env: mockEnv,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
 
@@ -1373,7 +1373,7 @@ describe('SessionService', () => {
         env: mockEnv,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
 
@@ -1413,7 +1413,7 @@ describe('SessionService', () => {
       });
 
       // Should NOT set GH_TOKEN because this is not a GitHub repo (no githubRepo)
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
   });
@@ -1717,8 +1717,10 @@ describe('SessionService', () => {
         mcpServers,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp: Record<string, unknown>;
+      };
       expect(configContent.mcp).toBeDefined();
       expect(configContent.mcp.puppeteer).toEqual({
         type: 'local',
@@ -1760,8 +1762,10 @@ describe('SessionService', () => {
         mcpServers: {}, // Empty object
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp?: Record<string, unknown>;
+      };
       expect(configContent.mcp).toBeUndefined();
     });
 
@@ -1812,8 +1816,10 @@ describe('SessionService', () => {
         mcpServers,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp: Record<string, unknown>;
+      };
       // MCP configs are passed through directly — no conversion
       expect(configContent.mcp['server-1']).toEqual({
         type: 'local',
@@ -1870,8 +1876,10 @@ describe('SessionService', () => {
         mcpServers,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp: Record<string, unknown>;
+      };
       expect(configContent.mcp['disabled-server']).toEqual({
         type: 'local',
         command: ['test'],
@@ -2195,8 +2203,10 @@ describe('SessionService', () => {
       });
 
       // Verify MCP config is passed through directly in KILO_CONFIG_CONTENT
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp: Record<string, unknown>;
+      };
       expect(configContent.mcp).toBeDefined();
       expect(configContent.mcp.puppeteer).toEqual({
         type: 'local',
@@ -2252,8 +2262,8 @@ describe('SessionService', () => {
         env: expect.objectContaining({
           API_KEY: 'restored-key',
           DATABASE_URL: 'postgres://restored',
-        }),
-        cwd: expect.any(String),
+        }) as unknown,
+        cwd: expect.any(String) as unknown,
       });
     });
 
@@ -2304,16 +2314,18 @@ describe('SessionService', () => {
       // Verify envVars restored
       expect(sandboxCreateSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          env: expect.objectContaining({ API_KEY: 'test' }),
+          env: expect.objectContaining({ API_KEY: 'test' }) as unknown,
         })
       );
 
       // Verify setup commands re-run (because repo didn't exist, triggering reclone)
-      expect(fakeSession.exec).toHaveBeenCalledWith('npm install', expect.any(Object));
+      expect(fakeSession.exec).toHaveBeenCalledWith('npm install', expect.any(Object) as unknown);
 
       // Verify MCP config passed through directly in KILO_CONFIG_CONTENT
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
-      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT);
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as { env: Record<string, string> };
+      const configContent = JSON.parse(callArgs.env.KILO_CONFIG_CONTENT) as {
+        mcp: Record<string, unknown>;
+      };
       expect(configContent.mcp).toBeDefined();
       expect(configContent.mcp.test).toEqual({
         type: 'local',

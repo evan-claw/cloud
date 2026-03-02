@@ -42,8 +42,7 @@
   "devDependencies": {
     "@cloudflare/containers": "0.0.30",
     "@cloudflare/vitest-pool-workers": "^0.12.8",
-    "@eslint/eslintrc": "catalog:",
-    "@eslint/js": "catalog:",
+    "@kilocode/eslint-config": "workspace:*",
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
@@ -52,7 +51,6 @@
     "eslint": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
-    "typescript-eslint": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"
   },

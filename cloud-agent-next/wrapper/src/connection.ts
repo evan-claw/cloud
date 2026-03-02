@@ -230,7 +230,8 @@ export function createConnectionManager(
         // Check for terminal errors
         if (event.streamEventType === 'kilocode') {
           const data = event.data as Record<string, unknown>;
-          const terminal = isTerminalErrorEvent({ event: String(data.event ?? ''), data });
+          const eventName = typeof data.event === 'string' ? data.event : '';
+          const terminal = isTerminalErrorEvent({ event: eventName, data });
           if (terminal.isTerminal) {
             callbacks.onTerminalError(terminal.reason ?? 'terminal error');
             return;
@@ -241,9 +242,9 @@ export function createConnectionManager(
           if (data.event === 'permission.asked') {
             const props = data.properties;
             if (isRecord(props) && typeof props.id === 'string') {
-              logToFile(
-                `auto-rejecting permission: id=${props.id} permission=${String(props.permission ?? 'unknown')}`
-              );
+              const permission =
+                typeof props.permission === 'string' ? props.permission : 'unknown';
+              logToFile(`auto-rejecting permission: id=${props.id} permission=${permission}`);
               config.kiloClient
                 .answerPermission(props.id, 'reject')
                 .catch((err: unknown) =>

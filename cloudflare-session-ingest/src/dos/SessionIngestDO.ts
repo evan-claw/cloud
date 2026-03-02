@@ -79,8 +79,8 @@ export class SessionIngestDO extends DurableObject<Env> {
     super(state, env);
     this.db = drizzle(state.storage, { logger: false });
 
-    void state.blockConcurrencyWhile(async () => {
-      migrate(this.db, migrations);
+    void state.blockConcurrencyWhile(() => {
+      return migrate(this.db, migrations);
     });
   }
 
@@ -326,7 +326,7 @@ export class SessionIngestDO extends DurableObject<Env> {
   async clear(): Promise<void> {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
-    migrate(this.db, migrations);
+    await migrate(this.db, migrations);
   }
 }
 

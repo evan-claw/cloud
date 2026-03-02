@@ -16,6 +16,25 @@ import type {
   SessionInput,
 } from './types';
 
+/** Shape of an SSE event parsed from the cloud agent stream */
+type SseEventPayload = {
+  say?: string;
+  ask?: string;
+  content?: string;
+  text?: string;
+  event?: string;
+  partial?: boolean;
+  sessionId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type SseEvent = {
+  streamEventType?: string;
+  sessionId?: string;
+  message?: string;
+  payload?: SseEventPayload;
+};
+
 // Subset of denied patterns for observability; keep in sync with: cloud-agent/src/workspace.ts, cloud-agent-next/src/session-service.ts
 const RISKY_COMMAND_PATTERNS = [
   'git add',
@@ -561,7 +580,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         throw new Error(`prepareSession failed (${prepareResponse.status}): ${errorText}`);
       }
 
-      const prepareResult = (await prepareResponse.json()) as Record<string, unknown>;
+      const prepareResult: Record<string, unknown> = await prepareResponse.json();
       const prepareData = (prepareResult?.result as Record<string, unknown>)?.data as
         | Record<string, unknown>
         | undefined;
@@ -622,7 +641,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         );
       }
 
-      const initiateResult = (await initiateResponse.json()) as Record<string, unknown>;
+      const initiateResult: Record<string, unknown> = await initiateResponse.json();
       const initiateData = (initiateResult?.result as Record<string, unknown>)?.data as
         | Record<string, unknown>
         | undefined;
@@ -860,7 +879,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
           break;
         }
 
-        const { done, value } = await reader.read();
+        const { done, value } = (await reader.read()) as ReadableStreamReadResult<Uint8Array>;
 
         if (done) {
           console.log('[CodeReviewOrchestrator] SSE stream ended', {
@@ -891,7 +910,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
             }
 
             try {
-              const event = JSON.parse(data);
+              const event = JSON.parse(data) as SseEvent;
               totalEventsReceived++;
 
               // Track event type counts
@@ -1011,10 +1030,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 if (payload.content) {
                   message = payload.content;
                 } else if (payload.say === 'api_req_started') {
-                  const provider = payload.metadata?.inferenceProvider || 'API';
-                  const tokensIn = payload.metadata?.tokensIn ?? 0;
-                  const tokensOut = payload.metadata?.tokensOut ?? 0;
-                  const cost = payload.metadata?.cost ?? 0;
+                  const rawProvider = payload.metadata?.inferenceProvider;
+                  const provider = typeof rawProvider === 'string' ? rawProvider : 'API';
+                  const tokensIn = Number(payload.metadata?.tokensIn ?? 0);
+                  const tokensOut = Number(payload.metadata?.tokensOut ?? 0);
+                  const cost = Number(payload.metadata?.cost ?? 0);
                   message = `${provider} request: ${tokensIn.toLocaleString()} tokens in, ${tokensOut.toLocaleString()} tokens out`;
                   if (cost > 0) {
                     content = `Cost: $${cost.toFixed(4)}`;
@@ -1032,7 +1052,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                     }
                   }
                 } else if (payload.ask === 'use_mcp_server' && payload.metadata) {
-                  const { serverName, toolName, arguments: args } = payload.metadata;
+                  const rawServerName = payload.metadata.serverName;
+                  const serverName = typeof rawServerName === 'string' ? rawServerName : '';
+                  const rawToolName = payload.metadata.toolName;
+                  const toolName = typeof rawToolName === 'string' ? rawToolName : '';
+                  const args = payload.metadata.arguments;
                   message = `Using ${serverName}/${toolName}`;
 
                   // Log submit_review calls to detect approval issues
@@ -1045,8 +1069,10 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                     });
                   }
 
-                  if (args) {
+                  if (typeof args === 'string') {
                     content = args;
+                  } else if (args != null) {
+                    content = JSON.stringify(args);
                   }
                 } else {
                   message = payload.say || event.message || '';

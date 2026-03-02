@@ -20,6 +20,7 @@ packages:
   - 'packages/db'
   - 'packages/worker-utils'
   - 'packages/encryption'
+  - 'packages/eslint-config'
   - 'storybook'
   - 'cloudflare-deploy-infra/builder'
   - 'cloudflare-deploy-infra/dispatcher'

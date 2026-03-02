@@ -331,7 +331,7 @@ describe('trimPayload', () => {
         },
       });
 
-      const snapshot = JSON.parse(JSON.stringify(data));
+      const snapshot = JSON.parse(JSON.stringify(data)) as unknown;
 
       trimPayload('kilocode', data);
 

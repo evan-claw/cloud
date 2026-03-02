@@ -30,11 +30,8 @@ export class AttributionTrackerDO extends DurableObject<Env> {
   }
 
   clearAllData() {
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- intentional: truncate all rows
     this.db.delete(linesAdded).run();
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- intentional: truncate all rows
     this.db.delete(linesRemoved).run();
-    // eslint-disable-next-line drizzle/enforce-delete-with-where -- intentional: truncate all rows
     this.db.delete(attributionsMetadata).run();
   }
 

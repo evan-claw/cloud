@@ -529,11 +529,11 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to main branch'),
+        message: expect.stringContaining('cannot auto-commit directly to main branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -562,7 +562,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to master branch'),
+        message: expect.stringContaining('cannot auto-commit directly to master branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -591,7 +591,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('detached HEAD state'),
+        message: expect.stringContaining('detached HEAD state') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -620,7 +620,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('unable to determine current branch'),
+        message: expect.stringContaining('unable to determine current branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -664,17 +664,17 @@ describe('autoCommitChangesStream', () => {
       expect(events.length).toBeGreaterThan(3);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking for uncommitted changes'),
+        message: expect.stringContaining('Checking for uncommitted changes') as unknown,
       });
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Auto-committing changes'),
+        message: expect.stringContaining('Auto-committing changes') as unknown,
       });
-      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String), {
+      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String) as unknown, {
         sessionId: 'session-123',
       });
     });
@@ -710,7 +710,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(3);
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('No uncommitted changes to commit'),
+        message: expect.stringContaining('No uncommitted changes to commit') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });

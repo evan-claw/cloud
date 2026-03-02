@@ -15,17 +15,16 @@ export const AgentMetadataRecord = z.object({
   checkpoint: z
     .string()
     .nullable()
-    .transform((v, ctx) => {
+    .transform((v, ctx): unknown => {
       if (v === null) return null;
       try {
-        return JSON.parse(v);
+        return JSON.parse(v) as unknown;
       } catch {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid JSON in checkpoint' });
         return null;
       }
     })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see Agent.checkpoint in types.ts
-    .pipe(z.any()),
+    .pipe(z.unknown()),
   last_activity_at: z.string().nullable(),
 });
 

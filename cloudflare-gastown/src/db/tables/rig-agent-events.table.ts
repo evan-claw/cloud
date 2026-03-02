@@ -7,7 +7,7 @@ export const RigAgentEventRecord = z.object({
   event_type: z.string(),
   data: z
     .string()
-    .transform(v => JSON.parse(v))
+    .transform((v): unknown => JSON.parse(v) as unknown)
     .pipe(z.record(z.string(), z.unknown())),
   created_at: z.string(),
 });

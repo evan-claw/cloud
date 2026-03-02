@@ -127,7 +127,7 @@ export type KiloServerInstance = {
   /** Working directory (project root) the server was started in */
   workdir: string;
   /** The Bun subprocess handle */
-  process: import('bun').Subprocess;
+  process: import('bun').Subprocess; // eslint-disable-line @typescript-eslint/consistent-type-imports
   /** Agent IDs with sessions on this server */
   sessionIds: Set<string>;
   /** Tracks whether the server is healthy (responded to /global/health) */

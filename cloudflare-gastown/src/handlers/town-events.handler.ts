@@ -21,6 +21,7 @@ export async function handleListTownEvents(
       : 100;
 
   const town = getTownDOStub(c.env, params.townId);
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
   const events = await town.listBeadEvents({ since, limit });
 
   return c.json(resSuccess(events));

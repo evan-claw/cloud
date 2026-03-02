@@ -28,14 +28,13 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@eslint/js": "catalog:",
+    "@kilocode/eslint-config": "workspace:*",
     "@types/node": "^22.0.0",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "catalog:",
     "prettier": "catalog:",
     "typescript": "catalog:",
-    "typescript-eslint": "catalog:",
     "vitest": "^4.0.18",
     "wrangler": "catalog:"
   },

@@ -609,7 +609,7 @@ function recordToCapturedRequest(record: RequestRow): CapturedRequest {
 
 function parseRequestHeaders(value: string): Record<string, string> {
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const headers: Record<string, string> = {};
       for (const [key, headerValue] of Object.entries(parsed)) {

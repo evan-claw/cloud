@@ -28,7 +28,7 @@ export const RigBeadEventRecord = z.object({
   new_value: z.string().nullable(),
   metadata: z.string().transform((v, ctx): Record<string, unknown> => {
     try {
-      return JSON.parse(v);
+      return JSON.parse(v) as Record<string, unknown>;
     } catch {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid JSON in metadata' });
       return {};

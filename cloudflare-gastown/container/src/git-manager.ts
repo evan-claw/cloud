@@ -13,6 +13,7 @@ function validatePathSegment(value: string, label: string): void {
   if (!value || /\.\.[/\\]|[/\\]\.\.|^\.\.$/.test(value)) {
     throw new Error(`${label} contains path traversal`);
   }
+  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f]/.test(value)) {
     throw new Error(`${label} contains control characters`);
   }
@@ -75,6 +76,7 @@ function authenticateGitUrl(gitUrl: string, envVars?: Record<string, string>): s
  */
 function validateBranchName(branch: string, label: string): void {
   if (!branch) throw new Error(`${label} is required`);
+  // eslint-disable-next-line no-control-regex, no-useless-escape
   if (/[\x00-\x1f\x7f ~^:?*\[\\]/.test(branch)) {
     throw new Error(`${label} contains invalid characters`);
   }

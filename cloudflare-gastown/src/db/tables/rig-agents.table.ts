@@ -17,7 +17,7 @@ export const RigAgentRecord = z.object({
   checkpoint: z
     .string()
     .nullable()
-    .transform(v => (v === null ? null : JSON.parse(v)))
+    .transform((v): unknown => (v === null ? null : (JSON.parse(v) as unknown)))
     .pipe(z.unknown()),
   created_at: z.string(),
 });

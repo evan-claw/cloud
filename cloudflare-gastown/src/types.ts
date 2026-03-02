@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import type { BeadRecord } from './db/tables/beads.table';
 import type { AgentMetadataRecord } from './db/tables/agent-metadata.table';
-import type { ReviewMetadataRecord } from './db/tables/review-metadata.table';
-import type { EscalationMetadataRecord } from './db/tables/escalation-metadata.table';
-import type { ConvoyMetadataRecord } from './db/tables/convoy-metadata.table';
-import type { BeadEventRecord } from './db/tables/bead-events.table';
 
 // -- Beads --
 
@@ -73,9 +69,9 @@ export type Agent = {
   current_hook_bead_id: string | null;
   dispatch_attempts: number;
   last_activity_at: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Opaque JSON blob from
-  // SQLite; `unknown` breaks Cloudflare's Rpc.Serializable<T> type inference, and recursive
-  // JSON types cause "excessively deep" instantiation. Zod validates at runtime.
+  // Opaque JSON blob from SQLite; `unknown` breaks Cloudflare's Rpc.Serializable<T> type
+  // inference, and recursive JSON types cause "excessively deep" instantiation.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   checkpoint: any;
   created_at: string;
 };

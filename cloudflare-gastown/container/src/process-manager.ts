@@ -8,7 +8,7 @@
 
 import { createOpencode, type OpencodeClient } from '@kilocode/sdk';
 import { z } from 'zod';
-import type { ManagedAgent, StartAgentRequest, KiloSSEEvent, KiloSSEEventData } from './types';
+import type { ManagedAgent, StartAgentRequest } from './types';
 import { reportAgentCompleted } from './completion-reporter';
 
 const MANAGER_LOG = '[process-manager]';
