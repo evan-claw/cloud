@@ -29,18 +29,15 @@ export async function validateKiloToken(
     return { success: false, error: 'Invalid token' };
   }
 
-  const payloadEnv = typeof payload['env'] === 'string' ? payload['env'] : undefined;
-  if (expectedEnv && payloadEnv && payloadEnv !== expectedEnv) {
+  if (expectedEnv && payload.env && payload.env !== expectedEnv) {
     return { success: false, error: 'Invalid token' };
   }
-
-  const pepper = typeof payload['apiTokenPepper'] === 'string' ? payload['apiTokenPepper'] : null;
 
   return {
     success: true,
     userId: payload.kiloUserId,
     token,
-    pepper,
+    pepper: payload.apiTokenPepper ?? null,
   };
 }
 

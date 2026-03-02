@@ -1,12 +1,30 @@
 import { jwtVerify } from 'jose';
 import { z } from 'zod';
 
-export const kiloTokenPayload = z
-  .object({
-    version: z.literal(3),
-    kiloUserId: z.string().min(1),
-  })
-  .passthrough();
+/**
+ * All known fields that can appear in a Kilo user JWT, sourced from
+ * generateApiToken() / generateOrganizationApiToken() in src/lib/tokens.ts.
+ * All optional fields beyond version+kiloUserId default to undefined when absent.
+ */
+export const kiloTokenPayload = z.object({
+  // Core — always present
+  version: z.literal(3),
+  kiloUserId: z.string().min(1),
+  // Present in generateApiToken / generateOrganizationApiToken, absent in generateInternalServiceToken
+  apiTokenPepper: z.string().nullable().optional(),
+  env: z.string().optional(),
+  // Optional extras from JWTTokenExtraPayload
+  botId: z.string().optional(),
+  organizationId: z.string().optional(),
+  organizationRole: z.enum(['owner', 'member', 'billing_manager']).optional(),
+  internalApiUse: z.boolean().optional(),
+  createdOnPlatform: z.string().optional(),
+  tokenSource: z.string().optional(),
+  deviceAuthRequestCode: z.string().optional(),
+  // Standard JWT claims
+  iat: z.number().optional(),
+  exp: z.number().optional(),
+});
 
 export type KiloTokenPayload = z.infer<typeof kiloTokenPayload>;
 
@@ -14,8 +32,7 @@ export type KiloTokenPayload = z.infer<typeof kiloTokenPayload>;
  * Verify a Kilo user JWT (HS256, version 3).
  *
  * Checks: signature, expiration (built into jose), version === 3, and that
- * kiloUserId is a non-empty string. Uses .passthrough() so worker-specific
- * claims (e.g. apiTokenPepper, organizationId) are preserved in the result.
+ * kiloUserId is a non-empty string.
  *
  * @throws if the token is invalid, expired, or fails schema validation.
  */

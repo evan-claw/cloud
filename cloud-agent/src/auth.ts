@@ -27,8 +27,7 @@ export async function validateKiloToken(
 
   try {
     const payload = await verifyKiloToken(token, secret);
-    const botId = typeof payload['botId'] === 'string' ? payload['botId'] : undefined;
-    return { success: true, userId: payload.kiloUserId, token, botId };
+    return { success: true, userId: payload.kiloUserId, token, botId: payload.botId };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'JWT verification failed';
     return { success: false, error: message };
