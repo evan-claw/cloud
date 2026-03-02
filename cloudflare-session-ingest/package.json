@@ -21,6 +21,7 @@
     "@cloudflare/workers-types": "^4.20260120.0",
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
+    "drizzle-kit": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"

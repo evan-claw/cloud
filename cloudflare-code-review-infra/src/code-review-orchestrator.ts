@@ -16,6 +16,27 @@ import type {
   SessionInput,
 } from './types';
 
+// Subset of denied patterns for observability; keep in sync with: cloud-agent/src/workspace.ts, cloud-agent-next/src/session-service.ts
+const RISKY_COMMAND_PATTERNS = [
+  'git add',
+  'git commit',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git checkout',
+  'git switch',
+  'gh pr merge',
+  'gh pr review',
+  'pytest',
+  'vitest',
+];
+
+function findRiskyPattern(command: string): string | null {
+  const normalized = command.toLowerCase();
+  const match = RISKY_COMMAND_PATTERNS.find(pattern => normalized.includes(pattern));
+  return match ?? null;
+}
+
 /**
  * CodeReviewOrchestrator manages the complete lifecycle of a code review.
  * Persists review state in storage and maintains connection to cloud agent.
@@ -513,6 +534,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       // Step 1: Prepare session with callback target
       const prepareInput = {
         ...this.state.sessionInput,
+        createdOnPlatform: 'code-review',
         callbackTarget: {
           url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
           headers: {
@@ -524,6 +546,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       console.log('[CodeReviewOrchestrator] Calling prepareSession', {
         reviewId: this.state.reviewId,
         callbackUrl: prepareInput.callbackTarget.url,
+        createdOnPlatform: prepareInput.createdOnPlatform,
         skipBalanceCheck: this.state.skipBalanceCheck,
       });
 
@@ -971,6 +994,18 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 let content: string | undefined;
                 const payload = event.payload || {};
                 eventsStored++;
+
+                if (payload.ask === 'command' && typeof payload.text === 'string') {
+                  const riskyPattern = findRiskyPattern(payload.text);
+                  const logFn = riskyPattern ? console.warn : console.log;
+                  logFn('[CodeReviewOrchestrator] Command request observed', {
+                    reviewId: this.state.reviewId,
+                    sessionId: this.state.sessionId,
+                    eventNumber: totalEventsReceived,
+                    riskyPattern,
+                    command: payload.text.slice(0, 300),
+                  });
+                }
 
                 // Prioritize showing content if present
                 if (payload.content) {

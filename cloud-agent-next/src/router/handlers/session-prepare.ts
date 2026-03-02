@@ -361,6 +361,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           prompt: input.prompt,
           mode: input.mode,
           model: input.model,
+          variant: input.variant,
           kilocodeToken: ctx.authToken,
           githubRepo: input.githubRepo,
           githubToken: input.githubToken,
@@ -458,6 +459,7 @@ const updateSessionHandler = internalApiProtectedProcedure
       // Scalar fields - pass through as-is (undefined skips, null clears, value sets)
       setUpdateValue(updates, 'mode', input.mode);
       setUpdateValue(updates, 'model', input.model);
+      setUpdateValue(updates, 'variant', input.variant);
       setUpdateValue(updates, 'githubToken', input.githubToken);
       setUpdateValue(updates, 'gitToken', input.gitToken);
       setUpdateValue(updates, 'upstreamBranch', input.upstreamBranch);

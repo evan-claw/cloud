@@ -69,6 +69,7 @@ export type PrepareSessionInput = {
   prompt: string;
   mode: AgentMode;
   model: string;
+  variant?: string;
   // GitHub-specific params
   githubRepo?: string;
   /** GitHub Personal Access Token for private repositories */
@@ -116,6 +117,7 @@ export type SendMessageInput = {
   prompt: string;
   mode: 'code' | 'plan' | 'debug' | 'orchestrator' | 'ask';
   model: string;
+  variant?: string;
   autoCommit?: boolean;
   githubToken?: string;
   gitToken?: string;
@@ -211,6 +213,7 @@ export type UpdateSessionInput = {
   // Scalar fields - null to clear, value to set, undefined to skip
   mode?: AgentMode | null;
   model?: string | null;
+  variant?: string | null;
   githubToken?: string | null;
   gitToken?: string | null;
   upstreamBranch?: string | null;

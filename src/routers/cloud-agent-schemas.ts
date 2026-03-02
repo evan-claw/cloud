@@ -52,6 +52,7 @@ export const baseInitiateSessionSchema = z.object({
   prompt: z.string().min(1),
   mode: agentModeSchema,
   model: z.string().min(1),
+  variant: z.string().max(50).optional(),
   envVars: z.record(z.string().max(256), z.string().max(256)).optional(),
   setupCommands: z.array(z.string().max(500)).max(20).optional(),
   mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
@@ -66,6 +67,7 @@ export const baseSendMessageSchema = z.object({
   prompt: z.string().min(1),
   mode: agentModeSchema,
   model: z.string().min(1),
+  variant: z.string().max(50).optional(),
   autoCommit: z.boolean().optional().default(false),
 });
 
@@ -75,6 +77,7 @@ export const baseSendMessageV2Schema = z.object({
   prompt: z.string().min(1),
   mode: agentModeSchema,
   model: z.string().min(1),
+  variant: z.string().max(50).optional(),
   autoCommit: z.boolean().optional().default(false),
 });
 
@@ -128,6 +131,7 @@ export const basePrepareSessionSchema = z
     prompt: z.string().min(1).max(100_000),
     mode: agentModeSchema,
     model: z.string().min(1),
+    variant: z.string().max(50).optional(),
 
     // Optional environment profile name (resolved server-side)
     profileName: z.string().max(100).optional(),

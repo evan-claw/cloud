@@ -239,6 +239,27 @@
       "when": 1772223319721,
       "tag": "0033_absent_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1772440960933,
+      "tag": "0034_bouncy_whizzer",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1772195925655,
+      "tag": "0035_third_shiver_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1772457937366,
+      "tag": "0036_early_bastion",
+      "breakpoints": true
     }
   ]
 }

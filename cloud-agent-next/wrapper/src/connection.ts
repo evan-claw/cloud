@@ -11,6 +11,7 @@
 
 import type { WrapperState } from './state.js';
 import type { IngestEvent, WrapperCommand } from '../../src/shared/protocol.js';
+import { trimPayload } from '../../src/shared/trim-payload.js';
 import { createSSEConsumer, isTerminalErrorEvent, type SSEConsumer } from './sse-consumer.js';
 import { logToFile } from './utils.js';
 
@@ -217,8 +218,12 @@ export function createConnectionManager(
         state.recordSseEvent();
       },
       onEvent: (event: IngestEvent) => {
-        // Forward to ingest (heartbeats already filtered out)
-        sendToIngest(event);
+        // Trim large payloads before forwarding to reduce DO storage pressure
+        const trimmed: IngestEvent = {
+          ...event,
+          data: trimPayload(event.streamEventType, event.data),
+        };
+        sendToIngest(trimmed);
 
         // Check for terminal errors
         if (event.streamEventType === 'kilocode') {

@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.8",
+    "drizzle-kit": "catalog:",
     "@eslint/eslintrc": "catalog:",
     "@eslint/js": "catalog:",
     "@types/jsonwebtoken": "catalog:",

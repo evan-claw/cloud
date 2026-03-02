@@ -109,7 +109,7 @@ export async function getProvider(
     }
   }
 
-  if (requestedModel.startsWith('kilo/') && organizationId) {
+  if (requestedModel.startsWith('kilo-internal/') && organizationId) {
     const [customLlm] = await db
       .select()
       .from(custom_llm)

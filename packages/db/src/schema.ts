@@ -187,11 +187,15 @@ export const kilocode_users = pgTable(
     completed_welcome_form: boolean().default(false).notNull(),
     linkedin_url: text(),
     github_url: text(),
+    openrouter_upstream_safety_identifier: text(),
   },
   table => [
     unique('UQ_b1afacbcf43f2c7c4cb9f7e7faa').on(table.google_user_email),
     // Prevent empty strings
     check('blocked_reason_not_empty', sql`length(blocked_reason) > 0`),
+    uniqueIndex('UQ_kilocode_users_openrouter_upstream_safety_identifier')
+      .on(table.openrouter_upstream_safety_identifier)
+      .where(sql`${table.openrouter_upstream_safety_identifier} IS NOT NULL`),
   ]
 );
 
@@ -626,6 +630,9 @@ export const microdollar_usage_metadata = pgTable(
     machine_id: text(),
     feature_id: integer(),
     session_id: text(),
+    mode_id: integer(),
+    auto_model_id: integer(),
+    market_cost: bigint({ mode: 'number' }),
   },
   table => [index('idx_microdollar_usage_metadata_created_at').on(table.created_at)]
 );
@@ -737,6 +744,24 @@ export const feature = pgTable(
   table => [uniqueIndex('UQ_feature').on(table.feature)]
 );
 
+export const mode = pgTable(
+  'mode',
+  {
+    mode_id: serial().notNull().primaryKey(),
+    mode: text().notNull(),
+  },
+  table => [uniqueIndex('UQ_mode').on(table.mode)]
+);
+
+export const auto_model = pgTable(
+  'auto_model',
+  {
+    auto_model_id: serial().notNull().primaryKey(),
+    auto_model: text().notNull(),
+  },
+  table => [uniqueIndex('UQ_auto_model').on(table.auto_model)]
+);
+
 export const microdollar_usage_view = pgView('microdollar_usage_view', {
   id: uuid().notNull(),
   kilo_user_id: text().notNull(),
@@ -783,6 +808,9 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
   machine_id: text(),
   feature: text(),
   session_id: text(),
+  mode: text(),
+  auto_model: text(),
+  market_cost: bigint({ mode: 'number' }),
 }).as(sql`
   SELECT
     mu.id,
@@ -829,7 +857,10 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
     meta.has_tools,
     meta.machine_id,
     feat.feature,
-    meta.session_id
+    meta.session_id,
+    md.mode,
+    am.auto_model,
+    meta.market_cost
   FROM ${microdollar_usage} mu
   LEFT JOIN ${microdollar_usage_metadata} meta ON mu.id = meta.id
   LEFT JOIN ${http_ip} ip ON meta.http_ip_id = ip.http_ip_id
@@ -841,6 +872,8 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
   LEFT JOIN ${finish_reason} frfr ON meta.finish_reason_id = frfr.finish_reason_id
   LEFT JOIN ${editor_name} edit ON meta.editor_name_id = edit.editor_name_id
   LEFT JOIN ${feature} feat ON meta.feature_id = feat.feature_id
+  LEFT JOIN ${mode} md ON meta.mode_id = md.mode_id
+  LEFT JOIN ${auto_model} am ON meta.auto_model_id = am.auto_model_id
 `);
 
 export type MicrodollarUsageView = typeof microdollar_usage_view.$inferSelect;
@@ -3127,3 +3160,21 @@ export const kiloclaw_image_catalog = pgTable(
 );
 
 export type KiloClawImageCatalogEntry = typeof kiloclaw_image_catalog.$inferSelect;
+
+// Discord Gateway Listener coordination
+// Single-row table that tracks the currently active Gateway listener.
+// Used to ensure only one Gateway WebSocket connection is active at a time
+// across multiple serverless instances. New listeners atomically claim the
+// active slot, and existing listeners poll to detect they've been superseded.
+export const discord_gateway_listener = pgTable('discord_gateway_listener', {
+  // Singleton: always id = 1
+  id: integer().primaryKey().default(1),
+  // Unique identifier for the currently active listener instance
+  listener_id: text().notNull(),
+  // When this listener started
+  started_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  // When this listener is expected to stop (started_at + duration)
+  expires_at: timestamp({ withTimezone: true, mode: 'string' }).notNull(),
+});
+
+export type DiscordGatewayListener = typeof discord_gateway_listener.$inferSelect;

@@ -29,6 +29,8 @@ import { eq } from 'drizzle-orm';
 import type { Owner } from '@/lib/integrations/core/types';
 import type { PlatformIntegration } from '@kilocode/db/schema';
 
+export const maxDuration = 800;
+
 /**
  * Reaction emoji names
  */

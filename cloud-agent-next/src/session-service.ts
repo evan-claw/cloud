@@ -38,6 +38,78 @@ const SANDBOX_RETRY_DEFAULTS = {
   baseBackoffMs: 100,
   maxBackoffMs: 5000,
 };
+
+const DEFAULT_DENIED_COMMAND_PATTERNS = ['rm -rf', 'sudo rm', 'mkfs', 'dd if='];
+
+// Keep in sync with: cloud-agent/src/workspace.ts, cloudflare-code-review-infra/src/code-review-orchestrator.ts
+// mkdir and touch are intentionally allowed for agent scratch space during analysis
+const CODE_REVIEW_ALLOWED_COMMANDS = [
+  'ls',
+  'cat',
+  'echo',
+  'pwd',
+  'find',
+  'grep',
+  'git',
+  'gh',
+  'whoami',
+  'date',
+  'head',
+  'tail',
+  'cd',
+  'mkdir',
+  'touch',
+];
+
+const CODE_REVIEW_DENIED_COMMAND_PATTERNS = [
+  'git add',
+  'git commit',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git cherry-pick',
+  'git reset',
+  'git checkout',
+  'git switch',
+  'git stash',
+  'git tag',
+  'git am',
+  'git apply',
+  'git remote set-url',
+  'gh pr merge',
+  'gh pr review',
+  'gh pr create',
+  'gh pr close',
+  'gh pr edit',
+  'gh issue',
+  'gh repo create',
+  'gh repo fork',
+  'npm test',
+  'pnpm test',
+  'bun test',
+  'yarn test',
+  'pytest',
+  'vitest',
+];
+
+type CommandGuardPolicy = {
+  policyName: string;
+  allowed: string[];
+  denied: string[];
+};
+
+function getCommandGuardPolicy(createdOnPlatform?: string): CommandGuardPolicy | null {
+  if (createdOnPlatform !== 'code-review') {
+    return null;
+  }
+
+  return {
+    policyName: 'code-review-read-only',
+    allowed: CODE_REVIEW_ALLOWED_COMMANDS,
+    denied: [...DEFAULT_DENIED_COMMAND_PATTERNS, ...CODE_REVIEW_DENIED_COMMAND_PATTERNS],
+  };
+}
+
 class SessionSnapshotRestoreError extends Error {
   constructor(
     message: string,
@@ -481,6 +553,7 @@ export class SessionService {
       !createdOnPlatform ||
       createdOnPlatform === 'cloud-agent' ||
       createdOnPlatform === 'app-builder';
+    const commandGuardPolicy = getCommandGuardPolicy(createdOnPlatform);
 
     const configContent: Record<string, unknown> = {
       permission: {
@@ -495,6 +568,34 @@ export class SessionService {
         },
       },
     };
+
+    if (commandGuardPolicy) {
+      configContent.autoApproval = {
+        enabled: true,
+        read: { enabled: true, outside: false },
+        write: { enabled: false, outside: false, protected: true },
+        browser: { enabled: false },
+        retry: { enabled: false, delay: 10 },
+        mcp: { enabled: true },
+        mode: { enabled: true },
+        subtasks: { enabled: true },
+        execute: {
+          enabled: true,
+          allowed: commandGuardPolicy.allowed,
+          denied: commandGuardPolicy.denied,
+        },
+        question: { enabled: false, timeout: 60 },
+        todo: { enabled: true },
+      };
+
+      logger
+        .withFields({
+          createdOnPlatform,
+          commandPolicy: commandGuardPolicy.policyName,
+          deniedCommandPatterns: commandGuardPolicy.denied.length,
+        })
+        .info('Enabled read-only command guard policy');
+    }
     // MCP configs are already in CLI-native format — pass through directly
     if (mcpServers && Object.keys(mcpServers).length > 0) {
       configContent.mcp = mcpServers;
@@ -1275,7 +1376,6 @@ export class SessionService {
         `Session ${sessionId} has no kiloSessionId in metadata. Cannot restore snapshot.`
       );
     }
-
     // Clone first so .git exists when `kilo import` runs — the CLI derives the
     // project ID from the repo's root commit hash; without a repo the FK on
     // session.project_id fails.

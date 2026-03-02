@@ -60,6 +60,7 @@ type PromptBody = {
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  variant?: string;
 };
 
 type CommandBody = {
@@ -310,6 +311,7 @@ function createPromptHandler(deps: ServerDependencies) {
         model: body.model,
         system: body.system,
         tools: body.tools,
+        variant: body.variant,
       });
       logToFile(`job/prompt: sent messageId=${messageId}`);
     } catch (error) {

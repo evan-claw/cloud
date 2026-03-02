@@ -8,6 +8,7 @@ import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';
 import crypto from 'crypto';
 import type { BotType } from './types';
 import { generateBotUserId, generateBotUserEmail, getBotDisplayName } from './types';
+import { generateOpenRouterUpstreamSafetyIdentifier } from '@/lib/providerHash';
 
 /**
  * Get the user ID of a bot for an organization
@@ -57,6 +58,7 @@ async function createBotUser(organizationId: string, botType: BotType): Promise<
       api_token_pepper: crypto.randomBytes(32).toString('hex'), // For JWT signing
       is_admin: false,
       auto_top_up_enabled: false,
+      openrouter_upstream_safety_identifier: generateOpenRouterUpstreamSafetyIdentifier(botId),
     })
     .returning();
 

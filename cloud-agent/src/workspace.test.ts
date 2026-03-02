@@ -3,11 +3,51 @@ import {
   manageBranch,
   cloneGitHubRepo,
   cloneGitRepo,
+  configureKilocode,
   checkDiskSpace,
   createSandboxUsageEvent,
   LOW_DISK_THRESHOLD_MB,
 } from './workspace';
 import type { ExecutionSession } from './types';
+
+describe('configureKilocode', () => {
+  it('applies read-only command policy for code-review sessions', async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const fakeExecutor = {
+      writeFile,
+    } as unknown as ExecutionSession;
+
+    await configureKilocode(
+      fakeExecutor,
+      '/home/session-123',
+      'org-123',
+      'token-123',
+      'anthropic/claude-sonnet-4.6',
+      undefined,
+      undefined,
+      'code-review'
+    );
+
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const configJson = writeFile.mock.calls[0][1] as string;
+    const config = JSON.parse(configJson) as {
+      autoApproval?: {
+        execute?: {
+          denied?: string[];
+        };
+        write?: {
+          enabled?: boolean;
+          protected?: boolean;
+        };
+      };
+    };
+
+    expect(config.autoApproval?.execute?.denied).toContain('git commit');
+    expect(config.autoApproval?.execute?.denied).toContain('gh pr merge');
+    expect(config.autoApproval?.write?.enabled).toBe(false);
+    expect(config.autoApproval?.write?.protected).toBe(true);
+  });
+});
 
 describe('manageBranch', () => {
   let fakeSession: ExecutionSession;

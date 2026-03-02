@@ -310,7 +310,9 @@ export function createLifecycleManager(
             timestamp: new Date().toISOString(),
           });
         } else {
-          logToFile('auto-commit complete');
+          logToFile(
+            `auto-commit complete: success=${result.success} skipped=${result.skipped ?? false} error=${result.error ?? '(none)'}`
+          );
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

@@ -19,6 +19,7 @@
   "license": "UNLICENSED",
   "devDependencies": {
     "@types/jest": "^29.5.14",
+    "drizzle-kit": "catalog:",
     "jest": "^29.7.0",
     "typescript": "catalog:",
     "@types/jsonwebtoken": "catalog:",
@@ -26,6 +27,7 @@
   },
   "dependencies": {
     "@kilocode/worker-utils": "workspace:*",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "workers-tagged-logger": "catalog:",
     "jsonwebtoken": "catalog:",

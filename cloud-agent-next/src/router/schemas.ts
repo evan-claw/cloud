@@ -43,6 +43,7 @@ export const PromptPayload = z.object({
   prompt: z.string().min(1, 'Prompt is required').describe('The task prompt for Kilo Code'),
   mode: AgentModeSchema.describe('Kilo Code execution mode (required)'),
   model: modelIdSchema.describe('AI model to use (required)'),
+  variant: z.string().max(50).optional(),
 });
 
 /**
@@ -127,6 +128,7 @@ export const PrepareSessionInput = z
       .describe('The task prompt for Kilo Code'),
     mode: AgentModeSchema.describe('Kilo Code execution mode'),
     model: modelIdSchema.describe('AI model to use'),
+    variant: z.string().max(50).optional(),
 
     // Repository - one of these pairs required
     githubRepo: githubRepoSchema
@@ -238,6 +240,7 @@ export const UpdateSessionInput = z
     // Scalar fields - null to clear, value to set, undefined to skip
     mode: AgentModeSchema.nullable().optional().describe('Mode to set (null to clear)'),
     model: modelIdSchema.nullable().optional().describe('Model to set (null to clear)'),
+    variant: z.string().max(50).nullable().optional(),
     githubToken: z.string().nullable().optional().describe('GitHub token to set (null to clear)'),
     gitToken: z.string().nullable().optional().describe('Git token to set (null to clear)'),
     upstreamBranch: branchNameSchema

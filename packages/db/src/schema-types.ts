@@ -127,6 +127,11 @@ export type OrganizationPlan = z.infer<typeof OrganizationPlanSchema>;
 const OrganizationSettingsSchema = z.object({
   model_allow_list: z.array(z.string()).optional(),
   provider_allow_list: z.array(z.string()).optional(),
+
+  // under development, not yet enforced, will replace model_allow_list and provider_allow_list:
+  model_deny_list: z.array(z.string()).optional(),
+  provider_deny_list: z.array(z.string()).optional(),
+
   default_model: z.string().optional(),
   data_collection: z.enum(['allow', 'deny']).nullable().optional(),
   // null means they were grandfathered in and so they have usage limits enabled

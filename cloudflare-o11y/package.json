@@ -13,12 +13,14 @@
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"@types/node": "^25.1.0",
+		"drizzle-kit": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "~3.2.0",
 		"wrangler": "catalog:"
 	},
 	"dependencies": {
 		"@kilocode/worker-utils": "workspace:*",
+		"drizzle-orm": "catalog:",
 		"hono": "catalog:",
 		"zod": "catalog:"
 	}

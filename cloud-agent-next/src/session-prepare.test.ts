@@ -334,6 +334,29 @@ describe('prepareSession endpoint', () => {
       );
     });
 
+    it('should forward variant to DO prepare', async () => {
+      const doStub = createMockDOStub({
+        prepare: vi.fn().mockResolvedValue({ success: true }),
+      });
+      const ctx = createInternalApiContext({ doStub });
+
+      const caller = appRouter.createCaller(ctx);
+      await caller.prepareSession({
+        prompt: 'Test prompt',
+        mode: 'code',
+        model: 'claude-3',
+        githubRepo: 'acme/repo',
+        githubToken: 'ghp_token',
+        variant: 'high',
+      });
+
+      expect(doStub.prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: 'high',
+        })
+      );
+    });
+
     it('should pass optional configuration to DO', async () => {
       const doStub = createMockDOStub({
         prepare: vi.fn().mockResolvedValue({ success: true }),
@@ -531,6 +554,25 @@ describe('updateSession endpoint', () => {
           envVars: null,
           setupCommands: null,
           mcpServers: null,
+        })
+      );
+    });
+
+    it('should forward variant via tryUpdate', async () => {
+      const doStub = createMockDOStub({
+        tryUpdate: vi.fn().mockResolvedValue({ success: true }),
+      });
+      const ctx = createInternalApiContext({ doStub });
+
+      const caller = appRouter.createCaller(ctx);
+      await caller.updateSession({
+        cloudAgentSessionId: 'agent_12345678-1234-1234-1234-123456789abc' as SessionId,
+        variant: 'low',
+      });
+
+      expect(doStub.tryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: 'low',
         })
       );
     });

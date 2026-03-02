@@ -23,6 +23,8 @@ export interface SessionInput {
   githubToken?: string;
   /** Generic git token for authentication (for GitLab and other platforms) */
   gitToken?: string;
+  /** Git platform type for correct token/env var handling */
+  platform?: 'github' | 'gitlab';
   envVars?: Record<string, string>;
   mcpServers?: Record<string, MCPServerConfig>;
 }
