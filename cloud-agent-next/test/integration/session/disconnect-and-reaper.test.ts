@@ -12,6 +12,7 @@
  */
 
 import { env, runInDurableObject, listDurableObjectIds } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/durable-sqlite';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createEventQueries } from '../../../src/session/queries/events.js';
 import type { ExecutionId } from '../../../src/types/ids.js';
@@ -70,7 +71,8 @@ describe('Disconnect handling & reaper', () => {
       const execution = await instance.getExecution(excId);
 
       // Check events for synthetic error event
-      const eventQueries = createEventQueries(state.storage.sql);
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
       const events = eventQueries.findByFilters({ executionIds: [excId] });
       const errorEvents = events.filter(e => e.stream_event_type === 'error');
 
@@ -138,7 +140,8 @@ describe('Disconnect handling & reaper', () => {
 
       const execution = await instance.getExecution(excId);
 
-      const eventQueries = createEventQueries(state.storage.sql);
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
       const events = eventQueries.findByFilters({ executionIds: [excId] });
       const errorEvents = events.filter(e => e.stream_event_type === 'error');
 
@@ -195,7 +198,8 @@ describe('Disconnect handling & reaper', () => {
 
       const execution = await instance.getExecution(excId);
 
-      const eventQueries = createEventQueries(state.storage.sql);
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
       const events = eventQueries.findByFilters({ executionIds: [excId] });
       const errorEvents = events.filter(e => e.stream_event_type === 'error');
 
