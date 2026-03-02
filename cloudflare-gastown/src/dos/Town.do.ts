@@ -1216,7 +1216,7 @@ export class TownDO extends DurableObject<Env> {
       current_hook_bead_id: row.current_hook_bead_id,
       dispatch_attempts: row.dispatch_attempts,
       last_activity_at: row.last_activity_at,
-      checkpoint: row.checkpoint,
+      checkpoint: row.checkpoint ? JSON.parse(row.checkpoint) : null,
       created_at: row.created_at,
     }));
 
