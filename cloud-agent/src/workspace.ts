@@ -37,7 +37,6 @@ const CLI_CONFIG_PATH = `${CLI_DIR}/config.json`;
 const CLI_GLOBAL_TASKS_PATH = `${CLI_DIR}/global/tasks`;
 const CLI_LOGS_PATH = `${CLI_DIR}/logs`;
 
-// Keep in sync with: cloud-agent-next/src/session-service.ts, cloudflare-code-review-infra/src/code-review-orchestrator.ts
 const DEFAULT_ALLOWED_COMMANDS = [
   'ls',
   'cat',
@@ -60,6 +59,7 @@ const DEFAULT_ALLOWED_COMMANDS = [
 
 const DEFAULT_DENIED_COMMAND_PATTERNS = ['rm -rf', 'sudo rm', 'mkfs', 'dd if='];
 
+// Keep in sync with: cloud-agent-next/src/session-service.ts, cloudflare-code-review-infra/src/code-review-orchestrator.ts
 // mkdir and touch are intentionally allowed for agent scratch space during analysis
 const CODE_REVIEW_ALLOWED_COMMANDS = [
   'ls',
