@@ -1,19 +1,20 @@
 /**
  * Security Sync — Worker-side sync logic
  *
- * Ported from the Next.js app's sync-service.ts, dependabot-api.ts,
- * dependabot-parser.ts, security-findings.ts, and security-config.ts.
- *
- * This module is self-contained: it uses raw SQL via pg (through Hyperdrive)
+ * Uses Drizzle ORM via @kilocode/db for all database access (through Hyperdrive)
  * and the GitHub REST API via fetch (with tokens from GIT_TOKEN_SERVICE).
  */
 
 import { z } from 'zod';
-import type { Database } from './db';
-
-// ---------------------------------------------------------------------------
-// Types (mirrored from src/lib/security-agent/core/types.ts)
-// ---------------------------------------------------------------------------
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
+import type { WorkerDb } from '@kilocode/db/client';
+import {
+  agent_configs,
+  platform_integrations,
+  security_findings,
+  security_audit_log,
+} from '@kilocode/db/schema';
+import { SecurityAuditLogAction } from '@kilocode/db/schema-types';
 
 const SecurityFindingSource = { DEPENDABOT: 'dependabot' } as const;
 
@@ -131,9 +132,25 @@ type FetchAlertsResult =
   | { status: 'repo_not_found' }
   | { status: 'alerts_disabled' };
 
-// ---------------------------------------------------------------------------
-// Owner resolution — matches the dispatch message to DB config
-// ---------------------------------------------------------------------------
+function isOrgOwner(
+  owner: SecurityReviewOwner
+): owner is { organizationId: string; userId?: never } {
+  return 'organizationId' in owner && Boolean(owner.organizationId);
+}
+
+function ownerFilter(owner: SecurityReviewOwner) {
+  if (isOrgOwner(owner)) {
+    return eq(agent_configs.owned_by_organization_id, owner.organizationId);
+  }
+  return eq(agent_configs.owned_by_user_id, owner.userId);
+}
+
+function integrationOwnerFilter(owner: SecurityReviewOwner) {
+  if (isOrgOwner(owner)) {
+    return eq(platform_integrations.owned_by_organization_id, owner.organizationId);
+  }
+  return eq(platform_integrations.owned_by_user_id, owner.userId);
+}
 
 type EnabledOwnerConfig = {
   owner: SecurityReviewOwner;
@@ -141,49 +158,56 @@ type EnabledOwnerConfig = {
   installationId: string;
   repositories: string[];
   repoNameToId: Map<string, number>;
-};
-
-type IntegrationRow = {
-  id: string;
-  platform_installation_id: string;
-  permissions: Record<string, string> | null;
-  repositories: Array<{ id: number; full_name: string; name: string; private: boolean }> | null;
-};
-
-type AgentConfigRow = {
-  id: string;
-  config: Record<string, unknown>;
-  is_enabled: boolean;
+  slaConfig: SecurityAgentConfig;
 };
 
 export async function getOwnerConfig(
-  db: Database,
+  db: WorkerDb,
   owner: SecurityReviewOwner
 ): Promise<EnabledOwnerConfig | null> {
-  const isOrg = 'organizationId' in owner && Boolean(owner.organizationId);
-  const ownerId = isOrg ? owner.organizationId : owner.userId;
-  const ownerColumn = isOrg ? 'owned_by_organization_id' : 'owned_by_user_id';
-
   // Get agent config
-  const configs = await db.query<AgentConfigRow>(
-    `SELECT id, config, is_enabled FROM agent_configs
-     WHERE agent_type = 'security_scan' AND platform = 'github' AND is_enabled = true AND ${ownerColumn} = $1
-     LIMIT 1`,
-    [ownerId]
-  );
+  const configs = await db
+    .select({
+      id: agent_configs.id,
+      config: agent_configs.config,
+      is_enabled: agent_configs.is_enabled,
+    })
+    .from(agent_configs)
+    .where(
+      and(
+        eq(agent_configs.agent_type, 'security_scan'),
+        eq(agent_configs.platform, 'github'),
+        eq(agent_configs.is_enabled, true),
+        ownerFilter(owner)
+      )
+    )
+    .limit(1);
+
   if (configs.length === 0) return null;
   const agentConfig = configs[0];
 
   // Get platform integration
-  const integrations = await db.query<IntegrationRow>(
-    `SELECT id, platform_installation_id, permissions, repositories
-     FROM platform_integrations
-     WHERE ${ownerColumn} = $1 AND platform = 'github' AND platform_installation_id IS NOT NULL
-     LIMIT 1`,
-    [ownerId]
-  );
+  const integrations = await db
+    .select({
+      id: platform_integrations.id,
+      platform_installation_id: platform_integrations.platform_installation_id,
+      permissions: platform_integrations.permissions,
+      repositories: platform_integrations.repositories,
+    })
+    .from(platform_integrations)
+    .where(
+      and(
+        integrationOwnerFilter(owner),
+        eq(platform_integrations.platform, 'github'),
+        isNotNull(platform_integrations.platform_installation_id)
+      )
+    )
+    .limit(1);
+
   if (integrations.length === 0) return null;
   const integration = integrations[0];
+
+  if (!integration.platform_installation_id) return null;
 
   // Check vulnerability_alerts permission
   const perms = integration.permissions;
@@ -194,8 +218,7 @@ export async function getOwnerConfig(
 
   // Filter repositories
   const allRepos = (integration.repositories ?? []).filter(
-    (r): r is { id: number; full_name: string; name: string; private: boolean } =>
-      typeof r.id === 'number' && typeof r.full_name === 'string' && r.full_name.length > 0
+    r => typeof r.id === 'number' && typeof r.full_name === 'string' && r.full_name.length > 0
   );
   if (allRepos.length === 0) return null;
 
@@ -227,12 +250,9 @@ export async function getOwnerConfig(
     installationId: integration.platform_installation_id,
     repositories: selectedRepos,
     repoNameToId,
+    slaConfig: { ...DEFAULT_SLA_CONFIG, ...securityConfig },
   };
 }
-
-// ---------------------------------------------------------------------------
-// GitHub Dependabot API — direct fetch (no Octokit needed)
-// ---------------------------------------------------------------------------
 
 async function fetchAllDependabotAlerts(
   token: string,
@@ -297,10 +317,6 @@ function parseLinkNext(linkHeader: string | null): string | null {
   return match ? match[1] : null;
 }
 
-// ---------------------------------------------------------------------------
-// Dependabot alert parser (ported from dependabot-parser.ts)
-// ---------------------------------------------------------------------------
-
 function mapDependabotStateToStatus(state: DependabotAlertState): SecurityFindingStatus {
   switch (state) {
     case 'open':
@@ -310,8 +326,6 @@ function mapDependabotStateToStatus(state: DependabotAlertState): SecurityFindin
     case 'dismissed':
     case 'auto_dismissed':
       return SecurityFindingStatus.IGNORED;
-    default:
-      return SecurityFindingStatus.OPEN;
   }
 }
 
@@ -346,10 +360,6 @@ function parseDependabotAlert(alert: DependabotAlertRaw): ParsedSecurityFinding 
   };
 }
 
-// ---------------------------------------------------------------------------
-// SLA helpers (ported from core/types.ts)
-// ---------------------------------------------------------------------------
-
 function getSlaForSeverity(config: SecurityAgentConfig, severity: SecuritySeverity): number {
   switch (severity) {
     case 'critical':
@@ -360,8 +370,6 @@ function getSlaForSeverity(config: SecurityAgentConfig, severity: SecuritySeveri
       return config.sla_medium_days;
     case 'low':
       return config.sla_low_days;
-    default:
-      return config.sla_low_days;
   }
 }
 
@@ -371,40 +379,8 @@ function calculateSlaDueAt(firstDetectedAt: string, slaDays: number): string {
   return date.toISOString();
 }
 
-// ---------------------------------------------------------------------------
-// DB: get SLA config for owner
-// ---------------------------------------------------------------------------
-
-async function getSecurityAgentConfig(
-  db: Database,
-  owner: SecurityReviewOwner
-): Promise<SecurityAgentConfig> {
-  const isOrg = 'organizationId' in owner && Boolean(owner.organizationId);
-  const ownerId = isOrg ? owner.organizationId : owner.userId;
-  const ownerColumn = isOrg ? 'owned_by_organization_id' : 'owned_by_user_id';
-
-  const rows = await db.query<{ config: Record<string, unknown> }>(
-    `SELECT config FROM agent_configs
-     WHERE agent_type = 'security_scan' AND platform = 'github' AND is_enabled = true AND ${ownerColumn} = $1
-     LIMIT 1`,
-    [ownerId]
-  );
-
-  if (rows.length === 0) return DEFAULT_SLA_CONFIG;
-  const parsed = securityAgentConfigSchema.partial().safeParse(rows[0].config);
-  if (!parsed.success) {
-    console.warn('Invalid security agent config, using defaults', { error: parsed.error.message });
-    return DEFAULT_SLA_CONFIG;
-  }
-  return { ...DEFAULT_SLA_CONFIG, ...parsed.data };
-}
-
-// ---------------------------------------------------------------------------
-// DB: upsert security finding
-// ---------------------------------------------------------------------------
-
 async function upsertSecurityFinding(
-  db: Database,
+  db: WorkerDb,
   params: {
     finding: ParsedSecurityFinding;
     owner: SecurityReviewOwner;
@@ -414,115 +390,84 @@ async function upsertSecurityFinding(
   }
 ): Promise<void> {
   const { finding, owner, platformIntegrationId, repoFullName, slaDueAt } = params;
-  const isOrg = 'organizationId' in owner && Boolean(owner.organizationId);
 
-  await db.query(
-    `INSERT INTO security_findings (
-      owned_by_organization_id, owned_by_user_id, platform_integration_id,
-      repo_full_name, source, source_id, severity, ghsa_id, cve_id,
-      package_name, package_ecosystem, vulnerable_version_range, patched_version,
-      manifest_path, title, description, status, ignored_reason, ignored_by,
-      fixed_at, sla_due_at, dependabot_html_url, raw_data, first_detected_at,
-      cwe_ids, cvss_score, dependency_scope
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-      $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27
-    )
-    ON CONFLICT (repo_full_name, source, source_id) DO UPDATE SET
-      severity = EXCLUDED.severity,
-      ghsa_id = EXCLUDED.ghsa_id,
-      cve_id = EXCLUDED.cve_id,
-      vulnerable_version_range = EXCLUDED.vulnerable_version_range,
-      patched_version = EXCLUDED.patched_version,
-      title = EXCLUDED.title,
-      description = EXCLUDED.description,
-      status = EXCLUDED.status,
-      ignored_reason = EXCLUDED.ignored_reason,
-      ignored_by = EXCLUDED.ignored_by,
-      fixed_at = EXCLUDED.fixed_at,
-      sla_due_at = EXCLUDED.sla_due_at,
-      dependabot_html_url = EXCLUDED.dependabot_html_url,
-      raw_data = EXCLUDED.raw_data,
-      cwe_ids = EXCLUDED.cwe_ids,
-      cvss_score = EXCLUDED.cvss_score,
-      dependency_scope = EXCLUDED.dependency_scope,
-      last_synced_at = now(),
-      updated_at = now()`,
-    [
-      isOrg ? owner.organizationId : null,
-      isOrg ? null : owner.userId,
-      platformIntegrationId,
-      repoFullName,
-      finding.source,
-      finding.source_id,
-      finding.severity,
-      finding.ghsa_id,
-      finding.cve_id,
-      finding.package_name,
-      finding.package_ecosystem,
-      finding.vulnerable_version_range,
-      finding.patched_version,
-      finding.manifest_path,
-      finding.title,
-      finding.description,
-      finding.status,
-      finding.ignored_reason,
-      finding.ignored_by,
-      finding.fixed_at,
-      slaDueAt,
-      finding.dependabot_html_url,
-      JSON.stringify(finding.raw_data),
-      finding.first_detected_at,
-      finding.cwe_ids,
-      finding.cvss_score?.toString() ?? null,
-      finding.dependency_scope,
-    ]
-  );
+  // Fields that are updated on conflict (shared between insert and upsert)
+  const mutableFields = {
+    severity: finding.severity,
+    ghsa_id: finding.ghsa_id,
+    cve_id: finding.cve_id,
+    vulnerable_version_range: finding.vulnerable_version_range,
+    patched_version: finding.patched_version,
+    title: finding.title,
+    description: finding.description,
+    status: finding.status,
+    ignored_reason: finding.ignored_reason,
+    ignored_by: finding.ignored_by,
+    fixed_at: finding.fixed_at,
+    sla_due_at: slaDueAt,
+    dependabot_html_url: finding.dependabot_html_url,
+    raw_data: finding.raw_data,
+    cwe_ids: finding.cwe_ids,
+    cvss_score: finding.cvss_score?.toString() ?? null,
+    dependency_scope: finding.dependency_scope,
+  };
+
+  await db
+    .insert(security_findings)
+    .values({
+      owned_by_organization_id: isOrgOwner(owner) ? owner.organizationId : null,
+      owned_by_user_id: isOrgOwner(owner) ? null : owner.userId,
+      platform_integration_id: platformIntegrationId,
+      repo_full_name: repoFullName,
+      source: finding.source,
+      source_id: finding.source_id,
+      package_name: finding.package_name,
+      package_ecosystem: finding.package_ecosystem,
+      manifest_path: finding.manifest_path,
+      first_detected_at: finding.first_detected_at,
+      ...mutableFields,
+    })
+    .onConflictDoUpdate({
+      target: [
+        security_findings.repo_full_name,
+        security_findings.source,
+        security_findings.source_id,
+      ],
+      set: {
+        ...mutableFields,
+        last_synced_at: sql`now()`,
+        updated_at: sql`now()`,
+      },
+    });
 }
 
-// ---------------------------------------------------------------------------
-// DB: write audit log
-// ---------------------------------------------------------------------------
-
 async function writeAuditLog(
-  db: Database,
+  db: WorkerDb,
   params: {
     owner: SecurityReviewOwner;
-    action: string;
+    action: SecurityAuditLogAction;
     resource_type: string;
     resource_id: string;
     metadata: Record<string, unknown>;
   }
 ): Promise<void> {
   const { owner, action, resource_type, resource_id, metadata } = params;
-  const isOrg = 'organizationId' in owner && Boolean(owner.organizationId);
 
-  await db.query(
-    `INSERT INTO security_audit_log (
-      owned_by_organization_id, owned_by_user_id,
-      actor_id, actor_email, actor_name,
-      action, resource_type, resource_id, metadata
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [
-      isOrg ? owner.organizationId : null,
-      isOrg ? null : owner.userId,
-      null, // actor_id — system operation
-      null, // actor_email
-      null, // actor_name
-      action,
-      resource_type,
-      resource_id,
-      JSON.stringify(metadata),
-    ]
-  );
+  await db.insert(security_audit_log).values({
+    owned_by_organization_id: isOrgOwner(owner) ? owner.organizationId : null,
+    owned_by_user_id: isOrgOwner(owner) ? null : owner.userId,
+    actor_id: null,
+    actor_email: null,
+    actor_name: null,
+    action,
+    resource_type,
+    resource_id,
+    metadata,
+  });
 }
 
-// ---------------------------------------------------------------------------
-// DB: prune stale repos from config
-// ---------------------------------------------------------------------------
-
 async function pruneStaleReposFromConfig(
-  db: Database,
+  db: WorkerDb,
   owner: SecurityReviewOwner,
   staleRepoNames: string[],
   repoNameToId: Map<string, number>
@@ -534,16 +479,22 @@ async function pruneStaleReposFromConfig(
   );
   if (staleIds.size === 0) return;
 
-  const isOrg = 'organizationId' in owner && Boolean(owner.organizationId);
-  const ownerId = isOrg ? owner.organizationId : owner.userId;
-  const ownerColumn = isOrg ? 'owned_by_organization_id' : 'owned_by_user_id';
+  const rows = await db
+    .select({
+      id: agent_configs.id,
+      config: agent_configs.config,
+      is_enabled: agent_configs.is_enabled,
+    })
+    .from(agent_configs)
+    .where(
+      and(
+        eq(agent_configs.agent_type, 'security_scan'),
+        eq(agent_configs.platform, 'github'),
+        ownerFilter(owner)
+      )
+    )
+    .limit(1);
 
-  const rows = await db.query<{ id: string; config: Record<string, unknown>; is_enabled: boolean }>(
-    `SELECT id, config, is_enabled FROM agent_configs
-     WHERE agent_type = 'security_scan' AND platform = 'github' AND ${ownerColumn} = $1
-     LIMIT 1`,
-    [ownerId]
-  );
   if (rows.length === 0) return;
 
   const parsed = securityAgentConfigSchema.partial().safeParse(rows[0].config);
@@ -564,22 +515,18 @@ async function pruneStaleReposFromConfig(
   if (prunedIds.length === config.selected_repository_ids.length) return;
 
   const updatedConfig = { ...config, selected_repository_ids: prunedIds };
-  await db.query(`UPDATE agent_configs SET config = $1, updated_at = now() WHERE id = $2`, [
-    JSON.stringify(updatedConfig),
-    rows[0].id,
-  ]);
+  await db
+    .update(agent_configs)
+    .set({ config: updatedConfig, updated_at: sql`now()` })
+    .where(eq(agent_configs.id, rows[0].id));
 
   console.warn(
     `Pruned ${config.selected_repository_ids.length - prunedIds.length} stale repo(s) from config`
   );
 }
 
-// ---------------------------------------------------------------------------
-// Sync orchestration for a single owner (called from queue handler)
-// ---------------------------------------------------------------------------
-
 export async function syncOwner(params: {
-  db: Database;
+  db: WorkerDb;
   gitTokenService: GitTokenService;
   owner: SecurityReviewOwner;
   runId: string;
@@ -593,7 +540,6 @@ export async function syncOwner(params: {
   }
 
   const token = await gitTokenService.getToken(config.installationId);
-  const slaConfig = await getSecurityAgentConfig(database, owner);
 
   const totalResult: SyncResult = { synced: 0, errors: 0, staleRepos: [] };
   let firstError: Error | null = null;
@@ -607,7 +553,7 @@ export async function syncOwner(params: {
         owner,
         platformIntegrationId: config.platformIntegrationId,
         repoFullName,
-        slaConfig,
+        slaConfig: config.slaConfig,
       });
       totalResult.synced += repoResult.synced;
       totalResult.errors += repoResult.errors;
@@ -645,7 +591,7 @@ export async function syncOwner(params: {
   try {
     await writeAuditLog(database, {
       owner,
-      action: 'security.sync.completed',
+      action: SecurityAuditLogAction.SyncCompleted,
       resource_type: 'agent_config',
       resource_id: ownerId,
       metadata: {
@@ -666,12 +612,8 @@ export async function syncOwner(params: {
   return totalResult;
 }
 
-// ---------------------------------------------------------------------------
-// Sync a single repository
-// ---------------------------------------------------------------------------
-
 async function syncRepo(params: {
-  db: Database;
+  db: WorkerDb;
   token: string;
   owner: SecurityReviewOwner;
   platformIntegrationId: string;

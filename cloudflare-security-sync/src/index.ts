@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { createDatabase } from './db';
+import { getWorkerDb } from '@kilocode/db/client';
+import { agent_configs } from '@kilocode/db/schema';
+import { eq, and, isNotNull, or } from 'drizzle-orm';
 import { syncOwner } from './sync';
 
 const SecuritySyncMessageSchema = z.object({
@@ -25,11 +27,6 @@ export type SecuritySyncMessage = z.infer<typeof SecuritySyncMessageSchema>;
 type OwnerEntry = {
   owner: { organizationId?: string; userId?: string };
   ownerKey: string;
-};
-
-type AgentConfigOwnerRow = {
-  owned_by_organization_id: string | null;
-  owned_by_user_id: string | null;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -114,7 +111,7 @@ async function processSecuritySyncMessage(
     return;
   }
 
-  const db = createDatabase(env.HYPERDRIVE.connectionString);
+  const db = getWorkerDb(env.HYPERDRIVE.connectionString, { statement_timeout: 30_000 });
   const startTime = Date.now();
 
   const result = await syncOwner({
@@ -156,15 +153,24 @@ export default {
     let failed = false;
 
     try {
-      const db = createDatabase(env.HYPERDRIVE.connectionString);
-      const rows = await db.query<AgentConfigOwnerRow>(`
-        SELECT owned_by_organization_id, owned_by_user_id
-        FROM agent_configs
-        WHERE agent_type = 'security_scan'
-          AND platform = 'github'
-          AND is_enabled = true
-          AND (owned_by_organization_id IS NOT NULL OR owned_by_user_id IS NOT NULL)
-      `);
+      const db = getWorkerDb(env.HYPERDRIVE.connectionString, { statement_timeout: 30_000 });
+      const rows = await db
+        .select({
+          owned_by_organization_id: agent_configs.owned_by_organization_id,
+          owned_by_user_id: agent_configs.owned_by_user_id,
+        })
+        .from(agent_configs)
+        .where(
+          and(
+            eq(agent_configs.agent_type, 'security_scan'),
+            eq(agent_configs.platform, 'github'),
+            eq(agent_configs.is_enabled, true),
+            or(
+              isNotNull(agent_configs.owned_by_organization_id),
+              isNotNull(agent_configs.owned_by_user_id)
+            )
+          )
+        );
 
       const deduplicated = new Map<string, OwnerEntry>();
       for (const row of rows) {

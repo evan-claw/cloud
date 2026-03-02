@@ -323,7 +323,7 @@ export type DependabotAlertRaw = {
       name: string;
     };
     manifest_path: string;
-    scope: 'development' | 'runtime';
+    scope: 'development' | 'runtime' | null;
   };
   security_advisory: {
     ghsa_id: string;

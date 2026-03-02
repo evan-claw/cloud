@@ -10,13 +10,13 @@
     "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts"
   },
   "dependencies": {
-    "pg": "^8.18.0",
+    "@kilocode/db": "workspace:*",
+    "drizzle-orm": "catalog:",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@types/pg": "^8.11.0",
-    "typescript": "^5.9.3",
+    "typescript": "catalog:",
     "wrangler": "^4.61.0"
   }
 }
