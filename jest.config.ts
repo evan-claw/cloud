@@ -44,6 +44,7 @@ const config: Config = {
     '<rootDir>/kiloclaw/',
     '<rootDir>/packages/encryption/',
     '<rootDir>/packages/worker-utils/',
+    '<rootDir>/.worktrees/',
   ],
   transformIgnorePatterns: [
     'node_modules/.pnpm/(?!(@octokit|universal-user-agent|before-after-hook|bottleneck))',
