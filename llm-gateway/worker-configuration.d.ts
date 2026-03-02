@@ -4,7 +4,7 @@ declare namespace Cloudflare {
   interface GlobalProps {}
   interface Env {
     HYPERDRIVE: Hyperdrive;
-    USER_CACHE_KV: KVNamespace;
+    USER_EXISTS_CACHE: KVNamespace;
     NEXTAUTH_SECRET_PROD: SecretsStoreSecret;
   }
 }

@@ -1,48 +1,34 @@
-import jwt from 'jsonwebtoken';
+import { verifyKiloToken, extractBearerToken, type KiloTokenPayload } from '@kilocode/worker-utils';
 
-export const JWT_TOKEN_VERSION = 3;
-
-// Full JWT payload shape — mirrors src/lib/tokens.ts JWTTokenPayload + JWTTokenExtraPayload.
-export type JWTPayload = {
-  kiloUserId: string;
-  version: number;
-  apiTokenPepper?: string;
-  botId?: string;
-  organizationId?: string;
-  organizationRole?: string;
-  internalApiUse?: boolean;
-  createdOnPlatform?: string;
-  tokenSource?: string;
-};
-
-function isJWTPayload(payload: unknown): payload is JWTPayload {
-  if (!payload || typeof payload !== 'object') return false;
-  const p = payload as Record<string, unknown>;
-  return (
-    typeof p.kiloUserId === 'string' && p.kiloUserId.length > 0 && p.version === JWT_TOKEN_VERSION
-  );
-}
+export { extractBearerToken };
+export type { KiloTokenPayload };
 
 export type JWTVerifyResult =
-  | { ok: true; payload: JWTPayload }
-  | { ok: false; reason: 'missing' | 'invalid' | 'expired' | 'version' };
+  | { ok: true; payload: KiloTokenPayload }
+  | { ok: false; reason: 'invalid' | 'expired' | 'version' };
 
-export function verifyKiloJwt(token: string, secret: string): JWTVerifyResult {
+export async function verifyGatewayJwt(token: string, secret: string): Promise<JWTVerifyResult> {
   try {
-    const raw = jwt.verify(token, secret, { algorithms: ['HS256'] });
-    if (!isJWTPayload(raw)) {
-      return { ok: false, reason: 'version' };
-    }
-    return { ok: true, payload: raw };
+    const payload = await verifyKiloToken(token, secret);
+    return { ok: true, payload };
   } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) return { ok: false, reason: 'expired' };
+    if (err instanceof Error) {
+      // jose uses error.code for JWT-specific errors
+      if ((err as { code?: string }).code === 'ERR_JWT_EXPIRED') {
+        return { ok: false, reason: 'expired' };
+      }
+      if (err.name === 'ZodError') return { ok: false, reason: 'version' };
+    }
     return { ok: false, reason: 'invalid' };
   }
 }
 
-export function extractBearerToken(authHeader: string | undefined): string | null {
-  if (!authHeader) return null;
-  if (!authHeader.toLowerCase().startsWith('bearer ')) return null;
-  const token = authHeader.slice(7).trim();
-  return token.length > 0 ? token : null;
+// Returns true when the JWT pepper matches the DB pepper.
+// If the DB user has no pepper set, any token is accepted.
+export function isPepperValid(
+  jwtPepper: string | null | undefined,
+  dbPepper: string | null
+): boolean {
+  if (!dbPepper) return true;
+  return jwtPepper === dbPepper;
 }

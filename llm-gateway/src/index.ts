@@ -1,15 +1,39 @@
 import { Hono } from 'hono';
+import type { MiddlewareHandler } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
-import type { HonoContext } from './types';
+import type { HonoContext } from './types/hono';
+import { requestTimingMiddleware } from './middleware/request-timing';
+import { parseBodyMiddleware } from './middleware/parse-body';
+import { extractIpMiddleware } from './middleware/extract-ip';
+import { resolveAutoModelMiddleware } from './middleware/resolve-auto-model';
+import { authMiddleware } from './middleware/auth';
+import { anonymousGateMiddleware } from './middleware/anonymous-gate';
 
 const app = new Hono<HonoContext>();
 
 app.use('*', useWorkersLogger('llm-gateway') as Parameters<typeof app.use>[1]);
 
-// Phase 1 stub: all requests return 501 until middleware chain is wired up.
-app.post('/chat/completions', c => {
-  return c.json({ error: 'Not implemented' }, 501);
-});
+// Stub handler replaced by proxyHandler in Phase 5
+const notImplemented: MiddlewareHandler<HonoContext> = async c =>
+  c.json({ error: 'Not implemented' }, 501);
+
+function registerChatCompletions(path: string) {
+  app.post(
+    path,
+    requestTimingMiddleware,
+    parseBodyMiddleware,
+    extractIpMiddleware,
+    resolveAutoModelMiddleware,
+    authMiddleware,
+    anonymousGateMiddleware,
+    // Remaining middleware (rate limiting, provider resolution, proxy) added in later phases.
+    notImplemented
+  );
+}
+
+// Match the Next.js routes exactly so clients need no URL reconfiguration
+registerChatCompletions('/api/gateway/chat/completions');
+registerChatCompletions('/api/openrouter/chat/completions');
 
 app.get('/health', c => {
   return c.json({ status: 'ok', service: 'llm-gateway' });

@@ -26,8 +26,8 @@
   ],
   "kv_namespaces": [
     {
-      "binding": "USER_CACHE_KV",
-      "id": "c92d83fa280c4e07963bd3f0c6b00ff1",
+      "binding": "USER_EXISTS_CACHE",
+      "id": "ab836697b6034a95beb92aceea474b10",
     },
   ],
   "secrets_store_secrets": [

@@ -25,3 +25,5 @@ export type { Owner, MCPServerConfig } from './types.js';
 
 export { verifyKiloToken, kiloTokenPayload } from './kilo-token.js';
 export type { KiloTokenPayload } from './kilo-token.js';
+
+export { userExistsWithCache } from './user-exists-cache.js';
