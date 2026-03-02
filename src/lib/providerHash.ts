@@ -10,7 +10,12 @@ import type { Provider } from '@/lib/providers';
  */
 export function generateProviderSpecificHash(payload: string, provider: Provider): string {
   const salt = 'd20250815';
-  const pepper = provider.id === 'openrouter' ? 'henk is a boss' : provider.id;
+  const pepper =
+    provider.id === 'custom'
+      ? provider.apiUrl
+      : provider.id === 'openrouter'
+        ? 'henk is a boss'
+        : provider.id;
   return crypto
     .createHash('sha256')
     .update(salt + pepper + payload)
