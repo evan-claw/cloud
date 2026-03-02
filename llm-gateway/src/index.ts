@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import type { MiddlewareHandler } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import type { HonoContext } from './types/hono';
 import { requestTimingMiddleware } from './middleware/request-timing';
@@ -15,14 +14,11 @@ import { providerResolutionMiddleware } from './middleware/provider-resolution';
 import { requestValidationMiddleware } from './middleware/request-validation';
 import { balanceAndOrgCheckMiddleware } from './middleware/balance-and-org';
 import { requestTransformMiddleware } from './middleware/request-transform';
+import { proxyHandler } from './handler/proxy';
 
 const app = new Hono<HonoContext>();
 
 app.use('*', useWorkersLogger('llm-gateway') as Parameters<typeof app.use>[1]);
-
-// Stub handler replaced by proxyHandler in Phase 5
-const notImplemented: MiddlewareHandler<HonoContext> = async c =>
-  c.json({ error: 'Not implemented' }, 501);
 
 function registerChatCompletions(path: string) {
   app.post(
@@ -40,8 +36,7 @@ function registerChatCompletions(path: string) {
     requestValidationMiddleware,
     balanceAndOrgCheckMiddleware,
     requestTransformMiddleware,
-    // proxyHandler added in Phase 5
-    notImplemented
+    proxyHandler
   );
 }
 

@@ -78,8 +78,21 @@
       "secret_name": "BYOK_ENCRYPTION_KEY",
     },
   ],
+  "secrets_store_secrets": [
+    {
+      "binding": "ABUSE_CF_ACCESS_CLIENT_ID",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "ABUSE_CF_ACCESS_CLIENT_ID",
+    },
+    {
+      "binding": "ABUSE_CF_ACCESS_CLIENT_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "ABUSE_CF_ACCESS_CLIENT_SECRET",
+    },
+  ],
   "vars": {
     "GIGAPOTATO_API_URL": "https://your-gigapotato-endpoint/v1",
     "OPENROUTER_ORG_ID": "",
+    "ABUSE_SERVICE_URL": "https://abuse.kiloapps.io",
   },
 }

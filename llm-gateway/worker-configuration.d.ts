@@ -15,9 +15,13 @@ declare namespace Cloudflare {
     MISTRAL_API_KEY: SecretsStoreSecret;
     VERCEL_AI_GATEWAY_API_KEY: SecretsStoreSecret;
     BYOK_ENCRYPTION_KEY: SecretsStoreSecret;
+    // Abuse service secrets
+    ABUSE_CF_ACCESS_CLIENT_ID: SecretsStoreSecret;
+    ABUSE_CF_ACCESS_CLIENT_SECRET: SecretsStoreSecret;
     // Vars
     GIGAPOTATO_API_URL: string;
     OPENROUTER_ORG_ID: string;
+    ABUSE_SERVICE_URL: string;
   }
 }
 interface Env extends Cloudflare.Env {}

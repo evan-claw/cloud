@@ -22,9 +22,13 @@
     "typecheck": "tsgo --noEmit --incremental false"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.41",
+    "@ai-sdk/openai": "^3.0.27",
     "@kilocode/db": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
+    "ai": "^6.0.78",
     "drizzle-orm": "catalog:",
+    "eventsource-parser": "^3.0.6",
     "hono": "catalog:",
     "workers-tagged-logger": "catalog:",
     "zod": "catalog:"
