@@ -52,6 +52,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     RATE_LIMIT_KV: kv,
     O11Y: {
       fetch: async () => new Response(JSON.stringify({ success: true })),
+      ingestApiMetrics: async () => {},
     } as unknown as Fetcher,
     NEXTAUTH_SECRET_PROD: makeSecret(TEST_SECRET),
     OPENROUTER_API_KEY: makeSecret('or-key'),

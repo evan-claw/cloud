@@ -102,8 +102,7 @@ type BackgroundTaskParams = {
   isAnon: boolean;
   sessionId: string | null;
   connectionString: string;
-  o11y: { fetch(input: string | URL, init?: RequestInit): Promise<Response> };
-  o11yClientSecretPromise: Promise<string>;
+  o11y: { ingestApiMetrics(params: O11YApiMetricsParams): Promise<void> };
 };
 
 function scheduleBackgroundTasks(
@@ -139,7 +138,6 @@ function scheduleBackgroundTasks(
     sessionId,
     connectionString,
     o11y,
-    o11yClientSecretPromise,
   } = params;
 
   // ── Usage accounting ───────────────────────────────────────────────────────
@@ -192,9 +190,6 @@ function scheduleBackgroundTasks(
   const metricsTask = metricsStream
     ? withTimeout(
         (async () => {
-          const clientSecret = await o11yClientSecretPromise.catch(() => '');
-          if (!clientSecret) return;
-
           const toolsAvailable = Array.isArray(requestBody.tools)
             ? (requestBody.tools as Array<{ type?: string; function?: { name?: string } }>).map(
                 t => {
@@ -209,7 +204,6 @@ function scheduleBackgroundTasks(
 
           await runApiMetrics(
             o11y,
-            clientSecret,
             {
               kiloUserId: user.id,
               organizationId,
@@ -310,9 +304,6 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   const requestStartedAt = c.get('requestStartedAt');
   const modeHeader = c.get('modeHeader');
   const isAnon = isAnonymousContext(user);
-
-  // Pre-fetch O11Y client secret (non-blocking, used later in background tasks)
-  const o11yClientSecretPromise = c.env.O11Y_KILO_GATEWAY_CLIENT_SECRET.get().catch(() => '');
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
@@ -452,7 +443,6 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     sessionId: taskId,
     connectionString: c.env.HYPERDRIVE.connectionString,
     o11y: c.env.O11Y,
-    o11yClientSecretPromise,
   } as const;
 
   // ── Free model response rewrite ───────────────────────────────────────────────

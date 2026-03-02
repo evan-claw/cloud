@@ -1,5 +1,6 @@
-// Background task: emit API metrics to the O11Y service binding.
-// Port of src/lib/o11y/api-metrics.server.ts — uses service binding instead of raw fetch.
+// Background task: emit API metrics to the O11Y service binding via RPC.
+// The O11Y worker exposes an ingestApiMetrics RPC method on its WorkerEntrypoint,
+// eliminating the need for HTTP routing, JSON serialization, and admin token auth.
 
 import { createParser } from 'eventsource-parser';
 import type { EventSourceMessage } from 'eventsource-parser';
@@ -16,7 +17,6 @@ export type ApiMetricsTokens = {
 };
 
 export type ApiMetricsParams = {
-  clientSecret: string;
   kiloUserId: string;
   organizationId?: string;
   isAnonymous: boolean;
@@ -34,10 +34,6 @@ export type ApiMetricsParams = {
   statusCode: number;
   tokens?: ApiMetricsTokens;
 };
-
-// ─── O11Y service binding type ────────────────────────────────────────────────
-
-type O11YFetcher = { fetch(input: string | URL, init?: RequestInit): Promise<Response> };
 
 // ─── Token extraction ─────────────────────────────────────────────────────────
 
@@ -260,22 +256,15 @@ async function drainResponseBodyForInferenceProvider(
   }
 }
 
+// ─── O11Y service binding type (RPC) ──────────────────────────────────────────
+
+type O11YRpc = { ingestApiMetrics(params: O11YApiMetricsParams): Promise<void> };
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
-async function sendApiMetrics(
-  o11y: O11YFetcher,
-  clientSecret: string,
-  params: ApiMetricsParams
-): Promise<void> {
+async function sendApiMetrics(o11y: O11YRpc, params: ApiMetricsParams): Promise<void> {
   try {
-    await o11y.fetch('/ingest/api-metrics', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'X-O11Y-ADMIN-TOKEN': clientSecret,
-      },
-      body: JSON.stringify(params),
-    });
+    await o11y.ingestApiMetrics(params);
   } catch (err) {
     console.error('[api-metrics] Failed to send metrics:', err);
   }
@@ -283,12 +272,11 @@ async function sendApiMetrics(
 
 /**
  * Drain the background response stream to extract inferenceProvider,
- * then emit the final ApiMetricsParams to O11Y. Bounded to 60s internally.
+ * then emit the final ApiMetricsParams to O11Y via RPC. Bounded to 60s internally.
  */
 export async function runApiMetrics(
-  o11y: O11YFetcher,
-  clientSecret: string,
-  params: Omit<ApiMetricsParams, 'clientSecret' | 'completeRequestMs'>,
+  o11y: O11YRpc,
+  params: Omit<ApiMetricsParams, 'completeRequestMs'>,
   backgroundStream: ReadableStream,
   requestStartedAt: number
 ): Promise<void> {
@@ -306,10 +294,9 @@ export async function runApiMetrics(
 
   const completeRequestMs = Math.max(0, Math.round(performance.now() - requestStartedAt));
 
-  await sendApiMetrics(o11y, clientSecret, {
+  await sendApiMetrics(o11y, {
     ...params,
     inferenceProvider: inferenceProvider ?? params.inferenceProvider,
-    clientSecret,
     completeRequestMs,
   });
 }

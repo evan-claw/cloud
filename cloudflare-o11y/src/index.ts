@@ -1,13 +1,17 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Hono } from 'hono';
-import { registerApiMetricsRoutes } from './api-metrics-routes';
+import { registerApiMetricsRoutes, ApiMetricsParamsSchema } from './api-metrics-routes';
+import type { z } from 'zod';
 import { evaluateAlerts } from './alerting/evaluate';
 import { registerAlertingConfigRoutes } from './alerting/config-routes';
 import { SessionMetricsParamsSchema } from './session-metrics-schema';
 import type { SessionMetricsParams } from './session-metrics-schema';
 import { writeSessionMetricsDataPoint } from './session-metrics-analytics';
+import { writeApiMetricsDataPoint } from './o11y-analytics';
 
 export { AlertConfigDO } from './alerting/AlertConfigDO';
+
+export type ApiMetricsParams = z.infer<typeof ApiMetricsParamsSchema>;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -27,5 +31,11 @@ export default class extends WorkerEntrypoint<Env> {
 	async ingestSessionMetrics(params: SessionMetricsParams): Promise<void> {
 		const parsed = SessionMetricsParamsSchema.parse(params);
 		await writeSessionMetricsDataPoint(parsed, this.env);
+	}
+
+	/** RPC method called by llm-gateway via service binding. */
+	async ingestApiMetrics(params: ApiMetricsParams): Promise<void> {
+		const parsed = ApiMetricsParamsSchema.parse(params);
+		writeApiMetricsDataPoint(parsed, 'kilo-gateway', this.env, (p) => this.ctx.waitUntil(p));
 	}
 }
