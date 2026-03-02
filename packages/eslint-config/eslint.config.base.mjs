@@ -48,7 +48,7 @@ export default function baseConfig(tsconfigRootDir) {
         '@typescript-eslint/no-unsafe-member-access': 'error',
         '@typescript-eslint/no-unsafe-argument': 'error',
         '@typescript-eslint/no-base-to-string': 'off',
-        '@typescript-eslint/no-unsafe-call': 'off',
+        '@typescript-eslint/no-unsafe-call': 'error',
         '@typescript-eslint/no-empty-object-type': 'off',
       },
     },
