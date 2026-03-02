@@ -65,24 +65,6 @@ export function isDiscordBotMessage(message: { author?: { bot?: boolean } }): bo
 }
 
 /**
- * Get the bot's own user ID by calling /users/@me with the bot token.
- */
-export async function getDiscordBotUserId(): Promise<string | null> {
-  if (!DISCORD_BOT_TOKEN) return null;
-
-  try {
-    const response = await fetch('https://discord.com/api/v10/users/@me', {
-      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { id: string };
-    return data.id;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Build a Discord message link.
  */
 export function buildDiscordMessageLink(
