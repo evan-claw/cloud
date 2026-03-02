@@ -14,8 +14,7 @@ import {
   BALANCE_REQUIRED_SUBSCRIPTIONS,
   BALANCE_REQUIRED_MUTATIONS,
 } from './balance-validation.js';
-import { validateKiloToken } from './auth.js';
-import { getWorkerDb } from '@kilocode/db/client';
+import { validateKiloToken, requireDb } from './auth.js';
 import { createQueueConsumer } from './queue/consumer.js';
 import { createCallbackQueueConsumer } from './callbacks/index.js';
 import type { ExecutionMessage } from './queue/types.js';
@@ -176,7 +175,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
         const authResult = await validateKiloToken(
           authHeader,
           this.env.NEXTAUTH_SECRET,
-          getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+          requireDb(this.env)
         );
         if (!authResult.success) {
           return new Response(authResult.error, { status: 401 });
@@ -213,7 +212,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
         const authResult = await validateKiloToken(
           authHeader,
           this.env.NEXTAUTH_SECRET,
-          getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+          requireDb(this.env)
         );
         if (!authResult.success) {
           return new Response(authResult.error, { status: 401 });
@@ -256,7 +255,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           const authResult = await validateKiloToken(
             authHeader,
             this.env.NEXTAUTH_SECRET,
-            getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+            requireDb(this.env)
           );
           if (!authResult.success) {
             return new Response(JSON.stringify({ error: authResult.error }), {
@@ -294,7 +293,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           const authResult = await validateKiloToken(
             authHeader,
             this.env.NEXTAUTH_SECRET,
-            getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+            requireDb(this.env)
           );
           if (!authResult.success) {
             return new Response(JSON.stringify({ error: authResult.error }), {
@@ -346,7 +345,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           const authResult = await validateKiloToken(
             authHeader,
             this.env.NEXTAUTH_SECRET,
-            getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+            requireDb(this.env)
           );
           if (!authResult.success) {
             return this.buildTrpcErrorResponse(401, authResult.error, procedureName);
@@ -383,7 +382,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           const authResult = await validateKiloToken(
             authHeader,
             this.env.NEXTAUTH_SECRET,
-            getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+            requireDb(this.env)
           );
           if (!authResult.success) {
             return this.buildTrpcErrorResponse(401, authResult.error, procedureName);
@@ -396,7 +395,7 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           const authResult = await validateKiloToken(
             authHeader,
             this.env.NEXTAUTH_SECRET,
-            getWorkerDb(this.env.HYPERDRIVE?.connectionString ?? '')
+            requireDb(this.env)
           );
           if (!authResult.success) {
             return this.buildTrpcErrorResponse(401, authResult.error, procedureName);

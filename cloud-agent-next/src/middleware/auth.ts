@@ -9,9 +9,23 @@ import { getWorkerDb } from '@kilocode/db/client';
 
 export const authMiddleware = createMiddleware<HonoContext>(
   async (c: Context<HonoContext>, next: Next) => {
+    if (!c.env.HYPERDRIVE?.connectionString) {
+      logger.error('HYPERDRIVE not configured — cannot validate token pepper');
+      return buildTrpcErrorResponse(500, 'Server configuration error');
+    }
+
     const authHeader = c.req.header('authorization');
-    const db = getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '');
-    const result = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET, db);
+    const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+
+    let result: Awaited<ReturnType<typeof validateKiloToken>>;
+    try {
+      result = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET, db);
+    } catch (err) {
+      logger
+        .withFields({ error: err instanceof Error ? err.message : String(err) })
+        .error('Authentication service error');
+      return buildTrpcErrorResponse(500, 'Authentication service unavailable');
+    }
 
     if (!result.success) {
       logger.withFields({ error: result.error }).warn('Authentication failed');

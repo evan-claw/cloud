@@ -1,5 +1,11 @@
 import { createMiddleware } from 'hono/factory';
-import { verifyKiloToken, extractBearerToken, UserNotFoundError } from '@kilocode/worker-utils';
+import {
+  verifyKiloToken,
+  extractBearerToken,
+  UserNotFoundError,
+  TokenRevokedError,
+  JwtVerificationError,
+} from '@kilocode/worker-utils';
 import { getWorkerDb } from '@kilocode/db/client';
 
 import type { Env } from '../env';
@@ -26,7 +32,14 @@ export const kiloJwtAuthMiddleware = createMiddleware<{
     if (err instanceof UserNotFoundError) {
       return c.json({ success: false, error: 'User account not found' }, 403);
     }
-    return c.json({ success: false, error: 'Invalid or expired token' }, 401);
+    if (err instanceof TokenRevokedError) {
+      return c.json({ success: false, error: 'Token has been revoked' }, 401);
+    }
+    if (err instanceof JwtVerificationError) {
+      return c.json({ success: false, error: 'Invalid or expired token' }, 401);
+    }
+    // DB connectivity errors — rethrow for Hono error handler → 500
+    throw err;
   }
 
   c.set('user_id', kiloUserId);

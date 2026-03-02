@@ -52,11 +52,9 @@ export class TokenRevokedError extends Error {
  * connectivity errors (which propagate as-is).
  */
 export class JwtVerificationError extends Error {
-  cause: unknown;
   constructor(cause: unknown) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    super(message);
-    this.cause = cause;
+    super(message, { cause });
   }
 }
 

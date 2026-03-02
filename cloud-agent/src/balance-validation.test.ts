@@ -14,6 +14,7 @@ import type { Env } from './types.js';
 // Mock the auth module
 vi.mock('./auth.js', () => ({
   validateKiloToken: vi.fn(),
+  requireDb: vi.fn(() => ({}) /* returns a stub WorkerDb */),
 }));
 
 // Mock the session-service module

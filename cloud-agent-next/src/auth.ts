@@ -4,6 +4,7 @@ import {
   extractBearerToken,
   UserNotFoundError,
   TokenRevokedError,
+  JwtVerificationError,
 } from '@kilocode/worker-utils';
 import type { WorkerDb } from '@kilocode/db/client';
 
@@ -38,11 +39,15 @@ export async function validateKiloToken(
     const payload = await verifyKiloToken(token, secret, db);
     return { success: true, userId: payload.kiloUserId, token, botId: payload.botId };
   } catch (err) {
-    if (err instanceof UserNotFoundError || err instanceof TokenRevokedError) {
+    if (
+      err instanceof JwtVerificationError ||
+      err instanceof UserNotFoundError ||
+      err instanceof TokenRevokedError
+    ) {
       return { success: false, error: err.message };
     }
-    const message = err instanceof Error ? err.message : 'JWT verification failed';
-    return { success: false, error: message };
+    // DB connectivity errors — rethrow for caller to handle as 500
+    throw err;
   }
 }
 

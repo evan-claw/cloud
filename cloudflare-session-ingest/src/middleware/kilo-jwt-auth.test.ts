@@ -116,6 +116,6 @@ describe('kiloJwtAuthMiddleware', () => {
     );
 
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ success: false, error: 'Invalid or expired token' });
+    expect(await res.json()).toEqual({ success: false, error: 'Token has been revoked' });
   });
 });

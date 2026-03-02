@@ -94,12 +94,24 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
   }
 
   const sessionId = c.req.param('sessionId');
+  if (!c.env.HYPERDRIVE?.connectionString) {
+    logger.error('HYPERDRIVE not configured — cannot validate token pepper');
+    return c.text('Server configuration error', 500);
+  }
   const authHeader = c.req.header('Authorization');
-  const authResult = await validateKiloToken(
-    authHeader ?? null,
-    c.env.NEXTAUTH_SECRET,
-    getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '')
-  );
+  let authResult: Awaited<ReturnType<typeof validateKiloToken>>;
+  try {
+    authResult = await validateKiloToken(
+      authHeader ?? null,
+      c.env.NEXTAUTH_SECRET,
+      getWorkerDb(c.env.HYPERDRIVE.connectionString)
+    );
+  } catch (err) {
+    logger
+      .withFields({ error: err instanceof Error ? err.message : String(err) })
+      .error('Authentication service error');
+    return c.text('Authentication service unavailable', 500);
+  }
   if (!authResult.success) {
     return c.text(authResult.error, 401);
   }
@@ -133,12 +145,24 @@ app.put(
       return c.text('Invalid filename', 400);
     }
 
+    if (!c.env.HYPERDRIVE?.connectionString) {
+      logger.error('HYPERDRIVE not configured — cannot validate token pepper');
+      return c.text('Server configuration error', 500);
+    }
     const authHeader = c.req.header('Authorization');
-    const authResult = await validateKiloToken(
-      authHeader ?? null,
-      c.env.NEXTAUTH_SECRET,
-      getWorkerDb(c.env.HYPERDRIVE?.connectionString ?? '')
-    );
+    let authResult: Awaited<ReturnType<typeof validateKiloToken>>;
+    try {
+      authResult = await validateKiloToken(
+        authHeader ?? null,
+        c.env.NEXTAUTH_SECRET,
+        getWorkerDb(c.env.HYPERDRIVE.connectionString)
+      );
+    } catch (err) {
+      logger
+        .withFields({ error: err instanceof Error ? err.message : String(err) })
+        .error('Authentication service error');
+      return c.text('Authentication service unavailable', 500);
+    }
     if (!authResult.success) {
       return c.text(authResult.error, 401);
     }

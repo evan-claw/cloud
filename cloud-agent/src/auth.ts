@@ -5,10 +5,23 @@ import {
   extractBearerToken,
   UserNotFoundError,
   TokenRevokedError,
+  JwtVerificationError,
 } from '@kilocode/worker-utils';
 import { getWorkerDb } from '@kilocode/db/client';
 import type { WorkerDb } from '@kilocode/db/client';
 import type { Env } from './types.js';
+
+/**
+ * Get a WorkerDb from the HYPERDRIVE binding, failing fast with a clear error
+ * if the binding is not configured.
+ */
+export function requireDb(env: Env): WorkerDb {
+  const connectionString = env.HYPERDRIVE?.connectionString;
+  if (!connectionString) {
+    throw new Error('HYPERDRIVE not configured — cannot validate token pepper');
+  }
+  return getWorkerDb(connectionString);
+}
 
 type StreamTicketPayload = {
   type: 'stream_ticket';
@@ -37,11 +50,15 @@ export async function validateKiloToken(
     const payload = await verifyKiloToken(token, secret, db);
     return { success: true, userId: payload.kiloUserId, token, botId: payload.botId };
   } catch (err) {
-    if (err instanceof UserNotFoundError || err instanceof TokenRevokedError) {
+    if (
+      err instanceof JwtVerificationError ||
+      err instanceof UserNotFoundError ||
+      err instanceof TokenRevokedError
+    ) {
       return { success: false, error: err.message };
     }
-    const message = err instanceof Error ? err.message : 'JWT verification failed';
-    return { success: false, error: message };
+    // DB connectivity errors — rethrow for caller to handle as 500
+    throw err;
   }
 }
 
@@ -83,7 +100,7 @@ export async function authenticate(
   env: Env
 ): Promise<{ userId: string; token: string; botId?: string }> {
   const authHeader = request.headers.get('authorization');
-  const db = getWorkerDb(env.HYPERDRIVE?.connectionString ?? '');
+  const db = requireDb(env);
 
   const result = await validateKiloToken(authHeader, env.NEXTAUTH_SECRET, db);
 
