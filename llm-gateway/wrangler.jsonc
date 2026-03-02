@@ -5,7 +5,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-02-01",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
   "dev": {
     "port": 8787,
     "local_protocol": "http",
@@ -18,10 +17,25 @@
   "placement": {
     "mode": "smart",
   },
-  "env": {
-    "dev": {
-      "name": "llm-gateway-dev",
-      "workers_dev": true,
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "624ec80650dd414199349f4e217ddb10",
+      "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
     },
-  },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "USER_CACHE_KV",
+      "id": "c92d83fa280c4e07963bd3f0c6b00ff1",
+    },
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "NEXTAUTH_SECRET_PROD",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "NEXTAUTH_SECRET_PROD",
+      // To set: wrangler secrets-store secret create 342a86d9e3a94da698e82d0c6e2a36f0 --name NEXTAUTH_SECRET_PROD --scopes workers
+    },
+  ],
 }
