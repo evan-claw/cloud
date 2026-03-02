@@ -35,6 +35,13 @@
       "id": "ab836697b6034a95beb92aceea474b10",
     },
   ],
+  "services": [
+    {
+      // O11Y observability service — receives API metrics via internal service binding
+      "binding": "O11Y",
+      "service": "cloudflare-o11y",
+    },
+  ],
   "secrets_store_secrets": [
     {
       "binding": "NEXTAUTH_SECRET_PROD",
@@ -77,8 +84,6 @@
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
       "secret_name": "BYOK_ENCRYPTION_KEY",
     },
-  ],
-  "secrets_store_secrets": [
     {
       "binding": "ABUSE_CF_ACCESS_CLIENT_ID",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
@@ -88,6 +93,11 @@
       "binding": "ABUSE_CF_ACCESS_CLIENT_SECRET",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
       "secret_name": "ABUSE_CF_ACCESS_CLIENT_SECRET",
+    },
+    {
+      "binding": "O11Y_KILO_GATEWAY_CLIENT_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "O11Y_KILO_GATEWAY_CLIENT_SECRET",
     },
   ],
   "vars": {

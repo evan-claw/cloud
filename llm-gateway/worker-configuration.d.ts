@@ -6,6 +6,8 @@ declare namespace Cloudflare {
     HYPERDRIVE: Hyperdrive;
     USER_EXISTS_CACHE: KVNamespace;
     RATE_LIMIT_KV: KVNamespace;
+    // Service bindings
+    O11Y: Fetcher;
     // Secrets Store
     NEXTAUTH_SECRET_PROD: SecretsStoreSecret;
     OPENROUTER_API_KEY: SecretsStoreSecret;
@@ -18,6 +20,8 @@ declare namespace Cloudflare {
     // Abuse service secrets
     ABUSE_CF_ACCESS_CLIENT_ID: SecretsStoreSecret;
     ABUSE_CF_ACCESS_CLIENT_SECRET: SecretsStoreSecret;
+    // O11Y metrics auth
+    O11Y_KILO_GATEWAY_CLIENT_SECRET: SecretsStoreSecret;
     // Vars
     GIGAPOTATO_API_URL: string;
     OPENROUTER_ORG_ID: string;
@@ -34,4 +38,7 @@ interface KVNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
+}
+interface Fetcher {
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
