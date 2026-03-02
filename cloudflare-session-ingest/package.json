@@ -15,7 +15,6 @@
     "@kilocode/worker-utils": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
-    "jsonwebtoken": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -15,6 +15,7 @@
   "dependencies": {
     "aws4fetch": "catalog:",
     "hono": "catalog:",
+    "jose": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
