@@ -3,6 +3,7 @@ import 'server-only';
 import { validateAuthorizationHeader, JWT_TOKEN_VERSION } from './tokens';
 import { NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
+
 import type { CreateOrUpdateUserArgs } from './user';
 import { findUserById, createOrUpdateUser, findAndSyncExistingUser } from './user';
 import { db, readDb } from '@/lib/drizzle';
@@ -82,6 +83,11 @@ const warnInSentry = sentryLogger('user.server', 'warning');
 const blacklistDomainsEnv = getEnvVariable('BLACKLIST_DOMAINS');
 const BLACKLIST_DOMAINS = blacklistDomainsEnv
   ? blacklistDomainsEnv.split('|').map((domain: string) => domain.trim())
+  : [];
+
+const blacklistTldsEnv = getEnvVariable('BLACKLIST_TLDS');
+const BLACKLIST_TLDS = blacklistTldsEnv
+  ? blacklistTldsEnv.split('|').map((tld: string) => tld.trim().toLowerCase())
   : [];
 
 function createGoogleAccountInfo(
@@ -423,7 +429,10 @@ const authOptions: NextAuthOptions = {
           return redirectUrlForCode('USER-NOT-FOUND', accountInfo.google_user_email);
         }
 
-        if (isEmailBlacklistedByDomain(accountInfo.google_user_email)) {
+        if (
+          isEmailBlacklistedByDomain(accountInfo.google_user_email) ||
+          isBlockedTLD(accountInfo.google_user_email)
+        ) {
           sentryLogger('auth', 'warning')(
             `SECURITY: Blacklisted: ${accountInfo.google_user_email}`,
             accountInfo
@@ -764,7 +773,7 @@ async function validateUserAuthorization(
 ): Promise<GetAuthResponse> {
   if (!user) {
     return authError(401, 'User not found', kiloUserId);
-  } else if (isUserBlacklistedByDomain(user)) {
+  } else if (isUserBlacklistedByDomain(user) || isBlockedTLD(user.google_user_email)) {
     return authError(403, 'Access denied (R0)', kiloUserId);
   } else if (!opts.DANGEROUS_allowBlockedUsers && user.blocked_reason) {
     return report_blocked_user(kiloUserId);
@@ -806,6 +815,13 @@ export const isEmailBlacklistedByDomain = (
       email.toLowerCase().endsWith('@' + domain.toLowerCase()) ||
       email.toLowerCase().endsWith('.' + domain.toLowerCase())
   );
+
+export const isBlockedTLD = (email: string, blacklisted_tlds = BLACKLIST_TLDS) => {
+  const domain = getLowerDomainFromEmail(email);
+  if (!domain) return false;
+  const tld = domain.split('.').pop();
+  return tld !== undefined && blacklisted_tlds.includes(tld);
+};
 
 export function report_blocked_user(kiloUserId: string) {
   return authError(403, 'Access denied (R1)', kiloUserId);

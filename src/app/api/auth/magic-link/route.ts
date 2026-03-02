@@ -6,6 +6,7 @@ import { verifyTurnstileJWT } from '@/lib/auth/verify-turnstile-jwt';
 import * as z from 'zod';
 import { findUserByEmail } from '@/lib/user';
 import { validateMagicLinkSignupEmail } from '@/lib/schemas/email';
+import { isEmailBlacklistedByDomain, isBlockedTLD } from '@/lib/user.server';
 
 const requestSchema = z.object({
   email: z.string().email(),
@@ -34,6 +35,10 @@ export async function POST(request: NextRequest) {
   const turnstileResult = await verifyTurnstileJWT('magic-link');
   if (!turnstileResult.success) {
     return turnstileResult.response;
+  }
+
+  if (isEmailBlacklistedByDomain(email) || isBlockedTLD(email)) {
+    return NextResponse.json({ success: false, error: 'BLOCKED' }, { status: 403 });
   }
 
   // Check if this is an existing user (sign-in) or new user (signup)
