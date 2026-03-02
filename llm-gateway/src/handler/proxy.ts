@@ -33,11 +33,9 @@ const TEN_MINUTES_MS = 10 * 60 * 1000;
 const BACKGROUND_TASK_TIMEOUT_MS = 25_000;
 
 // Wrap a promise to never exceed a max duration, so waitUntil budgets are bounded.
+// Uses scheduler.wait (Workers-native) instead of setTimeout for proper I/O scheduling.
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
-  return Promise.race([
-    p,
-    new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), ms)),
-  ]);
+  return Promise.race([p, scheduler.wait(ms).then(() => undefined)]);
 }
 
 // Build the upstream fetch URL — always /chat/completions on the provider base URL.
@@ -400,10 +398,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // ── Await abuse classification (2s timeout) ───────────────────────────────────
   let classifyResult: Awaited<typeof classifyPromise> | null = null;
   try {
-    classifyResult = await Promise.race([
-      classifyPromise,
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
-    ]);
+    classifyResult = await Promise.race([classifyPromise, scheduler.wait(2000).then(() => null)]);
   } catch {
     // ignore — abuse service is fail-open
   }

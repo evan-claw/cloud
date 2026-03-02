@@ -42,3 +42,7 @@ interface KVNamespace {
 interface Fetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
+// Workers-native scheduler API (awaitable alternative to setTimeout)
+declare const scheduler: {
+  wait(ms: number): Promise<void>;
+};

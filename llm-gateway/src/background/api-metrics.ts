@@ -226,9 +226,7 @@ async function drainResponseBodyForInferenceProvider(
 
       const result = await Promise.race([
         reader.read(),
-        new Promise<{ timeout: true }>(resolve =>
-          setTimeout(() => resolve({ timeout: true }), remainingMs)
-        ),
+        scheduler.wait(remainingMs).then((): { timeout: true } => ({ timeout: true })),
       ]);
 
       if ('timeout' in result) {

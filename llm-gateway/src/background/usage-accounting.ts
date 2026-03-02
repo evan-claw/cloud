@@ -715,7 +715,7 @@ export async function runUsageAccounting(
       } catch (err) {
         if (attempt >= 2) throw err;
         console.warn('insertUsageRecord concurrency failure, retrying', { attempt });
-        await new Promise(r => setTimeout(r, Math.random() * 100));
+        await scheduler.wait(Math.random() * 100);
         attempt++;
       }
     }
