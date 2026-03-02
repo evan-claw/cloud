@@ -14,7 +14,7 @@ import {
   BALANCE_REQUIRED_SUBSCRIPTIONS,
   BALANCE_REQUIRED_MUTATIONS,
 } from './balance-validation.js';
-import { validateKiloToken, requireDb } from './auth.js';
+import { safeValidateKiloToken } from './auth.js';
 import { createQueueConsumer } from './queue/consumer.js';
 import { createCallbackQueueConsumer } from './callbacks/index.js';
 import type { ExecutionMessage } from './queue/types.js';
@@ -172,13 +172,9 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
         }
         const sessionId = ingestMatch[2];
         const authHeader = request.headers.get('Authorization');
-        const authResult = await validateKiloToken(
-          authHeader,
-          this.env.NEXTAUTH_SECRET,
-          requireDb(this.env)
-        );
+        const authResult = await safeValidateKiloToken(authHeader, this.env);
         if (!authResult.success) {
-          return new Response(authResult.error, { status: 401 });
+          return new Response(authResult.error, { status: authResult.status });
         }
         if (authResult.userId !== userId) {
           return new Response('Token does not match session user', { status: 403 });
@@ -209,13 +205,9 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
           return new Response('Invalid filename', { status: 400 });
         }
         const authHeader = request.headers.get('Authorization');
-        const authResult = await validateKiloToken(
-          authHeader,
-          this.env.NEXTAUTH_SECRET,
-          requireDb(this.env)
-        );
+        const authResult = await safeValidateKiloToken(authHeader, this.env);
         if (!authResult.success) {
-          return new Response(authResult.error, { status: 401 });
+          return new Response(authResult.error, { status: authResult.status });
         }
         if (authResult.userId !== userId) {
           return new Response('Token does not match session user', { status: 403 });
@@ -252,14 +244,10 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
         if (skipBalanceCheck) {
           logger.withFields({ procedure: procedureName }).info('Skipping balance check per header');
 
-          const authResult = await validateKiloToken(
-            authHeader,
-            this.env.NEXTAUTH_SECRET,
-            requireDb(this.env)
-          );
+          const authResult = await safeValidateKiloToken(authHeader, this.env);
           if (!authResult.success) {
             return new Response(JSON.stringify({ error: authResult.error }), {
-              status: 401,
+              status: authResult.status,
               headers: { 'Content-Type': 'application/json' },
             });
           }
@@ -290,14 +278,10 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
             });
           }
           // First validate auth to get userId for DO lookup
-          const authResult = await validateKiloToken(
-            authHeader,
-            this.env.NEXTAUTH_SECRET,
-            requireDb(this.env)
-          );
+          const authResult = await safeValidateKiloToken(authHeader, this.env);
           if (!authResult.success) {
             return new Response(JSON.stringify({ error: authResult.error }), {
-              status: 401,
+              status: authResult.status,
               headers: { 'Content-Type': 'application/json' },
             });
           }
@@ -342,13 +326,9 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
         if (skipBalanceCheck) {
           logger.withFields({ procedure: procedureName }).info('Skipping balance check per header');
 
-          const authResult = await validateKiloToken(
-            authHeader,
-            this.env.NEXTAUTH_SECRET,
-            requireDb(this.env)
-          );
+          const authResult = await safeValidateKiloToken(authHeader, this.env);
           if (!authResult.success) {
-            return this.buildTrpcErrorResponse(401, authResult.error, procedureName);
+            return this.buildTrpcErrorResponse(authResult.status, authResult.error, procedureName);
           }
 
           return this.handleTrpcRequest(request, authResult);
@@ -379,26 +359,18 @@ export default class KilocodeWorker extends WorkerEntrypoint<Env> {
 
         // For sendMessageV2, we need to fetch orgId from session metadata if not in input
         if (procedureName === 'sendMessageV2' && !orgId && sessionId) {
-          const authResult = await validateKiloToken(
-            authHeader,
-            this.env.NEXTAUTH_SECRET,
-            requireDb(this.env)
-          );
+          const authResult = await safeValidateKiloToken(authHeader, this.env);
           if (!authResult.success) {
-            return this.buildTrpcErrorResponse(401, authResult.error, procedureName);
+            return this.buildTrpcErrorResponse(authResult.status, authResult.error, procedureName);
           }
           orgId = await fetchOrgIdForSession(this.env, authResult.userId, sessionId);
         }
 
         // For initiateFromKilocodeSessionV2, fetch from session metadata
         if (procedureName === 'initiateFromKilocodeSessionV2' && !orgId && sessionId) {
-          const authResult = await validateKiloToken(
-            authHeader,
-            this.env.NEXTAUTH_SECRET,
-            requireDb(this.env)
-          );
+          const authResult = await safeValidateKiloToken(authHeader, this.env);
           if (!authResult.success) {
-            return this.buildTrpcErrorResponse(401, authResult.error, procedureName);
+            return this.buildTrpcErrorResponse(authResult.status, authResult.error, procedureName);
           }
           orgId = await fetchOrgIdForSession(this.env, authResult.userId, sessionId);
         }

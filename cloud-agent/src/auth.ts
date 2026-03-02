@@ -10,6 +10,7 @@ import {
 import { getWorkerDb } from '@kilocode/db/client';
 import type { WorkerDb } from '@kilocode/db/client';
 import type { Env } from './types.js';
+import { logger } from './logger.js';
 
 /**
  * Get a WorkerDb from the HYPERDRIVE binding, failing fast with a clear error
@@ -88,6 +89,43 @@ export function validateStreamTicket(
       return { success: false, error: 'Invalid ticket signature' };
     }
     return { success: false, error: 'Ticket validation failed' };
+  }
+}
+
+type SafeValidateResult =
+  | { success: true; userId: string; token: string; botId?: string }
+  | { success: false; error: string; status: 401 }
+  | { success: false; error: string; status: 500 };
+
+/**
+ * Combines requireDb + validateKiloToken with infrastructure error handling.
+ * Returns a status field so callers can distinguish auth failures (401) from
+ * server errors (500) without needing their own try/catch.
+ */
+export async function safeValidateKiloToken(
+  authHeader: string | null,
+  env: Env
+): Promise<SafeValidateResult> {
+  let db: WorkerDb;
+  try {
+    db = requireDb(env);
+  } catch (err) {
+    logger
+      .withFields({ error: err instanceof Error ? err.message : String(err) })
+      .error('HYPERDRIVE not configured');
+    return { success: false, error: 'Authentication service unavailable', status: 500 };
+  }
+  try {
+    const result = await validateKiloToken(authHeader, env.NEXTAUTH_SECRET, db);
+    if (!result.success) {
+      return { ...result, status: 401 };
+    }
+    return result;
+  } catch (err) {
+    logger
+      .withFields({ error: err instanceof Error ? err.message : String(err) })
+      .error('Authentication service error');
+    return { success: false, error: 'Authentication service unavailable', status: 500 };
   }
 }
 

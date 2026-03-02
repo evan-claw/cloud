@@ -1,4 +1,4 @@
-import { validateKiloToken, requireDb } from './auth.js';
+import { safeValidateKiloToken } from './auth.js';
 import { DEFAULT_BACKEND_URL } from './constants.js';
 import { logger } from './logger.js';
 import type { Env } from './types.js';
@@ -28,10 +28,9 @@ export async function validateAuthAndBalance(
   env: Env
 ): Promise<BalanceValidationResult> {
   // Validate JWT first
-  const db = requireDb(env);
-  const authResult = await validateKiloToken(authHeader, env.NEXTAUTH_SECRET, db);
+  const authResult = await safeValidateKiloToken(authHeader, env);
   if (!authResult.success) {
-    return { success: false, status: 401, message: authResult.error };
+    return { success: false, status: authResult.status, message: authResult.error };
   }
 
   // Use configured backend URL or fall back to production API

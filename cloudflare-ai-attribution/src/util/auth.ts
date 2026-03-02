@@ -2,6 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import {
   verifyKiloToken,
   extractBearerToken,
+  JwtVerificationError,
   UserNotFoundError,
   TokenRevokedError,
 } from '@kilocode/worker-utils';
@@ -42,10 +43,15 @@ export async function validateKiloToken(
       organizationRole: payload.organizationRole,
     };
   } catch (err) {
-    if (err instanceof UserNotFoundError || err instanceof TokenRevokedError) {
+    if (
+      err instanceof JwtVerificationError ||
+      err instanceof UserNotFoundError ||
+      err instanceof TokenRevokedError
+    ) {
       return { success: false, error: err.message };
     }
-    return { success: false, error: 'Invalid or expired token' };
+    // DB connectivity errors — rethrow for caller to handle as 500
+    throw err;
   }
 }
 
