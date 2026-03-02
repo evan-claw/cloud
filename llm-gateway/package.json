@@ -1,0 +1,47 @@
+{
+  "name": "llm-gateway",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LLM Gateway Cloudflare Worker — transparent drop-in replacement for /api/openrouter",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "deploy:prod": "wrangler deploy --env=\"\"",
+    "deploy:dev": "wrangler deploy --env dev",
+    "dev": "wrangler dev --env dev",
+    "start": "wrangler dev --env dev",
+    "types": "wrangler types",
+    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
+    "lint:fix": "eslint --config eslint.config.mjs --cache --fix 'src/**/*.ts'",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.workers.config.ts",
+    "test:integration:watch": "vitest --config vitest.workers.config.ts",
+    "typecheck": "tsgo --noEmit --incremental false"
+  },
+  "dependencies": {
+    "@kilocode/db": "workspace:*",
+    "@kilocode/worker-utils": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:",
+    "jsonwebtoken": "catalog:",
+    "workers-tagged-logger": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.8",
+    "@kilocode/eslint-config": "workspace:*",
+    "@types/jsonwebtoken": "catalog:",
+    "@types/node": "^22",
+    "@typescript/native-preview": "7.0.0-dev.20251019.1",
+    "@vitest/ui": "^3.2.4",
+    "drizzle-kit": "catalog:",
+    "eslint": "catalog:",
+    "prettier": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4",
+    "wrangler": "catalog:"
+  }
+}

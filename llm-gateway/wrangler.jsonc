@@ -1,0 +1,217 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // NOTE: Base config is for PRODUCTION environment
+  // Use --env dev for development deployments
+  "name": "llm-gateway",
+  "account_id": "e115e769bcdd4c3d66af59d3332cb394",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "dev": {
+    "port": 8787,
+    "local_protocol": "http",
+    "ip": "0.0.0.0",
+  },
+  // Observability - enables Workers Logs
+  "observability": {
+    "enabled": true,
+  },
+  "logpush": true,
+  // Colocate with DB, not at edge
+  "placement": {
+    "mode": "smart",
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ABUSE_SERVICE_URL": "https://abuse.kiloapps.io",
+    "GIGAPOTATO_API_URL": "https://gigapotato.kiloapps.io",
+    "OPENROUTER_ORG_ID": "",
+  },
+  // Hyperdrive: primary (writes) + read replica (auth, balance checks)
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "<primary-hyperdrive-id>",
+    },
+    {
+      "binding": "HYPERDRIVE_READ",
+      "id": "<read-replica-hyperdrive-id>",
+    },
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "<rate-limit-kv-id>",
+    },
+    {
+      "binding": "USER_CACHE_KV",
+      "id": "<user-cache-kv-id>",
+    },
+  ],
+  "services": [
+    {
+      "binding": "O11Y",
+      "service": "cloudflare-o11y",
+    },
+  ],
+  // Secrets Store (shared Kilo secrets store)
+  "secrets_store_secrets": [
+    {
+      "binding": "NEXTAUTH_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "NEXTAUTH_SECRET_PROD",
+    },
+    {
+      "binding": "OPENROUTER_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "OPENROUTER_API_KEY_PROD",
+    },
+    {
+      "binding": "BYOK_ENCRYPTION_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "BYOK_ENCRYPTION_KEY_PROD",
+    },
+    {
+      "binding": "ABUSE_CF_ACCESS_CLIENT_ID",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "ABUSE_CF_ACCESS_CLIENT_ID_PROD",
+    },
+    {
+      "binding": "ABUSE_CF_ACCESS_CLIENT_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "ABUSE_CF_ACCESS_CLIENT_SECRET_PROD",
+    },
+    {
+      "binding": "GIGAPOTATO_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "GIGAPOTATO_API_KEY_PROD",
+    },
+    {
+      "binding": "CORETHINK_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "CORETHINK_API_KEY_PROD",
+    },
+    {
+      "binding": "MARTIAN_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "MARTIAN_API_KEY_PROD",
+    },
+    {
+      "binding": "MISTRAL_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "MISTRAL_API_KEY_PROD",
+    },
+    {
+      "binding": "VERCEL_AI_GATEWAY_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "VERCEL_AI_GATEWAY_API_KEY_PROD",
+    },
+    {
+      "binding": "OPENAI_API_KEY",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "OPENAI_API_KEY_PROD",
+    },
+  ],
+  // ============================================
+  // DEVELOPMENT ENVIRONMENT
+  // Deploy with: wrangler deploy --env dev
+  // ============================================
+  "env": {
+    "dev": {
+      "name": "llm-gateway-dev",
+      "workers_dev": true,
+      "vars": {
+        "ENVIRONMENT": "development",
+        "ABUSE_SERVICE_URL": "https://abuse.kiloapps.io",
+        "GIGAPOTATO_API_URL": "https://gigapotato.kiloapps.io",
+        "OPENROUTER_ORG_ID": "",
+      },
+      "hyperdrive": [
+        {
+          "binding": "HYPERDRIVE",
+          "id": "<primary-hyperdrive-id>",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
+        },
+        {
+          "binding": "HYPERDRIVE_READ",
+          "id": "<read-replica-hyperdrive-id>",
+          "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
+        },
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "RATE_LIMIT_KV",
+          "id": "<rate-limit-kv-id-dev>",
+        },
+        {
+          "binding": "USER_CACHE_KV",
+          "id": "<user-cache-kv-id-dev>",
+        },
+      ],
+      "services": [
+        {
+          "binding": "O11Y",
+          "service": "cloudflare-o11y-dev",
+        },
+      ],
+      "secrets_store_secrets": [
+        {
+          "binding": "NEXTAUTH_SECRET",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "NEXTAUTH_SECRET_DEV",
+        },
+        {
+          "binding": "OPENROUTER_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "OPENROUTER_API_KEY_DEV",
+        },
+        {
+          "binding": "BYOK_ENCRYPTION_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "BYOK_ENCRYPTION_KEY_DEV",
+        },
+        {
+          "binding": "ABUSE_CF_ACCESS_CLIENT_ID",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "ABUSE_CF_ACCESS_CLIENT_ID_DEV",
+        },
+        {
+          "binding": "ABUSE_CF_ACCESS_CLIENT_SECRET",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "ABUSE_CF_ACCESS_CLIENT_SECRET_DEV",
+        },
+        {
+          "binding": "GIGAPOTATO_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "GIGAPOTATO_API_KEY_DEV",
+        },
+        {
+          "binding": "CORETHINK_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "CORETHINK_API_KEY_DEV",
+        },
+        {
+          "binding": "MARTIAN_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "MARTIAN_API_KEY_DEV",
+        },
+        {
+          "binding": "MISTRAL_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "MISTRAL_API_KEY_DEV",
+        },
+        {
+          "binding": "VERCEL_AI_GATEWAY_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "VERCEL_AI_GATEWAY_API_KEY_DEV",
+        },
+        {
+          "binding": "OPENAI_API_KEY",
+          "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+          "secret_name": "OPENAI_API_KEY_DEV",
+        },
+      ],
+    },
+  },
+}

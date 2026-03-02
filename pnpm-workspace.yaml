@@ -44,6 +44,7 @@ packages:
   - 'kiloclaw'
   - 'cloudflare-gastown'
   - 'cloudflare-gastown/container'
+  - 'llm-gateway'
 
 ignoredBuiltDependencies:
   - '@sentry/cli'
