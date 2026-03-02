@@ -27,7 +27,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000; // 10 seconds
  * Discord Gateway listener with Postgres-based coordination.
  *
  * Architecture:
- * - This route is triggered by a cron job (e.g., every 3 minutes)
+ * - This route is triggered by a cron job (every 9 minutes)
  * - It connects to Discord's Gateway via WebSocket using discord.js
  * - When it receives MESSAGE_CREATE events, it forwards them as HTTP POST
  *   requests to the webhook handler (/discord/webhook) for unified processing
