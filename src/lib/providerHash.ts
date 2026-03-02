@@ -24,12 +24,12 @@ export function generateProviderSpecificHash(payload: string, provider: Provider
 }
 
 export function generateOpenRouterUpstreamSafetyIdentifier(userId: string) {
+  const orgId = getEnvVariable('OPENROUTER_ORG_ID');
+  if (!orgId) {
+    throw new Error('OPENROUTER_ORG_ID is not set');
+  }
   return crypto
     .createHash('sha256')
-    .update(
-      getEnvVariable('OPENROUTER_ORG_KEY') +
-        '-' +
-        generateProviderSpecificHash(userId, PROVIDERS.OPENROUTER)
-    )
+    .update(orgId + '-' + generateProviderSpecificHash(userId, PROVIDERS.OPENROUTER))
     .digest('hex');
 }
