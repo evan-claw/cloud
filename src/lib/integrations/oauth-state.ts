@@ -12,11 +12,12 @@ import { NEXTAUTH_SECRET } from '@/lib/config.server';
  *
  * This module produces a state value of the form:
  *
- *   base64url({ owner, uid, iat, nonce }) . HMAC-SHA256(payload, secret)
+ *   base64url({ owner, uid, iat, nonce, context? }) . HMAC-SHA256(payload, secret)
  *
  * where `owner` is the original owner string, `uid` is the ID of the
  * authenticated user who started the flow, `iat` is the issued-at timestamp
- * (seconds since epoch), and `nonce` is random bytes to ensure uniqueness.
+ * (seconds since epoch), `nonce` is random bytes to ensure uniqueness, and
+ * optional `context` carries signed flow metadata.
  *
  * On the callback we:
  *
@@ -40,18 +41,50 @@ function sign(data: string): string {
   return crypto.createHmac(HMAC_ALGORITHM, NEXTAUTH_SECRET).update(data).digest('base64url');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getValidOAuthStateContext(value: unknown): OAuthStateContext | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const context: OAuthStateContext = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== 'string') {
+      return null;
+    }
+    context[key] = entry;
+  }
+
+  return context;
+}
+
+export type OAuthStateContext = Record<string, string>;
+
 /**
  * Build a signed OAuth state parameter.
  *
  * @param owner  – owner string, e.g. `user_abc123` or `org_xyz789`
  * @param userId – the ID of the currently-authenticated user initiating the flow
+ * @param context – optional signed metadata carried through the callback
  */
-export function createOAuthState(owner: string, userId: string): string {
+export function createOAuthState(
+  owner: string,
+  userId: string,
+  context?: OAuthStateContext
+): string {
   const iat = Math.floor(Date.now() / 1000);
   const nonce = crypto.randomBytes(NONCE_BYTES).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ owner, uid: userId, iat, nonce })).toString(
-    'base64url'
-  );
+
+  const data = context
+    ? { owner, uid: userId, iat, nonce, context }
+    : { owner, uid: userId, iat, nonce };
+  const payload = Buffer.from(JSON.stringify(data)).toString('base64url');
   const signature = sign(payload);
   return `${payload}.${signature}`;
 }
@@ -61,6 +94,8 @@ export type VerifiedOAuthState = {
   owner: string;
   /** The user ID that initiated the OAuth flow */
   userId: string;
+  /** Optional signed metadata from flow initiation */
+  context?: OAuthStateContext;
 };
 
 /**
@@ -93,6 +128,7 @@ export function verifyOAuthState(state: string | null): VerifiedOAuthState | nul
       uid?: string;
       iat?: number;
       nonce?: string;
+      context?: unknown;
     };
     if (typeof data.owner !== 'string' || typeof data.uid !== 'string') return null;
 
@@ -104,7 +140,10 @@ export function verifyOAuthState(state: string | null): VerifiedOAuthState | nul
     // Require nonce to be present (guards against old-format tokens)
     if (typeof data.nonce !== 'string' || data.nonce.length === 0) return null;
 
-    return { owner: data.owner, userId: data.uid };
+    const context = getValidOAuthStateContext(data.context);
+    if (context === null) return null;
+
+    return { owner: data.owner, userId: data.uid, context };
   } catch {
     return null;
   }

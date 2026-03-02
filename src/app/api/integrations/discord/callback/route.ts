@@ -1,17 +1,154 @@
 import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { getUserFromAuth } from '@/lib/user.server';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import type { Owner } from '@/lib/integrations/core/types';
 import { captureException, captureMessage } from '@sentry/nextjs';
 import {
   exchangeDiscordCode,
+  getDiscordBotUserId,
+  getDiscordChannelMessage,
   getDiscordOAuthUserId,
   linkDiscordRequesterToOwner,
+  postDiscordMessage,
   upsertDiscordInstallation,
 } from '@/lib/integrations/discord-service';
 import { verifyOAuthState } from '@/lib/integrations/oauth-state';
 import { APP_URL } from '@/lib/constants';
+import { processDiscordBotMessage } from '@/lib/discord-bot';
+import { getDevUserSuffix } from '@/lib/slack-bot/dev-user-info';
+import {
+  isDiscordBotMessage,
+  replaceDiscordUserMentionsWithNames,
+  stripDiscordBotMention,
+  truncateForDiscord,
+} from '@/lib/discord-bot/discord-utils';
+import { z } from 'zod';
+
+const DISCORD_SNOWFLAKE_REGEX = /^\d+$/;
+
+const DiscordReplayContextSchema = z.object({
+  discordReplayGuildId: z.string().regex(DISCORD_SNOWFLAKE_REGEX),
+  discordReplayChannelId: z.string().regex(DISCORD_SNOWFLAKE_REGEX),
+  discordReplayMessageId: z.string().regex(DISCORD_SNOWFLAKE_REGEX),
+});
+
+type DiscordReplayContext = {
+  guildId: string;
+  channelId: string;
+  messageId: string;
+};
+
+function getDiscordReplayContext(
+  value: Record<string, string> | undefined
+): DiscordReplayContext | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = DiscordReplayContextSchema.safeParse(value);
+  if (!parsed.success) {
+    return null;
+  }
+
+  return {
+    guildId: parsed.data.discordReplayGuildId,
+    channelId: parsed.data.discordReplayChannelId,
+    messageId: parsed.data.discordReplayMessageId,
+  };
+}
+
+async function replayLinkedDiscordMessage(
+  replayContext: DiscordReplayContext,
+  linkedDiscordUserId: string
+): Promise<void> {
+  const messageResult = await getDiscordChannelMessage(
+    replayContext.channelId,
+    replayContext.messageId
+  );
+  if (!messageResult.ok) {
+    captureMessage('Discord replay failed to fetch original message', {
+      level: 'warning',
+      tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+      extra: { replayContext, error: messageResult.error },
+    });
+    return;
+  }
+
+  const message = messageResult.message;
+  if (message.author.id !== linkedDiscordUserId) {
+    captureMessage('Discord replay skipped due to author mismatch', {
+      level: 'warning',
+      tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+      extra: {
+        replayContext,
+        expectedDiscordUserId: linkedDiscordUserId,
+        messageAuthorId: message.author.id,
+      },
+    });
+    return;
+  }
+
+  if (isDiscordBotMessage({ author: { bot: message.author.bot } })) {
+    return;
+  }
+
+  const botUserResult = await getDiscordBotUserId();
+  if (!botUserResult.ok) {
+    captureMessage('Discord replay failed to resolve bot user', {
+      level: 'warning',
+      tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+      extra: { replayContext, error: botUserResult.error },
+    });
+    return;
+  }
+
+  const botUserId = botUserResult.userId;
+  const mentionsBot = message.mentions.some(mention => mention.id === botUserId);
+  if (!mentionsBot) {
+    captureMessage('Discord replay skipped because message no longer mentions bot', {
+      level: 'info',
+      tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+      extra: { replayContext, botUserId },
+    });
+    return;
+  }
+
+  const cleanedText = stripDiscordBotMention(message.content, botUserId);
+  if (!cleanedText) {
+    return;
+  }
+
+  const resolvedText = await replaceDiscordUserMentionsWithNames(
+    cleanedText,
+    replayContext.guildId
+  );
+  const result = await processDiscordBotMessage(resolvedText, replayContext.guildId, {
+    channelId: replayContext.channelId,
+    guildId: replayContext.guildId,
+    userId: linkedDiscordUserId,
+    messageId: replayContext.messageId,
+  });
+
+  const responseText = truncateForDiscord(result.response + getDevUserSuffix());
+  const postResult = await postDiscordMessage(replayContext.channelId, responseText, {
+    messageReference: { message_id: replayContext.messageId },
+    linkButton: result.linkDiscordAccountUrl
+      ? {
+          label: 'Link My Discord Account',
+          url: result.linkDiscordAccountUrl,
+        }
+      : undefined,
+  });
+
+  if (!postResult.ok) {
+    captureMessage('Discord replay failed to post response', {
+      level: 'warning',
+      tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+      extra: { replayContext, error: postResult.error },
+    });
+  }
+}
 
 const buildDiscordRedirectPath = (state: string | null, queryParam: string): string => {
   // Try to extract the owner from a signed state for best-effort redirects on error paths.
@@ -94,6 +231,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/integrations?error=unauthorized', APP_URL));
     }
 
+    const replayContext = getDiscordReplayContext(verified.context);
+
     // 5. Parse owner from verified state payload
     let owner: Owner;
     const ownerStr = verified.owner;
@@ -148,6 +287,22 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(
           new URL(buildDiscordRedirectPath(state, 'error=installation_missing'), APP_URL)
         );
+      }
+
+      if (replayContext && replayContext.guildId === linked.platform_installation_id) {
+        after(async () => {
+          await replayLinkedDiscordMessage(replayContext, discordUserId);
+        });
+      } else if (replayContext) {
+        captureMessage('Discord replay context guild mismatch; replay skipped', {
+          level: 'warning',
+          tags: { endpoint: 'discord/callback', source: 'discord_replay' },
+          extra: {
+            replayContext,
+            linkedInstallationGuildId: linked.platform_installation_id,
+            owner,
+          },
+        });
       }
     }
 

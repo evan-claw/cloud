@@ -486,6 +486,117 @@ export async function updateModel(
   return { success: true };
 }
 
+export type DiscordChannelMessage = {
+  id: string;
+  content: string;
+  channelId: string;
+  author: {
+    id: string;
+    username: string;
+    bot?: boolean;
+  };
+  mentions: Array<{ id: string }>;
+};
+
+/**
+ * Fetch a Discord channel message using the bot token.
+ */
+export async function getDiscordChannelMessage(
+  channelId: string,
+  messageId: string
+): Promise<{ ok: true; message: DiscordChannelMessage } | { ok: false; error: string }> {
+  if (!DISCORD_BOT_TOKEN) {
+    return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
+  }
+
+  try {
+    const response = await fetch(
+      `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`,
+      {
+        headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Discord API ${response.status}: ${errorText}` };
+    }
+
+    const rawMessage = (await response.json()) as {
+      id?: string;
+      content?: string;
+      channel_id?: string;
+      author?: { id?: string; username?: string; bot?: boolean };
+      mentions?: Array<{ id?: string }>;
+    };
+
+    if (
+      typeof rawMessage.id !== 'string' ||
+      typeof rawMessage.content !== 'string' ||
+      typeof rawMessage.channel_id !== 'string' ||
+      typeof rawMessage.author?.id !== 'string' ||
+      typeof rawMessage.author?.username !== 'string'
+    ) {
+      return { ok: false, error: 'Discord API returned malformed message payload' };
+    }
+
+    const mentions = (rawMessage.mentions || [])
+      .map(mention => mention.id)
+      .filter((id): id is string => typeof id === 'string')
+      .map(id => ({ id }));
+
+    return {
+      ok: true,
+      message: {
+        id: rawMessage.id,
+        content: rawMessage.content,
+        channelId: rawMessage.channel_id,
+        author: {
+          id: rawMessage.author.id,
+          username: rawMessage.author.username,
+          bot: rawMessage.author.bot,
+        },
+        mentions,
+      },
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, error: errorMessage };
+  }
+}
+
+/**
+ * Fetch the bot user ID for mention checks.
+ */
+export async function getDiscordBotUserId(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
+  if (!DISCORD_BOT_TOKEN) {
+    return { ok: false, error: 'DISCORD_BOT_TOKEN is not configured' };
+  }
+
+  try {
+    const response = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bot ${DISCORD_BOT_TOKEN}` },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { ok: false, error: `Discord API ${response.status}: ${errorText}` };
+    }
+
+    const user = (await response.json()) as { id?: string };
+    if (typeof user.id !== 'string' || user.id.length === 0) {
+      return { ok: false, error: 'Discord API returned malformed bot user payload' };
+    }
+
+    return { ok: true, userId: user.id };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, error: errorMessage };
+  }
+}
+
 /**
  * Post a message to a Discord channel using the Bot Token.
  */

@@ -47,11 +47,17 @@ export type DiscordBotMessageResult = {
   installation: PlatformIntegration | null;
 };
 
-function buildDiscordAccountLinkUrl(owner: Owner): string {
+function buildDiscordAccountLinkUrl(owner: Owner, eventContext?: DiscordEventContext): string {
   const params = new URLSearchParams({
     ownerType: owner.type,
     ownerId: owner.id,
   });
+
+  if (eventContext) {
+    params.set('guildId', eventContext.guildId);
+    params.set('channelId', eventContext.channelId);
+    params.set('messageId', eventContext.messageId);
+  }
 
   return `${APP_URL}/integrations/discord/link?${params.toString()}`;
 }
@@ -281,7 +287,7 @@ export async function processDiscordBotMessage(
         modelUsed: '',
         toolCallsMade: [],
         error: authResult.error,
-        linkDiscordAccountUrl: buildDiscordAccountLinkUrl(owner),
+        linkDiscordAccountUrl: buildDiscordAccountLinkUrl(owner, discordEventContext),
         installation,
       };
     }
