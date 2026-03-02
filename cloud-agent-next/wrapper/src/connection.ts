@@ -242,9 +242,9 @@ export function createConnectionManager(
           if (data.event === 'permission.asked') {
             const props = data.properties;
             if (isRecord(props) && typeof props.id === 'string') {
-              logToFile(
-                `auto-rejecting permission: id=${props.id} permission=${String(props.permission ?? 'unknown')}`
-              );
+              const permission =
+                typeof props.permission === 'string' ? props.permission : 'unknown';
+              logToFile(`auto-rejecting permission: id=${props.id} permission=${permission}`);
               config.kiloClient
                 .answerPermission(props.id, 'reject')
                 .catch((err: unknown) =>

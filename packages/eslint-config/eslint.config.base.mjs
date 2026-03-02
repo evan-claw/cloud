@@ -41,7 +41,6 @@ export default function baseConfig(tsconfigRootDir) {
         ],
         '@typescript-eslint/require-await': 'off',
         '@typescript-eslint/consistent-type-imports': 'error',
-        '@typescript-eslint/no-var-requires': 'error',
 
         '@typescript-eslint/no-unsafe-assignment': 'error',
         '@typescript-eslint/no-unsafe-member-access': 'error',
