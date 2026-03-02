@@ -152,11 +152,11 @@ export async function GET(request: NextRequest) {
     }
 
     // 9. Redirect to success page
-    const successQuery = isInstallFlow ? 'success=installed' : 'success=linked_user';
-    const successPath =
-      owner.type === 'org'
-        ? `/organizations/${owner.id}/integrations/discord?${successQuery}`
-        : `/integrations/discord?${successQuery}`;
+    const successPath = isInstallFlow
+      ? owner.type === 'org'
+        ? `/organizations/${owner.id}/integrations/discord?success=installed`
+        : '/integrations/discord?success=installed'
+      : '/integrations/discord/link/success';
 
     return NextResponse.redirect(new URL(successPath, APP_URL));
   } catch (error) {
