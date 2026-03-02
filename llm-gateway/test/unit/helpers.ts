@@ -1,0 +1,140 @@
+// Shared test helpers for mocking Cloudflare bindings and building requests.
+
+import { SignJWT } from 'jose';
+import type { ExecutionContext } from 'hono';
+
+const TEST_SECRET = 'test-secret-at-least-32-characters-long';
+
+function encode(s: string) {
+  return new TextEncoder().encode(s);
+}
+
+// Sign a v3 JWT matching verifyGatewayJwt expectations.
+export async function signToken(
+  payload: Record<string, unknown> = {},
+  secret = TEST_SECRET,
+  expiresIn = '1h'
+) {
+  return new SignJWT({ version: 3, kiloUserId: 'user-1', ...payload })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(expiresIn)
+    .sign(encode(secret));
+}
+
+// Build a minimal mock Env matching worker-configuration.d.ts.
+export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloudflare.Env {
+  const store = new Map<string, string>();
+  function makeKv(initial: Record<string, string> = {}): KVNamespace {
+    for (const [k, v] of Object.entries(initial)) store.set(k, v);
+    return {
+      async get(key: string) {
+        return store.get(key) ?? null;
+      },
+      async put(key: string, value: string) {
+        store.set(key, value);
+      },
+      async delete(key: string) {
+        store.delete(key);
+      },
+    } as unknown as KVNamespace;
+  }
+
+  function makeSecret(value: string): SecretsStoreSecret {
+    return { get: async () => value };
+  }
+
+  const kv = makeKv();
+
+  return {
+    HYPERDRIVE: { connectionString: 'postgres://localhost:5432/test' } as Hyperdrive,
+    USER_EXISTS_CACHE: kv,
+    RATE_LIMIT_KV: kv,
+    O11Y: {
+      fetch: async () => new Response(JSON.stringify({ success: true })),
+    } as unknown as Fetcher,
+    NEXTAUTH_SECRET_PROD: makeSecret(TEST_SECRET),
+    OPENROUTER_API_KEY: makeSecret('or-key'),
+    GIGAPOTATO_API_KEY: makeSecret('gp-key'),
+    CORETHINK_API_KEY: makeSecret('ct-key'),
+    MARTIAN_API_KEY: makeSecret('mt-key'),
+    MISTRAL_API_KEY: makeSecret('ms-key'),
+    VERCEL_AI_GATEWAY_API_KEY: makeSecret('vc-key'),
+    BYOK_ENCRYPTION_KEY: makeSecret('byok-key-32-chars-exactly-here!'),
+    ABUSE_CF_ACCESS_CLIENT_ID: makeSecret('abuse-id'),
+    ABUSE_CF_ACCESS_CLIENT_SECRET: makeSecret('abuse-secret'),
+    O11Y_KILO_GATEWAY_CLIENT_SECRET: makeSecret('o11y-secret'),
+    GIGAPOTATO_API_URL: 'https://gigapotato.example.com',
+    OPENROUTER_ORG_ID: 'org-123',
+    ABUSE_SERVICE_URL: 'https://abuse.example.com',
+    ...overrides,
+  } as Cloudflare.Env;
+}
+
+export { TEST_SECRET };
+
+export function fakeExecutionCtx(): ExecutionContext {
+  return {
+    waitUntil: () => {},
+    passThroughOnException: () => {},
+    props: {},
+  };
+}
+
+// Build a POST request for /api/gateway/chat/completions.
+export function chatRequest(
+  body: Record<string, unknown>,
+  opts: {
+    headers?: Record<string, string>;
+    token?: string;
+    path?: string;
+  } = {}
+) {
+  const path = opts.path ?? '/api/gateway/chat/completions';
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'CF-Connecting-IP': '1.2.3.4',
+    ...opts.headers,
+  };
+  if (opts.token) {
+    headers.Authorization = `Bearer ${opts.token}`;
+  }
+  return new Request(`http://localhost${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+// SSE helpers.
+export function makeSSEStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
+export function sseChunk(data: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+export function sseDone(): string {
+  return 'data: [DONE]\n\n';
+}
+
+// Read an SSE response body into parsed event data objects.
+export async function readSSEEvents(response: Response): Promise<unknown[]> {
+  const text = await response.text();
+  const events: unknown[] = [];
+  for (const line of text.split('\n')) {
+    if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+      events.push(JSON.parse(line.slice(6)));
+    }
+  }
+  return events;
+}
