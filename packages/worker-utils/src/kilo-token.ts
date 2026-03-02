@@ -1,7 +1,5 @@
 import { jwtVerify } from 'jose';
 import { z } from 'zod';
-import type { MiddlewareHandler } from 'hono';
-import { extractBearerToken } from './extract-bearer-token.js';
 
 export const kiloTokenPayload = z
   .object({
@@ -27,40 +25,4 @@ export async function verifyKiloToken(token: string, secret: string): Promise<Ki
   });
 
   return kiloTokenPayload.parse(payload);
-}
-
-type KiloTokenEnv = {
-  Bindings: Record<never, never>;
-  Variables: { kiloUserId: string; kiloTokenPayload: KiloTokenPayload };
-};
-
-/**
- * Hono middleware that extracts + verifies a Kilo user token from the
- * `Authorization: Bearer` header and sets `kiloUserId` and `kiloTokenPayload`
- * on the Hono context.
- *
- * @param getSecret - Callback to retrieve the NEXTAUTH_SECRET from the context.
- */
-export function kiloTokenAuthMiddleware(
-  getSecret: (c: Parameters<MiddlewareHandler<KiloTokenEnv>>[0]) => string | Promise<string>
-): MiddlewareHandler<KiloTokenEnv> {
-  return async (c, next) => {
-    const token = extractBearerToken(c.req.header('Authorization'));
-    if (!token) {
-      return c.json({ success: false, error: 'Missing or malformed Authorization header' }, 401);
-    }
-
-    const secret = await getSecret(c);
-
-    let payload: KiloTokenPayload;
-    try {
-      payload = await verifyKiloToken(token, secret);
-    } catch {
-      return c.json({ success: false, error: 'Invalid or expired token' }, 401);
-    }
-
-    c.set('kiloUserId', payload.kiloUserId);
-    c.set('kiloTokenPayload', payload);
-    return next();
-  };
 }
