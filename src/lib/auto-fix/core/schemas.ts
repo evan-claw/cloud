@@ -69,7 +69,7 @@ export const AutoFixAgentConfigSchema = z
     enabled_for_issues: z.boolean().describe('Enable auto fix for GitHub issues'),
     enabled_for_review_comments: z
       .boolean()
-      .default(true)
+      .default(false)
       .describe('Enable auto fix for PR review comment @kilo mentions'),
     repository_selection_mode: z
       .enum(['all', 'selected'])

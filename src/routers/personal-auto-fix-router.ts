@@ -69,7 +69,7 @@ export const personalAutoFixRouter = createTRPCRouter({
         // Build config object with defaults for optional fields
         const config: AutoFixAgentConfig = {
           enabled_for_issues: input.enabled_for_issues,
-          enabled_for_review_comments: input.enabled_for_review_comments ?? true,
+          enabled_for_review_comments: input.enabled_for_review_comments ?? false,
           repository_selection_mode: input.repository_selection_mode,
           selected_repository_ids: input.selected_repository_ids ?? [],
           skip_labels: input.skip_labels ?? [],
