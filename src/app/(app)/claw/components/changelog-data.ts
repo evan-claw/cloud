@@ -13,7 +13,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-03-01',
     description:
-      'Fixed model picker showing unsupported models. If you encounter model-not-found errors, use Settings > Set Default to select a supported model and restart the gateway.',
+      'Fixed model picker showing unsupported models. If you encounter model-not-found errors, use Settings > Default Model to select a supported model and restart the gateway.',
     category: 'bugfix',
     deployHint: null,
   },
