@@ -914,9 +914,17 @@ export class CloudAgentSession extends DurableObject {
         .error('Error during alarm reaper');
     }
 
-    // Schedule next alarm run — use shorter interval while an execution is active
-    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
-    const nextInterval = activeExecutionId ? REAPER_ACTIVE_INTERVAL_MS : this.getReaperIntervalMs();
+    // Schedule next alarm run — use shorter interval while an execution is active.
+    // Wrapped in try/catch so a failure here never prevents rescheduling the alarm.
+    let nextInterval = this.getReaperIntervalMs();
+    try {
+      const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+      if (activeExecutionId) {
+        nextInterval = REAPER_ACTIVE_INTERVAL_MS;
+      }
+    } catch {
+      // Fall through with default interval
+    }
     await this.ctx.storage.setAlarm(now + nextInterval);
   }
 
