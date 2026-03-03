@@ -1,4 +1,4 @@
-import type { SessionMetricsParams } from './session-metrics-schema';
+import type { SessionMetricsParams } from '@kilocode/worker-utils';
 
 /**
  * Write a session metrics data point to Analytics Engine,

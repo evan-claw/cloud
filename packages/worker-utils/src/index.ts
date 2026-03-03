@@ -27,3 +27,10 @@ export { verifyKiloToken, kiloTokenPayload } from './kilo-token.js';
 export type { KiloTokenPayload } from './kilo-token.js';
 
 export { userExistsWithCache } from './user-exists-cache.js';
+
+export {
+  ApiMetricsParamsSchema,
+  SessionMetricsParamsSchema,
+  TerminationReasons,
+} from './o11y-schemas.js';
+export type { ApiMetricsParams, SessionMetricsParams } from './o11y-schemas.js';

@@ -32,6 +32,7 @@ import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
+import type { ApiMetricsParams } from '@kilocode/worker-utils';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const BACKGROUND_TASK_TIMEOUT_MS = 25_000;
@@ -106,7 +107,7 @@ type BackgroundTaskParams = {
   isAnon: boolean;
   sessionId: string | null;
   connectionString: string;
-  o11y: { ingestApiMetrics(params: O11YApiMetricsParams): Promise<void> };
+  o11y: { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
 };
 
 function scheduleBackgroundTasks(

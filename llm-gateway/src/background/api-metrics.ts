@@ -5,35 +5,11 @@
 import { createParser } from 'eventsource-parser';
 import type { EventSourceMessage } from 'eventsource-parser';
 import { z } from 'zod';
+import type { ApiMetricsParams } from '@kilocode/worker-utils';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+export type { ApiMetricsParams };
 
-export type ApiMetricsTokens = {
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheWriteTokens?: number;
-  cacheHitTokens?: number;
-  totalTokens?: number;
-};
-
-export type ApiMetricsParams = {
-  kiloUserId: string;
-  organizationId?: string;
-  isAnonymous: boolean;
-  isStreaming: boolean;
-  userByok: boolean;
-  mode?: string;
-  provider: string;
-  inferenceProvider?: string;
-  requestedModel: string;
-  resolvedModel: string;
-  toolsAvailable: string[];
-  toolsUsed: string[];
-  ttfbMs: number;
-  completeRequestMs: number;
-  statusCode: number;
-  tokens?: ApiMetricsTokens;
-};
+export type ApiMetricsTokens = NonNullable<ApiMetricsParams['tokens']>;
 
 // ─── Token extraction ─────────────────────────────────────────────────────────
 
@@ -258,7 +234,7 @@ async function drainResponseBodyForInferenceProvider(
 
 // ─── O11Y service binding type (RPC) ──────────────────────────────────────────
 
-type O11YRpc = { ingestApiMetrics(params: O11YApiMetricsParams): Promise<void> };
+type O11YRpc = { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
@@ -276,7 +252,9 @@ async function sendApiMetrics(o11y: O11YRpc, params: ApiMetricsParams): Promise<
  */
 export async function runApiMetrics(
   o11y: O11YRpc,
-  params: Omit<ApiMetricsParams, 'completeRequestMs'>,
+  params: Omit<ApiMetricsParams, 'completeRequestMs' | 'inferenceProvider'> & {
+    inferenceProvider?: string;
+  },
   backgroundStream: ReadableStream,
   requestStartedAt: number
 ): Promise<void> {
@@ -296,7 +274,7 @@ export async function runApiMetrics(
 
   await sendApiMetrics(o11y, {
     ...params,
-    inferenceProvider: inferenceProvider ?? params.inferenceProvider,
+    inferenceProvider: inferenceProvider ?? params.inferenceProvider ?? '',
     completeRequestMs,
   });
 }

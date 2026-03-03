@@ -1,7 +1,4 @@
-import type { z } from 'zod';
-import type { ApiMetricsParamsSchema } from './api-metrics-routes';
-
-type ApiMetricsParams = z.infer<typeof ApiMetricsParamsSchema>;
+import type { ApiMetricsParams } from '@kilocode/worker-utils';
 
 /**
  * Write an API metrics data point to Analytics Engine for alerting queries,

@@ -1,17 +1,14 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { Hono } from 'hono';
-import { registerApiMetricsRoutes, ApiMetricsParamsSchema } from './api-metrics-routes';
-import type { z } from 'zod';
+import { ApiMetricsParamsSchema, SessionMetricsParamsSchema } from '@kilocode/worker-utils';
+import type { ApiMetricsParams, SessionMetricsParams } from '@kilocode/worker-utils';
+import { registerApiMetricsRoutes } from './api-metrics-routes';
 import { evaluateAlerts } from './alerting/evaluate';
 import { registerAlertingConfigRoutes } from './alerting/config-routes';
-import { SessionMetricsParamsSchema } from './session-metrics-schema';
-import type { SessionMetricsParams } from './session-metrics-schema';
 import { writeSessionMetricsDataPoint } from './session-metrics-analytics';
 import { writeApiMetricsDataPoint } from './o11y-analytics';
 
 export { AlertConfigDO } from './alerting/AlertConfigDO';
-
-export type ApiMetricsParams = z.infer<typeof ApiMetricsParamsSchema>;
 
 const app = new Hono<{ Bindings: Env }>();
 
