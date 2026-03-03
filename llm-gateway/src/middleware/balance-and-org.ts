@@ -67,7 +67,7 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
           title: 'Paid Model - Credits Required',
           message: 'This is a paid model. To use paid models, you need to add credits.',
           balance,
-          buyCreditsUrl: 'https://kilocode.ai/profile',
+          buyCreditsUrl: 'https://app.kilo.ai/profile',
         },
       },
       402
