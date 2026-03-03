@@ -16,7 +16,25 @@ import {
   checkOrganizationModelRestrictions,
 } from '../lib/org-restrictions';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
-import { getWorkerDb } from '@kilocode/db/client';
+import { getWorkerDb, type WorkerDb } from '@kilocode/db/client';
+import { and, eq, gt, sql } from 'drizzle-orm';
+import { credit_transactions } from '@kilocode/db/schema';
+
+// Mirrors summarizeUserPayments() in src/lib/creditTransactions.ts.
+// Returns true if the user has made at least one paid (non-free) top-up.
+async function hasUserMadePaidTopup(db: WorkerDb, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(credit_transactions)
+    .where(
+      and(
+        eq(credit_transactions.kilo_user_id, userId),
+        eq(credit_transactions.is_free, false),
+        gt(credit_transactions.amount_microdollars, 0)
+      )
+    );
+  return (row?.count ?? 0) > 0;
+}
 
 function isFreePromptTrainingAllowed(
   provider: { data_collection?: 'allow' | 'deny' } | undefined
@@ -59,17 +77,14 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
     !isActiveReviewPromo(botId, resolvedModel) &&
     !isActiveCloudAgentPromo(tokenSource, resolvedModel)
   ) {
-    // Port of usageLimitExceededResponse — look up payment history to choose message
-    // For the Worker we skip the payments DB lookup and use a simplified message
+    // Mirror usageLimitExceededResponse(): branch on payment history to choose title/message.
+    const isReturningUser = await hasUserMadePaidTopup(db, user.id);
+    const title = isReturningUser ? 'Low Credit Warning!' : 'Paid Model - Credits Required';
+    const message = isReturningUser
+      ? 'Add credits to continue, or switch to a free model'
+      : 'This is a paid model. To use paid models, you need to add credits.';
     return c.json(
-      {
-        error: {
-          title: 'Paid Model - Credits Required',
-          message: 'This is a paid model. To use paid models, you need to add credits.',
-          balance,
-          buyCreditsUrl: 'https://app.kilo.ai/profile',
-        },
-      },
+      { error: { title, message, balance, buyCreditsUrl: 'https://app.kilo.ai/profile' } },
       402
     );
   }
