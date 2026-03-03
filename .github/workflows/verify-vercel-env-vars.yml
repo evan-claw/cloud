@@ -1,0 +1,205 @@
+# Vercel Environment Variable Drift Detection
+#
+# Compares env var keys across three Vercel projects and posts a Slack alert
+# if any variables are present in some projects but not all.
+#
+# Required secrets:
+#   VERCEL_TOKEN              — Vercel API token with read access to all three projects
+#   VERCEL_TEAM_ID            — Vercel team/org ID (if projects are under a team)
+#   SLACK_ENV_DRIFT_WEBHOOK_URL — Slack incoming webhook URL for drift alerts
+
+name: Verify Vercel Env Vars
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 6 AM UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-env-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare env vars across Vercel projects
+        uses: actions/github-script@v7
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ENV_DRIFT_WEBHOOK_URL }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const PROJECTS = [
+              "kilocode-app",
+              "kilocode-global-app",
+              "kilocode-gateway",
+            ];
+
+            const TARGETS = ["production", "preview", "development"];
+
+            // Vercel-managed or expected-to-differ env vars.
+            // Add entries here to exclude them from drift detection.
+            const IGNORED_KEYS = new Set([
+              "VERCEL",
+              "VERCEL_URL",
+              "VERCEL_ENV",
+              "VERCEL_GIT_COMMIT_SHA",
+              "VERCEL_GIT_COMMIT_MESSAGE",
+              "VERCEL_GIT_COMMIT_AUTHOR_LOGIN",
+              "VERCEL_GIT_COMMIT_AUTHOR_NAME",
+              "VERCEL_GIT_COMMIT_REF",
+              "VERCEL_GIT_PROVIDER",
+              "VERCEL_GIT_REPO_SLUG",
+              "VERCEL_GIT_REPO_OWNER",
+              "VERCEL_GIT_REPO_ID",
+              "VERCEL_GIT_PULL_REQUEST_ID",
+              "VERCEL_BRANCH_URL",
+              "VERCEL_PROJECT_PRODUCTION_URL",
+              "VERCEL_AUTOMATION_BYPASS_SECRET",
+            ]);
+
+            // --- Fetch env vars from the Vercel API ---
+
+            async function fetchEnvVars(projectName) {
+              const url = new URL(`https://api.vercel.com/v10/projects/${encodeURIComponent(projectName)}/env`);
+              url.searchParams.set("teamId", process.env.VERCEL_TEAM_ID);
+              // Request up to 100 env vars per page (Vercel default limit is 20)
+              url.searchParams.set("limit", "100");
+
+              const allEnvs = [];
+              let nextUrl = url.toString();
+
+              while (nextUrl) {
+                const res = await fetch(nextUrl, {
+                  headers: { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` },
+                });
+
+                if (!res.ok) {
+                  const body = await res.text();
+                  throw new Error(`Vercel API error for ${projectName}: ${res.status} ${body}`);
+                }
+
+                const data = await res.json();
+                const envs = data.envs ?? data;
+                allEnvs.push(...(Array.isArray(envs) ? envs : []));
+
+                // Handle pagination
+                const next = data.pagination?.next;
+                if (next) {
+                  const paginatedUrl = new URL(url.toString());
+                  paginatedUrl.searchParams.set("until", String(next));
+                  nextUrl = paginatedUrl.toString();
+                } else {
+                  nextUrl = null;
+                }
+              }
+
+              return allEnvs;
+            }
+
+            // --- Build per-target key sets for each project ---
+
+            // envsByProject: Map<projectName, Map<target, Set<key>>>
+            const envsByProject = new Map();
+
+            for (const project of PROJECTS) {
+              const envVars = await fetchEnvVars(project);
+              const targetMap = new Map(TARGETS.map((t) => [t, new Set()]));
+
+              for (const env of envVars) {
+                if (IGNORED_KEYS.has(env.key)) continue;
+
+                // env.target can be a string or an array of strings
+                const targets = Array.isArray(env.target) ? env.target : [env.target];
+                for (const t of targets) {
+                  if (targetMap.has(t)) {
+                    targetMap.get(t).add(env.key);
+                  }
+                }
+              }
+
+              envsByProject.set(project, targetMap);
+            }
+
+            // --- Compare across projects per target ---
+
+            // mismatches: Map<target, Array<{ key, missingFrom: string[] }>>
+            const mismatches = new Map();
+
+            for (const target of TARGETS) {
+              // Collect the union of all keys for this target
+              const allKeys = new Set();
+              for (const project of PROJECTS) {
+                for (const key of envsByProject.get(project).get(target)) {
+                  allKeys.add(key);
+                }
+              }
+
+              const targetMismatches = [];
+              for (const key of [...allKeys].sort()) {
+                const missingFrom = PROJECTS.filter(
+                  (p) => !envsByProject.get(p).get(target).has(key)
+                );
+                if (missingFrom.length > 0) {
+                  targetMismatches.push({ key, missingFrom });
+                }
+              }
+
+              if (targetMismatches.length > 0) {
+                mismatches.set(target, targetMismatches);
+              }
+            }
+
+            // --- Report results ---
+
+            if (mismatches.size === 0) {
+              core.info("No env var drift detected across projects. All good!");
+              return;
+            }
+
+            // Build Slack message
+            const lines = [
+              ":warning: *Vercel Env Var Drift Detected*",
+              "",
+              `The following environment variables are not consistent across all three Vercel projects (${PROJECTS.join(", ")}):`,
+            ];
+
+            for (const target of TARGETS) {
+              const items = mismatches.get(target);
+              if (!items) continue;
+              lines.push("");
+              lines.push(`*${target.charAt(0).toUpperCase() + target.slice(1)}:*`);
+              for (const { key, missingFrom } of items) {
+                lines.push(`  • \`${key}\` — missing from: ${missingFrom.join(", ")}`);
+              }
+            }
+
+            lines.push("");
+            lines.push(`<${process.env.WORKFLOW_RUN_URL}|View workflow run>`);
+
+            const message = lines.join("\n");
+
+            // Log to the workflow output as well
+            core.info(message);
+
+            // Post to Slack
+            const webhookUrl = process.env.SLACK_WEBHOOK_URL;
+            if (!webhookUrl) {
+              core.warning("SLACK_ENV_DRIFT_WEBHOOK_URL secret is not set — skipping Slack notification.");
+              return;
+            }
+
+            const slackRes = await fetch(webhookUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: message }),
+            });
+
+            if (!slackRes.ok) {
+              const body = await slackRes.text();
+              throw new Error(`Slack webhook error: ${slackRes.status} ${body}`);
+            }
+
+            core.info("Slack notification sent successfully.");
