@@ -48,7 +48,7 @@ describe('promotionLimit', () => {
       { RATE_LIMIT_DO: doNamespace }
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: { code: string; message: string } };
+    const body: { error: { code: string; message: string } } = await res.json();
     expect(body.error.code).toBe('PROMOTION_MODEL_LIMIT_REACHED');
     expect(body.error.message).toContain('Sign up for free');
   });

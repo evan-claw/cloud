@@ -55,7 +55,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 }));
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -93,7 +93,7 @@ function mockUpstream200() {
 
 function getUpstreamBody(): Record<string, unknown> {
   const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-  return JSON.parse(init.body);
+  return JSON.parse(init.body) as Record<string, unknown>;
 }
 
 describe('body mutations', () => {

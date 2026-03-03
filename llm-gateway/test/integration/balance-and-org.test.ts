@@ -85,7 +85,7 @@ describe('balanceAndOrg', () => {
       )
     );
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { error: { title: string; balance: number } };
+    const body: { error: { title: string; balance: number } } = await res.json();
     expect(body.error.title).toBe('Low Credit Warning!');
     expect(body.error.balance).toBe(0);
   });
@@ -105,7 +105,7 @@ describe('balanceAndOrg', () => {
       )
     );
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { error: { title: string; message: string } };
+    const body: { error: { title: string; message: string } } = await res.json();
     expect(body.error.title).toBe('Paid Model - Credits Required');
     expect(body.error.message).toContain('$20 free');
   });
@@ -136,7 +136,7 @@ describe('balanceAndOrg', () => {
       )
     );
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('not allowed');
   });
 
@@ -167,7 +167,7 @@ describe('balanceAndOrg', () => {
       )
     );
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('Data collection');
   });
 });

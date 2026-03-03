@@ -58,7 +58,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 }));
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -165,7 +165,7 @@ describe('proxy upstream', () => {
       })
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { model: string; usage: { cost?: number } };
+    const body: { model: string; usage: { cost?: number } } = await res.json();
     expect(body.model).toBe('corethink:free');
     expect(body.usage.cost).toBeUndefined();
   });
@@ -284,7 +284,7 @@ describe('proxy upstream', () => {
       })
     );
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('context length');
     expect(body.error).toContain('tokens');
   });
@@ -304,7 +304,7 @@ describe('proxy upstream', () => {
       })
     );
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toBe('Stealth model unable to process request');
   });
 

@@ -51,9 +51,9 @@ vi.mock('../../src/lib/abuse-service', () => ({
 // This bypasses DB+crypto complexity while exercising the full
 // provider-resolution → proxy → makeErrorReadable chain.
 vi.mock('../../src/lib/byok', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../src/lib/byok')>();
+  const mod = await importOriginal();
   return {
-    ...mod,
+    ...(mod as Record<string, unknown>),
     getModelUserByokProviders: async () => ['anthropic'],
     getBYOKforUser: async () => [{ decryptedAPIKey: 'sk-test-byok', providerId: 'anthropic' }],
     getBYOKforOrganization: async () => null,
@@ -61,7 +61,7 @@ vi.mock('../../src/lib/byok', async (importOriginal) => {
 });
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -101,7 +101,7 @@ describe('BYOK errors', () => {
       })
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('[BYOK]');
     expect(body.error).toContain('invalid');
   });
@@ -121,7 +121,7 @@ describe('BYOK errors', () => {
       })
     );
     expect(res.status).toBe(402);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('[BYOK]');
     expect(body.error).toContain('insufficient funds');
   });
@@ -141,7 +141,7 @@ describe('BYOK errors', () => {
       })
     );
     expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('[BYOK]');
     expect(body.error).toContain('permission');
   });
@@ -161,7 +161,7 @@ describe('BYOK errors', () => {
       })
     );
     expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('[BYOK]');
     expect(body.error).toContain('rate limit');
   });

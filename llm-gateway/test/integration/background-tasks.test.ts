@@ -50,9 +50,9 @@ vi.mock('../../src/lib/abuse-service', () => ({
 // Spy on scheduleBackgroundTasks
 const bgTasksSpy = vi.fn();
 vi.mock('../../src/handler/background-tasks', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../src/handler/background-tasks')>();
+  const mod = await importOriginal();
   return {
-    ...mod,
+    ...(mod as Record<string, unknown>),
     scheduleBackgroundTasks: (...args: unknown[]) => {
       bgTasksSpy(...args);
     },
@@ -60,7 +60,7 @@ vi.mock('../../src/handler/background-tasks', async (importOriginal) => {
 });
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -107,7 +107,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.accountingStream).not.toBeNull();
     expect(params.metricsStream).not.toBeNull();
     expect(params.loggingStream).not.toBeNull();
@@ -151,7 +151,7 @@ describe('background tasks', () => {
     expect(res.status).toBe(503);
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.upstreamStatusCode).toBe(402);
   });
 
@@ -174,7 +174,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.accountingStream).toBeNull();
   });
 
@@ -197,7 +197,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.loggingStream).toBeNull();
   });
 
@@ -220,7 +220,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.metricsStream).not.toBeNull();
   });
 
@@ -243,7 +243,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.accountingStream).not.toBeNull();
   });
 
@@ -266,7 +266,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.loggingStream).not.toBeNull();
   });
 
@@ -289,8 +289,8 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
-    expect(params.user.id).toBe('user-1');
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect((params.user as { id: string }).id).toBe('user-1');
     expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
     expect(params.isAnon).toBe(false);
     expect(params.userByok).toBe(false);
@@ -328,7 +328,7 @@ describe('background tasks', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.modeHeader).toBe('code');
     expect(params.feature).toBe('vscode-extension');
     expect(params.sessionId).toBe('task-abc');

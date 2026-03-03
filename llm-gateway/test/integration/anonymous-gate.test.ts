@@ -46,7 +46,7 @@ describe('anonymousGate', () => {
       })
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: { code: string; message: string } };
+    const body: { error: { code: string; message: string } } = await res.json();
     expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
     expect(body.error.message).toBe('You need to sign in to use this model.');
   });

@@ -50,9 +50,9 @@ vi.mock('../../src/lib/abuse-service', () => ({
 // Spy on scheduleBackgroundTasks
 const bgTasksSpy = vi.fn();
 vi.mock('../../src/handler/background-tasks', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../src/handler/background-tasks')>();
+  const mod = await importOriginal();
   return {
-    ...mod,
+    ...(mod as Record<string, unknown>),
     scheduleBackgroundTasks: (...args: unknown[]) => {
       bgTasksSpy(...args);
     },
@@ -60,7 +60,7 @@ vi.mock('../../src/handler/background-tasks', async (importOriginal) => {
 });
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -115,7 +115,7 @@ describe('auto-model resolution', () => {
 
     // The body should have the resolved model (claude-sonnet)
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    const body = JSON.parse(init.body);
+    const body = JSON.parse(init.body) as Record<string, unknown>;
     expect(body.model).toContain('claude-sonnet');
   });
 
@@ -134,7 +134,7 @@ describe('auto-model resolution', () => {
     await res.text();
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    const body = JSON.parse(init.body);
+    const body = JSON.parse(init.body) as Record<string, unknown>;
     // plan mode resolves to claude-opus
     expect(body.model).toContain('claude-opus');
   });
@@ -153,7 +153,7 @@ describe('auto-model resolution', () => {
     await res.text();
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    const body = JSON.parse(init.body);
+    const body = JSON.parse(init.body) as Record<string, unknown>;
     expect(body.model).toContain('minimax');
   });
 
@@ -170,7 +170,7 @@ describe('auto-model resolution', () => {
     await new Promise(r => setTimeout(r, 50));
 
     expect(bgTasksSpy).toHaveBeenCalled();
-    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    const params = bgTasksSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(params.autoModel).toBe('kilo/auto');
   });
 });

@@ -51,7 +51,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 const captureExceptionSpy = vi.fn();
 vi.mock('../../src/lib/sentry', () => ({
   SENTRY_DSN: 'https://fake@sentry.io/123',
-  captureException: (...args: unknown[]) => captureExceptionSpy(...args),
+  captureException: (...args: unknown[]) => captureExceptionSpy(...args) as void,
 }));
 
 // Also mock @sentry/cloudflare to prevent real Sentry initialization
@@ -61,7 +61,7 @@ vi.mock('@sentry/cloudflare', () => ({
 }));
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -98,7 +98,7 @@ describe('error handling', () => {
       })
     );
     expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('Internal server error');
   });
 
@@ -122,9 +122,9 @@ describe('error handling', () => {
     await new Promise(r => setTimeout(r, 100));
 
     expect(captureExceptionSpy).toHaveBeenCalled();
-    const [err] = captureExceptionSpy.mock.calls[0];
+    const err = captureExceptionSpy.mock.calls[0][0] as Error;
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain('500');
+    expect(err.message).toContain('500');
   });
 
   it('captureException NOT called for upstream 4xx (non-402)', async () => {
@@ -166,8 +166,8 @@ describe('error handling', () => {
     expect(res.status).toBe(503);
 
     expect(captureExceptionSpy).toHaveBeenCalled();
-    const [err] = captureExceptionSpy.mock.calls[0];
+    const err = captureExceptionSpy.mock.calls[0][0] as Error;
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain('402');
+    expect(err.message).toContain('402');
   });
 });

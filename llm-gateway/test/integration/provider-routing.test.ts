@@ -55,7 +55,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 }));
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -213,7 +213,7 @@ describe('provider routing', () => {
     await res.text();
 
     const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
-    const body = JSON.parse(init.body);
+    const body = JSON.parse(init.body) as Record<string, unknown>;
     // corethink:free has internal_id 'corethink' — the model sent upstream should be 'corethink'
     // (parseBody lowercases and the provider-specific logic may strip the :free suffix)
     expect(body.model).not.toContain(':free');

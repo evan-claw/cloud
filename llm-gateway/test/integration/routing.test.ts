@@ -89,12 +89,12 @@ describe('routing', () => {
 
     const res1 = await dispatch(makeReq('/api/gateway/chat/completions'));
     expect(res1.status).toBe(400);
-    const body1 = await res1.json();
+    const body1: { error: string } = await res1.json();
     expect(body1.error).toBe('Invalid request');
 
     const res2 = await dispatch(makeReq('/api/openrouter/chat/completions'));
     expect(res2.status).toBe(400);
-    const body2 = await res2.json();
+    const body2: { error: string } = await res2.json();
     expect(body2.error).toBe('Invalid request');
   });
 });

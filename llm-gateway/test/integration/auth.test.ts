@@ -74,7 +74,7 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: { message: string } };
+    const body: { error: { message: string } } = await res.json();
     expect(body.error.message).toBe('Invalid or expired token');
   });
 
@@ -91,7 +91,7 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: { message: string } };
+    const body: { error: { message: string } } = await res.json();
     expect(body.error.message).toBe('User not found');
   });
 
@@ -108,7 +108,7 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body = (await res.json()) as { error: { message: string } };
+    const body: { error: { message: string } } = await res.json();
     expect(body.error.message).toBe('Token has been revoked');
   });
 });

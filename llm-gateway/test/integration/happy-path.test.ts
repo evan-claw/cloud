@@ -48,7 +48,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 }));
 
 // Polyfill scheduler.wait for Node
-if (!globalThis.scheduler) {
+if (!(globalThis as Record<string, unknown>).scheduler) {
   (globalThis as Record<string, unknown>).scheduler = {
     wait: (ms: number) => new Promise(r => setTimeout(r, ms)),
   };
@@ -91,10 +91,10 @@ describe('happy path', () => {
     expect(res.status).toBe(200);
 
     expect(fetchMock).toHaveBeenCalled();
-    const [fetchUrl] = fetchMock.mock.calls[0];
+    const fetchUrl = fetchMock.mock.calls[0][0] as string;
     expect(fetchUrl).toContain('corethink');
 
-    const body = (await res.json()) as { model: string; usage: { cost?: number } };
+    const body: { model: string; usage: { cost?: number } } = await res.json();
     expect(body.model).toBe('corethink:free');
     expect(body.usage.cost).toBeUndefined();
   });
@@ -126,10 +126,10 @@ describe('happy path', () => {
     expect(res.status).toBe(200);
 
     expect(fetchMock).toHaveBeenCalled();
-    const [fetchUrl] = fetchMock.mock.calls[0];
+    const fetchUrl = fetchMock.mock.calls[0][0] as string;
     expect(fetchUrl).toContain('openrouter.ai');
 
-    const body = (await res.json()) as { model: string };
+    const body: { model: string } = await res.json();
     expect(body.model).toBe('anthropic/claude-sonnet-4-20250514');
   });
 
@@ -156,10 +156,10 @@ describe('happy path', () => {
     expect(res.status).toBe(200);
 
     expect(fetchMock).toHaveBeenCalled();
-    const [fetchUrl] = fetchMock.mock.calls[0];
+    const fetchUrl = fetchMock.mock.calls[0][0] as string;
     expect(fetchUrl).toContain('gigapotato');
 
-    const body = (await res.json()) as { model: string };
+    const body: { model: string } = await res.json();
     expect(body.model).toBe('giga-potato');
   });
 });

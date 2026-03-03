@@ -64,7 +64,7 @@ describe('requestValidation', () => {
       })
     );
     expect(res.status).toBe(503);
-    const body = await res.json();
+    const body: { error: string } = await res.json();
     expect(body.error).toBe('Service Unavailable');
   });
 
@@ -76,7 +76,7 @@ describe('requestValidation', () => {
       })
     );
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body: { error: string } = await res.json();
     expect(body.error).toContain('alpha period');
   });
 
@@ -88,7 +88,7 @@ describe('requestValidation', () => {
       })
     );
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body: { error: string } = await res.json();
     expect(body.error).toBe('Model not found');
   });
 });
