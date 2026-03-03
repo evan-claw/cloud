@@ -12,10 +12,11 @@ export const requestValidationMiddleware: MiddlewareHandler<HonoContext> = async
   const resolvedModel = c.get('resolvedModel');
   const user = c.get('user');
 
-  if (body.max_tokens && body.max_tokens > MAX_TOKENS_LIMIT) {
-    console.warn(`SECURITY: Max tokens limit exceeded: ${user.id}`, {
-      maxTokens: body.max_tokens,
-    });
+  const maxCompletionTokens =
+    typeof body.max_completion_tokens === 'number' ? body.max_completion_tokens : undefined;
+  const maxTokens = body.max_tokens ?? maxCompletionTokens;
+  if (maxTokens && maxTokens > MAX_TOKENS_LIMIT) {
+    console.warn(`SECURITY: Max tokens limit exceeded: ${user.id}`, { maxTokens });
     return c.json(
       {
         error: 'Service Unavailable',
