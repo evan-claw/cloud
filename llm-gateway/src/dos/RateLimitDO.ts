@@ -23,43 +23,49 @@ export type RateLimitResult = {
 };
 
 export class RateLimitDO extends DurableObject<Env> {
-  // Check + atomically increment in one call. No race conditions because
-  // the DO serializes all concurrent requests to the same instance.
-  async checkAndIncrement(
-    key: string,
-    windowMs: number,
-    maxRequests: number
-  ): Promise<RateLimitResult> {
+  // Read the current window count without modifying state.
+  private async peekCount(key: string, windowMs: number): Promise<number> {
     const now = Date.now();
     const windowStart = now - windowMs;
     const timestamps = ((await this.ctx.storage.get<number[]>(key)) ?? []).filter(
       t => t >= windowStart
     );
+    return timestamps.length;
+  }
 
-    if (timestamps.length >= maxRequests) {
-      return { allowed: false, requestCount: timestamps.length };
-    }
-
+  // Append a timestamp to the sliding window. No race conditions because
+  // the DO serializes all concurrent requests to the same instance.
+  private async appendTimestamp(key: string, windowMs: number): Promise<number> {
+    const now = Date.now();
+    const windowStart = now - windowMs;
+    const timestamps = ((await this.ctx.storage.get<number[]>(key)) ?? []).filter(
+      t => t >= windowStart
+    );
     timestamps.push(now);
     await this.ctx.storage.put(key, timestamps);
     this.scheduleCleanup(windowMs);
-    return { allowed: true, requestCount: timestamps.length };
+    return timestamps.length;
   }
 
+  // Check-only — does NOT increment the counter. Used by rate-limit middleware
+  // so that the log middleware is the sole place that increments.
   async checkFreeModel(): Promise<RateLimitResult> {
-    return this.checkAndIncrement(FREE_KEY, FREE_MODEL_WINDOW_MS, FREE_MODEL_MAX_REQUESTS);
+    const count = await this.peekCount(FREE_KEY, FREE_MODEL_WINDOW_MS);
+    return { allowed: count < FREE_MODEL_MAX_REQUESTS, requestCount: count };
   }
 
   async incrementFreeModel(): Promise<void> {
-    await this.checkAndIncrement(FREE_KEY, FREE_MODEL_WINDOW_MS, FREE_MODEL_MAX_REQUESTS);
+    await this.appendTimestamp(FREE_KEY, FREE_MODEL_WINDOW_MS);
   }
 
+  // Check-only — does NOT increment the counter.
   async checkPromotion(): Promise<RateLimitResult> {
-    return this.checkAndIncrement(PROMO_KEY, PROMOTION_WINDOW_MS, PROMOTION_MAX_REQUESTS);
+    const count = await this.peekCount(PROMO_KEY, PROMOTION_WINDOW_MS);
+    return { allowed: count < PROMOTION_MAX_REQUESTS, requestCount: count };
   }
 
   async incrementPromotion(): Promise<void> {
-    await this.checkAndIncrement(PROMO_KEY, PROMOTION_WINDOW_MS, PROMOTION_MAX_REQUESTS);
+    await this.appendTimestamp(PROMO_KEY, PROMOTION_WINDOW_MS);
   }
 
   // Schedule an alarm to clean up expired entries so the DO can be evicted.
