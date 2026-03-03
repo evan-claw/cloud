@@ -88,20 +88,23 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // Preserve query string so it is forwarded to the upstream provider.
   const { search } = new URL(c.req.url);
 
-  // PostHog API key — fetched once per request, fail-open if unavailable.
+  // Fetch PostHog + abuse secrets in parallel — all fail-open.
   let posthogApiKey: string | undefined;
-  c.env.POSTHOG_API_KEY.get()
-    .then(k => {
-      posthogApiKey = k;
-    })
-    .catch(() => {
-      /* fail-open */
-    });
+  let abuseSecrets: AbuseServiceSecrets | undefined;
+
+  const [abuseServiceUrl] = await Promise.all([
+    c.env.ABUSE_SERVICE_URL.get(),
+    c.env.POSTHOG_API_KEY.get()
+      .then(k => {
+        posthogApiKey = k;
+      })
+      .catch(() => {
+        /* fail-open */
+      }),
+  ]);
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
-  const abuseServiceUrl = await c.env.ABUSE_SERVICE_URL.get();
-  let abuseSecrets: AbuseServiceSecrets | undefined;
   const abuseSecretsPromise = Promise.all([
     c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
     c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
