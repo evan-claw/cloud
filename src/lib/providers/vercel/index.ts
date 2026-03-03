@@ -2,6 +2,7 @@ import type { BYOKResult } from '@/lib/byok';
 import { kiloFreeModels, preferredModels } from '@/lib/models';
 import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { getGatewayErrorRate } from '@/lib/providers/gateway-error-rate';
+import { isOpenAiModel } from '@/lib/providers/openai';
 import type { VercelUserByokInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
 import {
   AutocompleteUserByokProviderIdSchema,
@@ -76,6 +77,12 @@ export async function shouldRouteToVercel(
     console.debug(
       `[shouldRouteToVercel] Anthropic models are not routed to Vercel pending fine-grained tool streaming support`
     );
+    return false;
+  }
+
+  if (isOpenAiModel(requestedModel)) {
+    // 2026-03-03 Vercel returns this error: The model `gpt-5.3-codex-api-preview` does not exist or you do not have access to it.
+    console.debug(`[shouldRouteToVercel] OpenAI models are not routed to Vercel`);
     return false;
   }
 
