@@ -83,15 +83,17 @@ export function ReviewAgentPageClient({
           <Badge variant="new">new</Badge>
         </div>
         <p className="text-muted-foreground">
-          Automate code reviews with AI-powered analysis for your personal repositories.{' '}
-          <a
-            href="https://kilo.ai/docs/advanced-usage/code-reviews"
-            className="inline-flex items-center gap-1 text-blue-400 underline hover:text-blue-300"
-          >
-            Learn more
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          Automate code reviews with AI-powered analysis for your personal repositories
         </p>
+        <a
+          href="https://kilo.ai/docs/advanced-usage/code-reviews"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
+        >
+          Learn how to use it
+          <ExternalLink className="size-4" />
+        </a>
       </div>
 
       {/* Platform Selection Tabs */}
