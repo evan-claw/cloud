@@ -235,7 +235,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       const writer = writable.getWriter();
 
       const pipePromise = (async () => {
-        const reader = responseBody.getReader();
+        const reader = responseBody.getReader() as ReadableStreamDefaultReader<Uint8Array>;
         try {
           for (;;) {
             const result = await reader.read();
@@ -289,7 +289,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     const writer = writable.getWriter();
 
     const pipePromise = (async () => {
-      const reader = responseBody.getReader();
+      const reader = responseBody.getReader() as ReadableStreamDefaultReader<Uint8Array>;
       try {
         for (;;) {
           const result = await reader.read();

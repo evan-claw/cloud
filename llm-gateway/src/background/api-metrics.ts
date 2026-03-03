@@ -166,7 +166,7 @@ async function drainResponseBodyForInferenceProvider(
   const body = response.body;
   if (!body) return undefined;
 
-  const reader = body.getReader();
+  const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
   const contentType = response.headers.get('content-type') ?? '';
   const isEventStream = contentType.includes('text/event-stream');
 

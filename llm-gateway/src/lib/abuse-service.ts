@@ -156,7 +156,7 @@ export async function classifyRequest(
       console.error(`Abuse service error (${response.status}): ${await response.text()}`);
       return null;
     }
-    return (await response.json()) as AbuseClassificationResponse;
+    return await response.json<AbuseClassificationResponse>();
   } catch (err) {
     console.error('Abuse classification failed:', err);
     return null;
@@ -236,7 +236,7 @@ export async function reportCost(
       console.error(`[Abuse] Cost update failed (${response.status}): ${await response.text()}`);
       return null;
     }
-    return (await response.json()) as CostUpdateResponse;
+    return await response.json<CostUpdateResponse>();
   } catch (err) {
     console.error('[Abuse] Failed to report cost:', err);
     return null;

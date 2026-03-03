@@ -216,7 +216,7 @@ function processOpenRouterUsage(
 // ─── Stream/string parsers ────────────────────────────────────────────────────
 
 export async function parseMicrodollarUsageFromStream(
-  stream: ReadableStream,
+  stream: ReadableStream<Uint8Array>,
   kiloUserId: string,
   provider: string,
   statusCode: number
@@ -238,7 +238,7 @@ export async function parseMicrodollarUsageFromStream(
 
       let json: ChatCompletionChunk | undefined;
       try {
-        json = JSON.parse(event.data);
+        json = JSON.parse(event.data) as ChatCompletionChunk;
       } catch {
         return;
       }
@@ -333,7 +333,7 @@ export function parseMicrodollarUsageFromString(
   let responseJson: NonStreamingResponseJson | null = null;
 
   try {
-    responseJson = JSON.parse(fullResponse);
+    responseJson = JSON.parse(fullResponse) as NonStreamingResponseJson;
   } catch {
     console.warn('parseMicrodollarUsageFromString: failed to parse JSON', { kiloUserId });
   }
@@ -586,7 +586,7 @@ async function ingestOrganizationTokenUsage(
  * downstream use by api-metrics and abuse-cost background tasks.
  */
 export async function runUsageAccounting(
-  stream: ReadableStream | null,
+  stream: ReadableStream<Uint8Array> | null,
   usageContext: MicrodollarUsageContext,
   db: WorkerDb
 ): Promise<MicrodollarUsageStats | null> {
