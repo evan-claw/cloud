@@ -73,6 +73,7 @@ app.onError((err, c) => {
 export default Sentry.withSentry(
   (_env: Env) => ({
     dsn: SENTRY_DSN,
+    sendDefaultPii: true,
     tracesSampleRate: 0, // errors only — no performance tracing
   }),
   { fetch: app.fetch }
