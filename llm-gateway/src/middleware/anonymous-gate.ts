@@ -30,7 +30,6 @@ export const anonymousGateMiddleware = createMiddleware<HonoContext>(async (c, n
   }
 
   // Free model: allow anonymous access
-  // NOTE: promotion-limit.ts (Phase 3) runs next and enforces the anonymous request cap.
   c.set('user', createAnonymousContext(c.get('clientIp')));
   return next();
 });
