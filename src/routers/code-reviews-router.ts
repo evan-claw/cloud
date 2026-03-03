@@ -158,7 +158,7 @@ export const personalReviewAgentRouter = createTRPCRouter({
           customInstructions: null,
           maxReviewTimeMinutes: 10,
           modelSlug: PRIMARY_DEFAULT_MODEL,
-          thinkingEffort: null as string | null,
+          thinkingEffort: null satisfies string | null,
           repositorySelectionMode: 'all' as const,
           selectedRepositoryIds: [],
           manuallyAddedRepositories: [],
