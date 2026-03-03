@@ -22,21 +22,31 @@ export async function run() {
         .from(organizations)
         .where(eq(organizations.id, org.id));
 
+      if (settings.model_allow_list) {
+        settings.model_allow_list = [...new Set<string>(settings.model_allow_list)];
+      }
+      if (settings.provider_allow_list) {
+        settings.provider_allow_list = [...new Set<string>(settings.provider_allow_list)];
+      }
+
       const denyLists = await createDenyLists(
         settings.model_allow_list,
         settings.provider_allow_list
       );
+
       if (denyLists?.model_deny_list && denyLists.model_deny_list.length > 0) {
         settings.model_deny_list = denyLists.model_deny_list;
       }
       if (denyLists?.provider_deny_list && denyLists.provider_deny_list.length > 0) {
         settings.provider_deny_list = denyLists.provider_deny_list;
       }
+
       await tran
         .update(organizations)
         .set({ settings })
         .where(eq(organizations.id, org.id))
         .execute();
+
       console.log(`Commit ${org.id}`);
     });
   }
