@@ -7,24 +7,38 @@ export function extractHeaderAndLimitLength(headers: Headers, name: string): str
 
 export type FraudDetectionHeaders = {
   http_x_forwarded_for: string | null;
-  http_x_vercel_ip_city: string | null;
-  http_x_vercel_ip_country: string | null;
-  http_x_vercel_ip_latitude: number | null;
-  http_x_vercel_ip_longitude: number | null;
-  http_x_vercel_ja4_digest: string | null;
+  geo_city: string | null;
+  geo_country: string | null;
+  geo_latitude: number | null;
+  geo_longitude: number | null;
+  ja3_hash: string | null;
   http_user_agent: string | null;
 };
 
-const parseFloatOrNull = (value: string | null) => (value === null ? null : parseFloat(value));
+const parseFloatOrNull = (value: unknown) => (typeof value === 'string' ? parseFloat(value) : null);
 
-export function getFraudDetectionHeaders(headers: Headers): FraudDetectionHeaders {
+const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+// Safe property access on an unknown object.
+function prop(obj: unknown, key: string): unknown {
+  if (typeof obj === 'object' && obj !== null && key in obj) {
+    return (obj as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+// Reads geo/fingerprint data from Cloudflare's request.cf object.
+// `cf` is typed as `unknown` to avoid fighting the CfProperties union
+// (IncomingRequestCfProperties | RequestInitCfProperties); at runtime it's
+// always an IncomingRequestCfProperties on incoming requests.
+export function getFraudDetectionHeaders(headers: Headers, cf: unknown): FraudDetectionHeaders {
   return {
     http_x_forwarded_for: headers.get('x-forwarded-for'),
-    http_x_vercel_ip_city: headers.get('x-vercel-ip-city'),
-    http_x_vercel_ip_country: headers.get('x-vercel-ip-country'),
-    http_x_vercel_ip_latitude: parseFloatOrNull(headers.get('x-vercel-ip-latitude')),
-    http_x_vercel_ip_longitude: parseFloatOrNull(headers.get('x-vercel-ip-longitude')),
-    http_x_vercel_ja4_digest: headers.get('x-vercel-ja4-digest'),
+    geo_city: str(prop(cf, 'city')),
+    geo_country: str(prop(cf, 'country')),
+    geo_latitude: parseFloatOrNull(prop(cf, 'latitude')),
+    geo_longitude: parseFloatOrNull(prop(cf, 'longitude')),
+    ja3_hash: str(prop(prop(cf, 'botManagement'), 'ja3Hash')),
     http_user_agent: headers.get('user-agent'),
   };
 }
@@ -75,10 +89,10 @@ export type ProjectHeaders = {
   machineId: string | null;
 };
 
-export function extractProjectHeaders(headers: Headers): ProjectHeaders {
+export function extractProjectHeaders(headers: Headers, cf: unknown): ProjectHeaders {
   const xKiloCodeVersion = headers.get('X-KiloCode-Version');
   return {
-    fraudHeaders: getFraudDetectionHeaders(headers),
+    fraudHeaders: getFraudDetectionHeaders(headers, cf),
     xKiloCodeVersion,
     projectId: normalizeProjectId(headers.get('X-KiloCode-ProjectId')),
     numericKiloCodeVersion: getXKiloCodeVersionNumber(xKiloCodeVersion) ?? 0,

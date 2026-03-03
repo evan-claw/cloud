@@ -118,11 +118,11 @@ type UsageMetaData = {
   message_id: string;
   created_at: string;
   http_x_forwarded_for: string | null;
-  http_x_vercel_ip_city: string | null;
-  http_x_vercel_ip_country: string | null;
-  http_x_vercel_ip_latitude: number | null;
-  http_x_vercel_ip_longitude: number | null;
-  http_x_vercel_ja4_digest: string | null;
+  geo_city: string | null;
+  geo_country: string | null;
+  geo_latitude: number | null;
+  geo_longitude: number | null;
+  ja3_hash: string | null;
   user_prompt_prefix: string | null;
   system_prompt_prefix: string | null;
   system_prompt_length: number | null;
@@ -433,9 +433,9 @@ async function insertUsageAndMetadataWithBalanceUpdate(
     )
     , ${createUpsertCTE(sql`http_user_agent`, metadataFields.http_user_agent)}
     , ${createUpsertCTE(sql`http_ip`, metadataFields.http_x_forwarded_for)}
-    , ${createUpsertCTE(sql`vercel_ip_country`, metadataFields.http_x_vercel_ip_country)}
-    , ${createUpsertCTE(sql`vercel_ip_city`, metadataFields.http_x_vercel_ip_city)}
-    , ${createUpsertCTE(sql`ja4_digest`, metadataFields.http_x_vercel_ja4_digest)}
+    , ${createUpsertCTE(sql`vercel_ip_country`, metadataFields.geo_country)}
+    , ${createUpsertCTE(sql`vercel_ip_city`, metadataFields.geo_city)}
+    , ${createUpsertCTE(sql`ja4_digest`, metadataFields.ja3_hash)}
     , ${createUpsertCTE(sql`system_prompt_prefix`, metadataFields.system_prompt_prefix)}
     , ${createUpsertCTE(sql`finish_reason`, metadataFields.finish_reason)}
     , ${createUpsertCTE(sql`editor_name`, metadataFields.editor_name)}
@@ -484,8 +484,8 @@ async function insertUsageAndMetadataWithBalanceUpdate(
         ${metadataFields.message_id},
         ${metadataFields.created_at},
         ${metadataFields.user_prompt_prefix},
-        ${metadataFields.http_x_vercel_ip_latitude},
-        ${metadataFields.http_x_vercel_ip_longitude},
+        ${metadataFields.geo_latitude},
+        ${metadataFields.geo_longitude},
         ${metadataFields.system_prompt_length},
         ${metadataFields.max_tokens},
         ${metadataFields.has_middle_out_transform},
@@ -676,11 +676,11 @@ export async function runUsageAccounting(
     created_at,
     message_id: usageStats.messageId ?? '<missing>',
     http_x_forwarded_for: usageContext.fraudHeaders.http_x_forwarded_for,
-    http_x_vercel_ip_city: usageContext.fraudHeaders.http_x_vercel_ip_city,
-    http_x_vercel_ip_country: usageContext.fraudHeaders.http_x_vercel_ip_country,
-    http_x_vercel_ip_latitude: usageContext.fraudHeaders.http_x_vercel_ip_latitude,
-    http_x_vercel_ip_longitude: usageContext.fraudHeaders.http_x_vercel_ip_longitude,
-    http_x_vercel_ja4_digest: usageContext.fraudHeaders.http_x_vercel_ja4_digest,
+    geo_city: usageContext.fraudHeaders.geo_city,
+    geo_country: usageContext.fraudHeaders.geo_country,
+    geo_latitude: usageContext.fraudHeaders.geo_latitude,
+    geo_longitude: usageContext.fraudHeaders.geo_longitude,
+    ja3_hash: usageContext.fraudHeaders.ja3_hash,
     user_prompt_prefix: user_prompt_prefix ?? null,
     system_prompt_prefix: system_prompt_prefix || null,
     system_prompt_length: usageContext.promptInfo.system_prompt_length,

@@ -22,8 +22,8 @@ export const requestTransformMiddleware: MiddlewareHandler<HonoContext> = async 
   const user = c.get('user');
   const userByok = c.get('userByok');
 
-  // Extract per-request headers (stored for background tasks)
-  const projectHeaders = extractProjectHeaders(c.req.raw.headers);
+  // Extract per-request headers + CF geo data (stored for background tasks)
+  const projectHeaders = extractProjectHeaders(c.req.raw.headers, c.req.raw.cf);
   c.set('fraudHeaders', projectHeaders.fraudHeaders);
   c.set('projectId', projectHeaders.projectId);
   c.set('taskId', projectHeaders.taskId);

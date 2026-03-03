@@ -27,11 +27,11 @@ const secrets: AbuseServiceSecrets = {
 
 const emptyFraudHeaders: FraudDetectionHeaders = {
   http_x_forwarded_for: '1.2.3.4',
-  http_x_vercel_ip_city: null,
-  http_x_vercel_ip_country: null,
-  http_x_vercel_ip_latitude: null,
-  http_x_vercel_ip_longitude: null,
-  http_x_vercel_ja4_digest: null,
+  geo_city: null,
+  geo_country: null,
+  geo_latitude: null,
+  geo_longitude: null,
+  ja3_hash: null,
   http_user_agent: null,
 };
 

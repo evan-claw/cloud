@@ -4,31 +4,41 @@ import { describe, it, expect } from 'vitest';
 import { extractProjectHeaders, getFraudDetectionHeaders } from '../../src/lib/extract-headers';
 
 describe('getFraudDetectionHeaders', () => {
-  it('extracts all fraud detection headers', () => {
+  it('extracts geo data from cf object', () => {
     const headers = new Headers({
       'x-forwarded-for': '1.2.3.4',
-      'x-vercel-ip-city': 'San Francisco',
-      'x-vercel-ip-country': 'US',
-      'x-vercel-ip-latitude': '37.7749',
-      'x-vercel-ip-longitude': '-122.4194',
-      'x-vercel-ja4-digest': 'abc123',
       'user-agent': 'Kilo-Code/3.0.0',
     });
-    const result = getFraudDetectionHeaders(headers);
+    const cf = {
+      city: 'San Francisco',
+      country: 'US',
+      latitude: '37.7749',
+      longitude: '-122.4194',
+      botManagement: { ja3Hash: 'abc123' },
+    };
+    const result = getFraudDetectionHeaders(headers, cf);
     expect(result.http_x_forwarded_for).toBe('1.2.3.4');
-    expect(result.http_x_vercel_ip_city).toBe('San Francisco');
-    expect(result.http_x_vercel_ip_country).toBe('US');
-    expect(result.http_x_vercel_ip_latitude).toBe(37.7749);
-    expect(result.http_x_vercel_ip_longitude).toBe(-122.4194);
-    expect(result.http_x_vercel_ja4_digest).toBe('abc123');
+    expect(result.geo_city).toBe('San Francisco');
+    expect(result.geo_country).toBe('US');
+    expect(result.geo_latitude).toBe(37.7749);
+    expect(result.geo_longitude).toBe(-122.4194);
+    expect(result.ja3_hash).toBe('abc123');
     expect(result.http_user_agent).toBe('Kilo-Code/3.0.0');
   });
 
-  it('returns null for missing headers', () => {
-    const result = getFraudDetectionHeaders(new Headers());
+  it('returns null when cf is undefined', () => {
+    const result = getFraudDetectionHeaders(new Headers(), undefined);
     expect(result.http_x_forwarded_for).toBeNull();
-    expect(result.http_x_vercel_ip_city).toBeNull();
-    expect(result.http_x_vercel_ip_latitude).toBeNull();
+    expect(result.geo_city).toBeNull();
+    expect(result.geo_latitude).toBeNull();
+    expect(result.ja3_hash).toBeNull();
+  });
+
+  it('returns null when cf has no botManagement (non-Enterprise)', () => {
+    const cf = { city: 'Austin', country: 'US', latitude: '30.27', longitude: '-97.74' };
+    const result = getFraudDetectionHeaders(new Headers(), cf);
+    expect(result.geo_city).toBe('Austin');
+    expect(result.ja3_hash).toBeNull();
   });
 });
 
@@ -42,7 +52,7 @@ describe('extractProjectHeaders', () => {
       'x-kilocode-machineid': 'machine-abc',
       'x-forwarded-for': '5.6.7.8',
     });
-    const result = extractProjectHeaders(headers);
+    const result = extractProjectHeaders(headers, undefined);
     expect(result.xKiloCodeVersion).toBe('3.2.1');
     expect(result.projectId).toBe('my-project');
     expect(result.taskId).toBe('task-123');
@@ -56,7 +66,7 @@ describe('extractProjectHeaders', () => {
     const headers = new Headers({
       'X-KiloCode-ProjectId': 'https://github.com/org/my-repo.git',
     });
-    const result = extractProjectHeaders(headers);
+    const result = extractProjectHeaders(headers, undefined);
     expect(result.projectId).toBe('my-repo');
   });
 
@@ -64,12 +74,12 @@ describe('extractProjectHeaders', () => {
     const headers = new Headers({
       'X-KiloCode-ProjectId': 'git@github.com:org/my-repo.git',
     });
-    const result = extractProjectHeaders(headers);
+    const result = extractProjectHeaders(headers, undefined);
     expect(result.projectId).toBe('my-repo');
   });
 
   it('returns 0 for missing version header', () => {
-    const result = extractProjectHeaders(new Headers());
+    const result = extractProjectHeaders(new Headers(), undefined);
     expect(result.numericKiloCodeVersion).toBe(0);
     expect(result.xKiloCodeVersion).toBeNull();
   });
@@ -79,7 +89,7 @@ describe('extractProjectHeaders', () => {
     const headers = new Headers({
       'x-kilocode-taskid': longValue,
     });
-    const result = extractProjectHeaders(headers);
+    const result = extractProjectHeaders(headers, undefined);
     expect(result.taskId).toHaveLength(500);
   });
 });

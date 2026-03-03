@@ -48,7 +48,7 @@ export type Variables = {
   customLlm: CustomLlm | null;
   secrets: SecretsBundle;
 
-  // request-transform.ts — extracted from request headers, stored for Phase 6 background tasks
+  // request-transform.ts — extracted from request headers, stored for background tasks
   fraudHeaders: FraudDetectionHeaders;
   projectId: string | null;
   taskId: string | null;
