@@ -9,6 +9,10 @@ export default defineConfig({
       // Provide a minimal stub so unit tests can import modules that
       // transitively depend on DurableObject (e.g. RateLimitDO).
       'cloudflare:workers': path.resolve(__dirname, 'test/unit/stubs/cloudflare-workers.ts'),
+      // @sentry/cloudflare is only available in the Workers runtime.
+      // Provide a no-op stub so unit tests can import modules that
+      // transitively depend on Sentry (e.g. sentry.ts, index.ts).
+      '@sentry/cloudflare': path.resolve(__dirname, 'test/unit/stubs/sentry-cloudflare.ts'),
     },
   },
   test: {

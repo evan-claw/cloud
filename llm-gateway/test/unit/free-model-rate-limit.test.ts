@@ -65,8 +65,11 @@ describe('freeModelRateLimitMiddleware', () => {
     const ns = makeFakeDONamespace(new Set(['1.2.3.4']));
     const res = await post(ns, 'corethink:free');
     expect(res.status).toBe(429);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('FREE_MODEL_RATE_LIMITED');
+    const body = (await res.json()) as { error: string; message: string };
+    expect(body.error).toBe('Rate limit exceeded');
+    expect(body.message).toBe(
+      'Free model usage limit reached. Please try again later or upgrade to a paid model.'
+    );
   });
 
   it('skips non-Kilo free models', async () => {

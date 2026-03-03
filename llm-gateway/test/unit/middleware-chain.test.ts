@@ -78,11 +78,14 @@ describe('middleware chain – 404', () => {
 });
 
 describe('middleware chain – body validation', () => {
-  it('returns 400 for missing model', async () => {
+  it('returns 404 for missing model (matches reference modelDoesNotExistResponse)', async () => {
     const res = await dispatch(chatRequest({ messages: [] }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.error).toContain('model');
+    expect(body).toEqual({
+      error: 'Model not found',
+      message: 'The requested model could not be found.',
+    });
   });
 
   it('returns 400 for invalid JSON', async () => {
