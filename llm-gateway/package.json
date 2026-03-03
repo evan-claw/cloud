@@ -6,10 +6,9 @@
   "description": "LLM Gateway Cloudflare Worker — transparent drop-in replacement for /api/openrouter",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
-    "deploy:prod": "wrangler deploy --env=\"\"",
-    "deploy:dev": "wrangler deploy --env dev",
-    "dev": "wrangler dev --env dev",
-    "start": "wrangler dev --env dev",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
     "types": "wrangler types",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "lint:fix": "eslint --config eslint.config.mjs --cache --fix 'src/**/*.ts'",
