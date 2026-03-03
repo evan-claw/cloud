@@ -815,6 +815,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare existing session:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }
@@ -849,6 +850,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare session for resume:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }

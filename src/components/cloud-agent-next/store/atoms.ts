@@ -287,8 +287,8 @@ export const addUserMessageAtom = atom(
     }
   ): string => {
     const { sessionId, content, agent = 'code', model = { providerID: '', modelID: '' } } = payload;
-    const messageId = `optimistic-${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const partId = `part_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const messageId = `optimistic-${crypto.randomUUID()}`;
+    const partId = `part_${crypto.randomUUID()}`;
     const now = Date.now();
 
     const userMessage: StoredMessage = {
@@ -334,8 +334,8 @@ export const addUserMessageAtom = atom(
 /**
  * Remove the optimistic user message (if any) from the store.
  * No-op when no optimistic message exists (avoids unnecessary Map copies / subscriber notifications).
+ * Returns true if an optimistic message was found and removed.
  */
-/** Returns true if an optimistic message was found and removed. */
 export const removeOptimisticMessageAtom = atom(null, (get, set): boolean => {
   const messagesMap = get(messagesMapAtom);
 
