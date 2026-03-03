@@ -154,4 +154,185 @@ describe('background tasks', () => {
     const [_ctx, params] = bgTasksSpy.mock.calls[0];
     expect(params.upstreamStatusCode).toBe(402);
   });
+
+  it('accountingStream is null for anonymous users', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      chatRequest({
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.accountingStream).toBeNull();
+  });
+
+  it('loggingStream is null for anonymous users', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      chatRequest({
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.loggingStream).toBeNull();
+  });
+
+  it('metricsStream is non-null for anonymous users', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      chatRequest({
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.metricsStream).not.toBeNull();
+  });
+
+  it('accountingStream is non-null for authenticated 200', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      await authRequest({
+        model: 'anthropic/claude-sonnet-4-20250514',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.accountingStream).not.toBeNull();
+  });
+
+  it('loggingStream is non-null for authenticated 200', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      await authRequest({
+        model: 'anthropic/claude-sonnet-4-20250514',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.loggingStream).not.toBeNull();
+  });
+
+  it('params include correct user/org/provider/model', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const res = await dispatch(
+      await authRequest({
+        model: 'anthropic/claude-sonnet-4-20250514',
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.user.id).toBe('user-1');
+    expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(params.isAnon).toBe(false);
+    expect(params.userByok).toBe(false);
+  });
+
+  it('params include header-sourced fields (modeHeader, feature, etc.)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+
+    const token = await signToken({ kiloUserId: 'user-1' });
+    const res = await dispatch(
+      chatRequest(
+        {
+          model: 'anthropic/claude-sonnet-4-20250514',
+          messages: [{ role: 'user', content: 'hi' }],
+        },
+        {
+          token,
+          headers: {
+            'x-kilocode-mode': 'code',
+            'x-kilocode-feature': 'vscode-extension',
+            'x-kilocode-taskid': 'task-abc',
+            'x-kilocode-editorname': 'vscode',
+            'x-kilocode-machineid': 'machine-xyz',
+          },
+        }
+      )
+    );
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(bgTasksSpy).toHaveBeenCalled();
+    const [_ctx, params] = bgTasksSpy.mock.calls[0];
+    expect(params.modeHeader).toBe('code');
+    expect(params.feature).toBe('vscode-extension');
+    expect(params.sessionId).toBe('task-abc');
+    expect(params.editorName).toBe('vscode');
+    expect(params.machineId).toBe('machine-xyz');
+  });
 });
