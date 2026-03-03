@@ -11,7 +11,10 @@ export const parseBodyMiddleware = createMiddleware<HonoContext>(async (c, next)
   } catch (err) {
     captureException(err, { source: 'llm-gateway-parse-body' });
     return c.json(
-      { error: 'Invalid request', message: 'Could not parse request body. Please ensure it is valid JSON.' },
+      {
+        error: 'Invalid request',
+        message: 'Could not parse request body. Please ensure it is valid JSON.',
+      },
       400
     );
   }
@@ -20,7 +23,10 @@ export const parseBodyMiddleware = createMiddleware<HonoContext>(async (c, next)
   delete body.models;
 
   if (typeof body.model !== 'string' || body.model.trim().length === 0) {
-    return c.json({ error: 'model is required' }, 400);
+    return c.json(
+      { error: 'Model not found', message: 'The requested model could not be found.' },
+      404
+    );
   }
 
   // Ensure usage is always returned so background accounting can parse it

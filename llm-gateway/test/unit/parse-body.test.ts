@@ -61,16 +61,26 @@ describe('parseBodyMiddleware', () => {
     expect(data.stream_options).toEqual({ include_usage: true });
   });
 
-  it('returns 400 for missing model', async () => {
+  it('returns 404 for missing model (matches reference modelDoesNotExistResponse)', async () => {
     const app = makeApp();
     const res = await post(app, { messages: [] });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
+    const data = (await res.json()) as JsonData;
+    expect(data).toEqual({
+      error: 'Model not found',
+      message: 'The requested model could not be found.',
+    });
   });
 
-  it('returns 400 for empty model', async () => {
+  it('returns 404 for empty model (matches reference modelDoesNotExistResponse)', async () => {
     const app = makeApp();
     const res = await post(app, { model: '  ', messages: [] });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
+    const data = (await res.json()) as JsonData;
+    expect(data).toEqual({
+      error: 'Model not found',
+      message: 'The requested model could not be found.',
+    });
   });
 
   it('returns 400 for invalid JSON', async () => {
