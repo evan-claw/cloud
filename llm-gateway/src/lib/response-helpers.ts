@@ -2,6 +2,7 @@
 // All functions use plain Fetch API constructs (no Next.js dependencies).
 
 import type { OpenRouterChatCompletionRequest } from '../types/request';
+import { getKiloFreeModelContextLength } from './models';
 
 // Whitelist upstream headers, add Content-Encoding: identity.
 // Content-Encoding: identity ensures no intermediary re-compresses the stream.
@@ -37,6 +38,7 @@ const byokErrorMessages: Partial<Record<number, string>> = {
 // Returns an alternative Response when there is a meaningful error message to
 // show the client, or undefined if the original response should be forwarded.
 export async function makeErrorReadable({
+  requestedModel,
   request,
   response,
   isUserByok,
@@ -56,8 +58,25 @@ export async function makeErrorReadable({
     }
   }
 
-  // Suppress unused-variable warning: `request` reserved for context-length checks (Phase 6+)
-  void request;
+  // Sometimes upstream returns generic or nonsensical errors when the context length
+  // is exceeded. If we can detect that the request likely exceeds the model's context
+  // window, return a clear message instead.
+  const contextLength = getKiloFreeModelContextLength(requestedModel);
+  if (contextLength) {
+    const estimatedTokenCount = estimateTokenCount(request);
+    if (estimatedTokenCount >= contextLength) {
+      const error = `The maximum context length is ${contextLength} tokens. However, about ${estimatedTokenCount} tokens were requested.`;
+      console.warn(`Responding with ${response.status} ${error}`);
+      return Response.json({ error, message: error }, { status: response.status });
+    }
+  }
 
   return undefined;
+}
+
+// Matches the reference estimateTokenCount in llm-proxy-helpers.ts:
+// rough char/4 approximation + max output tokens.
+function estimateTokenCount(request: OpenRouterChatCompletionRequest): number {
+  const maxOutputTokens = Number(request.max_completion_tokens ?? request.max_tokens ?? 0);
+  return Math.round(JSON.stringify(request).length / 4 + maxOutputTokens);
 }

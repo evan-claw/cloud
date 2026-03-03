@@ -3,23 +3,55 @@
 
 type KiloFreeModel = {
   public_id: string;
+  context_length: number;
   is_enabled: boolean;
   inference_providers: string[];
 };
 
 // Keep in sync with src/lib/providers/*.ts
 const kiloFreeModels: KiloFreeModel[] = [
-  { public_id: 'corethink:free', is_enabled: true, inference_providers: ['corethink'] },
-  { public_id: 'giga-potato', is_enabled: true, inference_providers: ['stealth'] },
-  { public_id: 'giga-potato-thinking', is_enabled: true, inference_providers: ['stealth'] },
-  { public_id: 'moonshotai/kimi-k2.5:free', is_enabled: true, inference_providers: [] },
-  { public_id: 'minimax/minimax-m2.5:free', is_enabled: true, inference_providers: [] },
+  {
+    public_id: 'corethink:free',
+    context_length: 78_000,
+    is_enabled: true,
+    inference_providers: ['corethink'],
+  },
+  {
+    public_id: 'giga-potato',
+    context_length: 256_000,
+    is_enabled: true,
+    inference_providers: ['stealth'],
+  },
+  {
+    public_id: 'giga-potato-thinking',
+    context_length: 256_000,
+    is_enabled: true,
+    inference_providers: ['stealth'],
+  },
+  {
+    public_id: 'moonshotai/kimi-k2.5:free',
+    context_length: 262_144,
+    is_enabled: true,
+    inference_providers: [],
+  },
+  {
+    public_id: 'minimax/minimax-m2.5:free',
+    context_length: 204_800,
+    is_enabled: true,
+    inference_providers: [],
+  },
   {
     public_id: 'x-ai/grok-code-fast-1:optimized:free',
+    context_length: 256_000,
     is_enabled: false,
     inference_providers: ['stealth'],
   },
-  { public_id: 'z-ai/glm-5:free', is_enabled: false, inference_providers: [] },
+  {
+    public_id: 'z-ai/glm-5:free',
+    context_length: 202_800,
+    is_enabled: false,
+    inference_providers: [],
+  },
 ];
 
 // A model is "free" if it's a Kilo-hosted free model, ends in ':free', is the
@@ -83,4 +115,9 @@ function isOpenRouterStealthModel(model: string): boolean {
 // is not explicitly allowed by the provider config.
 export function isDataCollectionRequiredOnKiloCodeOnly(model: string): boolean {
   return kiloFreeModels.some(m => m.public_id === model && m.is_enabled);
+}
+
+// Returns context_length for a Kilo free model, or undefined for other models.
+export function getKiloFreeModelContextLength(model: string): number | undefined {
+  return kiloFreeModels.find(m => m.public_id === model)?.context_length;
 }

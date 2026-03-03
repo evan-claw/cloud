@@ -115,4 +115,67 @@ describe('makeErrorReadable', () => {
     });
     expect(result).toBeUndefined();
   });
+
+  it('returns context-length error for Kilo free model when estimated tokens exceed limit', async () => {
+    // corethink:free has context_length 78_000. Build a request whose
+    // JSON serialization / 4 exceeds that threshold.
+    const longContent = 'x'.repeat(78_000 * 4);
+    const response = new Response('Internal Server Error', { status: 500 });
+    const result = await makeErrorReadable({
+      requestedModel: 'corethink:free',
+      request: { model: 'corethink:free', messages: [{ role: 'user', content: longContent }] },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeDefined();
+    expect(result!.status).toBe(500);
+    const body = (await result!.json()) as { error: string; message: string };
+    expect(body.error).toContain('The maximum context length is 78000 tokens');
+    expect(body.error).toContain('tokens were requested');
+    expect(body.error).toBe(body.message);
+  });
+
+  it('returns undefined for Kilo free model when estimated tokens are within limit', async () => {
+    const response = new Response('Bad Request', { status: 400 });
+    const result = await makeErrorReadable({
+      requestedModel: 'corethink:free',
+      request: { model: 'corethink:free', messages: [{ role: 'user', content: 'hi' }] },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeUndefined();
+  });
+
+  it('accounts for max_completion_tokens in context-length estimate', async () => {
+    // corethink:free context_length is 78_000. A short prompt + huge max_completion_tokens
+    // should trigger the check.
+    const response = new Response('Error', { status: 500 });
+    const result = await makeErrorReadable({
+      requestedModel: 'corethink:free',
+      request: {
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_completion_tokens: 100_000,
+      },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeDefined();
+    const body = (await result!.json()) as { error: string };
+    expect(body.error).toContain('The maximum context length is 78000 tokens');
+  });
+
+  it('skips context-length check for non-Kilo models', async () => {
+    const response = new Response('Error', { status: 500 });
+    const result = await makeErrorReadable({
+      requestedModel: 'openai/gpt-4',
+      request: {
+        model: 'openai/gpt-4',
+        messages: [{ role: 'user', content: 'x'.repeat(1_000_000) }],
+      },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeUndefined();
+  });
 });
