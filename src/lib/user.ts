@@ -156,6 +156,26 @@ export async function findUserByEmail(email: string): Promise<User | undefined> 
   });
 }
 
+function fireAuthEvent(
+  user: Pick<User, 'id' | 'google_user_email' | 'created_at'>,
+  eventType: 'signup' | 'signin',
+  provider: AuthProviderId,
+  requestHeaders: Headers
+) {
+  void reportAuthEvent({
+    kilo_user_id: user.id,
+    event_type: eventType,
+    email: user.google_user_email,
+    account_created_at: user.created_at,
+    ip_address: requestHeaders.get('x-forwarded-for'),
+    geo_city: requestHeaders.get('x-vercel-ip-city'),
+    geo_country: requestHeaders.get('x-vercel-ip-country'),
+    ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
+    user_agent: requestHeaders.get('user-agent'),
+    auth_method: provider,
+  });
+}
+
 export async function createOrUpdateUser(
   args: CreateOrUpdateUserArgs,
   turnstile_guid: UUID | undefined,
@@ -164,20 +184,8 @@ export async function createOrUpdateUser(
 ): Promise<Result<{ user: User; isNew: boolean }, AuthErrorType>> {
   const existingUser = await findAndSyncExistingUser(args);
   if (existingUser) {
-    // Fire-and-forget auth event for signin
     if (requestHeaders) {
-      void reportAuthEvent({
-        kilo_user_id: existingUser.id,
-        event_type: 'signin',
-        email: existingUser.google_user_email,
-        account_created_at: existingUser.created_at,
-        ip_address: requestHeaders.get('x-forwarded-for'),
-        geo_city: requestHeaders.get('x-vercel-ip-city'),
-        geo_country: requestHeaders.get('x-vercel-ip-country'),
-        ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
-        user_agent: requestHeaders.get('user-agent'),
-        auth_method: args.provider,
-      });
+      fireAuthEvent(existingUser, 'signin', args.provider, requestHeaders);
     }
 
     // User signed in or is being updated
@@ -225,20 +233,8 @@ export async function createOrUpdateUser(
       if (!linkResult.success) {
         return { success: false, error: linkResult.error };
       }
-      // Fire-and-forget auth event for auto-linked signin
       if (requestHeaders) {
-        void reportAuthEvent({
-          kilo_user_id: userByEmail.id,
-          event_type: 'signin',
-          email: userByEmail.google_user_email,
-          account_created_at: userByEmail.created_at,
-          ip_address: requestHeaders.get('x-forwarded-for'),
-          geo_city: requestHeaders.get('x-vercel-ip-city'),
-          geo_country: requestHeaders.get('x-vercel-ip-country'),
-          ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
-          user_agent: requestHeaders.get('user-agent'),
-          auth_method: args.provider,
-        });
+        fireAuthEvent(userByEmail, 'signin', args.provider, requestHeaders);
       }
       // Successfully linked account, return the existing user
       posthogClient.capture({
@@ -317,20 +313,8 @@ export async function createOrUpdateUser(
     return savedUser;
   });
 
-  // Fire-and-forget auth event for signup
   if (requestHeaders) {
-    void reportAuthEvent({
-      kilo_user_id: savedUser.id,
-      event_type: 'signup',
-      email: savedUser.google_user_email,
-      account_created_at: savedUser.created_at,
-      ip_address: requestHeaders.get('x-forwarded-for'),
-      geo_city: requestHeaders.get('x-vercel-ip-city'),
-      geo_country: requestHeaders.get('x-vercel-ip-country'),
-      ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
-      user_agent: requestHeaders.get('user-agent'),
-      auth_method: args.provider,
-    });
+    fireAuthEvent(savedUser, 'signup', args.provider, requestHeaders);
   }
 
   // User created event in PostHog
