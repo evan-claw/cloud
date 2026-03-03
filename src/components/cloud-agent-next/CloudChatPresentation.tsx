@@ -178,6 +178,9 @@ export type CloudChatPresentationProps = {
   inputModel?: string;
   onInputModeChange?: (mode: AgentMode) => void;
   onInputModelChange?: (model: string) => void;
+
+  /** Pre-populate the ChatInput textarea (e.g. to restore text after a failed send) */
+  chatInputInitialValue?: string;
 };
 
 /**
@@ -243,6 +246,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   inputModel,
   onInputModeChange,
   onInputModelChange,
+  chatInputInitialValue,
 }: CloudChatPresentationProps) {
   // Show chat interface when we have:
   // 1. An active streaming session (currentSessionId + sessionConfig)
@@ -473,6 +477,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
               onModeChange={onInputModeChange}
               onModelChange={onInputModelChange}
               showToolbar={Boolean(currentDbSessionId) && !needsResumeConfig}
+              initialValue={chatInputInitialValue}
             />
 
             {/* Banner for sessions needing configuration */}

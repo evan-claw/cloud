@@ -273,6 +273,13 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
     refetchSessions();
   }, [playCelebrationSound, refetchSessions]);
 
+  // Track failed message text to restore into ChatInput on send failure
+  const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
+
+  const handleSendFailed = useCallback((messageText: string) => {
+    setFailedMessageText(messageText);
+  }, []);
+
   // Stream hook (V2 WebSocket-based)
   const {
     sendMessage: sendMessageV2,
@@ -288,6 +295,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
     onKiloSessionCreated: handleKiloSessionCreated,
     onSessionInitiated: handleSessionInitiated,
     onQuestionAsked: playNotification,
+    onSendFailed: handleSendFailed,
   });
 
   // Wrapper for sendMessage that doesn't use sessionIdOverride
@@ -750,6 +758,8 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   // Handle send message
   const handleSendMessage = useCallback(
     async (prompt: string) => {
+      // Clear any previously failed message text so a repeated failure can re-trigger initialValue
+      setFailedMessageText(null);
       // Use cloudAgentSessionId (from IndexedDB for resumed sessions) or
       // currentSessionId (from stream for new sessions)
       let effectiveSessionId = cloudAgentSessionId || currentSessionId || null;
@@ -805,6 +815,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare existing session:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }
@@ -839,6 +850,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare session for resume:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }
@@ -979,6 +991,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
         autocommitStatus={autocommitStatus}
         getChildMessages={getChildSessionMessages}
         standaloneQuestion={standaloneQuestion}
+        chatInputInitialValue={failedMessageText ?? undefined}
       />
     </QuestionContextProvider>
   );
