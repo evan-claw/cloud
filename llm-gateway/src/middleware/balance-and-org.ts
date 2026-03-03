@@ -17,11 +17,12 @@ import {
 } from '../lib/org-restrictions';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { getWorkerDb, type WorkerDb } from '@kilocode/db/client';
-import { and, eq, gt, sql } from 'drizzle-orm';
-import { credit_transactions } from '@kilocode/db/schema';
+import { and, eq, gt, notExists, sql } from 'drizzle-orm';
+import { credit_transactions, kilo_pass_issuance_items } from '@kilocode/db/schema';
 
 // Mirrors summarizeUserPayments() in src/lib/creditTransactions.ts.
-// Returns true if the user has made at least one paid (non-free) top-up.
+// Returns true if the user has made at least one paid (non-free) top-up,
+// excluding KiloPass bonus credits (which are linked via kilo_pass_issuance_items).
 async function hasUserMadePaidTopup(db: WorkerDb, userId: string): Promise<boolean> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -30,7 +31,13 @@ async function hasUserMadePaidTopup(db: WorkerDb, userId: string): Promise<boole
       and(
         eq(credit_transactions.kilo_user_id, userId),
         eq(credit_transactions.is_free, false),
-        gt(credit_transactions.amount_microdollars, 0)
+        gt(credit_transactions.amount_microdollars, 0),
+        notExists(
+          db
+            .select({ id: kilo_pass_issuance_items.id })
+            .from(kilo_pass_issuance_items)
+            .where(eq(kilo_pass_issuance_items.credit_transaction_id, credit_transactions.id))
+        )
       )
     );
   return (row?.count ?? 0) > 0;
