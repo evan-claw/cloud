@@ -121,3 +121,10 @@ export function isDataCollectionRequiredOnKiloCodeOnly(model: string): boolean {
 export function getKiloFreeModelContextLength(model: string): number | undefined {
   return kiloFreeModels.find(m => m.public_id === model)?.context_length;
 }
+
+// A Kilo free model routed through a stealth inference provider.
+export function isKiloStealthModel(model: string): boolean {
+  return kiloFreeModels.some(
+    m => m.public_id === model && m.inference_providers.includes('stealth')
+  );
+}

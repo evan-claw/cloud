@@ -178,4 +178,44 @@ describe('makeErrorReadable', () => {
     });
     expect(result).toBeUndefined();
   });
+
+  it('returns stealth model error for Kilo stealth models', async () => {
+    // giga-potato is a stealth model (inference_providers includes 'stealth')
+    const response = new Response('Internal Server Error', { status: 500 });
+    const result = await makeErrorReadable({
+      requestedModel: 'giga-potato',
+      request: { model: 'giga-potato', messages: [{ role: 'user', content: 'hi' }] },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeDefined();
+    expect(result!.status).toBe(500);
+    const body = (await result!.json()) as { error: string; message: string };
+    expect(body.error).toBe('Stealth model unable to process request');
+    expect(body.message).toBe('Stealth model unable to process request');
+  });
+
+  it('preserves upstream status code for stealth model errors', async () => {
+    const response = new Response('Bad Gateway', { status: 502 });
+    const result = await makeErrorReadable({
+      requestedModel: 'giga-potato-thinking',
+      request: { model: 'giga-potato-thinking', messages: [{ role: 'user', content: 'hi' }] },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeDefined();
+    expect(result!.status).toBe(502);
+  });
+
+  it('does not return stealth error for non-stealth Kilo free models', async () => {
+    // corethink:free is not a stealth model — short request should return undefined
+    const response = new Response('Error', { status: 500 });
+    const result = await makeErrorReadable({
+      requestedModel: 'corethink:free',
+      request: { model: 'corethink:free', messages: [{ role: 'user', content: 'hi' }] },
+      response,
+      isUserByok: false,
+    });
+    expect(result).toBeUndefined();
+  });
 });

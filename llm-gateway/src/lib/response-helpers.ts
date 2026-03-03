@@ -2,7 +2,7 @@
 // All functions use plain Fetch API constructs (no Next.js dependencies).
 
 import type { OpenRouterChatCompletionRequest } from '../types/request';
-import { getKiloFreeModelContextLength } from './models';
+import { getKiloFreeModelContextLength, isKiloStealthModel } from './models';
 
 // Whitelist upstream headers, add Content-Encoding: identity.
 // Content-Encoding: identity ensures no intermediary re-compresses the stream.
@@ -69,6 +69,12 @@ export async function makeErrorReadable({
       console.warn(`Responding with ${response.status} ${error}`);
       return Response.json({ error, message: error }, { status: response.status });
     }
+  }
+
+  if (isKiloStealthModel(requestedModel)) {
+    const error = 'Stealth model unable to process request';
+    console.warn(`Responding with ${response.status} ${error}`);
+    return Response.json({ error, message: error }, { status: response.status });
   }
 
   return undefined;
