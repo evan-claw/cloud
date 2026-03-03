@@ -3,10 +3,10 @@
 // Responsibilities:
 //   1. Make upstream request (custom LLM or provider API)
 //   2. Start abuse classification early (non-blocking)
-//   3. Handle 402 → 503 conversion for non-BYOK cases
-//   4. Log proxy errors for 4xx/5xx responses
-//   5. Await abuse classification result (2s timeout)
-//   6. Schedule background tasks (always, even for error responses)
+//   3. Log proxy errors for 4xx/5xx responses
+//   4. Await abuse classification result (2s timeout)
+//   5. Schedule background tasks (always, even for error responses)
+//   6. Handle 402 → 503 conversion for non-BYOK cases (after bg tasks)
 //   7. Apply makeErrorReadable for BYOK/context-length errors
 //   8. Rewrite free model response (SSE or JSON)
 
@@ -153,22 +153,6 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   console.debug(`Upstream ${provider.id} responded with ${response.status}`);
 
-  // ── 402 → 503 conversion (non-BYOK) ─────────────────────────────────────────
-  if (response.status === 402 && !userByok) {
-    captureException(new Error(`${provider.id} returned 402 Payment Required`), {
-      kiloUserId: user.id,
-      model: requestBody.model,
-      organizationId,
-    });
-    return c.json(
-      {
-        error: 'Service Unavailable',
-        message: 'The service is temporarily unavailable. Please try again later.',
-      },
-      503
-    );
-  }
-
   // ── Error logging ────────────────────────────────────────────────────────────
   if (response.status >= 400) {
     const responseClone = response.clone();
@@ -277,6 +261,24 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       metricsStream: makeErrorStream(),
       loggingStream: !isAnon ? makeErrorStream() : null,
     });
+
+    // ── 402 → 503 conversion (non-BYOK) ───────────────────────────────────────
+    // Placed after scheduleBackgroundTasks so metrics/accounting/logging are
+    // emitted even for 402 responses, matching the reference implementation.
+    if (response.status === 402 && !userByok) {
+      captureException(new Error(`${provider.id} returned 402 Payment Required`), {
+        kiloUserId: user.id,
+        model: requestBody.model,
+        organizationId,
+      });
+      return c.json(
+        {
+          error: 'Service Unavailable',
+          message: 'The service is temporarily unavailable. Please try again later.',
+        },
+        503
+      );
+    }
 
     // BYOK / context-length readable error — return a custom message instead of
     // the raw upstream body.
