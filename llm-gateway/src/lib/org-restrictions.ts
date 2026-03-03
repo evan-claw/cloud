@@ -12,12 +12,7 @@ import {
   organization_user_usage,
 } from '@kilocode/db/schema';
 import { and, eq, sql, not } from 'drizzle-orm';
-
-// Strip `:free`, `:exacto` etc. suffixes — port of src/lib/model-utils.ts
-function normalizeModelId(modelId: string): string {
-  const colonIndex = modelId.indexOf(':');
-  return colonIndex >= 0 ? modelId.substring(0, colonIndex) : modelId;
-}
+import { normalizeModelId } from './models';
 
 // Inference providers that a Kilo free model REQUIRES (must all be in provider allow list)
 const kiloFreeModelProviders: Record<string, string[]> = {

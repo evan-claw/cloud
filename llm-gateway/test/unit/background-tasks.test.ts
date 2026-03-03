@@ -96,7 +96,7 @@ function baseParams() {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('scheduleBackgroundTasks – requestedModel', () => {
+describe('scheduleBackgroundTasks – requestedModel (B3)', () => {
   it('uses autoModel as requestedModel when set (kilo/auto)', async () => {
     const { scheduleBackgroundTasks } = await import('../../src/handler/background-tasks');
     const waitUntilPromises: Promise<unknown>[] = [];
@@ -116,7 +116,6 @@ describe('scheduleBackgroundTasks – requestedModel', () => {
 
     expect(apiMetricsCalls).toHaveLength(1);
     const params = apiMetricsCalls[0] as Record<string, unknown>;
-    // B3: requestedModel must be the original kilo/auto, NOT the resolved model
     expect(params.requestedModel).toBe('kilo/auto');
     expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
@@ -140,6 +139,74 @@ describe('scheduleBackgroundTasks – requestedModel', () => {
     expect(apiMetricsCalls).toHaveLength(1);
     const params = apiMetricsCalls[0] as Record<string, unknown>;
     expect(params.requestedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
+  });
+});
+
+describe('scheduleBackgroundTasks – resolvedModel normalization (B4)', () => {
+  it('strips :free suffix from resolvedModel in metrics', async () => {
+    const { scheduleBackgroundTasks } = await import('../../src/handler/background-tasks');
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waitUntilPromises.push(p) };
+
+    scheduleBackgroundTasks(ctx, {
+      ...baseParams(),
+      resolvedModel: 'corethink:free',
+      autoModel: null,
+      accountingStream: null,
+      metricsStream: makeStream(),
+      loggingStream: null,
+    } as never);
+
+    await Promise.all(waitUntilPromises);
+
+    expect(apiMetricsCalls).toHaveLength(1);
+    const params = apiMetricsCalls[0] as Record<string, unknown>;
+    // B4: resolvedModel must be normalized — :free stripped
+    expect(params.resolvedModel).toBe('corethink');
+    // requestedModel is NOT normalized (preserves original for tracking)
+    expect(params.requestedModel).toBe('corethink:free');
+  });
+
+  it('strips :exacto suffix from resolvedModel in metrics', async () => {
+    const { scheduleBackgroundTasks } = await import('../../src/handler/background-tasks');
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waitUntilPromises.push(p) };
+
+    scheduleBackgroundTasks(ctx, {
+      ...baseParams(),
+      resolvedModel: 'some-model:exacto',
+      autoModel: null,
+      accountingStream: null,
+      metricsStream: makeStream(),
+      loggingStream: null,
+    } as never);
+
+    await Promise.all(waitUntilPromises);
+
+    expect(apiMetricsCalls).toHaveLength(1);
+    const params = apiMetricsCalls[0] as Record<string, unknown>;
+    expect(params.resolvedModel).toBe('some-model');
+  });
+
+  it('leaves models without colon suffix unchanged', async () => {
+    const { scheduleBackgroundTasks } = await import('../../src/handler/background-tasks');
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waitUntilPromises.push(p) };
+
+    scheduleBackgroundTasks(ctx, {
+      ...baseParams(),
+      resolvedModel: 'anthropic/claude-sonnet-4-20250514',
+      autoModel: null,
+      accountingStream: null,
+      metricsStream: makeStream(),
+      loggingStream: null,
+    } as never);
+
+    await Promise.all(waitUntilPromises);
+
+    expect(apiMetricsCalls).toHaveLength(1);
+    const params = apiMetricsCalls[0] as Record<string, unknown>;
     expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
 });

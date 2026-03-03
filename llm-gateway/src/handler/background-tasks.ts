@@ -11,6 +11,7 @@ import { runApiMetrics } from '../background/api-metrics';
 import { runRequestLogging } from '../background/request-logging';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
+import { normalizeModelId } from '../lib/models';
 import { getToolsAvailable, getToolsUsed } from '../background/api-metrics';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
@@ -173,7 +174,7 @@ export function scheduleBackgroundTasks(
                 mode: modeHeader ?? undefined,
                 provider,
                 requestedModel: autoModel ?? resolvedModel,
-                resolvedModel,
+                resolvedModel: normalizeModelId(resolvedModel),
                 toolsAvailable: getToolsAvailable(requestBody.tools),
                 toolsUsed,
                 ttfbMs,

@@ -146,3 +146,9 @@ export function isKiloStealthModel(model: string): boolean {
     m => m.public_id === model && m.inference_providers.includes('stealth')
   );
 }
+
+// Strip `:free`, `:exacto` etc. suffixes — port of src/lib/model-utils.ts.
+export function normalizeModelId(modelId: string): string {
+  const colonIndex = modelId.indexOf(':');
+  return colonIndex >= 0 ? modelId.substring(0, colonIndex) : modelId;
+}
