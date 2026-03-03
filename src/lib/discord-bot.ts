@@ -214,7 +214,9 @@ async function spawnCloudAgentSession(
 export async function processDiscordBotMessage(
   userMessage: string,
   guildId: string,
-  discordEventContext?: DiscordEventContext
+  discordEventContext?: DiscordEventContext & {
+    onCloudAgentSessionCreated?: (cloudAgentSessionId: string) => void;
+  }
 ): Promise<DiscordBotMessageResult> {
   console.log('[DiscordBot] processDiscordBotMessage started');
 
@@ -334,6 +336,7 @@ export async function processDiscordBotMessage(
 
       if (toolResult.sessionId) {
         cloudAgentSessionId = toolResult.sessionId;
+        discordEventContext?.onCloudAgentSessionCreated?.(toolResult.sessionId);
       }
 
       return { content: toolResult.response };

@@ -32,6 +32,12 @@ import type { PlatformIntegration } from '@kilocode/db/schema';
 export const maxDuration = 800;
 
 /**
+ * Internal timeout (ms) — must be lower than Vercel's maxDuration so we can
+ * send a graceful message before the function is killed.
+ */
+const ENDPOINT_TIMEOUT_MS = 750 * 1000;
+
+/**
  * Reaction emoji names
  */
 const PROCESSING_REACTION = 'hourglass_flowing_sand';
@@ -228,13 +234,81 @@ async function processSlackMessage(event: AppMentionEvent | GenericMessageEvent,
     name: PROCESSING_REACTION,
   });
 
-  // Process the message through Kilo Bot
-  const result = await processKiloBotMessage(kiloInputText, teamId, {
+  // Send an ephemeral session link as soon as the Cloud Agent session is created
+  let sessionLinkSent = false;
+  const onCloudAgentSessionCreated = (cloudAgentSessionId: string) => {
+    if (sessionLinkSent || !user) return;
+    sessionLinkSent = true;
+    postSessionLinkEphemeral({
+      accessToken,
+      channel,
+      user,
+      threadTs: replyThreadTs,
+      cloudAgentSessionId,
+      installation,
+    }).catch(err => {
+      console.error('[SlackBot:Webhook] Failed to send session link ephemeral:', err);
+    });
+  };
+
+  // Process the message through Kilo Bot, with an internal timeout that fires
+  // before Vercel's maxDuration so we can send a graceful message to the user.
+  const botPromise = processKiloBotMessage(kiloInputText, teamId, {
     channelId: channel,
     threadTs: replyThreadTs,
     userId: user as string,
     messageTs: ts,
+    onCloudAgentSessionCreated,
   });
+
+  const timeoutPromise = new Promise<null>(resolve => {
+    setTimeout(() => resolve(null), ENDPOINT_TIMEOUT_MS);
+  });
+
+  const result = await Promise.race([botPromise, timeoutPromise]);
+
+  if (result === null) {
+    // Internal timeout fired before the bot finished
+    console.log('[SlackBot:Webhook] Internal endpoint timeout reached');
+
+    const timeoutMessage = markdownToSlackMrkdwn(
+      'The Cloud Agent session is taking longer than expected. ' +
+        'Our endpoint is shutting down, but the session is still running. ' +
+        'Check the session link above to follow along.'
+    );
+    await postSlackMessageByAccessToken(accessToken, {
+      channel,
+      text: timeoutMessage,
+      thread_ts: replyThreadTs,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: timeoutMessage,
+          },
+        },
+      ],
+    });
+
+    // Swap reactions to indicate we're done (from our side)
+    await Promise.all([
+      removeSlackReactionByAccessToken(accessToken, {
+        channel,
+        timestamp: ts,
+        name: PROCESSING_REACTION,
+      }),
+      addSlackReactionByAccessToken(accessToken, {
+        channel,
+        timestamp: ts,
+        name: COMPLETE_REACTION,
+      }),
+    ]);
+
+    console.log(`[SlackBot:Webhook] processSlackMessage (${event.type}) timed out gracefully`);
+    return;
+  }
+
   const responseTimeMs = Date.now() - startTime;
 
   // Append dev user suffix if in dev environment
@@ -275,18 +349,6 @@ async function processSlackMessage(event: AppMentionEvent | GenericMessageEvent,
       name: COMPLETE_REACTION,
     }),
   ]);
-
-  // If a cloud agent session was created, post an ephemeral button for the user to view it
-  if (result.cloudAgentSessionId && user) {
-    await postSessionLinkEphemeral({
-      accessToken,
-      channel,
-      user,
-      threadTs: replyThreadTs,
-      cloudAgentSessionId: result.cloudAgentSessionId,
-      installation,
-    });
-  }
 
   // Log the request for admin debugging
   await logSlackBotRequest({

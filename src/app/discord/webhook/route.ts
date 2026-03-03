@@ -9,6 +9,8 @@ import {
   postDiscordMessage,
   addDiscordReaction,
   removeDiscordReaction,
+  getInstallationByGuildId,
+  getOwnerFromInstallation,
 } from '@/lib/integrations/discord-service';
 import {
   stripDiscordBotMention,
@@ -17,14 +19,88 @@ import {
   truncateForDiscord,
 } from '@/lib/discord-bot/discord-utils';
 import { getDevUserSuffix } from '@/lib/slack-bot/dev-user-info';
+import { APP_URL } from '@/lib/constants';
+import { db } from '@/lib/drizzle';
+import { cli_sessions_v2 } from '@kilocode/db/schema';
+import { eq } from 'drizzle-orm';
+
+import type { Owner } from '@/lib/integrations/core/types';
 
 export const maxDuration = 800;
+
+/**
+ * Internal timeout (ms) — must be lower than Vercel's maxDuration so we can
+ * send a graceful message before the function is killed.
+ */
+const ENDPOINT_TIMEOUT_MS = 750 * 1000;
 
 /**
  * Reaction emoji for processing state
  */
 const PROCESSING_EMOJI = '\u23f3'; // hourglass
 const COMPLETE_EMOJI = '\u2705'; // white check mark
+
+/**
+ * Build the session URL for a cloud agent session based on the owner type
+ */
+function buildSessionUrl(dbSessionId: string, owner: Owner): string {
+  const basePath = owner.type === 'org' ? `/organizations/${owner.id}/cloud` : '/cloud';
+  return `${APP_URL}${basePath}/chat?sessionId=${dbSessionId}`;
+}
+
+/**
+ * Look up the database session UUID from the cloud agent session ID
+ */
+async function getDbSessionIdFromCloudAgentId(cloudAgentSessionId: string): Promise<string | null> {
+  const [session] = await db
+    .select({ session_id: cli_sessions_v2.session_id })
+    .from(cli_sessions_v2)
+    .where(eq(cli_sessions_v2.cloud_agent_session_id, cloudAgentSessionId))
+    .limit(1);
+
+  return session?.session_id ?? null;
+}
+
+/**
+ * Post a message with a link to the Cloud Agent session
+ */
+async function postSessionLinkMessage({
+  channelId,
+  messageId,
+  cloudAgentSessionId,
+  guildId,
+}: {
+  channelId: string;
+  messageId: string;
+  cloudAgentSessionId: string;
+  guildId: string;
+}): Promise<void> {
+  const installation = await getInstallationByGuildId(guildId);
+  if (!installation) {
+    console.error('[DiscordBot:Webhook] Could not find installation for session link');
+    return;
+  }
+
+  const owner = getOwnerFromInstallation(installation);
+  if (!owner) {
+    console.error('[DiscordBot:Webhook] Could not determine owner for session link');
+    return;
+  }
+
+  const dbSessionId = await getDbSessionIdFromCloudAgentId(cloudAgentSessionId);
+  if (!dbSessionId) {
+    console.error(
+      '[DiscordBot:Webhook] Could not find database session for cloud agent session:',
+      cloudAgentSessionId
+    );
+    return;
+  }
+
+  const sessionUrl = buildSessionUrl(dbSessionId, owner);
+  await postDiscordMessage(channelId, `Cloud Agent session started — follow along here: ${sessionUrl}`, {
+    messageReference: { message_id: messageId },
+  });
+}
 
 /**
  * Forwarded Gateway event shape (from the Gateway listener)
@@ -155,13 +231,62 @@ async function processGatewayMessage(event: ForwardedGatewayEvent) {
 
   const startTime = Date.now();
 
-  // Process through bot
-  const result = await processDiscordBotMessage(resolvedText, guildId, {
+  // Post a session link as soon as the Cloud Agent session is created
+  let sessionLinkSent = false;
+  const onCloudAgentSessionCreated = (cloudAgentSessionId: string) => {
+    if (sessionLinkSent) return;
+    sessionLinkSent = true;
+    postSessionLinkMessage({
+      channelId,
+      messageId,
+      cloudAgentSessionId,
+      guildId,
+    }).catch(err => {
+      console.error('[DiscordBot:Webhook] Failed to send session link:', err);
+    });
+  };
+
+  // Process through bot, with an internal timeout that fires before Vercel's
+  // maxDuration so we can send a graceful message to the user.
+  const botPromise = processDiscordBotMessage(resolvedText, guildId, {
     channelId,
     guildId,
     userId: author.id,
     messageId,
+    onCloudAgentSessionCreated,
   });
+
+  const timeoutPromise = new Promise<null>(resolve => {
+    setTimeout(() => resolve(null), ENDPOINT_TIMEOUT_MS);
+  });
+
+  const result = await Promise.race([botPromise, timeoutPromise]);
+
+  if (result === null) {
+    // Internal timeout fired before the bot finished
+    console.log('[DiscordBot:Webhook] Internal endpoint timeout reached');
+
+    const timeoutMessage = truncateForDiscord(
+      'The Cloud Agent session is taking longer than expected. ' +
+        'Our endpoint is shutting down, but the session is still running. ' +
+        'Check the session link above to follow along.'
+    );
+    await postDiscordMessage(channelId, timeoutMessage, {
+      messageReference: { message_id: messageId },
+    });
+
+    // Swap reactions to indicate we're done (from our side)
+    const [removeResult] = await Promise.all([
+      removeDiscordReaction(channelId, messageId, PROCESSING_EMOJI),
+      addDiscordReaction(channelId, messageId, COMPLETE_EMOJI),
+    ]);
+    if (!removeResult.ok) {
+      await removeDiscordReaction(channelId, messageId, PROCESSING_EMOJI);
+    }
+
+    console.log('[DiscordBot:Webhook] processGatewayMessage timed out gracefully');
+    return;
+  }
 
   const responseTimeMs = Date.now() - startTime;
   console.log(`[DiscordBot:Webhook] Bot processing completed in ${responseTimeMs}ms`);

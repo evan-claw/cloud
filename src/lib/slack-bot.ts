@@ -375,11 +375,15 @@ async function spawnCloudAgentSession(
  * This is the main entry point for generating AI responses with tool support.
  * @param userMessage The message from the user
  * @param teamId The Slack team ID to identify which integration to use
+ * @param slackEventContext Optional Slack event context with channel/thread info
+ *   and an optional callback fired when a Cloud Agent session is created.
  */
 export async function processKiloBotMessage(
   userMessage: string,
   teamId: string,
-  slackEventContext?: SlackEventContext
+  slackEventContext?: SlackEventContext & {
+    onCloudAgentSessionCreated?: (cloudAgentSessionId: string) => void;
+  }
 ): Promise<KiloBotMessageResult> {
   console.log('[SlackBot] processKiloBotMessage started with message:', userMessage);
   console.log('[SlackBot] Looking up Slack integration for team:', teamId);
@@ -537,6 +541,7 @@ export async function processKiloBotMessage(
       console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
       if (toolResult.sessionId) {
         cloudAgentSessionId = toolResult.sessionId;
+        slackEventContext?.onCloudAgentSessionCreated?.(toolResult.sessionId);
       }
 
       return {
