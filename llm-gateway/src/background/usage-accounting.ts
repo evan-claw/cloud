@@ -18,6 +18,10 @@ import type { FeatureValue } from '../lib/feature-detection';
 import type { PromptInfo } from '../lib/prompt-info';
 import { isFreeModel } from '../lib/models';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
+import {
+  getEffectiveKiloPassThreshold,
+  maybeIssueKiloPassBonusFromUsageThreshold,
+} from './kilo-pass';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -534,9 +538,10 @@ async function insertUsageAndMetadataWithBalanceUpdate(
   db: WorkerDb,
   coreUsageFields: CoreUsageFields,
   metadataFields: UsageMetaData
-): Promise<{ newMicrodollarsUsed: number } | null> {
+): Promise<{ newMicrodollarsUsed: number; kiloPassThreshold: number | null } | null> {
   const result = await db.execute<{
     new_microdollars_used: number | bigint | string;
+    kilo_pass_threshold: number | bigint | string | null;
   }>(sql`
     WITH microdollar_usage_ins AS (
       INSERT INTO microdollar_usage (
@@ -653,7 +658,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
     WHERE id = ${coreUsageFields.kilo_user_id}
       AND ${coreUsageFields.organization_id}::uuid IS NULL
       AND ${coreUsageFields.cost} > 0
-    RETURNING microdollars_used AS new_microdollars_used
+    RETURNING microdollars_used AS new_microdollars_used, kilo_pass_threshold
   `);
 
   if (!result.rows[0]) {
@@ -666,7 +671,13 @@ async function insertUsageAndMetadataWithBalanceUpdate(
     return null;
   }
 
-  return { newMicrodollarsUsed: Number(result.rows[0].new_microdollars_used) };
+  const newMicrodollarsUsed = Number(result.rows[0].new_microdollars_used);
+  const kiloPassThreshold =
+    result.rows[0].kilo_pass_threshold == null
+      ? null
+      : Number(result.rows[0].kilo_pass_threshold);
+
+  return { newMicrodollarsUsed, kiloPassThreshold };
 }
 
 async function ingestOrganizationTokenUsage(
@@ -873,11 +884,17 @@ export async function runUsageAccounting(
     market_cost: usageStats.market_cost ?? null,
   };
 
+  let balanceUpdateResult: { newMicrodollarsUsed: number; kiloPassThreshold: number | null } | null =
+    null;
   try {
     let attempt = 0;
     while (true) {
       try {
-        await insertUsageAndMetadataWithBalanceUpdate(db, coreUsageFields, metadataFields);
+        balanceUpdateResult = await insertUsageAndMetadataWithBalanceUpdate(
+          db,
+          coreUsageFields,
+          metadataFields
+        );
         break;
       } catch (err) {
         if (attempt >= 2) throw err;
@@ -889,6 +906,26 @@ export async function runUsageAccounting(
   } catch (err) {
     console.error('insertUsageRecord failed', err);
     // Don't return null — we still want to return stats for abuse cost reporting
+  }
+
+  // KiloPass: trigger bonus credit issuance if usage threshold is crossed.
+  if (balanceUpdateResult) {
+    const effectiveThreshold = getEffectiveKiloPassThreshold(
+      balanceUpdateResult.kiloPassThreshold
+    );
+    if (
+      effectiveThreshold !== null &&
+      balanceUpdateResult.newMicrodollarsUsed >= effectiveThreshold
+    ) {
+      // Fire async — do not await; errors are logged inside.
+      void maybeIssueKiloPassBonusFromUsageThreshold(
+        db,
+        coreUsageFields.kilo_user_id,
+        coreUsageFields.created_at
+      ).catch(err => {
+        console.error('[kilo-pass] maybeIssueKiloPassBonusFromUsageThreshold failed', err);
+      });
+    }
   }
 
   try {
