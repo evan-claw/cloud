@@ -27,10 +27,6 @@
   ],
   "kv_namespaces": [
     {
-      "binding": "USER_EXISTS_CACHE",
-      "id": "ab836697b6034a95beb92aceea474b10",
-    },
-    {
       "binding": "RATE_LIMIT_KV",
       "id": "b22ee150a8fb4f63970bd3ff69f23e4d",
     },
