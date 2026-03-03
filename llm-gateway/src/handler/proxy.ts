@@ -8,8 +8,7 @@
 //   5. Await abuse classification result (2s timeout)
 //   6. Apply makeErrorReadable for BYOK/context-length errors
 //   7. Rewrite free model response (SSE or JSON)
-//   8. Tee the response body into (client stream) + (background streams)
-//   9. Schedule background tasks via ctx.waitUntil()
+//   8. Schedule background tasks via ctx.waitUntil()
 
 import type { Handler } from 'hono';
 import type { HonoContext } from '../types/hono';
@@ -18,30 +17,12 @@ import { isKiloFreeModel } from '../lib/models';
 import { customLlmRequest } from '../lib/custom-llm/index';
 import { getOutputHeaders, wrapResponse, makeErrorReadable } from '../lib/response-helpers';
 import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
-import { classifyAbuse, reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
+import { classifyAbuse, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { getWorkerDb } from '@kilocode/db/client';
-import {
-  runUsageAccounting,
-  type MicrodollarUsageContext,
-  type MicrodollarUsageStats,
-} from '../background/usage-accounting';
-import { runApiMetrics } from '../background/api-metrics';
-import { runRequestLogging } from '../background/request-logging';
-import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
-import type { FraudDetectionHeaders } from '../lib/extract-headers';
-import type { FeatureValue } from '../lib/feature-detection';
-import type { OpenRouterChatCompletionRequest } from '../types/request';
-import type { ApiMetricsParams } from '@kilocode/worker-utils';
+import { scheduleBackgroundTasks } from './background-tasks';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
-const BACKGROUND_TASK_TIMEOUT_MS = 25_000;
-
-// Wrap a promise to never exceed a max duration, so waitUntil budgets are bounded.
-// Uses scheduler.wait (Workers-native) instead of setTimeout for proper I/O scheduling.
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
-  return Promise.race([p, scheduler.wait(ms).then(() => undefined)]);
-}
 
 // Build the upstream fetch URL — always /chat/completions on the provider base URL.
 function buildUpstreamUrl(providerApiUrl: string): string {
@@ -69,220 +50,6 @@ async function openRouterRequest(
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TEN_MINUTES_MS),
   });
-}
-
-// ─── Background task params ────────────────────────────────────────────────────
-
-type BgUser = {
-  id: string;
-  google_user_email?: string;
-  microdollars_used?: number;
-};
-
-type BackgroundTaskParams = {
-  accountingStream: ReadableStream | null;
-  metricsStream: ReadableStream | null;
-  loggingStream: ReadableStream | null;
-  upstreamStatusCode: number;
-  abuseServiceUrl: string;
-  abuseSecrets: AbuseServiceSecrets | undefined;
-  abuseRequestId: number | undefined;
-  isStreaming: boolean;
-  requestStartedAt: number;
-  provider: string;
-  resolvedModel: string;
-  requestBody: OpenRouterChatCompletionRequest;
-  user: BgUser;
-  organizationId: string | undefined;
-  modeHeader: string | null;
-  fraudHeaders: FraudDetectionHeaders;
-  projectId: string | null;
-  editorName: string | null;
-  machineId: string | null;
-  feature: FeatureValue | null;
-  autoModel: string | null;
-  botId: string | undefined;
-  tokenSource: string | undefined;
-  userByok: boolean;
-  isAnon: boolean;
-  sessionId: string | null;
-  connectionString: string;
-  o11y: { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
-};
-
-function scheduleBackgroundTasks(
-  ctx: { waitUntil(p: Promise<unknown>): void },
-  params: BackgroundTaskParams
-): void {
-  const {
-    accountingStream,
-    metricsStream,
-    loggingStream,
-    upstreamStatusCode,
-    abuseServiceUrl,
-    abuseSecrets,
-    abuseRequestId,
-    isStreaming,
-    requestStartedAt,
-    provider,
-    resolvedModel,
-    requestBody,
-    user,
-    organizationId,
-    modeHeader,
-    fraudHeaders,
-    projectId,
-    editorName,
-    machineId,
-    feature,
-    autoModel,
-    botId,
-    tokenSource,
-    userByok,
-    isAnon,
-    sessionId,
-    connectionString,
-    o11y,
-  } = params;
-
-  // ── Usage accounting ───────────────────────────────────────────────────────
-  const usageTask: Promise<MicrodollarUsageStats | null | undefined> =
-    accountingStream && !isAnon
-      ? withTimeout(
-          (async () => {
-            const db = getWorkerDb(connectionString);
-            const promptInfo = extractPromptInfo(requestBody);
-            const { estimatedInputTokens, estimatedOutputTokens } = estimateChatTokens(requestBody);
-
-            const usageContext: MicrodollarUsageContext = {
-              kiloUserId: user.id,
-              fraudHeaders,
-              organizationId,
-              provider,
-              requested_model: resolvedModel,
-              promptInfo,
-              max_tokens: requestBody.max_tokens ?? null,
-              has_middle_out_transform: requestBody.transforms?.includes('middle-out') ?? null,
-              estimatedInputTokens,
-              estimatedOutputTokens,
-              isStreaming,
-              prior_microdollar_usage: user.microdollars_used ?? 0,
-              project_id: projectId,
-              status_code: upstreamStatusCode,
-              editor_name: editorName,
-              machine_id: machineId,
-              user_byok: userByok,
-              has_tools: Array.isArray(requestBody.tools) && requestBody.tools.length > 0,
-              botId,
-              tokenSource,
-              abuse_request_id: abuseRequestId,
-              feature,
-              session_id: sessionId,
-              mode: modeHeader,
-              auto_model: autoModel,
-            };
-
-            return runUsageAccounting(accountingStream, usageContext, db);
-          })(),
-          BACKGROUND_TASK_TIMEOUT_MS
-        )
-      : (accountingStream?.cancel(), Promise.resolve(null));
-
-  // ── API metrics ────────────────────────────────────────────────────────────
-  const metricsTask =
-    metricsStream && o11y
-      ? withTimeout(
-          (async () => {
-            const toolsAvailable = Array.isArray(requestBody.tools)
-              ? (requestBody.tools as Array<{ type?: string; function?: { name?: string } }>).map(
-                  t => {
-                    if (t.type === 'function') {
-                      const name =
-                        typeof t.function?.name === 'string' ? t.function.name.trim() : '';
-                      return name ? `function:${name}` : 'function:unknown';
-                    }
-                    return 'unknown:unknown';
-                  }
-                )
-              : [];
-
-            await runApiMetrics(
-              o11y,
-              {
-                kiloUserId: user.id,
-                organizationId,
-                isAnonymous: isAnon,
-                isStreaming,
-                userByok,
-                mode: modeHeader ?? undefined,
-                provider,
-                requestedModel: requestBody.model ?? resolvedModel,
-                resolvedModel,
-                toolsAvailable,
-                toolsUsed: [],
-                ttfbMs: 0,
-                statusCode: upstreamStatusCode,
-              },
-              metricsStream,
-              requestStartedAt
-            );
-          })(),
-          BACKGROUND_TASK_TIMEOUT_MS
-        )
-      : (metricsStream?.cancel(), Promise.resolve(undefined));
-
-  // ── Request logging (Kilo employees only) ──────────────────────────────────
-  const loggingTask =
-    loggingStream && !isAnon
-      ? withTimeout(
-          (async () => {
-            const db = getWorkerDb(connectionString);
-            await runRequestLogging({
-              db,
-              responseStream: loggingStream,
-              statusCode: upstreamStatusCode,
-              user: { id: user.id, google_user_email: user.google_user_email },
-              organizationId,
-              provider,
-              model: resolvedModel,
-              request: requestBody,
-            });
-          })(),
-          BACKGROUND_TASK_TIMEOUT_MS
-        )
-      : (loggingStream?.cancel(), Promise.resolve(undefined));
-
-  // ── Abuse cost (depends on usage accounting result) ────────────────────────
-  const abuseCostTask = withTimeout(
-    usageTask.then(usageStats => {
-      if (!usageStats || !abuseRequestId) return;
-      return reportAbuseCost(
-        abuseServiceUrl,
-        abuseSecrets,
-        {
-          kiloUserId: user.id,
-          fraudHeaders,
-          requested_model: resolvedModel,
-          abuse_request_id: abuseRequestId,
-        },
-        {
-          messageId: usageStats.messageId,
-          cost_mUsd: usageStats.market_cost ?? usageStats.cost_mUsd,
-          inputTokens: usageStats.inputTokens,
-          outputTokens: usageStats.outputTokens,
-          cacheWriteTokens: usageStats.cacheWriteTokens,
-          cacheHitTokens: usageStats.cacheHitTokens,
-        }
-      );
-    }),
-    BACKGROUND_TASK_TIMEOUT_MS
-  );
-
-  ctx.waitUntil(
-    Promise.all([usageTask, metricsTask, loggingTask, abuseCostTask]).catch(err => {
-      console.error('[proxy] Background task error', err);
-    })
-  );
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -374,20 +141,22 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   if (response.status >= 400) {
     const responseClone = response.clone();
     const logLevel = response.status >= 500 ? 'error' : 'warn';
-    responseClone
-      .text()
-      .then(body => {
-        console[logLevel](`${provider.id} returned error ${response.status}`, {
-          kiloUserId: user.id,
-          model: requestBody.model,
-          organizationId,
-          status: response.status,
-          first4k: body.slice(0, 4096),
-        });
-      })
-      .catch(() => {
-        /* ignore */
-      });
+    c.executionCtx.waitUntil(
+      responseClone
+        .text()
+        .then(body => {
+          console[logLevel](`${provider.id} returned error ${response.status}`, {
+            kiloUserId: user.id,
+            model: requestBody.model,
+            organizationId,
+            status: response.status,
+            first4k: body.slice(0, 4096),
+          });
+        })
+        .catch(() => {
+          /* ignore */
+        })
+    );
   }
 
   // ── Await abuse classification (2s timeout) ───────────────────────────────────
@@ -458,17 +227,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   if (shouldRewrite) {
     if (response.body) {
-      const needsMetrics = !!bgCommon.o11y;
-      let clientStream: ReadableStream;
-      let metricsStream: ReadableStream | null = null;
-
-      if (needsMetrics) {
-        const [ms, cs] = response.body.tee();
-        metricsStream = ms;
-        clientStream = cs;
-      } else {
-        clientStream = response.body;
-      }
+      const [metricsStream, clientStream] = response.body.tee();
 
       scheduleBackgroundTasks(c.executionCtx, {
         ...bgCommon,
@@ -488,13 +247,13 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     // a TransformStream that forwards every chunk to the client immediately while
     // accumulating a copy. After the stream completes, background tasks replay the
     // buffered data without any coupling to client delivery speed.
+    const responseBody = response.body;
     const chunks: Uint8Array[] = [];
     const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
 
     const pipePromise = (async () => {
-      // response.body is guaranteed non-null by the outer `if (response.body)` check.
-      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      const reader = responseBody.getReader();
       try {
         for (;;) {
           const result = await reader.read();
@@ -504,6 +263,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
         }
         await writer.close();
       } catch (err) {
+        await reader.cancel().catch(() => {});
         await writer.abort(err).catch(() => {});
         throw err;
       }
@@ -526,7 +286,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
           scheduleBackgroundTasks(c.executionCtx, {
             ...bgCommon,
             accountingStream: !isAnon ? replayStream() : null,
-            metricsStream: bgCommon.o11y ? replayStream() : null,
+            metricsStream: replayStream(),
             loggingStream: !isAnon ? replayStream() : null,
           });
         })
