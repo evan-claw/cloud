@@ -610,7 +610,7 @@ export class TownDO extends DurableObject<Env> {
 
   async sendMayorMessage(
     message: string,
-    model?: string
+    _model?: string
   ): Promise<{ agentId: string; sessionStatus: 'idle' | 'active' | 'starting' }> {
     await this.ensureInitialized();
     const townId = this.townId;
@@ -1353,7 +1353,6 @@ export class TownDO extends DurableObject<Env> {
 
     for (const working of workingAgents) {
       const agentId = working.bead_id;
-      const hookBeadId = working.current_hook_bead_id;
       const lastActivity = working.last_activity_at;
 
       const containerInfo = await dispatch.checkAgentContainerStatus(this.env, townId, agentId);

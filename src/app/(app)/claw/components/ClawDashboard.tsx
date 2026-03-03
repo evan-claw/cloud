@@ -18,6 +18,7 @@ import { InstanceControls } from './InstanceControls';
 import { InstanceTab } from './InstanceTab';
 import { SettingsTab } from './SettingsTab';
 import { ChangelogCard } from './ChangelogCard';
+import { EarlybirdBanner } from './EarlybirdBanner';
 import { PairingCard } from './PairingCard';
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
@@ -141,6 +142,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
 
       {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
 
+      <EarlybirdBanner />
       <ChangelogCard />
     </div>
   );

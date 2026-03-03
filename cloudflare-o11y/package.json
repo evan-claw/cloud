@@ -8,12 +8,15 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
+		"@kilocode/eslint-config": "workspace:*",
 		"@types/node": "^25.1.0",
 		"drizzle-kit": "catalog:",
+		"eslint": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "~3.2.0",
 		"wrangler": "catalog:"

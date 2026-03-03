@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "exports": {
     ".": "./src/index.ts",
@@ -18,8 +19,10 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.9",
+    "@kilocode/eslint-config": "workspace:*",
     "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.31.9",
+    "eslint": "catalog:",
     "typescript": "catalog:"
   }
 }

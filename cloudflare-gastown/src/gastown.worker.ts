@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { getTownContainerStub } from './dos/TownContainer.do';
 import { resError } from './util/res.util';
 import { dashboardHtml } from './ui/dashboard.ui';
@@ -118,7 +119,7 @@ app.use('*', async (c, next) => {
 // ── Cloudflare Access ───────────────────────────────────────────────────
 // Validate Cloudflare Access JWT for all requests; skip in development.
 
-app.use('*', async (c, next) =>
+app.use('*', async (c: Context<GastownEnv, string>, next) =>
   c.env.ENVIRONMENT === 'development'
     ? next()
     : withCloudflareAccess({
@@ -142,7 +143,7 @@ app.get('/health', c => c.json({ status: 'ok' }));
 // guaranteed for handlers. Auth middleware is skipped in dev.
 
 app.use('/api/towns/:townId/rigs/:rigId/*', townIdMiddleware);
-app.use('/api/towns/:townId/rigs/:rigId/*', async (c, next) =>
+app.use('/api/towns/:townId/rigs/:rigId/*', async (c: Context<GastownEnv, string>, next) =>
   c.env.ENVIRONMENT === 'development' ? next() : authMiddleware(c, next)
 );
 
@@ -179,8 +180,10 @@ app.get('/api/towns/:townId/rigs/:rigId/agents/:agentId/events', c =>
 );
 
 // Agent-scoped routes — agentOnlyMiddleware enforces JWT agentId match
-app.use('/api/towns/:townId/rigs/:rigId/agents/:agentId/*', async (c, next) =>
-  c.env.ENVIRONMENT === 'development' ? next() : agentOnlyMiddleware(c, next)
+app.use(
+  '/api/towns/:townId/rigs/:rigId/agents/:agentId/*',
+  async (c: Context<GastownEnv, string>, next) =>
+    c.env.ENVIRONMENT === 'development' ? next() : agentOnlyMiddleware(c, next)
 );
 app.post('/api/towns/:townId/rigs/:rigId/agents/:agentId/hook', c =>
   handleHookBead(c, c.req.param())

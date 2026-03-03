@@ -141,7 +141,7 @@ async function main() {
   // Create connection manager
   const connectionManager = createConnectionManager(
     state,
-    { kiloServerPort },
+    { kiloServerPort, kiloClient },
     {
       onMessageComplete: (messageId: string) => {
         getLifecycleManager().onMessageComplete(messageId);

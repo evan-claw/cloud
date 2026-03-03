@@ -7,6 +7,7 @@
     "dev": "wrangler dev --env dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "test": "jest"
   },
   "keywords": [
@@ -18,11 +19,12 @@
   "author": "Kilo Code",
   "license": "UNLICENSED",
   "devDependencies": {
+    "@kilocode/eslint-config": "workspace:*",
     "@types/jest": "^29.5.14",
     "drizzle-kit": "catalog:",
+    "eslint": "catalog:",
     "jest": "^29.7.0",
     "typescript": "catalog:",
-    "@types/jsonwebtoken": "catalog:",
     "wrangler": "catalog:"
   },
   "dependencies": {
@@ -30,7 +32,6 @@
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "workers-tagged-logger": "catalog:",
-    "jsonwebtoken": "catalog:",
     "zod": "catalog:"
   }
 }

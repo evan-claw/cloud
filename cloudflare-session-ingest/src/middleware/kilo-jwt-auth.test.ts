@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import jwt from 'jsonwebtoken';
+import { SignJWT } from 'jose';
 
 import { kiloJwtAuthMiddleware } from './kilo-jwt-auth';
 
@@ -30,6 +30,14 @@ function makeEnv(secret: string, opts?: { cachedUserState?: '1' | '0' | null }):
   };
 }
 
+async function sign(payload: Record<string, unknown>, secret: string): Promise<string> {
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(new TextEncoder().encode(secret));
+}
+
 describe('kiloJwtAuthMiddleware', () => {
   it('rejects missing Authorization header', async () => {
     const app = new Hono<{ Bindings: TestEnv; Variables: { user_id: string } }>();
@@ -42,7 +50,7 @@ describe('kiloJwtAuthMiddleware', () => {
 
   it('accepts valid v3 token when user exists in cache', async () => {
     const secret = 'test-secret';
-    const token = jwt.sign({ kiloUserId: 'usr_123', version: 3 }, secret, { algorithm: 'HS256' });
+    const token = await sign({ kiloUserId: 'usr_123', version: 3 }, secret);
 
     const app = new Hono<{ Bindings: TestEnv; Variables: { user_id: string } }>();
     app.use('/api/*', kiloJwtAuthMiddleware);
@@ -63,9 +71,7 @@ describe('kiloJwtAuthMiddleware', () => {
 
   it('rejects valid v3 token when user is cached as not-found', async () => {
     const secret = 'test-secret';
-    const token = jwt.sign({ kiloUserId: 'deleted_user', version: 3 }, secret, {
-      algorithm: 'HS256',
-    });
+    const token = await sign({ kiloUserId: 'deleted_user', version: 3 }, secret);
 
     const app = new Hono<{ Bindings: TestEnv; Variables: { user_id: string } }>();
     app.use('/api/*', kiloJwtAuthMiddleware);

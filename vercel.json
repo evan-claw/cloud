@@ -13,10 +13,6 @@
       "schedule": "0 3 * * *"
     },
     {
-      "path": "/api/cron/sync-security-alerts",
-      "schedule": "0 */6 * * *"
-    },
-    {
       "path": "/api/cron/cleanup-stale-analyses",
       "schedule": "*/15 * * * *"
     },

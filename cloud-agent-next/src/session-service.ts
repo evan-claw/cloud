@@ -489,6 +489,7 @@ export class SessionService {
     userEnvVars: Record<string, string> | undefined,
     sessionHome: string,
     sessionId: string,
+    workspacePath: string,
     env: PersistenceEnv,
     originalToken: string,
     kilocodeModel: string | undefined,
@@ -559,6 +560,7 @@ export class SessionService {
       permission: {
         external_directory: {
           [`/tmp/attachments/${sessionId}/**`]: 'allow',
+          [`${workspacePath}/**`]: 'allow',
         },
         ...(!isInteractive && { question: 'deny' }),
       },
@@ -696,6 +698,7 @@ export class SessionService {
       envVars,
       sessionHome,
       sessionId,
+      workspacePath,
       env,
       originalToken,
       kilocodeModel,
@@ -909,10 +912,10 @@ export class SessionService {
           if (
             event.streamEventType === 'kilocode' &&
             event.payload?.event === 'session_created' &&
-            event.payload?.sessionId &&
+            typeof event.payload?.sessionId === 'string' &&
             !capturedKiloSessionId
           ) {
-            capturedKiloSessionId = String(event.payload.sessionId);
+            capturedKiloSessionId = event.payload.sessionId;
             logger.setTags({ kiloSessionId: capturedKiloSessionId });
           }
           yield event;

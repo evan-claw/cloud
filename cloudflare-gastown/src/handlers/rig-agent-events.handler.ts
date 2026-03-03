@@ -22,7 +22,7 @@ const GetEventsQuery = z.object({
  * Called by the container (via completion-reporter or a streaming relay)
  * to persist events so late-joining dashboard clients can catch up.
  */
-export async function handleAppendAgentEvent(c: Context<GastownEnv>, params: { rigId: string }) {
+export async function handleAppendAgentEvent(c: Context<GastownEnv>, _params: { rigId: string }) {
   const parsed = AppendEventBody.safeParse(await parseJsonBody(c));
   if (!parsed.success) {
     return c.json(resError('Invalid request body'), 400);
@@ -59,6 +59,7 @@ export async function handleGetAgentEvents(
 
   const townId = c.get('townId');
   const town = getTownDOStub(c.env, townId);
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
   const events = await town.getAgentEvents(
     params.agentId,
     queryParsed.data.after_id,

@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import type { z } from 'zod';
 
 export type TableInput = {
@@ -19,17 +17,13 @@ export type TableQueryInterpolator<T extends TableInput> = {
 };
 
 export function getTable<T extends TableInput>(table: T): TableQueryInterpolator<T> {
-  const columns: {
-    [K in T['columns'][number]]: K;
-  } = {} as any;
+  const columns = {} as { [K in T['columns'][number]]: K };
 
-  const columnsWithTable: {
-    [K in T['columns'][number]]: `${T['name']}.${K}`;
-  } = {} as any;
+  const columnsWithTable = {} as { [K in T['columns'][number]]: `${T['name']}.${K}` };
 
   for (const key of table.columns) {
-    (columns as any)[key] = key;
-    (columnsWithTable as any)[key] = [table.name, key].join('.');
+    (columns as Record<string, string>)[key] = key;
+    (columnsWithTable as Record<string, string>)[key] = [table.name, key].join('.');
   }
 
   const result: TableQueryInterpolator<T> = {
@@ -47,6 +41,7 @@ export function getTable<T extends TableInput>(table: T): TableQueryInterpolator
   return result;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Zod schema shape is inherently any-typed
 export function getTableFromZodSchema<Name extends string, Schema extends z.ZodObject<any>>(
   name: Name,
   schema: Schema
@@ -54,7 +49,12 @@ export function getTableFromZodSchema<Name extends string, Schema extends z.ZodO
   name: Name;
   columns: Array<Extract<keyof z.infer<Schema>, string>>;
 }> {
-  return getTable({ name, columns: Object.keys(schema.shape) }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- z.ZodObject<any> generic taints schema.shape
+  const columns = Object.keys(schema.shape) as Extract<keyof z.infer<Schema>, string>[];
+  return getTable({ name, columns }) as TableQueryInterpolator<{
+    name: Name;
+    columns: Extract<keyof z.infer<Schema>, string>[];
+  }>;
 }
 
 export type BaseTableQueryInterpolator = TableQueryInterpolator<{
@@ -79,6 +79,6 @@ export function getCreateTableQueryFromTable<T extends BaseTableQueryInterpolato
     `.trim();
 }
 
-function objectKeys<T>(obj: T): Array<keyof T> {
-  return Object.keys(obj as any) as any;
+function objectKeys<T extends object>(obj: T): Array<keyof T> {
+  return Object.keys(obj) as Array<keyof T>;
 }

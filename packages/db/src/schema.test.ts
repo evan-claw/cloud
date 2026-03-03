@@ -10,16 +10,21 @@ describe('database schema', () => {
 
     // Get the latest snapshot from the migrations folder
     const journalPath = path.join(migrationsDir, 'meta', '_journal.json');
-    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf-8'));
+    const journal = JSON.parse(fs.readFileSync(journalPath, 'utf-8')) as {
+      entries: { idx: number }[];
+    };
     const latestEntry = journal.entries[journal.entries.length - 1];
     const latestSnapshotPath = path.join(
       migrationsDir,
       'meta',
       `${latestEntry.idx.toString().padStart(4, '0')}_snapshot.json`
     );
-    const latestSnapshot = JSON.parse(fs.readFileSync(latestSnapshotPath, 'utf-8'));
+    const latestSnapshot = JSON.parse(fs.readFileSync(latestSnapshotPath, 'utf-8')) as {
+      id: string;
+    };
 
     // Generate current schema state
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generateDrizzleJson's return type contains `any` fields
     const currentSchema = generateDrizzleJson(schema, latestSnapshot.id);
 
     // Generate migration diff

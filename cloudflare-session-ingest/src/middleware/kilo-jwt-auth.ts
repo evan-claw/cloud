@@ -1,24 +1,10 @@
 import { createMiddleware } from 'hono/factory';
-import jwt from 'jsonwebtoken';
+import { verifyKiloToken, extractBearerToken } from '@kilocode/worker-utils';
 import { eq } from 'drizzle-orm';
 import { getWorkerDb } from '@kilocode/db/client';
 import { kilocode_users } from '@kilocode/db/schema';
 
 import type { Env } from '../env';
-
-type TokenPayloadV3 = {
-  kiloUserId: string;
-  version: number;
-};
-
-function isTokenPayloadV3(payload: unknown): payload is TokenPayloadV3 {
-  if (!payload || typeof payload !== 'object') {
-    return false;
-  }
-
-  const p = payload as Record<string, unknown>;
-  return typeof p.kiloUserId === 'string' && p.kiloUserId.length > 0 && p.version === 3;
-}
 
 const USER_EXISTS_TTL_SECONDS = 24 * 60 * 60; // 24h
 const USER_NOT_FOUND_TTL_SECONDS = 5 * 60; // 5m
@@ -63,42 +49,26 @@ export const kiloJwtAuthMiddleware = createMiddleware<{
     user_id: string;
   };
 }>(async (c, next) => {
-  const authHeader = c.req.header('Authorization') ?? c.req.header('authorization');
-  if (!authHeader) {
-    return c.json({ success: false, error: 'Missing Authorization header' }, 401);
-  }
-
-  if (!authHeader.toLowerCase().startsWith('bearer ')) {
-    return c.json({ success: false, error: 'Invalid Authorization header format' }, 401);
-  }
-
-  const token = authHeader.slice(7).trim();
+  const token = extractBearerToken(c.req.header('Authorization'));
   if (!token) {
-    return c.json({ success: false, error: 'Missing token' }, 401);
+    return c.json({ success: false, error: 'Missing or malformed Authorization header' }, 401);
   }
 
   const secret = await c.env.NEXTAUTH_SECRET_PROD.get();
 
+  let kiloUserId: string;
   try {
-    const payload = jwt.verify(token, secret, { algorithms: ['HS256'] });
-    if (!isTokenPayloadV3(payload)) {
-      return c.json({ success: false, error: 'Invalid token payload' }, 401);
-    }
-
-    const exists = await userExists(c.env, payload.kiloUserId);
-    if (!exists) {
-      return c.json({ success: false, error: 'User account not found' }, 403);
-    }
-
-    c.set('user_id', payload.kiloUserId);
-    await next();
-  } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
-      return c.json({ success: false, error: 'Token expired' }, 401);
-    }
-    if (error instanceof jwt.JsonWebTokenError) {
-      return c.json({ success: false, error: 'Invalid token signature' }, 401);
-    }
-    return c.json({ success: false, error: 'Token validation failed' }, 401);
+    const payload = await verifyKiloToken(token, secret);
+    kiloUserId = payload.kiloUserId;
+  } catch {
+    return c.json({ success: false, error: 'Invalid or expired token' }, 401);
   }
+
+  const exists = await userExists(c.env, kiloUserId);
+  if (!exists) {
+    return c.json({ success: false, error: 'User account not found' }, 403);
+  }
+
+  c.set('user_id', kiloUserId);
+  return next();
 });

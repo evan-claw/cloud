@@ -94,7 +94,7 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
 
   const sessionId = c.req.param('sessionId');
   const authHeader = c.req.header('Authorization');
-  const authResult = validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+  const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
   if (!authResult.success) {
     return c.text(authResult.error, 401);
   }
@@ -129,7 +129,7 @@ app.put(
     }
 
     const authHeader = c.req.header('Authorization');
-    const authResult = validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
+    const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
     if (!authResult.success) {
       return c.text(authResult.error, 401);
     }

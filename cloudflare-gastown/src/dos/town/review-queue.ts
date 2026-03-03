@@ -320,7 +320,7 @@ function completeReviewFromMRBead(sql: SqlStorage, mrBeadId: string, agentId: st
     );
     return;
   }
-  const sourceBeadId = mrBead.metadata?.source_bead_id;
+  const sourceBeadId: unknown = mrBead.metadata?.source_bead_id;
 
   completeReview(sql, mrBeadId, 'merged');
 
@@ -413,7 +413,7 @@ export function createMolecule(sql: SqlStorage, beadId: string, formula: unknown
   let prevStepId: string | null = null;
   for (let i = 0; i < formulaArr.length; i++) {
     const stepId = generateId();
-    const step = formulaArr[i];
+    const step: unknown = formulaArr[i];
 
     query(
       sql,
@@ -498,7 +498,7 @@ export function getMolecule(sql: SqlStorage, moleculeId: string): Molecule | nul
         ? 'completed'
         : 'active';
 
-  const formula = bead.metadata?.formula ?? [];
+  const formula: unknown = bead.metadata?.formula ?? [];
 
   return {
     id: moleculeId,
@@ -529,7 +529,7 @@ function getStepBeads(sql: SqlStorage, moleculeId: string): BeadRecord[] {
 export function getMoleculeForBead(sql: SqlStorage, beadId: string): Molecule | null {
   const bead = getBead(sql, beadId);
   if (!bead) return null;
-  const moleculeId = bead.metadata?.molecule_bead_id;
+  const moleculeId: unknown = bead.metadata?.molecule_bead_id;
   if (typeof moleculeId !== 'string') return null;
   return getMolecule(sql, moleculeId);
 }
@@ -547,7 +547,7 @@ export function getMoleculeCurrentStep(
   const formula = mol.formula;
   if (!Array.isArray(formula)) return null;
 
-  const step = formula[mol.current_step] ?? null;
+  const step: unknown = (formula as unknown[])[mol.current_step] ?? null;
   return { molecule: mol, step };
 }
 

@@ -53,7 +53,7 @@ const CreateMoleculeBody = z.object({
   }),
 });
 
-export async function handleCreateMolecule(c: Context<GastownEnv>, params: { rigId: string }) {
+export async function handleCreateMolecule(c: Context<GastownEnv>, _params: { rigId: string }) {
   const body = await parseJsonBody(c);
   const parsed = CreateMoleculeBody.safeParse(body);
   if (!parsed.success) {
@@ -65,6 +65,7 @@ export async function handleCreateMolecule(c: Context<GastownEnv>, params: { rig
 
   const townId = c.get('townId');
   const town = getTownDOStub(c.env, townId);
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
   const mol = await town.createMolecule(parsed.data.bead_id, parsed.data.formula);
   return c.json(resSuccess(mol), 201);
 }

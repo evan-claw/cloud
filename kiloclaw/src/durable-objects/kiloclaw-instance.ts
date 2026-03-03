@@ -724,7 +724,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         Array.isArray(cached.requests)
       ) {
         console.log(`[DO] pairing list served from KV cache (key=${cacheKey})`);
-        return { requests: cached.requests };
+        return { requests: cached.requests as typeof empty.requests };
       }
     }
 
@@ -754,9 +754,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     let pairing = empty;
     try {
-      const data = JSON.parse(result.stdout.trim());
-      if (Array.isArray(data.requests)) {
-        pairing = { requests: data.requests };
+      const data = JSON.parse(result.stdout.trim()) as unknown;
+      if (data && typeof data === 'object' && 'requests' in data && Array.isArray(data.requests)) {
+        pairing = { requests: data.requests as typeof empty.requests };
       }
     } catch {
       console.error('[DO] pairing list parse error:', result.stdout);
@@ -870,7 +870,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         Array.isArray(cached.requests)
       ) {
         console.log(`[DO] device pairing list served from KV cache (key=${cacheKey})`);
-        return { requests: cached.requests };
+        return { requests: cached.requests as typeof empty.requests };
       }
     }
 
@@ -902,9 +902,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     let pairing = empty;
     try {
-      const data = JSON.parse(result.stdout.trim());
-      if (Array.isArray(data.requests)) {
-        pairing = { requests: data.requests };
+      const data = JSON.parse(result.stdout.trim()) as unknown;
+      if (data && typeof data === 'object' && 'requests' in data && Array.isArray(data.requests)) {
+        pairing = { requests: data.requests as typeof empty.requests };
       }
     } catch {
       console.error(`[DO] device pairing list parse error: ${result.stdout} ${logCtx}`);

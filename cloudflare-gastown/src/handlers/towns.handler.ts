@@ -86,6 +86,7 @@ export async function handleCreateRig(c: Context<GastownEnv>, params: { userId: 
       kilocodeToken: parsed.data.kilocode_token,
       platformIntegrationId: parsed.data.platform_integration_id,
     });
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
     await townDOStub.addRig({
       rigId: rig.id,
       name: parsed.data.name,

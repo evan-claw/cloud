@@ -26,9 +26,9 @@ export const RigRecord = z.object({
   default_branch: z.string(),
   config: z
     .string()
-    .transform(v => {
+    .transform((v): Record<string, unknown> => {
       try {
-        return JSON.parse(v);
+        return JSON.parse(v) as Record<string, unknown>;
       } catch {
         return {};
       }

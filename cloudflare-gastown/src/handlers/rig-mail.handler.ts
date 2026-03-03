@@ -13,7 +13,7 @@ const SendMailBody = z.object({
   body: z.string().min(1),
 });
 
-export async function handleSendMail(c: Context<GastownEnv>, params: { rigId: string }) {
+export async function handleSendMail(c: Context<GastownEnv>, _params: { rigId: string }) {
   const parsed = SendMailBody.safeParse(await parseJsonBody(c));
   if (!parsed.success) {
     return c.json(

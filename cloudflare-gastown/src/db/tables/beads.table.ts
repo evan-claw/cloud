@@ -30,9 +30,9 @@ export const BeadRecord = z.object({
   priority: BeadPriority,
   labels: z
     .string()
-    .transform((v, ctx) => {
+    .transform((v, ctx): string[] => {
       try {
-        return JSON.parse(v);
+        return JSON.parse(v) as string[];
       } catch {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid JSON in labels' });
         return [];
@@ -41,16 +41,15 @@ export const BeadRecord = z.object({
     .pipe(z.array(z.string())),
   metadata: z
     .string()
-    .transform((v, ctx) => {
+    .transform((v, ctx): Record<string, unknown> => {
       try {
-        return JSON.parse(v);
+        return JSON.parse(v) as Record<string, unknown>;
       } catch {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid JSON in metadata' });
         return {};
       }
     })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see Agent.checkpoint in types.ts
-    .pipe(z.record(z.string(), z.any())),
+    .pipe(z.record(z.string(), z.any())), // z.any() needed for Rpc.Serializable compatibility
   created_by: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),

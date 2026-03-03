@@ -139,7 +139,7 @@ app.post('/deploy-archive', async (c: Context<HonoEnv>) => {
   let envVars: DeployRequest['envVars'] | undefined;
   if (envVarsHeader) {
     try {
-      envVars = JSON.parse(envVarsHeader);
+      envVars = JSON.parse(envVarsHeader) as DeployRequest['envVars'];
     } catch {
       return c.json({ error: 'Invalid X-Env-Vars header: must be valid JSON' }, 400);
     }

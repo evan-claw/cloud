@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withDORetry, type DORetryConfig } from './do-retry.js';
+import { withDORetry } from './do-retry.js';
 
 const mockLogger = {
   warn: vi.fn(),

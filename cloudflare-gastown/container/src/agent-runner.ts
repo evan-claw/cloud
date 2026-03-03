@@ -350,12 +350,13 @@ async function verifyGitCredentials(
 async function createMayorWorkspace(rigId: string): Promise<string> {
   const { mkdir: mkdirAsync } = await import('node:fs/promises');
   const { existsSync } = await import('node:fs');
-  const { resolve } = await import('node:path');
+  const path = await import('node:path');
   // Validate rigId to prevent path traversal (rigId is synthetic: "mayor-<townId>")
+  // eslint-disable-next-line no-control-regex
   if (!rigId || /\.\.[/\\]|[/\\]\.\.|^\.\.$/.test(rigId) || /[\x00-\x1f]/.test(rigId)) {
     throw new Error(`Invalid rigId for mayor workspace: ${rigId}`);
   }
-  const dir = resolve('/workspace/rigs', rigId, 'mayor-workspace');
+  const dir = path.resolve('/workspace/rigs', rigId, 'mayor-workspace');
   await mkdirAsync(dir, { recursive: true });
 
   // Initialize a bare git repo if not already present

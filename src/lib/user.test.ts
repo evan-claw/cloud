@@ -24,6 +24,8 @@ import {
   user_admin_notes,
   magic_link_tokens,
   stytch_fingerprints,
+  kiloclaw_version_pins,
+  kiloclaw_image_catalog,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
@@ -628,6 +630,41 @@ describe('User', () => {
       await softDeleteUser(user.id);
 
       expect((await db.select({ count: count() }).from(magic_link_tokens))[0].count).toBe(0);
+    });
+
+    it('should delete kiloclaw_version_pins for the user', async () => {
+      const user = await insertTestUser();
+      const adminUser = await insertTestUser({ is_admin: true });
+
+      // Create a catalog entry for the FK
+      const testTag = `test-gdpr-${Date.now()}`;
+      await db.insert(kiloclaw_image_catalog).values({
+        openclaw_version: '2026.1.1',
+        variant: 'default',
+        image_tag: testTag,
+        status: 'available',
+        published_at: new Date().toISOString(),
+      });
+
+      await db.insert(kiloclaw_version_pins).values({
+        user_id: user.id,
+        image_tag: testTag,
+        pinned_by: adminUser.id,
+        reason: 'test pin',
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_version_pins)
+          .where(eq(kiloclaw_version_pins.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+
+      // Cleanup catalog entry
+      await db.delete(kiloclaw_image_catalog).where(eq(kiloclaw_image_catalog.image_tag, testTag));
     });
   });
 

@@ -64,7 +64,7 @@ app.post('/attributions/track', async c => {
   // Parse and validate request body
   let payload: AttributionsTrackRequestBody;
   try {
-    const body = await c.req.json();
+    const body: unknown = await c.req.json();
     payload = AttributionsTrackRequestBody.parse(body);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);

@@ -23,10 +23,13 @@ export function generateProviderSpecificHash(payload: string, provider: Provider
     .digest('base64');
 }
 
-export function generateOpenRouterUpstreamSafetyIdentifier(userId: string): string {
+export function generateOpenRouterUpstreamSafetyIdentifier(userId: string): string | null {
   const orgId = getEnvVariable('OPENROUTER_ORG_ID');
   if (!orgId) {
-    throw new Error('OPENROUTER_ORG_ID is not set, please run vercel env pull');
+    console.error(
+      '[generateOpenRouterUpstreamSafetyIdentifier] OPENROUTER_ORG_ID is not set, please run vercel env pull'
+    );
+    return null;
   }
   return crypto
     .createHash('sha256')

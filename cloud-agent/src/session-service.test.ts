@@ -901,7 +901,7 @@ describe('SessionService', () => {
           PASSWORD: 'p@ssw0rd!#$%',
           JSON_CONFIG: '{"key":"value with spaces"}',
           PATH_WITH_COLON: '/usr/bin:/usr/local/bin',
-        }),
+        }) as unknown,
         cwd: `/workspace/org/user/sessions/${sessionId}`,
       });
     });
@@ -993,7 +993,7 @@ describe('SessionService', () => {
         expect.objectContaining({
           env: expect.objectContaining({
             GH_TOKEN: 'ghp_test123',
-          }),
+          }) as unknown,
         })
       );
     });
@@ -1041,7 +1041,7 @@ describe('SessionService', () => {
         expect.objectContaining({
           env: expect.objectContaining({
             GH_TOKEN: userProvidedToken,
-          }),
+          }) as unknown,
         })
       );
     });
@@ -1079,7 +1079,9 @@ describe('SessionService', () => {
         env: mockEnv,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as unknown as {
+        env: Record<string, unknown>;
+      };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
 
@@ -1116,7 +1118,9 @@ describe('SessionService', () => {
         env: mockEnv,
       });
 
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as unknown as {
+        env: Record<string, unknown>;
+      };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
 
@@ -1154,7 +1158,9 @@ describe('SessionService', () => {
       });
 
       // Should NOT set GH_TOKEN because this is not a GitHub repo (no githubRepo)
-      const callArgs = sandboxCreateSession.mock.calls[0][0];
+      const callArgs = sandboxCreateSession.mock.calls[0][0] as unknown as {
+        env: Record<string, unknown>;
+      };
       expect(callArgs.env).not.toHaveProperty('GH_TOKEN');
     });
   });
@@ -1550,7 +1556,10 @@ describe('SessionService', () => {
       expect(writtenContent).toBeDefined();
 
       // Should be valid JSON
-      const parsed = JSON.parse(writtenContent);
+      const parsed = JSON.parse(writtenContent) as unknown as Record<
+        string,
+        Record<string, unknown>
+      >;
       expect(parsed).toHaveProperty('mcpServers');
       expect(parsed.mcpServers).toHaveProperty('server-1');
       expect(parsed.mcpServers).toHaveProperty('server-2');
@@ -1624,7 +1633,7 @@ describe('SessionService', () => {
           setupCommands: ['npm install', 'npm build'],
           // MCPServerConfigSchema adds defaults for type, timeout, alwaysAllow, disabledTools
           mcpServers: {
-            test: expect.objectContaining({ command: 'test-server' }),
+            test: expect.objectContaining({ command: 'test-server' }) as unknown,
           },
         })
       );
@@ -1931,8 +1940,8 @@ describe('SessionService', () => {
         env: expect.objectContaining({
           API_KEY: 'restored-key',
           DATABASE_URL: 'postgres://restored',
-        }),
-        cwd: expect.any(String),
+        }) as unknown,
+        cwd: expect.any(String) as unknown,
       });
     });
 
@@ -1982,7 +1991,7 @@ describe('SessionService', () => {
       // Verify envVars restored
       expect(sandboxCreateSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          env: expect.objectContaining({ API_KEY: 'test' }),
+          env: expect.objectContaining({ API_KEY: 'test' }) as unknown,
         })
       );
 
@@ -2663,7 +2672,7 @@ describe('SessionService', () => {
           headers: expect.objectContaining({
             Authorization: 'Bearer auth-token',
             'Content-Type': 'application/json',
-          }),
+          }) as unknown,
           body: JSON.stringify({
             kilo_session_id: 'kilo-session-123',
             cloud_agent_session_id: 'agent-session-456',
