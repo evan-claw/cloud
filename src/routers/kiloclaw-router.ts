@@ -393,12 +393,14 @@ export const kiloclawRouter = createTRPCRouter({
         });
       }
 
+      const couponId = getEnvVariable('STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID');
+
       const session = await stripe.checkout.sessions.create({
-        mode: 'subscription',
+        mode: 'payment',
         customer: stripeCustomerId,
-        allow_promotion_codes: true,
         billing_address_collection: 'required',
         line_items: [{ price: priceId, quantity: 1 }],
+        ...(couponId ? { discounts: [{ coupon: couponId }] } : { allow_promotion_codes: true }),
         customer_update: {
           name: 'auto',
           address: 'auto',
@@ -409,12 +411,6 @@ export const kiloclawRouter = createTRPCRouter({
         },
         success_url: `${APP_URL}/claw?earlybird_checkout=success`,
         cancel_url: `${APP_URL}/claw/earlybird?checkout=cancelled`,
-        subscription_data: {
-          metadata: {
-            type: 'kiloclaw-earlybird',
-            kiloUserId: ctx.user.id,
-          },
-        },
         metadata: {
           type: 'kiloclaw-earlybird',
           kiloUserId: ctx.user.id,
