@@ -225,6 +225,21 @@ export async function createOrUpdateUser(
       if (!linkResult.success) {
         return { success: false, error: linkResult.error };
       }
+      // Fire-and-forget auth event for auto-linked signin
+      if (requestHeaders) {
+        void reportAuthEvent({
+          kilo_user_id: userByEmail.id,
+          event_type: 'signin',
+          email: userByEmail.google_user_email,
+          account_created_at: userByEmail.created_at,
+          ip_address: requestHeaders.get('x-forwarded-for'),
+          geo_city: requestHeaders.get('x-vercel-ip-city'),
+          geo_country: requestHeaders.get('x-vercel-ip-country'),
+          ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
+          user_agent: requestHeaders.get('user-agent'),
+          auth_method: args.provider,
+        });
+      }
       // Successfully linked account, return the existing user
       posthogClient.capture({
         distinctId: userByEmail.google_user_email,
