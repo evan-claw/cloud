@@ -19,6 +19,7 @@ type ProviderAwareAllowPredicateOptions = {
 
 export type ProviderAwareAllowPredicate = (modelId: string) => Promise<boolean>;
 
+/** @deprecated Use `createAllowPredicateFromDenyList` instead */
 export function createProviderAwareModelAllowPredicate(
   allowList: string[],
   options?: ProviderAwareAllowPredicateOptions
@@ -45,6 +46,16 @@ export function createProviderAwareModelAllowPredicate(
 
     const providersForModel = await getProvidersForModel(normalizedModelId);
     return isAllowedByProviderMembershipWildcard(providersForModel, wildcardProviderSlugs);
+  };
+}
+
+export function createAllowPredicateFromDenyList(
+  denyList: string[] | undefined
+): ProviderAwareAllowPredicate {
+  const denyListSet = new Set(denyList);
+  return (modelId: string): Promise<boolean> => {
+    const normalizedModelId = normalizeModelId(modelId);
+    return Promise.resolve(!denyListSet.has(normalizedModelId));
   };
 }
 

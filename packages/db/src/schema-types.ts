@@ -125,7 +125,9 @@ export const OrganizationPlanSchema = z.enum(['teams', 'enterprise']);
 export type OrganizationPlan = z.infer<typeof OrganizationPlanSchema>;
 
 const OrganizationSettingsSchema = z.object({
+  /** @deprecated */
   model_allow_list: z.array(z.string()).optional(),
+  /** @deprecated */
   provider_allow_list: z.array(z.string()).optional(),
 
   // under development, not yet enforced, will replace model_allow_list and provider_allow_list:

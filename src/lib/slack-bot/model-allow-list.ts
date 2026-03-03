@@ -1,6 +1,6 @@
 import { PRIMARY_DEFAULT_MODEL, preferredModels } from '@/lib/models';
 import { getOrganizationById } from '@/lib/organizations/organizations';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 
 /**
  * Get a default model that is allowed for an organization.
@@ -15,14 +15,14 @@ export async function getDefaultAllowedModel(
     return globalDefault;
   }
 
-  const modelAllowList = organization.settings?.model_allow_list || [];
+  const modelDenyList = organization.settings?.model_deny_list || [];
 
   // If no restrictions, use global default
-  if (modelAllowList.length === 0) {
+  if (modelDenyList.length === 0) {
     return globalDefault;
   }
 
-  const isAllowed = createProviderAwareModelAllowPredicate(modelAllowList);
+  const isAllowed = createAllowPredicateFromDenyList(modelDenyList);
 
   // Check if the organization's default model is allowed
   const orgDefaultModel = organization.settings?.default_model;
@@ -42,7 +42,7 @@ export async function getDefaultAllowedModel(
   }
 
   // Fall back to the first non-wildcard model in the allow list
-  const firstNonWildcard = modelAllowList.find(m => !m.endsWith('/*'));
+  const firstNonWildcard = modelDenyList.find(m => !m.endsWith('/*'));
   if (firstNonWildcard) {
     return firstNonWildcard;
   }
@@ -50,7 +50,7 @@ export async function getDefaultAllowedModel(
   // If only wildcards, fall back to global default (admin misconfiguration)
   console.warn(
     '[SlackBot] Organization has only wildcard entries in model allow list:',
-    modelAllowList
+    modelDenyList
   );
   return globalDefault;
 }

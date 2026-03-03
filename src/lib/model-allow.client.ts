@@ -50,6 +50,7 @@ function getOrBuildModelProvidersIndex(
 /**
  * Client-safe allow-list evaluation that mirrors
  * [`createProviderAwareModelAllowPredicate()`](src/lib/model-allow.server.ts:12).
+ * @deprecated
  */
 export function isModelAllowedProviderAwareClient(
   modelId: string,

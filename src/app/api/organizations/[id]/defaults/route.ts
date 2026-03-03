@@ -3,7 +3,7 @@ import { getAuthorizedOrgContext } from '@/lib/organizations/organization-auth';
 import type { NextRequest } from 'next/server';
 import { PRIMARY_DEFAULT_MODEL, getFirstFreeModel, preferredModels } from '@/lib/models';
 import { getEnhancedOpenRouterModels } from '@/lib/providers/openrouter';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { getModelIdToProviderSlugsIndex } from '@/lib/providers/openrouter/models-by-provider-index.server';
 
 type DefaultsResponse = {
@@ -26,9 +26,9 @@ export async function GET(
   // Get organization's default model setting
   let defaultModel = organization.settings?.default_model;
 
-  const allowList = organization.settings?.model_allow_list;
+  const denyList = organization.settings?.model_deny_list;
 
-  const isAllowed = createProviderAwareModelAllowPredicate(allowList ?? []);
+  const isAllowed = createAllowPredicateFromDenyList(denyList ?? []);
 
   const findFirstAllowedModel = async (modelIds: readonly string[]) => {
     for (const modelId of modelIds) {
@@ -73,23 +73,23 @@ export async function GET(
     defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL]);
 
     if (!defaultModel) {
-      if (!allowList?.length) {
+      if (!denyList?.length) {
         defaultModel = PRIMARY_DEFAULT_MODEL;
       } else {
-        const firstConcreteAllowedModel = allowList.find(modelId => !modelId.endsWith('/*'));
+        const firstConcreteAllowedModel = denyList.find(modelId => !modelId.endsWith('/*'));
         defaultModel = firstConcreteAllowedModel;
       }
     }
 
-    if (!defaultModel && allowList?.length) {
+    if (!defaultModel && denyList?.length) {
       defaultModel = await findFirstAllowedModel(preferredModels);
     }
 
-    if (!defaultModel && allowList?.length) {
+    if (!defaultModel && denyList?.length) {
       defaultModel = await findFirstAllowedModelFromDbSnapshot();
     }
 
-    if (!defaultModel && allowList?.length) {
+    if (!defaultModel && denyList?.length) {
       defaultModel = await findFirstAllowedModelFromOpenRouter();
     }
 

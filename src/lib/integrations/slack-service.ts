@@ -12,7 +12,7 @@ import { WebClient } from '@slack/web-api';
 import type { OAuthV2Response } from '@slack/oauth';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
 
@@ -481,9 +481,9 @@ export async function updateModel(
   if (owner.type === 'org') {
     const organization = await getOrganizationById(owner.id);
     if (organization) {
-      const modelAllowList = organization.settings?.model_allow_list || [];
-      if (modelAllowList.length > 0) {
-        const isAllowed = createProviderAwareModelAllowPredicate(modelAllowList);
+      const modelDenyList = organization.settings?.model_deny_list || [];
+      if (modelDenyList.length > 0) {
+        const isAllowed = createAllowPredicateFromDenyList(modelDenyList);
         if (!(await isAllowed(modelSlug))) {
           return { success: false, error: 'Model is not allowed by organization policy' };
         }

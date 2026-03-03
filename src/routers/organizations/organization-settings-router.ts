@@ -15,7 +15,7 @@ import * as z from 'zod';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
 import { getEnhancedOpenRouterModels } from '@/lib/providers/openrouter';
 import { requireActiveSubscriptionOrTrial } from '@/lib/organizations/trial-middleware';
-import { createDenyLists, createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList, createDenyLists } from '@/lib/model-allow.server';
 import { KILO_ORGANIZATION_ID } from '@/lib/organizations/constants';
 import { listAvailableCustomLlms } from '@/lib/custom-llm/listAvailableCustomLlms';
 
@@ -158,17 +158,17 @@ export const organizationsSettingsRouter = createTRPCRouter({
         });
       }
 
-      let allowedModels: string[] | undefined;
+      let deniedModels: string[] | undefined;
 
-      if (organization.plan === 'enterprise' && organization?.settings?.model_allow_list) {
-        allowedModels = organization.settings.model_allow_list;
+      if (organization.plan === 'enterprise' && organization?.settings?.model_deny_list) {
+        deniedModels = organization.settings.model_deny_list;
       }
 
       const responseData = await getEnhancedOpenRouterModels();
 
       let filteredModels = responseData.data;
-      if (allowedModels) {
-        const isAllowed = createProviderAwareModelAllowPredicate(allowedModels);
+      if (deniedModels) {
+        const isAllowed = createAllowPredicateFromDenyList(deniedModels);
         const models: OpenRouterModel[] = [];
         for (const model of responseData.data) {
           if (await isAllowed(model.id)) {
@@ -234,11 +234,11 @@ export const organizationsSettingsRouter = createTRPCRouter({
 
       // Check if default_model needs to be cleared
       if (
-        model_allow_list !== undefined &&
+        settingsUpdate.model_deny_list !== undefined &&
         currentSettings.default_model &&
-        model_allow_list.length > 0
+        settingsUpdate.model_deny_list.length > 0
       ) {
-        const isAllowed = createProviderAwareModelAllowPredicate(model_allow_list);
+        const isAllowed = createAllowPredicateFromDenyList(settingsUpdate.model_deny_list);
 
         if (!(await isAllowed(currentSettings.default_model))) {
           // Clear default_model if it's no longer in the allow list
@@ -287,9 +287,9 @@ export const organizationsSettingsRouter = createTRPCRouter({
       }
 
       // Validate default_model against existing model_allow_list
-      const existingAllowedModels = existingOrg.settings?.model_allow_list;
-      if (existingAllowedModels && existingAllowedModels.length > 0) {
-        const isAllowed = createProviderAwareModelAllowPredicate(existingAllowedModels);
+      const existingDeniedModels = existingOrg.settings?.model_deny_list;
+      if (existingDeniedModels && existingDeniedModels.length > 0) {
+        const isAllowed = createAllowPredicateFromDenyList(existingDeniedModels);
 
         if (default_model && !(await isAllowed(default_model))) {
           throw new TRPCError({
