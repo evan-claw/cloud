@@ -67,7 +67,9 @@ export default function EarlybirdPage() {
               disabled={checkoutMutation.isPending}
               onClick={() => checkoutMutation.mutate()}
             >
-              {checkoutMutation.isPending ? 'Redirecting to checkout...' : '🦞 Get the Early Bird Offer'}
+              {checkoutMutation.isPending
+                ? 'Redirecting to checkout...'
+                : '🦞 Get the Early Bird Offer'}
             </Button>
           </CardFooter>
         </Card>
