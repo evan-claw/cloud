@@ -267,6 +267,11 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
       });
     }
 
+    // Early return if KV has no versions
+    if (kvVersions.length === 0) {
+      return { synced: 0, skipped: 0, total: 0 };
+    }
+
     // Fetch only existing tags that match KV versions (more memory-efficient)
     const kvTags = kvVersions.map(v => v.imageTag);
     const existingTags = new Set(

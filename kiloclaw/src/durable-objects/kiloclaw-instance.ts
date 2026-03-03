@@ -64,7 +64,7 @@ import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../utils/env-encryption';
 import { z, type ZodType } from 'zod';
 import { resolveLatestVersion, resolveVersionByTag } from '../lib/image-version';
 import { lookupCatalogVersion } from '../lib/catalog-registration';
-import type { ImageVariant } from '../schemas/image-version';
+import { ImageVariantSchema, type ImageVariant } from '../schemas/image-version';
 
 type InstanceStatus = PersistedState['status'];
 
