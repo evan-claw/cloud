@@ -84,7 +84,7 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   if (restrictionError) {
     return c.json(
       { error: restrictionError.message, message: restrictionError.message },
-      restrictionError.status as 400 | 401 | 402 | 403 | 404
+      restrictionError.status
     );
   }
 

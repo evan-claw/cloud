@@ -41,7 +41,7 @@ export type OpenRouterProviderConfig = {
 };
 
 export type OrganizationRestrictionResult = {
-  error: { status: number; message: string } | null;
+  error: { status: 400 | 401 | 402 | 403 | 404; message: string } | null;
   providerConfig?: OpenRouterProviderConfig;
 };
 
