@@ -53,7 +53,8 @@ app.notFound(c => {
 });
 
 app.onError((err, c) => {
-  return c.json({ error: 'Internal server error', message: err.message }, 500);
+  console.error('[llm-gateway] Unhandled error', err);
+  return c.json({ error: 'Internal server error' }, 500);
 });
 
 export default {
