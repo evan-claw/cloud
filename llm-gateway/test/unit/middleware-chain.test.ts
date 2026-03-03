@@ -77,6 +77,30 @@ describe('middleware chain – 404', () => {
   });
 });
 
+describe('middleware chain – invalid path', () => {
+  it('returns 400 for /api/gateway/other (matches reference invalidPathResponse)', async () => {
+    const req = new Request('http://localhost/api/gateway/other', { method: 'POST' });
+    const res = await dispatch(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      error: 'Invalid path',
+      message: 'This endpoint only accepts the path `/chat/completions`.',
+    });
+  });
+
+  it('returns 400 for /api/openrouter/v1/models (matches reference invalidPathResponse)', async () => {
+    const req = new Request('http://localhost/api/openrouter/v1/models', { method: 'GET' });
+    const res = await dispatch(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      error: 'Invalid path',
+      message: 'This endpoint only accepts the path `/chat/completions`.',
+    });
+  });
+});
+
 describe('middleware chain – body validation', () => {
   it('returns 404 for missing model (matches reference modelDoesNotExistResponse)', async () => {
     const res = await dispatch(chatRequest({ messages: [] }));

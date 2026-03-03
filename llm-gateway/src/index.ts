@@ -49,6 +49,18 @@ registerChatCompletions('/api/gateway/chat/completions');
 registerChatCompletions('/api/openrouter/chat/completions');
 
 app.notFound(c => {
+  const path = new URL(c.req.url).pathname;
+  // The reference validates that [...path] is /chat/completions and returns
+  // invalidPathResponse() for anything else under /api/gateway or /api/openrouter.
+  if (path.startsWith('/api/gateway/') || path.startsWith('/api/openrouter/')) {
+    return c.json(
+      {
+        error: 'Invalid path',
+        message: 'This endpoint only accepts the path `/chat/completions`.',
+      },
+      400
+    );
+  }
   return c.json({ error: 'Not found' }, 404);
 });
 
