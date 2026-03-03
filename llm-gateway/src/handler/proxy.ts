@@ -87,6 +87,16 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // Preserve query string so it is forwarded to the upstream provider.
   const { search } = new URL(c.req.url);
 
+  // PostHog API key — fetched once per request, fail-open if unavailable.
+  let posthogApiKey: string | undefined;
+  c.env.POSTHOG_API_KEY.get()
+    .then(k => {
+      posthogApiKey = k;
+    })
+    .catch(() => {
+      /* fail-open */
+    });
+
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
   const abuseServiceUrl = await c.env.ABUSE_SERVICE_URL.get();
@@ -233,6 +243,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     isAnon,
     sessionId: taskId,
     toolsUsed: getToolsUsed(requestBody.messages),
+    posthogApiKey,
     connectionString: c.env.HYPERDRIVE.connectionString,
     o11y: c.env.O11Y,
   } as const;

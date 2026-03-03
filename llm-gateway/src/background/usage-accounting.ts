@@ -106,6 +106,10 @@ export type MicrodollarUsageContext = {
   isStreaming: boolean;
   /** User's microdollars_used before this request (for first-usage detection). */
   prior_microdollar_usage: number;
+  /** User email for authenticated users — used as PostHog distinctId. Undefined for anonymous users. */
+  posthog_distinct_id?: string;
+  /** PostHog API key for first-usage event capture. Undefined when not configured. */
+  posthogApiKey?: string;
   /** Provider base URL — used to call the /generation endpoint for accurate cost data. */
   providerApiUrl: string;
   /** Provider API key — used to authenticate /generation endpoint requests. */
@@ -722,6 +726,43 @@ async function ingestOrganizationTokenUsage(
   });
 }
 
+// ─── PostHog first-usage events ───────────────────────────────────────────────
+
+const POSTHOG_CAPTURE_URL = 'https://us.i.posthog.com/capture';
+
+async function sendPostHogEvent(
+  apiKey: string,
+  distinctId: string,
+  event: string,
+  properties: Record<string, unknown>
+): Promise<void> {
+  try {
+    await fetch(POSTHOG_CAPTURE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, distinct_id: distinctId, event, properties }),
+    });
+  } catch (err) {
+    console.warn(`[posthog] Failed to send ${event} event`, err);
+  }
+}
+
+async function isFirstUsageEver(
+  db: WorkerDb,
+  kiloUserId: string,
+  priorMicrodollarUsage: number,
+  organizationId: string | undefined
+): Promise<boolean> {
+  if (priorMicrodollarUsage > 0 || organizationId) return false;
+  // Check if there are any prior usage records for this user
+  const result = await db.execute<{ exists: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM microdollar_usage WHERE kilo_user_id = ${kiloUserId} LIMIT 1
+    ) AS exists
+  `);
+  return !result.rows[0]?.exists;
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
@@ -936,6 +977,47 @@ export async function runUsageAccounting(
     });
   } catch (err) {
     console.error('ingestOrganizationTokenUsage failed', err);
+  }
+
+  // PostHog first-usage events (authenticated non-org users only)
+  if (usageContext.posthog_distinct_id && usageContext.posthogApiKey) {
+    const apiKey = usageContext.posthogApiKey;
+    const distinctId = usageContext.posthog_distinct_id;
+
+    try {
+      const isFirst = await isFirstUsageEver(
+        db,
+        coreUsageFields.kilo_user_id,
+        usageContext.prior_microdollar_usage,
+        usageContext.organizationId
+      );
+      if (isFirst) {
+        await sendPostHogEvent(apiKey, distinctId, 'first_usage', {
+          model: usageStats.model,
+          cost_mUsd: coreUsageFields.cost,
+        });
+        console.log('first_usage PostHog event sent');
+      }
+    } catch (err) {
+      console.warn('[posthog] first_usage check failed', err);
+    }
+
+    // first_microdollar_usage: fires the first time the user crosses the 1 microdollar threshold
+    if (balanceUpdateResult) {
+      const priorUsageAtEnd = Math.abs(
+        balanceUpdateResult.newMicrodollarsUsed - coreUsageFields.cost
+      );
+      if (priorUsageAtEnd < 1) {
+        try {
+          await sendPostHogEvent(apiKey, distinctId, 'first_microdollar_usage', {
+            model: usageStats.model,
+            cost_mUsd: coreUsageFields.cost,
+          });
+        } catch (err) {
+          console.warn('[posthog] first_microdollar_usage send failed', err);
+        }
+      }
+    }
   }
 
   return usageStats;

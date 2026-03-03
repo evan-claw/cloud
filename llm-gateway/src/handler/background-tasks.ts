@@ -63,6 +63,7 @@ export type BackgroundTaskParams = {
   sessionId: string | null;
   ttfbMs: number;
   toolsUsed: ReturnType<typeof getToolsUsed>;
+  posthogApiKey: string | undefined;
   connectionString: string;
   o11y: { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
 };
@@ -103,6 +104,7 @@ export function scheduleBackgroundTasks(
     sessionId,
     ttfbMs,
     toolsUsed,
+    posthogApiKey,
     connectionString,
     o11y,
   } = params;
@@ -129,6 +131,8 @@ export function scheduleBackgroundTasks(
               estimatedOutputTokens,
               isStreaming,
               prior_microdollar_usage: user.microdollars_used ?? 0,
+              posthog_distinct_id: user.google_user_email,
+              posthogApiKey,
               providerApiUrl,
               providerApiKey,
               providerHasGenerationEndpoint,
