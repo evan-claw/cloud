@@ -31,9 +31,8 @@
       "id": "ab836697b6034a95beb92aceea474b10",
     },
     {
-      // Rate limit sliding window — reuses the same namespace with distinct key prefixes
       "binding": "RATE_LIMIT_KV",
-      "id": "ab836697b6034a95beb92aceea474b10",
+      "id": "b22ee150a8fb4f63970bd3ff69f23e4d",
     },
   ],
   "services": [
