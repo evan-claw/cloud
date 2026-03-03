@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
-export default function KiloclawInstancesRedirect() {
+export default function KiloclawVersionsRedirect() {
   redirect('/admin/kiloclaw');
 }
