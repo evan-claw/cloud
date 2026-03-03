@@ -4,7 +4,7 @@ import { Button } from '@/components/Button';
 import { Card } from '@/components/ui/card';
 import { Plus, GitBranch, Clock } from 'lucide-react';
 import { InlineDeleteConfirmation } from '@/components/ui/inline-delete-confirmation';
-import { formatDistanceToNow } from 'date-fns';
+import { TimeAgo } from '@/components/shared/TimeAgo';
 import { useRouter } from 'next/navigation';
 import type { StoredSession } from './types';
 import { cn } from '@/lib/utils';
@@ -73,9 +73,6 @@ export function ChatSidebar({
         ) : (
           sessions.map(session => {
             const isActive = session.sessionId === currentSessionId;
-            const timeAgo = formatDistanceToNow(new Date(session.updatedAt), {
-              addSuffix: true,
-            });
 
             return (
               <Card
@@ -112,7 +109,7 @@ export function ChatSidebar({
                   )}
                   <div className="text-muted-foreground flex items-center gap-1 text-xs">
                     <Clock className="h-3 w-3" />
-                    <span>{timeAgo}</span>
+                    <TimeAgo timestamp={session.updatedAt} />
                   </div>
                 </div>
               </Card>
