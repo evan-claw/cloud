@@ -12,6 +12,7 @@ import type { OpenRouterChatCompletionRequest } from '../types/request';
 import type { AnonymousUserContext } from './anonymous';
 import { isAnonymousContext } from './anonymous';
 import { isKiloFreeModel } from './models';
+import { shouldRouteToVercel } from './vercel-routing';
 
 export type ProviderId =
   | 'openrouter'
@@ -193,7 +194,8 @@ export async function getProvider(
   request: OpenRouterChatCompletionRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
-  secrets: SecretsBundle
+  secrets: SecretsBundle,
+  randomSeed: string
 ): Promise<ProviderResolutionResult> {
   const providers = buildProviders(secrets);
 
@@ -249,7 +251,12 @@ export async function getProvider(
     }
   }
 
-  // 3. Kilo free model with Martian gateway → wrap as custom provider
+  // 3. Vercel AI Gateway A/B routing (non-BYOK, non-custom-LLM)
+  if (await shouldRouteToVercel(db, requestedModel, request, randomSeed)) {
+    return { provider: providers.VERCEL_AI_GATEWAY, userByok: null, customLlm: null };
+  }
+
+  // 4. Kilo free model with Martian gateway → wrap as custom provider
   const kiloFreeModel = getKiloFreeModelWithGateway(requestedModel);
   if (kiloFreeModel?.is_enabled) {
     const gatewayProvider = providers[kiloFreeModel.gateway];
@@ -283,7 +290,7 @@ export async function getProvider(
     }
   }
 
-  // 4. Default to OpenRouter
+  // 5. Default to OpenRouter
   return { provider: providers.OPENROUTER, userByok: null, customLlm: null };
 }
 

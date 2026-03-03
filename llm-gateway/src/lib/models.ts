@@ -54,6 +54,24 @@ const kiloFreeModels: KiloFreeModel[] = [
   },
 ];
 
+// Models tested and recommended for Vercel AI Gateway routing.
+// Keep in sync with src/lib/models.ts preferredModels.
+export const preferredModels: string[] = [
+  'kilo/auto',
+  'kilo/auto-free',
+  'minimax/minimax-m2.5:free',
+  'moonshotai/kimi-k2.5:free',
+  'giga-potato-thinking',
+  'arcee-ai/trinity-large-preview:free',
+  'anthropic/claude-opus-4.6',
+  'anthropic/claude-sonnet-4.6',
+  'openai/gpt-5.2',
+  'openai/gpt-5.3-codex',
+  'google/gemini-3.1-pro-preview',
+  'z-ai/glm-5',
+  'x-ai/grok-code-fast-1',
+];
+
 // A model is "free" if it's a Kilo-hosted free model, ends in ':free', is the
 // OpenRouter free catch-all, or is an OpenRouter stealth (alpha/beta) model.
 export function isFreeModel(model: string): boolean {

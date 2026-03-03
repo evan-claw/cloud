@@ -41,13 +41,19 @@ export const providerResolutionMiddleware = createMiddleware<HonoContext>(async 
 
   const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
 
+  // Random seed for Vercel A/B routing — same as reference: taskId || user.id
+  const taskId = c.req.header('x-kilocode-taskid') ?? undefined;
+  const user = c.get('user');
+  const randomSeed = taskId ?? user.id;
+
   const { provider, userByok, customLlm } = await getProvider(
     db,
     c.get('resolvedModel'),
     c.get('requestBody'),
-    c.get('user'),
+    user,
     c.get('organizationId'),
-    secrets
+    secrets,
+    randomSeed
   );
 
   c.set('provider', provider);
