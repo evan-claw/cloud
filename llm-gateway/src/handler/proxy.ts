@@ -227,14 +227,50 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   if (shouldRewrite) {
     if (response.body) {
-      const [metricsStream, clientStream] = response.body.tee();
+      // Buffer chunks while forwarding to client (same pattern as the paid path
+      // below) so the metrics consumer can't stall the client via backpressure.
+      const responseBody = response.body;
+      const chunks: Uint8Array[] = [];
+      const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = writable.getWriter();
 
-      scheduleBackgroundTasks(c.executionCtx, {
-        ...bgCommon,
-        accountingStream: null, // free model — no cost accounting
-        metricsStream,
-        loggingStream: null,
-      });
+      const pipePromise = (async () => {
+        const reader = responseBody.getReader();
+        try {
+          for (;;) {
+            const result = await reader.read();
+            if (result.done) break;
+            chunks.push(result.value);
+            await writer.write(result.value);
+          }
+          await writer.close();
+        } catch (err) {
+          await reader.cancel().catch(() => {});
+          await writer.abort(err).catch(() => {});
+          throw err;
+        }
+      })();
+
+      c.executionCtx.waitUntil(
+        pipePromise
+          .then(() => {
+            const metricsStream = new ReadableStream<Uint8Array>({
+              start(controller) {
+                for (const chunk of chunks) controller.enqueue(chunk);
+                controller.close();
+              },
+            });
+            scheduleBackgroundTasks(c.executionCtx, {
+              ...bgCommon,
+              accountingStream: null, // free model — no cost accounting
+              metricsStream,
+              loggingStream: null,
+            });
+          })
+          .catch(err => {
+            console.error('[proxy] Free model stream pipe error', err);
+          })
+      );
       return rewriteFreeModelResponse(new Response(clientStream, response), resolvedModel);
     }
     return rewriteFreeModelResponse(response, resolvedModel);

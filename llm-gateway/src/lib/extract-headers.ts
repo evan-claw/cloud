@@ -15,7 +15,11 @@ export type FraudDetectionHeaders = {
   http_user_agent: string | null;
 };
 
-const parseFloatOrNull = (value: unknown) => (typeof value === 'string' ? parseFloat(value) : null);
+function parseFloatOrNull(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const n = parseFloat(value);
+  return Number.isNaN(n) ? null : n;
+}
 
 const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 

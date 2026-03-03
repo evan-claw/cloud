@@ -89,19 +89,9 @@
       "secret_name": "ABUSE_CF_ACCESS_CLIENT_SECRET",
     },
     {
-      "binding": "O11Y_KILO_GATEWAY_CLIENT_SECRET",
-      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
-      "secret_name": "O11Y_KILO_GATEWAY_CLIENT_SECRET",
-    },
-    {
       "binding": "GIGAPOTATO_API_URL",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
       "secret_name": "GIGAPOTATO_API_URL",
-    },
-    {
-      "binding": "OPENROUTER_ORG_ID",
-      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
-      "secret_name": "OPENROUTER_ORG_ID",
     },
     {
       "binding": "ABUSE_SERVICE_URL",

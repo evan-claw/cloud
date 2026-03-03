@@ -1,7 +1,7 @@
 // Tests for background/request-logging: isKiloEmployee guard and DB insert.
 
 import { describe, it, expect, vi } from 'vitest';
-import { runRequestLogging } from '../../src/background/request-logging';
+import { runRequestLogging, KILO_ORGANIZATION_ID } from '../../src/background/request-logging';
 
 function makeDb(
   insertMock = vi.fn().mockReturnValue({
@@ -85,7 +85,7 @@ describe('runRequestLogging', () => {
       responseStream: emptyStream(),
       statusCode: 200,
       user: { id: 'user-1', google_user_email: 'user@random.com' },
-      organizationId: '9d278969-5453-4ae3-a51f-a8d2274a7b56',
+      organizationId: KILO_ORGANIZATION_ID,
       provider: 'openrouter',
       model: 'test-model',
       request: { model: 'test-model', messages: [] },

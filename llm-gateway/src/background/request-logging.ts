@@ -5,8 +5,7 @@ import type { WorkerDb } from '@kilocode/db/client';
 import { api_request_log } from '@kilocode/db/schema';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
 
-// Kilo organization ID
-const KILO_ORGANIZATION_ID = '9d278969-5453-4ae3-a51f-a8d2274a7b56';
+export const KILO_ORGANIZATION_ID = '9d278969-5453-4ae3-a51f-a8d2274a7b56';
 
 type RequestLoggingUser = {
   id?: string;
