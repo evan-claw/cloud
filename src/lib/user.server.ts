@@ -441,11 +441,6 @@ const authOptions: NextAuthOptions = {
 
         // Block new signups from blocked TLDs (existing users can still sign in)
         if (!existingUser && isBlockedTLD(accountInfo.google_user_email)) {
-          sentryLogger('auth', 'warning')(
-            `SECURITY: Blocked TLD signup: ${accountInfo.google_user_email}`,
-            accountInfo
-          );
-
           return redirectUrlForCode(`BLOCKED`, accountInfo.google_user_email);
         }
 

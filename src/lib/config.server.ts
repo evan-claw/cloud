@@ -190,5 +190,8 @@ export const SECURITY_CLEANUP_BETTERSTACK_HEARTBEAT_URL = getEnvVariable(
 // Pipe-delimited list of TLDs to block from new signups, each with a leading dot (e.g. ".shop|.top|.co.uk")
 const blacklistTldsEnv = getEnvVariable('BLACKLIST_TLDS');
 export const BLACKLIST_TLDS = blacklistTldsEnv
-  ? blacklistTldsEnv.split('|').map((tld: string) => tld.trim().toLowerCase())
+  ? blacklistTldsEnv
+      .split('|')
+      .map((tld: string) => tld.trim().toLowerCase())
+      .filter(Boolean)
   : [];
