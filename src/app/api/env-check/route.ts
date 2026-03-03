@@ -21,15 +21,16 @@ type EnvCheckSuccess = {
   deployments: string[];
 };
 
-type MissingKey = {
+type KeyDrift = {
   key: string;
-  missingFrom: string[];
+  missingFrom?: string[];
+  mismatchBetween?: string[];
 };
 
 type EnvCheckDrift = {
   status: 'drift';
   message: string;
-  differences: MissingKey[];
+  differences: KeyDrift[];
 };
 
 type EnvCheckError = {
@@ -38,10 +39,13 @@ type EnvCheckError = {
   failures: { name: string; error: string }[];
 };
 
-async function fetchEnvKeys(
-  deployment: Deployment,
-  secret: string
-): Promise<{ name: string; keys: Set<string> | null; error: string | null }> {
+type FetchResult = {
+  name: string;
+  entries: Record<string, string> | null;
+  error: string | null;
+};
+
+async function fetchEnvKeys(deployment: Deployment, secret: string): Promise<FetchResult> {
   try {
     const response = await fetch(`${deployment.url}/api/env-keys`, {
       headers: { Authorization: `Bearer ${secret}` },
@@ -50,26 +54,26 @@ async function fetchEnvKeys(
     if (!response.ok) {
       return {
         name: deployment.name,
-        keys: null,
+        entries: null,
         error: `HTTP ${response.status}: ${response.statusText}`,
       };
     }
 
-    const keys: string[] = await response.json();
-    return { name: deployment.name, keys: new Set(keys), error: null };
+    const entries: Record<string, string> = await response.json();
+    return { name: deployment.name, entries, error: null };
   } catch (err) {
     return {
       name: deployment.name,
-      keys: null,
+      entries: null,
       error: err instanceof Error ? err.message : 'Unknown error',
     };
   }
 }
 
 /**
- * Fetches /api/env-keys from all three deployments, compares the key sets,
- * and reports any drift. Protected by ENV_CHECK_SECRET bearer token.
- * Never exposes actual env values — only key names and presence/absence.
+ * Fetches /api/env-keys from all three deployments, compares keys and hashed
+ * values, and reports any drift. Protected by ENV_CHECK_SECRET bearer token.
+ * Never exposes actual env values or hashes — only key names and drift type.
  */
 export async function GET(
   request: NextRequest
@@ -106,22 +110,30 @@ export async function GET(
   // Collect the union of all keys across all deployments
   const allKeys = new Set<string>();
   for (const result of results) {
-    if (result.keys) {
-      for (const key of result.keys) {
+    if (result.entries) {
+      for (const key of Object.keys(result.entries)) {
         allKeys.add(key);
       }
     }
   }
 
-  // Find keys missing from any deployment
-  const differences: MissingKey[] = [];
+  // Find keys missing from any deployment, or with mismatched hashed values
+  const differences: KeyDrift[] = [];
   for (const key of [...allKeys].sort()) {
+    const presentIn = results.filter(r => r.entries && key in r.entries);
     const missingFrom = results
-      .filter(r => r.keys && !r.keys.has(key))
+      .filter(r => r.entries && !(key in r.entries))
       .map(r => r.name);
 
     if (missingFrom.length > 0) {
       differences.push({ key, missingFrom });
+    } else if (presentIn.length > 1) {
+      // All deployments have this key — check whether hashed values match
+      const hashes = presentIn.map(r => r.entries?.[key]);
+      const unique = new Set(hashes);
+      if (unique.size > 1) {
+        differences.push({ key, mismatchBetween: presentIn.map(r => r.name) });
+      }
     }
   }
 
@@ -130,7 +142,7 @@ export async function GET(
   if (differences.length === 0) {
     return NextResponse.json({
       status: 'ok' as const,
-      message: 'All deployments have matching env var keys',
+      message: 'All deployments have matching env vars',
       deployments: deploymentNames,
     });
   }
@@ -138,7 +150,7 @@ export async function GET(
   return NextResponse.json(
     {
       status: 'drift' as const,
-      message: `Found ${differences.length} env var key(s) with drift across deployments`,
+      message: `Found ${differences.length} env var(s) with drift across deployments`,
       differences,
     },
     { status: 200 }
