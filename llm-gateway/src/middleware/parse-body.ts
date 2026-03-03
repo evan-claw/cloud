@@ -8,7 +8,10 @@ export const parseBodyMiddleware = createMiddleware<HonoContext>(async (c, next)
   try {
     body = await c.req.json<OpenRouterChatCompletionRequest>();
   } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+    return c.json(
+      { error: 'Invalid request', message: 'Could not parse request body. Please ensure it is valid JSON.' },
+      400
+    );
   }
 
   // OpenRouter-specific field that we do not support
