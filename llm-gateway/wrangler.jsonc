@@ -38,9 +38,8 @@
   ],
   "services": [
     {
-      // O11Y observability service — receives API metrics via internal service binding
       "binding": "O11Y",
-      "service": "cloudflare-o11y",
+      "service": "o11y",
     },
   ],
   "secrets_store_secrets": [

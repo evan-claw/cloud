@@ -21,7 +21,11 @@ import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
 import { classifyAbuse, reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { getWorkerDb } from '@kilocode/db/client';
-import { runUsageAccounting, type MicrodollarUsageContext } from '../background/usage-accounting';
+import {
+  runUsageAccounting,
+  type MicrodollarUsageContext,
+  type MicrodollarUsageStats,
+} from '../background/usage-accounting';
 import { runApiMetrics } from '../background/api-metrics';
 import { runRequestLogging } from '../background/request-logging';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
@@ -141,9 +145,7 @@ function scheduleBackgroundTasks(
   } = params;
 
   // ── Usage accounting ───────────────────────────────────────────────────────
-  const usageTask: Promise<
-    import('../background/usage-accounting').MicrodollarUsageStats | null | undefined
-  > =
+  const usageTask: Promise<MicrodollarUsageStats | null | undefined> =
     accountingStream && !isAnon
       ? withTimeout(
           (async () => {
@@ -169,8 +171,7 @@ function scheduleBackgroundTasks(
               editor_name: editorName,
               machine_id: machineId,
               user_byok: userByok,
-              has_tools:
-                Array.isArray(requestBody.tools) && (requestBody.tools as unknown[]).length > 0,
+              has_tools: Array.isArray(requestBody.tools) && requestBody.tools.length > 0,
               botId,
               tokenSource,
               abuse_request_id: abuseRequestId,
@@ -184,48 +185,50 @@ function scheduleBackgroundTasks(
           })(),
           BACKGROUND_TASK_TIMEOUT_MS
         )
-      : Promise.resolve(null);
+      : (accountingStream?.cancel(), Promise.resolve(null));
 
   // ── API metrics ────────────────────────────────────────────────────────────
-  const metricsTask = metricsStream
-    ? withTimeout(
-        (async () => {
-          const toolsAvailable = Array.isArray(requestBody.tools)
-            ? (requestBody.tools as Array<{ type?: string; function?: { name?: string } }>).map(
-                t => {
-                  if (t.type === 'function') {
-                    const name = typeof t.function?.name === 'string' ? t.function.name.trim() : '';
-                    return name ? `function:${name}` : 'function:unknown';
+  const metricsTask =
+    metricsStream && o11y
+      ? withTimeout(
+          (async () => {
+            const toolsAvailable = Array.isArray(requestBody.tools)
+              ? (requestBody.tools as Array<{ type?: string; function?: { name?: string } }>).map(
+                  t => {
+                    if (t.type === 'function') {
+                      const name =
+                        typeof t.function?.name === 'string' ? t.function.name.trim() : '';
+                      return name ? `function:${name}` : 'function:unknown';
+                    }
+                    return 'unknown:unknown';
                   }
-                  return 'unknown:unknown';
-                }
-              )
-            : [];
+                )
+              : [];
 
-          await runApiMetrics(
-            o11y,
-            {
-              kiloUserId: user.id,
-              organizationId,
-              isAnonymous: isAnon,
-              isStreaming,
-              userByok,
-              mode: modeHeader ?? undefined,
-              provider,
-              requestedModel: requestBody.model ?? resolvedModel,
-              resolvedModel,
-              toolsAvailable,
-              toolsUsed: [],
-              ttfbMs: 0,
-              statusCode: upstreamStatusCode,
-            },
-            metricsStream,
-            requestStartedAt
-          );
-        })(),
-        BACKGROUND_TASK_TIMEOUT_MS
-      )
-    : Promise.resolve(undefined);
+            await runApiMetrics(
+              o11y,
+              {
+                kiloUserId: user.id,
+                organizationId,
+                isAnonymous: isAnon,
+                isStreaming,
+                userByok,
+                mode: modeHeader ?? undefined,
+                provider,
+                requestedModel: requestBody.model ?? resolvedModel,
+                resolvedModel,
+                toolsAvailable,
+                toolsUsed: [],
+                ttfbMs: 0,
+                statusCode: upstreamStatusCode,
+              },
+              metricsStream,
+              requestStartedAt
+            );
+          })(),
+          BACKGROUND_TASK_TIMEOUT_MS
+        )
+      : (metricsStream?.cancel(), Promise.resolve(undefined));
 
   // ── Request logging (Kilo employees only) ──────────────────────────────────
   const loggingTask =
@@ -246,7 +249,7 @@ function scheduleBackgroundTasks(
           })(),
           BACKGROUND_TASK_TIMEOUT_MS
         )
-      : Promise.resolve(undefined);
+      : (loggingStream?.cancel(), Promise.resolve(undefined));
 
   // ── Abuse cost (depends on usage accounting result) ────────────────────────
   const abuseCostTask = withTimeout(
@@ -454,7 +457,18 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   if (shouldRewrite) {
     if (response.body) {
-      const [clientStream, metricsStream] = response.body.tee();
+      const needsMetrics = !!bgCommon.o11y;
+      let clientStream: ReadableStream;
+      let metricsStream: ReadableStream | null = null;
+
+      if (needsMetrics) {
+        const [ms, cs] = response.body.tee();
+        metricsStream = ms;
+        clientStream = cs;
+      } else {
+        clientStream = response.body;
+      }
+
       scheduleBackgroundTasks(c.executionCtx, {
         ...bgCommon,
         accountingStream: null, // free model — no cost accounting
@@ -466,19 +480,59 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     return rewriteFreeModelResponse(response, resolvedModel);
   }
 
-  // ── Pass-through with full background tasks ───────────────────────────────────
+  // ── Pass-through with background tasks (buffer-based, no .tee()) ────────────
   if (response.body) {
-    // Tee body into: client + accounting + metrics + logging (4 consumers)
-    const [clientStream, bg1] = response.body.tee();
-    const [accountingStream, bg2] = bg1.tee();
-    const [metricsStream, loggingStream] = bg2.tee();
+    // Instead of .tee() (which couples consumer speeds via backpressure and stalls
+    // the client when background consumers are slow), pipe the upstream body through
+    // a TransformStream that forwards every chunk to the client immediately while
+    // accumulating a copy. After the stream completes, background tasks replay the
+    // buffered data without any coupling to client delivery speed.
+    const chunks: Uint8Array[] = [];
+    const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
 
-    scheduleBackgroundTasks(c.executionCtx, {
-      ...bgCommon,
-      accountingStream,
-      metricsStream,
-      loggingStream,
-    });
+    const pipePromise = (async () => {
+      // response.body is guaranteed non-null by the outer `if (response.body)` check.
+      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+      try {
+        for (;;) {
+          const result = await reader.read();
+          if (result.done) break;
+          chunks.push(result.value);
+          await writer.write(result.value);
+        }
+        await writer.close();
+      } catch (err) {
+        await writer.abort(err).catch(() => {});
+        throw err;
+      }
+    })();
+
+    // Build a ReadableStream from the buffered chunks (usable after pipePromise resolves).
+    function replayStream(): ReadableStream<Uint8Array> {
+      return new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+    }
+
+    // Background tasks run after the stream completes (all chunks buffered).
+    c.executionCtx.waitUntil(
+      pipePromise
+        .then(() => {
+          scheduleBackgroundTasks(c.executionCtx, {
+            ...bgCommon,
+            accountingStream: !isAnon ? replayStream() : null,
+            metricsStream: bgCommon.o11y ? replayStream() : null,
+            loggingStream: !isAnon ? replayStream() : null,
+          });
+        })
+        .catch(err => {
+          console.error('[proxy] Stream pipe error', err);
+        })
+    );
 
     return wrapResponse(new Response(clientStream, response));
   }
