@@ -97,8 +97,12 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   });
 
   if (restrictionError) {
+    // The reference modelNotAllowedResponse() uses distinct error/message values.
     return c.json(
-      { error: restrictionError.message, message: restrictionError.message },
+      {
+        error: restrictionError.message,
+        message: 'The requested model is not allowed for your team.',
+      },
       restrictionError.status
     );
   }

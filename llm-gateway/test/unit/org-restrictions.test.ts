@@ -102,4 +102,16 @@ describe('checkOrganizationModelRestrictions', () => {
     expect(result.error).not.toBeNull();
     expect(result.error?.status).toBe(404);
   });
+
+  it('restriction error message matches reference modelNotAllowedResponse error field', () => {
+    const result = checkOrganizationModelRestrictions({
+      modelId: 'anthropic/claude-3-opus',
+      settings: { model_allow_list: ['openai/gpt-4'] },
+      organizationPlan: 'enterprise',
+    });
+    // The middleware uses restrictionError.message as the `error` field and
+    // 'The requested model is not allowed for your team.' as the `message` field,
+    // matching the reference modelNotAllowedResponse() which has distinct values.
+    expect(result.error?.message).toBe('Model not allowed for your team.');
+  });
 });
