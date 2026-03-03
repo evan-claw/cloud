@@ -42,8 +42,8 @@ export default function EarlybirdPage() {
 
           <CardContent className="relative flex flex-col gap-4">
             <p className="text-muted-foreground leading-relaxed">
-              To thank those of you who have been early adopters, we&apos;re offering the first 1,000
-              users 6 months of KiloClaw compute at 50% off. That&apos;s{' '}
+              To thank those of you who have been early adopters, we&apos;re offering the first
+              1,000 users 6 months of KiloClaw compute at 50% off. That&apos;s{' '}
               <span className="text-brand-primary font-semibold">$150 total</span> &mdash; works out
               to <span className="text-brand-primary font-semibold">$25/month</span> instead of $49.
             </p>
