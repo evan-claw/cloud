@@ -1,6 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import type { HonoContext } from '../types/hono';
-import { isKiloFreeModel, isFreeModel } from '../lib/models';
+import { isKiloFreeModel } from '../lib/models';
 import { isAnonymousContext } from '../lib/anonymous';
 import { incrementFreeModelUsage, incrementPromotionUsage } from '../lib/rate-limit';
 import { getWorkerDb } from '@kilocode/db/client';
@@ -14,7 +14,9 @@ import { free_model_usage } from '@kilocode/db/schema';
 export const logFreeModelUsageMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const resolvedModel = c.get('resolvedModel');
 
-  if (!isFreeModel(resolvedModel)) {
+  // Only log for Kilo-hosted free models, matching the reference implementation.
+  // OpenRouter :free suffix models are not tracked in free_model_usage.
+  if (!isKiloFreeModel(resolvedModel)) {
     return next();
   }
 
