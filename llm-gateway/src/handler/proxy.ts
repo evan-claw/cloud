@@ -22,6 +22,7 @@ import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions'
 import { getWorkerDb } from '@kilocode/db/client';
 import { scheduleBackgroundTasks } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
+import { captureException } from '../lib/sentry';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
@@ -154,7 +155,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   // ── 402 → 503 conversion (non-BYOK) ─────────────────────────────────────────
   if (response.status === 402 && !userByok) {
-    console.error(`${provider.id} returned 402 Payment Required`, {
+    captureException(new Error(`${provider.id} returned 402 Payment Required`), {
       kiloUserId: user.id,
       model: requestBody.model,
       organizationId,
@@ -176,13 +177,18 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       responseClone
         .text()
         .then(body => {
-          console[logLevel](`${provider.id} returned error ${response.status}`, {
+          const errorMessage = `${provider.id} returned error ${response.status}`;
+          const extra = {
             kiloUserId: user.id,
             model: requestBody.model,
             organizationId,
             status: response.status,
             first4k: body.slice(0, 4096),
-          });
+          };
+          console[logLevel](errorMessage, extra);
+          if (response.status >= 500) {
+            captureException(new Error(errorMessage), extra);
+          }
         })
         .catch(() => {
           /* ignore */

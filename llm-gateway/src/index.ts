@@ -1,4 +1,6 @@
 export { RateLimitDO } from './dos/RateLimitDO';
+import * as Sentry from '@sentry/cloudflare';
+import { SENTRY_DSN } from './lib/sentry';
 import { Hono } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import type { HonoContext } from './types/hono';
@@ -16,6 +18,7 @@ import { requestValidationMiddleware } from './middleware/request-validation';
 import { balanceAndOrgCheckMiddleware } from './middleware/balance-and-org';
 import { requestTransformMiddleware } from './middleware/request-transform';
 import { proxyHandler } from './handler/proxy';
+import { captureException } from './lib/sentry';
 
 const app = new Hono<HonoContext>();
 
@@ -51,9 +54,14 @@ app.notFound(c => {
 
 app.onError((err, c) => {
   console.error('[llm-gateway] Unhandled error', err);
+  captureException(err);
   return c.json({ error: 'Internal server error' }, 500);
 });
 
-export default {
-  fetch: app.fetch,
-};
+export default Sentry.withSentry(
+  (_env: Env) => ({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 0, // errors only — no performance tracing
+  }),
+  { fetch: app.fetch }
+);

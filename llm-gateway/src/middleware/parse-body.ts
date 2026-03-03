@@ -2,12 +2,14 @@ import { createMiddleware } from 'hono/factory';
 import type { HonoContext } from '../types/hono';
 import { validateFeatureHeader, FEATURE_HEADER } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
+import { captureException } from '../lib/sentry';
 
 export const parseBodyMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   let body: OpenRouterChatCompletionRequest;
   try {
     body = await c.req.json<OpenRouterChatCompletionRequest>();
-  } catch {
+  } catch (err) {
+    captureException(err, { source: 'llm-gateway-parse-body' });
     return c.json(
       { error: 'Invalid request', message: 'Could not parse request body. Please ensure it is valid JSON.' },
       400
