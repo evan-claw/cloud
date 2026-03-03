@@ -23,7 +23,7 @@
  *     pnpm script src/scripts/d2026-03-03_migrate-promo-users-to-minimax.ts --run-actually
  */
 
-import { db, closeAllDrizzleConnections } from '@/lib/drizzle';
+import { db, closeAllDrizzleConnections, type DrizzleTransaction } from '@/lib/drizzle';
 import {
   agent_configs,
   kilocode_users,
@@ -31,7 +31,7 @@ import {
   organizations,
   platform_integrations,
 } from '@kilocode/db/schema';
-import { sql, and, eq, lt, isNull, isNotNull } from 'drizzle-orm';
+import { sql, and, eq, inArray, lt, isNull, isNotNull } from 'drizzle-orm';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import {
   REVIEW_PROMO_START,
@@ -42,6 +42,8 @@ import {
 const TARGET_MODEL = minimax_m25_free_model.public_id; // 'minimax/minimax-m2.5:free'
 const MIN_BALANCE_MUSD = 1_000_000; // $1 in microdollars
 const isDryRun = !process.argv.includes('--run-actually');
+const REVIEW_PLATFORMS = ['github', 'gitlab'] as const;
+type ReviewPlatform = (typeof REVIEW_PLATFORMS)[number];
 
 // ── Phase 1: Identify depleted promo users ─────────────────────────────────
 
@@ -51,6 +53,8 @@ type DepletedOwner = {
   label: string; // email or org name for logging
   balance_usd: number;
 };
+
+type DbOrTx = typeof db | DrizzleTransaction;
 
 async function findDepletedPromoOwners(): Promise<DepletedOwner[]> {
   const owners: DepletedOwner[] = [];
@@ -137,20 +141,44 @@ type UpdateResult = {
   inserted: number;
   skipped: number;
   details: string[];
+  migratedConfigIds: string[];
 };
 
-async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResult> {
-  const result: UpdateResult = { updated: 0, inserted: 0, skipped: 0, details: [] };
+function configAsRecord(config: unknown): Record<string, unknown> | null {
+  if (!isRecord(config)) {
+    return null;
+  }
 
+  return config;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getModelSlug(config: unknown): string | null {
+  const configRecord = configAsRecord(config);
+  if (!configRecord) {
+    return null;
+  }
+
+  const maybeModel = configRecord.model_slug;
+  return typeof maybeModel === 'string' ? maybeModel : null;
+}
+
+async function migrateReviewModelsForDb(
+  dbOrTx: DbOrTx,
+  owners: DepletedOwner[],
+  result: UpdateResult
+): Promise<void> {
   for (const owner of owners) {
     const ownerCondition =
       owner.type === 'org'
         ? eq(agent_configs.owned_by_organization_id, owner.id)
         : eq(agent_configs.owned_by_user_id, owner.id);
 
-    // Check both github and gitlab platforms
-    for (const platform of ['github', 'gitlab']) {
-      const [existing] = await db
+    for (const platform of REVIEW_PLATFORMS) {
+      const [existing] = await dbOrTx
         .select({
           id: agent_configs.id,
           config: agent_configs.config,
@@ -166,8 +194,7 @@ async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResul
         .limit(1);
 
       if (existing) {
-        const config = existing.config as Record<string, unknown>;
-        const currentModel = config.model_slug;
+        const currentModel = getModelSlug(existing.config);
 
         if (currentModel !== REVIEW_PROMO_MODEL) {
           result.skipped++;
@@ -177,27 +204,32 @@ async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResul
           continue;
         }
 
-        // Update existing config
+        const currentConfig = configAsRecord(existing.config);
+        if (!currentConfig) {
+          result.skipped++;
+          result.details.push(
+            `  [SKIP] ${owner.type}:${owner.label} (${platform}) — config is not an object`
+          );
+          continue;
+        }
+
         if (!isDryRun) {
-          await db
+          await dbOrTx
             .update(agent_configs)
             .set({
-              config: { ...config, model_slug: TARGET_MODEL },
-              updated_at: new Date().toISOString(),
+              config: { ...currentConfig, model_slug: TARGET_MODEL },
             })
             .where(eq(agent_configs.id, existing.id));
         }
         result.updated++;
+        result.migratedConfigIds.push(existing.id);
         result.details.push(
           `  [UPDATE] ${owner.type}:${owner.label} (${platform}) — $${owner.balance_usd.toFixed(2)} balance`
         );
       } else {
-        // No agent_configs row — they'd fall back to DEFAULT_CODE_REVIEW_MODEL (Sonnet 4.6).
-        // Only insert if the owner actually has a platform_integration for this platform,
-        // otherwise they don't have reviews enabled at all.
-        const hasIntegration = await ownerHasIntegration(owner, platform);
+        const hasIntegration = await ownerHasIntegration(dbOrTx, owner, platform);
         if (!hasIntegration) {
-          continue; // no integration for this platform, nothing to do
+          continue;
         }
 
         if (!isDryRun) {
@@ -212,19 +244,26 @@ async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResul
                   owned_by_user_id: owner.id,
                 };
 
-          await db.insert(agent_configs).values({
-            ...values,
-            agent_type: 'code_review',
-            platform,
-            config: {
-              review_style: 'balanced',
-              focus_areas: [],
-              max_review_time_minutes: 10,
-              model_slug: TARGET_MODEL,
-            },
-            is_enabled: true,
-            created_by: 'script:migrate-promo-users-to-minimax',
-          });
+          const [inserted] = await dbOrTx
+            .insert(agent_configs)
+            .values({
+              ...values,
+              agent_type: 'code_review',
+              platform,
+              config: {
+                review_style: 'balanced',
+                focus_areas: [],
+                max_review_time_minutes: 10,
+                model_slug: TARGET_MODEL,
+              },
+              is_enabled: true,
+              created_by: 'script:migrate-promo-users-to-minimax',
+            })
+            .returning({ id: agent_configs.id });
+
+          if (inserted) {
+            result.migratedConfigIds.push(inserted.id);
+          }
         }
         result.inserted++;
         result.details.push(
@@ -233,17 +272,40 @@ async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResul
       }
     }
   }
+}
+
+async function migrateReviewModels(owners: DepletedOwner[]): Promise<UpdateResult> {
+  const result: UpdateResult = {
+    updated: 0,
+    inserted: 0,
+    skipped: 0,
+    details: [],
+    migratedConfigIds: [],
+  };
+
+  if (isDryRun) {
+    await migrateReviewModelsForDb(db, owners, result);
+    return result;
+  }
+
+  await db.transaction(async tx => {
+    await migrateReviewModelsForDb(tx, owners, result);
+  });
 
   return result;
 }
 
-async function ownerHasIntegration(owner: DepletedOwner, platform: string): Promise<boolean> {
+async function ownerHasIntegration(
+  dbOrTx: DbOrTx,
+  owner: DepletedOwner,
+  platform: ReviewPlatform
+): Promise<boolean> {
   const ownerCondition =
     owner.type === 'org'
       ? eq(platform_integrations.owned_by_organization_id, owner.id)
       : eq(platform_integrations.owned_by_user_id, owner.id);
 
-  const [row] = await db
+  const [row] = await dbOrTx
     .select({ id: platform_integrations.id })
     .from(platform_integrations)
     .where(and(ownerCondition, eq(platform_integrations.platform, platform)))
@@ -254,42 +316,54 @@ async function ownerHasIntegration(owner: DepletedOwner, platform: string): Prom
 
 // ── Phase 3: Verification ──────────────────────────────────────────────────
 
-async function verify(owners: DepletedOwner[]): Promise<void> {
-  const userIds = owners.filter(o => o.type === 'user').map(o => o.id);
-  const orgIds = owners.filter(o => o.type === 'org').map(o => o.id);
-
-  const allIds = [...userIds, ...orgIds];
-  if (allIds.length === 0) return;
+async function verify(migratedConfigIds: string[]): Promise<void> {
+  const uniqueConfigIds = [...new Set(migratedConfigIds)];
+  if (uniqueConfigIds.length === 0) {
+    console.log('Verification: no configs were updated or inserted');
+    return;
+  }
 
   const configs = await db
     .select({
+      id: agent_configs.id,
       owned_by_user_id: agent_configs.owned_by_user_id,
       owned_by_organization_id: agent_configs.owned_by_organization_id,
       platform: agent_configs.platform,
       config: agent_configs.config,
     })
     .from(agent_configs)
-    .where(
-      and(
-        eq(agent_configs.agent_type, 'code_review'),
-        sql`(${agent_configs.owned_by_user_id} = ANY(${userIds}) OR ${agent_configs.owned_by_organization_id} = ANY(${orgIds}))`
-      )
-    );
+    .where(inArray(agent_configs.id, uniqueConfigIds));
 
   let onTarget = 0;
   let notOnTarget = 0;
+  const foundConfigIds = new Set<string>();
+
   for (const c of configs) {
-    const model = (c.config as Record<string, unknown>).model_slug;
+    foundConfigIds.add(c.id);
+    const model = getModelSlug(c.config);
+
     if (model === TARGET_MODEL) {
       onTarget++;
     } else {
       notOnTarget++;
       console.log(
-        `  [WARN] ${c.owned_by_user_id ?? c.owned_by_organization_id} (${c.platform}) still on '${model}'`
+        `  [WARN] ${c.owned_by_user_id ?? c.owned_by_organization_id} (${c.platform}) still on '${model ?? '(missing model_slug)'}'`
       );
     }
   }
-  console.log(`Verification: ${onTarget} configs on MiniMax, ${notOnTarget} not on MiniMax`);
+
+  const missingConfigCount = uniqueConfigIds.filter(
+    configId => !foundConfigIds.has(configId)
+  ).length;
+  if (missingConfigCount > 0) {
+    console.log(
+      `  [WARN] ${missingConfigCount} migrated configs were not found during verification`
+    );
+  }
+
+  console.log(
+    `Verification: ${onTarget} configs on MiniMax, ${notOnTarget} not on MiniMax, ${missingConfigCount} missing`
+  );
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
@@ -329,7 +403,7 @@ async function run() {
   // Phase 3
   if (!isDryRun) {
     console.log('Phase 3: Verification...');
-    await verify(owners);
+    await verify(result.migratedConfigIds);
   }
 }
 
