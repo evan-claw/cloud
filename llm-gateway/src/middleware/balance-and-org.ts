@@ -80,9 +80,12 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
     // Mirror usageLimitExceededResponse(): branch on payment history to choose title/message.
     const isReturningUser = await hasUserMadePaidTopup(db, user.id);
     const title = isReturningUser ? 'Low Credit Warning!' : 'Paid Model - Credits Required';
+    // The reference calls FIRST_TOPUP_BONUS_AMOUNT() which returns 20 (the XL promo
+    // deadline of 2025-10-14 has passed). If that constant ever changes, update here.
+    const FIRST_TOPUP_BONUS = 20;
     const message = isReturningUser
       ? 'Add credits to continue, or switch to a free model'
-      : 'This is a paid model. To use paid models, you need to add credits.';
+      : `This is a paid model. To use paid models, you need to add credits. Get $${FIRST_TOPUP_BONUS} free on your first topup!`;
     return c.json(
       { error: { title, message, balance, buyCreditsUrl: 'https://app.kilo.ai/profile' } },
       402
