@@ -3380,7 +3380,8 @@ export const kiloclaw_earlybird_purchases = pgTable('kiloclaw_earlybird_purchase
     .notNull()
     .references(() => kilocode_users.id, { onDelete: 'cascade' })
     .unique(),
-  stripe_charge_id: text().notNull().unique(),
+  stripe_charge_id: text().unique(),
+  manual_payment_id: text().unique(),
   amount_cents: integer().notNull(),
   created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 });

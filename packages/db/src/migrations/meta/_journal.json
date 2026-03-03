@@ -288,6 +288,13 @@
       "when": 1772570847749,
       "tag": "0040_chief_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1772575808628,
+      "tag": "0041_earlybird_manual_payment",
+      "breakpoints": true
     }
   ]
 }
