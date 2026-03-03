@@ -127,10 +127,7 @@ type Tx = Parameters<WorkerDb['transaction']>[0] extends (tx: infer T) => unknow
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
-function getStatusPriority(row: {
-  status: string;
-  cancelAtPeriodEnd: boolean;
-}): number {
+function getStatusPriority(row: { status: string; cancelAtPeriodEnd: boolean }): number {
   if (row.status === 'active' && !row.cancelAtPeriodEnd) return 0;
   if (row.status === 'active' && row.cancelAtPeriodEnd) return 1;
   if (row.status === 'trialing') return 2;
@@ -170,7 +167,8 @@ async function getKiloPassStateForUser(
     return bMs - aMs;
   });
 
-  const s = sorted[0]!;
+  const s = sorted[0];
+  if (!s) return null;
   return {
     subscriptionId: s.subscriptionId,
     tier: s.tier,
@@ -310,8 +308,9 @@ function computeYearlyIssueMonth(
   const anchor = parseIso(nextYearlyIssueAtIso) ?? parseIso(startedAtIso);
   if (!anchor) return null;
   // currentPeriodStart = nextYearlyIssueAt - 1 month (or startedAt)
-  const currentPeriodStart =
-    nextYearlyIssueAtIso ? addMonths(new Date(nextYearlyIssueAtIso), -1) : anchor;
+  const currentPeriodStart = nextYearlyIssueAtIso
+    ? addMonths(new Date(nextYearlyIssueAtIso), -1)
+    : anchor;
   return computeIssueMonth(currentPeriodStart);
 }
 
@@ -488,7 +487,7 @@ async function maybeIssueBonusFromUsageThreshold(
 export async function maybeIssueKiloPassBonusFromUsageThreshold(
   db: WorkerDb,
   kiloUserId: string,
-  nowIso: string
+  _nowIso: string
 ): Promise<void> {
   await db.transaction(async tx => {
     // Lock the user row to prevent concurrent issuance

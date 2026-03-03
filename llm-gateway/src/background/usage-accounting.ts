@@ -308,7 +308,7 @@ async function fetchGeneration(
       });
       return null;
     }
-    return (await response.json()) as OpenRouterGeneration;
+    return await response.json();
   } catch (err) {
     console.warn('fetchGeneration: fetch error', { messageId, err });
     return null;
@@ -677,9 +677,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
 
   const newMicrodollarsUsed = Number(result.rows[0].new_microdollars_used);
   const kiloPassThreshold =
-    result.rows[0].kilo_pass_threshold == null
-      ? null
-      : Number(result.rows[0].kilo_pass_threshold);
+    result.rows[0].kilo_pass_threshold == null ? null : Number(result.rows[0].kilo_pass_threshold);
 
   return { newMicrodollarsUsed, kiloPassThreshold };
 }
@@ -806,11 +804,7 @@ export async function runUsageAccounting(
 
   // Refetch accurate cost/token data from the provider's generation endpoint when available.
   // OpenRouter's /generation?id= gives more precise token counts and cost data than the SSE stream.
-  if (
-    usageContext.providerHasGenerationEndpoint &&
-    usageStats.messageId &&
-    !usageStats.hasError
-  ) {
+  if (usageContext.providerHasGenerationEndpoint && usageStats.messageId && !usageStats.hasError) {
     try {
       const generation = await fetchGeneration(
         usageContext.providerApiUrl,
@@ -925,8 +919,10 @@ export async function runUsageAccounting(
     market_cost: usageStats.market_cost ?? null,
   };
 
-  let balanceUpdateResult: { newMicrodollarsUsed: number; kiloPassThreshold: number | null } | null =
-    null;
+  let balanceUpdateResult: {
+    newMicrodollarsUsed: number;
+    kiloPassThreshold: number | null;
+  } | null = null;
   try {
     let attempt = 0;
     while (true) {
@@ -951,9 +947,7 @@ export async function runUsageAccounting(
 
   // KiloPass: trigger bonus credit issuance if usage threshold is crossed.
   if (balanceUpdateResult) {
-    const effectiveThreshold = getEffectiveKiloPassThreshold(
-      balanceUpdateResult.kiloPassThreshold
-    );
+    const effectiveThreshold = getEffectiveKiloPassThreshold(balanceUpdateResult.kiloPassThreshold);
     if (
       effectiveThreshold !== null &&
       balanceUpdateResult.newMicrodollarsUsed >= effectiveThreshold

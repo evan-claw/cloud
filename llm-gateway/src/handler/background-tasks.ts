@@ -12,7 +12,7 @@ import { runRequestLogging } from '../background/request-logging';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
 import { normalizeModelId } from '../lib/models';
-import { getToolsAvailable, getToolsUsed } from '../background/api-metrics';
+import { getToolsAvailable, type getToolsUsed } from '../background/api-metrics';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';

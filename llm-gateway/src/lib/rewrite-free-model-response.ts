@@ -69,7 +69,7 @@ export async function rewriteFreeModelResponse(
       choices?: Array<{ message?: MessageWithReasoning }>;
       usage?: OpenRouterUsage;
     };
-    const json = (await response.json()) as JsonCompletion;
+    const json: JsonCompletion = await response.json();
     if (json.model) json.model = model;
 
     const message = json.choices?.[0]?.message;
