@@ -1,15 +1,11 @@
-import {
-  ReasoningEffortSchema,
-  type ModelSettings,
-  type OpenCodeSettings,
-  type VersionedSettings,
-} from '@/lib/organizations/model-settings';
 import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { giga_potato_model, giga_potato_thinking_model } from '@/lib/providers/gigapotato';
 import { isGemini3Model, isGeminiModel } from '@/lib/providers/google';
 import { isMoonshotModel } from '@/lib/providers/moonshotai';
 import { isOpenAiModel } from '@/lib/providers/openai';
 import { isZaiModel } from '@/lib/providers/zai';
+import type { ModelSettings, OpenCodeSettings, VersionedSettings } from '@kilocode/db/schema-types';
+import { ReasoningEffortSchema } from '@kilocode/db/schema-types';
 
 export function getModelSettings(model: string): ModelSettings | undefined {
   if (isOpenAiModel(model)) {
