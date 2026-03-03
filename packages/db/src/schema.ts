@@ -3367,3 +3367,22 @@ export const kiloclaw_version_pins = pgTable('kiloclaw_version_pins', {
 });
 
 export type KiloClawVersionPin = typeof kiloclaw_version_pins.$inferSelect;
+
+// KiloClaw Early Bird Purchases — records one-time earlybird payments.
+// Unique on user_id enforces at most one purchase per user.
+// Unique on stripe_charge_id provides webhook idempotency.
+export const kiloclaw_earlybird_purchases = pgTable('kiloclaw_earlybird_purchases', {
+  id: uuid()
+    .default(sql`gen_random_uuid()`)
+    .primaryKey()
+    .notNull(),
+  user_id: text()
+    .notNull()
+    .references(() => kilocode_users.id, { onDelete: 'cascade' })
+    .unique(),
+  stripe_charge_id: text().notNull().unique(),
+  amount_cents: integer().notNull(),
+  created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+});
+
+export type KiloClawEarlybirdPurchase = typeof kiloclaw_earlybird_purchases.$inferSelect;

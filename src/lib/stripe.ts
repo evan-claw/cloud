@@ -11,6 +11,7 @@ import {
   kilocode_users,
   auto_top_up_configs,
   organizations,
+  kiloclaw_earlybird_purchases,
 } from '@kilocode/db/schema';
 import { and, eq, inArray, isNull, ne, not, or, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
@@ -446,8 +447,7 @@ export async function handleSuccessfulChargeWithPayment(
     } else if (isAutoTopUpSetup) {
       await handleAutoTopUpSetup(user, paymentIntent, creditAmountInCents, config);
     } else if (isKiloclawEarlybird) {
-      // KiloClaw earlybird purchase - handled by separate flow, not a credit top-up
-      logExceptInTest(`Skipping kiloclaw-earlybird charge ${charge.id} - handled separately`);
+      await recordKiloclawEarlybirdPurchase(user, charge);
     } else {
       // Unknown charge type - log warning but don't process
       warnExceptInTest(
@@ -467,6 +467,19 @@ export async function handleSuccessfulChargeWithPayment(
       ...config,
     });
   }
+}
+
+async function recordKiloclawEarlybirdPurchase(user: User, charge: Stripe.Charge) {
+  await db
+    .insert(kiloclaw_earlybird_purchases)
+    .values({
+      user_id: user.id,
+      stripe_charge_id: charge.id,
+      amount_cents: charge.amount,
+    })
+    .onConflictDoNothing();
+
+  logExceptInTest(`Recorded kiloclaw-earlybird purchase for user ${user.id}, charge ${charge.id}`);
 }
 
 export async function getStripeInvoices(

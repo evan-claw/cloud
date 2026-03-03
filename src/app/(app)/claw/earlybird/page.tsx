@@ -1,14 +1,17 @@
 'use client';
 
 import { useTRPC } from '@/lib/trpc/utils';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { PageLayout } from '@/components/PageLayout';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import Link from 'next/link';
 
 export default function EarlybirdPage() {
   const trpc = useTRPC();
+  const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
+  const alreadyPurchased = earlybirdStatus?.purchased === true;
 
   const checkoutMutation = useMutation(
     trpc.kiloclaw.createEarlybirdCheckoutSession.mutationOptions({
@@ -61,16 +64,27 @@ export default function EarlybirdPage() {
           </CardContent>
 
           <CardFooter className="relative pt-2">
-            <Button
-              className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary w-full text-black hover:bg-black hover:ring-2"
-              size="lg"
-              disabled={checkoutMutation.isPending}
-              onClick={() => checkoutMutation.mutate()}
-            >
-              {checkoutMutation.isPending
-                ? 'Redirecting to checkout...'
-                : '🦞 Get the Early Bird Offer'}
-            </Button>
+            {alreadyPurchased ? (
+              <div className="flex w-full flex-col items-center gap-2">
+                <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                  You&apos;ve already purchased the early bird offer.
+                </p>
+                <Button variant="outline" size="lg" className="w-full" asChild>
+                  <Link href="/claw">Back to KiloClaw</Link>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary w-full text-black hover:bg-black hover:ring-2"
+                size="lg"
+                disabled={checkoutMutation.isPending}
+                onClick={() => checkoutMutation.mutate()}
+              >
+                {checkoutMutation.isPending
+                  ? 'Redirecting to checkout...'
+                  : '🦞 Get the Early Bird Offer'}
+              </Button>
+            )}
           </CardFooter>
         </Card>
       </div>

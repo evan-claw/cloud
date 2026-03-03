@@ -29,6 +29,7 @@ import {
   security_findings,
   security_analysis_queue,
   security_analysis_owner_state,
+  kiloclaw_earlybird_purchases,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
@@ -786,6 +787,26 @@ describe('User', () => {
 
       // Cleanup catalog entry
       await db.delete(kiloclaw_image_catalog).where(eq(kiloclaw_image_catalog.image_tag, testTag));
+    });
+
+    it('should delete kiloclaw_earlybird_purchases for the user', async () => {
+      const user = await insertTestUser();
+
+      await db.insert(kiloclaw_earlybird_purchases).values({
+        user_id: user.id,
+        stripe_charge_id: `ch_test_gdpr_${Date.now()}`,
+        amount_cents: 2500,
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_earlybird_purchases)
+          .where(eq(kiloclaw_earlybird_purchases.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
     });
   });
 

@@ -21,6 +21,9 @@ import {
 import { client as stripe } from '@/lib/stripe-client';
 import { APP_URL } from '@/lib/constants';
 import { getEnvVariable } from '@/lib/dotenvx';
+import { db } from '@/lib/drizzle';
+import { kiloclaw_earlybird_purchases } from '@kilocode/db/schema';
+import { eq } from 'drizzle-orm';
 
 const kilocodeDefaultModelSchema = z
   .string()
@@ -374,9 +377,33 @@ export const kiloclawRouter = createTRPCRouter({
     return client.restoreConfig(ctx.user.id);
   }),
 
+  getEarlybirdStatus: baseProcedure
+    .output(z.object({ purchased: z.boolean() }))
+    .query(async ({ ctx }) => {
+      const rows = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+      return { purchased: rows.length > 0 };
+    }),
+
   createEarlybirdCheckoutSession: baseProcedure
     .output(z.object({ url: z.url().nullable() }))
     .mutation(async ({ ctx }) => {
+      const existing = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existing.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'You have already purchased the early bird offer.',
+        });
+      }
+
       const stripeCustomerId = ctx.user.stripe_customer_id;
       if (!stripeCustomerId) {
         throw new TRPCError({
@@ -395,27 +422,36 @@ export const kiloclawRouter = createTRPCRouter({
 
       const couponId = getEnvVariable('STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID');
 
-      const session = await stripe.checkout.sessions.create({
-        mode: 'payment',
-        customer: stripeCustomerId,
-        billing_address_collection: 'required',
-        line_items: [{ price: priceId, quantity: 1 }],
-        ...(couponId ? { discounts: [{ coupon: couponId }] } : { allow_promotion_codes: true }),
-        customer_update: {
-          name: 'auto',
-          address: 'auto',
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: 'payment',
+          customer: stripeCustomerId,
+          billing_address_collection: 'required',
+          line_items: [{ price: priceId, quantity: 1 }],
+          ...(couponId ? { discounts: [{ coupon: couponId }] } : { allow_promotion_codes: true }),
+          customer_update: {
+            name: 'auto',
+            address: 'auto',
+          },
+          tax_id_collection: {
+            enabled: true,
+            required: 'never',
+          },
+          payment_intent_data: {
+            metadata: {
+              type: 'kiloclaw-earlybird',
+              kiloUserId: ctx.user.id,
+            },
+          },
+          success_url: `${APP_URL}/claw?earlybird_checkout=success`,
+          cancel_url: `${APP_URL}/claw/earlybird?checkout=cancelled`,
+          metadata: {
+            type: 'kiloclaw-earlybird',
+            kiloUserId: ctx.user.id,
+          },
         },
-        tax_id_collection: {
-          enabled: true,
-          required: 'never',
-        },
-        success_url: `${APP_URL}/claw?earlybird_checkout=success`,
-        cancel_url: `${APP_URL}/claw/earlybird?checkout=cancelled`,
-        metadata: {
-          type: 'kiloclaw-earlybird',
-          kiloUserId: ctx.user.id,
-        },
-      });
+        { idempotencyKey: `earlybird-checkout-${ctx.user.id}` }
+      );
 
       return { url: typeof session.url === 'string' ? session.url : null };
     }),
