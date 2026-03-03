@@ -21,9 +21,6 @@ export function createAnonymousContext(ipAddress: string): AnonymousUserContext 
 
 export function isAnonymousContext(user: unknown): user is AnonymousUserContext {
   return (
-    typeof user === 'object' &&
-    user !== null &&
-    'isAnonymous' in user &&
-    (user as { isAnonymous: unknown }).isAnonymous === true
+    typeof user === 'object' && user !== null && 'isAnonymous' in user && user.isAnonymous === true
   );
 }
