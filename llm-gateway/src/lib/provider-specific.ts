@@ -225,15 +225,19 @@ type VercelInferenceProviderConfig = { apiKey?: string; baseURL?: string } | Aws
 type AwsCredentials = { accessKeyId: string; secretAccessKey: string; region: string };
 
 function parseAwsCredentials(input: string): AwsCredentials {
-  const parsed: unknown = JSON.parse(input);
-  if (
-    typeof parsed === 'object' &&
-    parsed !== null &&
-    'accessKeyId' in parsed &&
-    'secretAccessKey' in parsed &&
-    'region' in parsed
-  ) {
-    return parsed as AwsCredentials;
+  try {
+    const parsed: unknown = JSON.parse(input);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'accessKeyId' in parsed &&
+      'secretAccessKey' in parsed &&
+      'region' in parsed
+    ) {
+      return parsed as AwsCredentials;
+    }
+  } catch {
+    // fall through to throw
   }
   throw new Error('Failed to parse AWS credentials');
 }
@@ -249,8 +253,7 @@ function getVercelInferenceProviderConfig(
   const list: VercelInferenceProviderConfig[] = [];
   if (key === 'zai') {
     list.push({ apiKey: provider.decryptedAPIKey, baseURL: 'https://api.z.ai/api/coding/paas/v4' });
-  }
-  if (key === 'bedrock') {
+  } else if (key === 'bedrock') {
     list.push(parseAwsCredentials(provider.decryptedAPIKey));
   } else {
     list.push({ apiKey: provider.decryptedAPIKey });
