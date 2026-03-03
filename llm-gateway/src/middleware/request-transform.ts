@@ -7,7 +7,7 @@
 //   4. Applies provider-specific mutations (Anthropic, xAI, Mistral, etc.)
 //
 // Also extracts per-request header values and stores them on context for
-// background tasks in Phase 6 (fraudHeaders, projectId, taskId, etc.).
+// background tasks (fraudHeaders, projectId, taskId, etc.).
 
 import type { MiddlewareHandler } from 'hono';
 import type { HonoContext } from '../types/hono';
@@ -22,7 +22,7 @@ export const requestTransformMiddleware: MiddlewareHandler<HonoContext> = async 
   const user = c.get('user');
   const userByok = c.get('userByok');
 
-  // Extract per-request headers (stored for Phase 6 background tasks)
+  // Extract per-request headers (stored for background tasks)
   const projectHeaders = extractProjectHeaders(c.req.raw.headers);
   c.set('fraudHeaders', projectHeaders.fraudHeaders);
   c.set('projectId', projectHeaders.projectId);
