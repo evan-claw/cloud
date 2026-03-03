@@ -172,7 +172,7 @@ export function scheduleBackgroundTasks(
                 userByok,
                 mode: modeHeader ?? undefined,
                 provider,
-                requestedModel: requestBody.model ?? resolvedModel,
+                requestedModel: autoModel ?? resolvedModel,
                 resolvedModel,
                 toolsAvailable: getToolsAvailable(requestBody.tools),
                 toolsUsed,
