@@ -65,9 +65,9 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     ABUSE_CF_ACCESS_CLIENT_ID: makeSecret('abuse-id'),
     ABUSE_CF_ACCESS_CLIENT_SECRET: makeSecret('abuse-secret'),
     O11Y_KILO_GATEWAY_CLIENT_SECRET: makeSecret('o11y-secret'),
-    GIGAPOTATO_API_URL: 'https://gigapotato.example.com',
-    OPENROUTER_ORG_ID: 'org-123',
-    ABUSE_SERVICE_URL: 'https://abuse.example.com',
+    GIGAPOTATO_API_URL: makeSecret('https://gigapotato.example.com'),
+    OPENROUTER_ORG_ID: makeSecret('org-123'),
+    ABUSE_SERVICE_URL: makeSecret('https://abuse.example.com'),
     ...overrides,
   } as Cloudflare.Env;
 }

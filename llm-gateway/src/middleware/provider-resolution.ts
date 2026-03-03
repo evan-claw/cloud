@@ -16,6 +16,7 @@ export const providerResolutionMiddleware = createMiddleware<HonoContext>(async 
     mistralApiKey,
     vercelAiGatewayApiKey,
     byokEncryptionKey,
+    gigapotatoApiUrl,
   ] = await Promise.all([
     c.env.OPENROUTER_API_KEY.get(),
     c.env.GIGAPOTATO_API_KEY.get(),
@@ -24,12 +25,13 @@ export const providerResolutionMiddleware = createMiddleware<HonoContext>(async 
     c.env.MISTRAL_API_KEY.get(),
     c.env.VERCEL_AI_GATEWAY_API_KEY.get(),
     c.env.BYOK_ENCRYPTION_KEY.get(),
+    c.env.GIGAPOTATO_API_URL.get(),
   ]);
 
   const secrets: SecretsBundle = {
     openrouterApiKey,
     gigapotatoApiKey,
-    gigapotatoApiUrl: c.env.GIGAPOTATO_API_URL,
+    gigapotatoApiUrl,
     corethinkApiKey,
     martianApiKey,
     mistralApiKey,

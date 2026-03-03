@@ -22,10 +22,9 @@ declare namespace Cloudflare {
     ABUSE_CF_ACCESS_CLIENT_SECRET: SecretsStoreSecret;
     // O11Y metrics auth
     O11Y_KILO_GATEWAY_CLIENT_SECRET: SecretsStoreSecret;
-    // Vars
-    GIGAPOTATO_API_URL: string;
-    OPENROUTER_ORG_ID: string;
-    ABUSE_SERVICE_URL: string;
+    GIGAPOTATO_API_URL: SecretsStoreSecret;
+    OPENROUTER_ORG_ID: SecretsStoreSecret;
+    ABUSE_SERVICE_URL: SecretsStoreSecret;
   }
 }
 interface Env extends Cloudflare.Env {}

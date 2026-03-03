@@ -307,7 +307,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
-  const abuseServiceUrl = c.env.ABUSE_SERVICE_URL;
+  const abuseServiceUrl = await c.env.ABUSE_SERVICE_URL.get();
   let abuseSecrets: AbuseServiceSecrets | undefined;
   const abuseSecretsPromise = Promise.all([
     c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
