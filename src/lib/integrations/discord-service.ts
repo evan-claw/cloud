@@ -151,6 +151,24 @@ export async function getInstallationByGuildId(
 }
 
 /**
+ * Get all Discord installations for a given guild ID.
+ * Used to detect duplicate integrations for the same Discord server.
+ */
+export async function getAllInstallationsByGuildId(
+  guildId: string
+): Promise<PlatformIntegration[]> {
+  return db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(
+        eq(platform_integrations.platform, PLATFORM.DISCORD),
+        eq(platform_integrations.platform_installation_id, guildId)
+      )
+    );
+}
+
+/**
  * Get the owner information from a Discord installation
  */
 export function getOwnerFromInstallation(integration: PlatformIntegration): Owner | null {

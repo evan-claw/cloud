@@ -158,6 +158,24 @@ export async function getInstallationByTeamId(teamId: string): Promise<PlatformI
 }
 
 /**
+ * Get all Slack installations for a given team ID.
+ * Used to detect duplicate integrations for the same Slack workspace.
+ */
+export async function getAllInstallationsByTeamId(
+  teamId: string
+): Promise<PlatformIntegration[]> {
+  return db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(
+        eq(platform_integrations.platform, PLATFORM.SLACK),
+        eq(platform_integrations.platform_installation_id, teamId)
+      )
+    );
+}
+
+/**
  * Get the owner information from a Slack installation
  */
 export function getOwnerFromInstallation(integration: PlatformIntegration): Owner | null {

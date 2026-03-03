@@ -11,7 +11,7 @@ import {
 import type OpenAI from 'openai';
 import type { Owner } from '@/lib/integrations/core/types';
 import {
-  getInstallationByGuildId,
+  getAllInstallationsByGuildId,
   getOwnerFromInstallation,
   getModel,
 } from '@/lib/integrations/discord-service';
@@ -220,8 +220,9 @@ export async function processDiscordBotMessage(
 
   let cloudAgentSessionId: string | undefined;
 
-  const installation = await getInstallationByGuildId(guildId);
-  if (!installation) {
+  // Look up all Discord integrations for this guild to detect duplicates
+  const allInstallations = await getAllInstallationsByGuildId(guildId);
+  if (allInstallations.length === 0) {
     return {
       response:
         'Error: No Discord integration found for this server. Please install the Kilo Code Discord integration.',
@@ -231,6 +232,28 @@ export async function processDiscordBotMessage(
       installation: null,
     };
   }
+
+  if (allInstallations.length > 1) {
+    const ownerIds = allInstallations.map(
+      i => i.owned_by_organization_id ?? i.owned_by_user_id ?? 'unknown'
+    );
+    console.warn(
+      '[DiscordBot] Multiple Discord integrations found for guild:',
+      guildId,
+      'owners:',
+      ownerIds
+    );
+    return {
+      response:
+        'Multiple integrations found for this message. Please remove duplicate Discord integrations from your Kilo account to resolve this issue.',
+      modelUsed: '',
+      toolCallsMade: [],
+      error: `Multiple Discord integrations found for guild ${guildId}`,
+      installation: null,
+    };
+  }
+
+  const [installation] = allInstallations;
 
   const owner = getOwnerFromInstallation(installation);
   if (!owner) {

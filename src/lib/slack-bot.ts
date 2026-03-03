@@ -17,7 +17,7 @@ import {
 import type OpenAI from 'openai';
 import type { Owner } from '@/lib/integrations/core/types';
 import {
-  getInstallationByTeamId,
+  getAllInstallationsByTeamId,
   getOwnerFromInstallation,
   getModel,
   getAccessTokenFromInstallation,
@@ -387,9 +387,9 @@ export async function processKiloBotMessage(
   // Track metadata for logging
   let cloudAgentSessionId: string | undefined;
 
-  // Look up the Slack integration to find the owner
-  const installation = await getInstallationByTeamId(teamId);
-  if (!installation) {
+  // Look up all Slack integrations for this team to detect duplicates
+  const allInstallations = await getAllInstallationsByTeamId(teamId);
+  if (allInstallations.length === 0) {
     console.error('[SlackBot] No Slack installation found for team:', teamId);
     return {
       response:
@@ -400,6 +400,28 @@ export async function processKiloBotMessage(
       installation: null,
     };
   }
+
+  if (allInstallations.length > 1) {
+    const ownerIds = allInstallations.map(
+      i => i.owned_by_organization_id ?? i.owned_by_user_id ?? 'unknown'
+    );
+    console.warn(
+      '[SlackBot] Multiple Slack integrations found for team:',
+      teamId,
+      'owners:',
+      ownerIds
+    );
+    return {
+      response:
+        'Multiple integrations found for this message. Please remove duplicate Slack integrations from your Kilo account to resolve this issue.',
+      modelUsed: '',
+      toolCallsMade: [],
+      error: `Multiple Slack integrations found for team ${teamId}`,
+      installation: null,
+    };
+  }
+
+  const [installation] = allInstallations;
 
   const owner = getOwnerFromInstallation(installation);
   if (!owner) {
