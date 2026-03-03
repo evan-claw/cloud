@@ -42,7 +42,7 @@ export const logFreeModelUsageMiddleware = createMiddleware<HonoContext>(async (
       (async () => {
         try {
           if (isKiloFreeModel(resolvedModel)) {
-            await incrementFreeModelUsage(c.env.RATE_LIMIT_KV, ip);
+            await incrementFreeModelUsage(c.env, ip);
           }
         } catch (err) {
           console.error('[logFreeModelUsageMiddleware] KV increment failed', err);
@@ -52,7 +52,7 @@ export const logFreeModelUsageMiddleware = createMiddleware<HonoContext>(async (
       (async () => {
         try {
           if (isAnonymousContext(user)) {
-            await incrementPromotionUsage(c.env.RATE_LIMIT_KV, ip);
+            await incrementPromotionUsage(c.env, ip);
           }
         } catch (err) {
           console.error('[logFreeModelUsageMiddleware] promotion KV increment failed', err);

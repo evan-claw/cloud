@@ -64,12 +64,9 @@ async function dispatch(req: Request, envOverrides: Partial<Record<string, unkno
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('middleware chain – health check', () => {
-  it('GET /health returns 200', async () => {
+  it('GET /health returns 404 (removed)', async () => {
     const res = await dispatch(new Request('http://localhost/health'));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe('ok');
-    expect(body.service).toBe('llm-gateway');
+    expect(res.status).toBe(404);
   });
 });
 

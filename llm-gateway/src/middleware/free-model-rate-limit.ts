@@ -11,7 +11,7 @@ export const freeModelRateLimitMiddleware = createMiddleware<HonoContext>(async 
     return next();
   }
 
-  const result = await checkFreeModelRateLimit(c.env.RATE_LIMIT_KV, c.get('clientIp'));
+  const result = await checkFreeModelRateLimit(c.env, c.get('clientIp'));
   if (!result.allowed) {
     return c.json(
       {

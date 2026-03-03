@@ -1,3 +1,4 @@
+export { RateLimitDO } from './dos/RateLimitDO';
 import { Hono } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import type { HonoContext } from './types/hono';

@@ -24,32 +24,43 @@ export async function signToken(
 
 // Build a minimal mock Env matching worker-configuration.d.ts.
 export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloudflare.Env {
-  const store = new Map<string, string>();
-  function makeKv(initial: Record<string, string> = {}): KVNamespace {
-    for (const [k, v] of Object.entries(initial)) store.set(k, v);
-    return {
-      async get(key: string) {
-        return store.get(key) ?? null;
-      },
-      async put(key: string, value: string) {
-        store.set(key, value);
-      },
-      async delete(key: string) {
-        store.delete(key);
-      },
-    } as unknown as KVNamespace;
-  }
-
   function makeSecret(value: string): SecretsStoreSecret {
     return { get: async () => value };
   }
 
-  const kv = makeKv();
+  // Fake DO namespace that creates stubs returning a fixed result.
+  function makeFakeDONamespace(): Cloudflare.Env['RATE_LIMIT_DO'] {
+    const stub = {
+      checkFreeModel: async () => ({ allowed: true, requestCount: 0 }),
+      checkPromotion: async () => ({ allowed: true, requestCount: 0 }),
+      incrementFreeModel: async () => {},
+      incrementPromotion: async () => {},
+    };
+    return {
+      idFromName() {
+        return {} as DurableObjectId;
+      },
+      newUniqueId() {
+        return {} as DurableObjectId;
+      },
+      idFromString() {
+        return {} as DurableObjectId;
+      },
+      getByName() {
+        return stub as unknown as DurableObjectStub;
+      },
+      get() {
+        return stub as unknown as DurableObjectStub;
+      },
+      jurisdiction() {
+        return this;
+      },
+    } as unknown as Cloudflare.Env['RATE_LIMIT_DO'];
+  }
 
   return {
     HYPERDRIVE: { connectionString: 'postgres://localhost:5432/test' } as Hyperdrive,
-    USER_EXISTS_CACHE: kv,
-    RATE_LIMIT_KV: kv,
+    RATE_LIMIT_DO: makeFakeDONamespace(),
     O11Y: {
       fetch: async () => new Response(JSON.stringify({ success: true })),
       ingestApiMetrics: async () => {},
@@ -64,9 +75,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     BYOK_ENCRYPTION_KEY: makeSecret('byok-key-32-chars-exactly-here!'),
     ABUSE_CF_ACCESS_CLIENT_ID: makeSecret('abuse-id'),
     ABUSE_CF_ACCESS_CLIENT_SECRET: makeSecret('abuse-secret'),
-    O11Y_KILO_GATEWAY_CLIENT_SECRET: makeSecret('o11y-secret'),
     GIGAPOTATO_API_URL: makeSecret('https://gigapotato.example.com'),
-    OPENROUTER_ORG_ID: makeSecret('org-123'),
     ABUSE_SERVICE_URL: makeSecret('https://abuse.example.com'),
     ...overrides,
   } as Cloudflare.Env;

@@ -13,7 +13,7 @@ export const promotionLimitMiddleware = createMiddleware<HonoContext>(async (c, 
     return next();
   }
 
-  const result = await checkPromotionLimit(c.env.RATE_LIMIT_KV, c.get('clientIp'));
+  const result = await checkPromotionLimit(c.env, c.get('clientIp'));
   if (!result.allowed) {
     return c.json(
       {

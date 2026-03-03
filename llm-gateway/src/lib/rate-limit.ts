@@ -1,76 +1,28 @@
-// KV-backed sliding window rate limiter.
-// Stores an array of request timestamps (ms) under each key.
-// The array is pruned to the current window on every read.
+// Rate limiting via Durable Object.
+// Each IP gets its own DO instance for strongly-consistent, atomic
+// check-and-increment with no TOCTOU race conditions.
 
-export type RateLimitResult = {
-  allowed: boolean;
-  requestCount: number;
-};
+import { getRateLimitDO } from '../dos/RateLimitDO';
+export type { RateLimitResult } from '../dos/RateLimitDO';
 
-const FREE_MODEL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const FREE_MODEL_MAX_REQUESTS = 200;
+type DOEnv = { RATE_LIMIT_DO: Parameters<typeof getRateLimitDO>[0]['RATE_LIMIT_DO'] };
 
-const PROMOTION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-const PROMOTION_MAX_REQUESTS = 10_000;
-
-function freeModelKey(ip: string) {
-  return `rl:free:${ip}`;
+export async function checkFreeModelRateLimit(env: DOEnv, ip: string) {
+  const stub = getRateLimitDO(env, ip);
+  return stub.checkFreeModel();
 }
 
-function promotionKey(ip: string) {
-  return `rl:promo:${ip}`;
+export async function checkPromotionLimit(env: DOEnv, ip: string) {
+  const stub = getRateLimitDO(env, ip);
+  return stub.checkPromotion();
 }
 
-async function readTimestamps(kv: KVNamespace, key: string): Promise<number[]> {
-  const raw = await kv.get(key);
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is number => typeof v === 'number');
-  } catch {
-    return [];
-  }
+export async function incrementFreeModelUsage(env: DOEnv, ip: string) {
+  const stub = getRateLimitDO(env, ip);
+  await stub.incrementFreeModel();
 }
 
-async function checkWindow(
-  kv: KVNamespace,
-  key: string,
-  windowMs: number,
-  maxRequests: number
-): Promise<RateLimitResult> {
-  const now = Date.now();
-  const windowStart = now - windowMs;
-  const timestamps = await readTimestamps(kv, key);
-  const inWindow = timestamps.filter(t => t >= windowStart);
-  return { allowed: inWindow.length < maxRequests, requestCount: inWindow.length };
-}
-
-async function incrementWindow(kv: KVNamespace, key: string, windowMs: number): Promise<void> {
-  const now = Date.now();
-  const windowStart = now - windowMs;
-  const timestamps = await readTimestamps(kv, key);
-  const inWindow = timestamps.filter(t => t >= windowStart);
-  inWindow.push(now);
-  // TTL = window duration in seconds — old entries are irrelevant past the window.
-  await kv.put(key, JSON.stringify(inWindow), { expirationTtl: Math.ceil(windowMs / 1000) });
-}
-
-export async function checkFreeModelRateLimit(
-  kv: KVNamespace,
-  ip: string
-): Promise<RateLimitResult> {
-  return checkWindow(kv, freeModelKey(ip), FREE_MODEL_WINDOW_MS, FREE_MODEL_MAX_REQUESTS);
-}
-
-export async function checkPromotionLimit(kv: KVNamespace, ip: string): Promise<RateLimitResult> {
-  return checkWindow(kv, promotionKey(ip), PROMOTION_WINDOW_MS, PROMOTION_MAX_REQUESTS);
-}
-
-export async function incrementFreeModelUsage(kv: KVNamespace, ip: string): Promise<void> {
-  await incrementWindow(kv, freeModelKey(ip), FREE_MODEL_WINDOW_MS);
-}
-
-export async function incrementPromotionUsage(kv: KVNamespace, ip: string): Promise<void> {
-  await incrementWindow(kv, promotionKey(ip), PROMOTION_WINDOW_MS);
+export async function incrementPromotionUsage(env: DOEnv, ip: string) {
+  const stub = getRateLimitDO(env, ip);
+  await stub.incrementPromotion();
 }

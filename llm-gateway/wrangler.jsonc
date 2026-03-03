@@ -25,10 +25,18 @@
       "localConnectionString": "postgres://postgres:postgres@localhost:5432/postgres",
     },
   ],
-  "kv_namespaces": [
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RATE_LIMIT_DO",
+        "class_name": "RateLimitDO",
+      },
+    ],
+  },
+  "migrations": [
     {
-      "binding": "RATE_LIMIT_KV",
-      "id": "b22ee150a8fb4f63970bd3ff69f23e4d",
+      "tag": "v1",
+      "new_classes": ["RateLimitDO"],
     },
   ],
   "services": [
