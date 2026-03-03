@@ -269,8 +269,8 @@ export class SessionIngestDO extends DurableObject<Env> {
       kiloUserId,
       sessionId,
       ingestVersion,
-      model: model ?? '',
-      organizationId: metrics.organizationId ?? '',
+      model,
+      organizationId: metrics.organizationId,
     });
 
     // Mark metrics as emitted to prevent duplicates

@@ -29,7 +29,10 @@ export const ApiMetricsParamsSchema = z.object({
     .optional(),
 });
 
-export type ApiMetricsParams = z.infer<typeof ApiMetricsParamsSchema>;
+// Input type: callers can pass undefined for fields with .default().
+export type ApiMetricsParams = z.input<typeof ApiMetricsParamsSchema>;
+// Output type: after .parse(), defaults are applied — all fields are concrete.
+export type ApiMetricsParamsParsed = z.infer<typeof ApiMetricsParamsSchema>;
 
 // ─── Session metrics (session-ingest → o11y) ─────────────────────────────────
 
@@ -79,4 +82,5 @@ export const SessionMetricsParamsSchema = z.object({
   ingestVersion: z.number().int().nonnegative().default(0),
 });
 
-export type SessionMetricsParams = z.infer<typeof SessionMetricsParamsSchema>;
+export type SessionMetricsParams = z.input<typeof SessionMetricsParamsSchema>;
+export type SessionMetricsParamsParsed = z.infer<typeof SessionMetricsParamsSchema>;

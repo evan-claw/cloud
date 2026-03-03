@@ -33,4 +33,9 @@ export {
   SessionMetricsParamsSchema,
   TerminationReasons,
 } from './o11y-schemas.js';
-export type { ApiMetricsParams, SessionMetricsParams } from './o11y-schemas.js';
+export type {
+  ApiMetricsParams,
+  ApiMetricsParamsParsed,
+  SessionMetricsParams,
+  SessionMetricsParamsParsed,
+} from './o11y-schemas.js';

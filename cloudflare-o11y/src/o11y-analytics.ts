@@ -1,4 +1,4 @@
-import type { ApiMetricsParams } from '@kilocode/worker-utils';
+import type { ApiMetricsParamsParsed as ApiMetricsParams } from '@kilocode/worker-utils';
 
 /**
  * Write an API metrics data point to Analytics Engine for alerting queries,

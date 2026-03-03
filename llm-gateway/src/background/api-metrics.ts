@@ -252,9 +252,7 @@ async function sendApiMetrics(o11y: O11YRpc, params: ApiMetricsParams): Promise<
  */
 export async function runApiMetrics(
   o11y: O11YRpc,
-  params: Omit<ApiMetricsParams, 'completeRequestMs' | 'inferenceProvider'> & {
-    inferenceProvider?: string;
-  },
+  params: Omit<ApiMetricsParams, 'completeRequestMs'>,
   backgroundStream: ReadableStream,
   requestStartedAt: number
 ): Promise<void> {
@@ -274,7 +272,7 @@ export async function runApiMetrics(
 
   await sendApiMetrics(o11y, {
     ...params,
-    inferenceProvider: inferenceProvider ?? params.inferenceProvider ?? '',
+    inferenceProvider: inferenceProvider ?? params.inferenceProvider,
     completeRequestMs,
   });
 }
