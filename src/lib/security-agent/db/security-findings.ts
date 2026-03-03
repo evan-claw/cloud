@@ -1,10 +1,3 @@
-/**
- * Security Findings - Database Operations
- *
- * Database operations for security findings.
- * Follows Drizzle ORM patterns used throughout the codebase.
- */
-
 import { db } from '@/lib/drizzle';
 import { security_findings } from '@kilocode/db/schema';
 import { eq, and, desc, count, sql, max, or } from 'drizzle-orm';
@@ -19,14 +12,8 @@ import type {
 
 type SecurityFindingStatusFilter = SecurityFindingStatus | 'closed';
 
-/**
- * Owner type for database queries
- */
 type Owner = { type: 'org'; id: string } | { type: 'user'; id: string };
 
-/**
- * Convert SecurityReviewOwner to Owner format used in queries
- */
 function toOwner(owner: SecurityReviewOwner): Owner {
   if ('organizationId' in owner && owner.organizationId) {
     return { type: 'org', id: owner.organizationId };
@@ -37,9 +24,6 @@ function toOwner(owner: SecurityReviewOwner): Owner {
   throw new Error('Invalid owner: must have either organizationId or userId');
 }
 
-/**
- * Parameters for creating a security finding
- */
 type CreateFindingParams = ParsedSecurityFinding & {
   owner: SecurityReviewOwner;
   platformIntegrationId?: string;
@@ -47,9 +31,6 @@ type CreateFindingParams = ParsedSecurityFinding & {
   slaDueAt?: Date;
 };
 
-/**
- * Creates a new security finding
- */
 export async function createSecurityFinding(params: CreateFindingParams): Promise<string> {
   try {
     const owner = toOwner(params.owner);
@@ -98,78 +79,168 @@ export async function createSecurityFinding(params: CreateFindingParams): Promis
   }
 }
 
-/**
- * Upserts a security finding (create or update based on unique constraint)
- * Uses repo_full_name + source + source_id as the unique key
- */
-export async function upsertSecurityFinding(params: CreateFindingParams): Promise<string> {
+export type UpsertSecurityFindingResult = {
+  findingId: string;
+  wasInserted: boolean;
+  previousStatus: SecurityFindingStatus | null;
+  findingCreatedAt: string;
+};
+
+/** Upsert using repo_full_name + source + source_id as the unique key. */
+export async function upsertSecurityFinding(
+  params: CreateFindingParams
+): Promise<UpsertSecurityFindingResult> {
   try {
     const owner = toOwner(params.owner);
 
-    const [finding] = await db
-      .insert(security_findings)
-      .values({
-        owned_by_organization_id: owner.type === 'org' ? owner.id : null,
-        owned_by_user_id: owner.type === 'user' ? owner.id : null,
-        platform_integration_id: params.platformIntegrationId || null,
-        repo_full_name: params.repoFullName,
-        source: params.source,
-        source_id: params.source_id,
-        severity: params.severity,
-        ghsa_id: params.ghsa_id,
-        cve_id: params.cve_id,
-        package_name: params.package_name,
-        package_ecosystem: params.package_ecosystem,
-        vulnerable_version_range: params.vulnerable_version_range,
-        patched_version: params.patched_version,
-        manifest_path: params.manifest_path,
-        title: params.title,
-        description: params.description,
-        status: params.status,
-        ignored_reason: params.ignored_reason,
-        ignored_by: params.ignored_by,
-        fixed_at: params.fixed_at,
-        sla_due_at: params.slaDueAt?.toISOString() || null,
-        dependabot_html_url: params.dependabot_html_url,
-        raw_data: params.raw_data,
-        first_detected_at: params.first_detected_at,
-        // Additional metadata
-        cwe_ids: params.cwe_ids,
-        cvss_score: params.cvss_score?.toString() || null,
-        dependency_scope: params.dependency_scope,
-      })
-      .onConflictDoUpdate({
-        target: [
-          security_findings.repo_full_name,
-          security_findings.source,
-          security_findings.source_id,
-        ],
-        set: {
-          severity: params.severity,
-          ghsa_id: params.ghsa_id,
-          cve_id: params.cve_id,
-          vulnerable_version_range: params.vulnerable_version_range,
-          patched_version: params.patched_version,
-          title: params.title,
-          description: params.description,
-          status: params.status,
-          ignored_reason: params.ignored_reason,
-          ignored_by: params.ignored_by,
-          fixed_at: params.fixed_at,
-          sla_due_at: params.slaDueAt?.toISOString() || null,
-          dependabot_html_url: params.dependabot_html_url,
-          raw_data: params.raw_data,
-          // Additional metadata
-          cwe_ids: params.cwe_ids,
-          cvss_score: params.cvss_score?.toString() || null,
-          dependency_scope: params.dependency_scope,
-          last_synced_at: sql`now()`,
-          updated_at: sql`now()`,
-        },
-      })
-      .returning({ id: security_findings.id });
+    const { rows } = await db.execute<{
+      findingId: string;
+      wasInserted: boolean;
+      previousStatus: SecurityFindingStatus | null;
+      findingCreatedAt: string;
+    }>(sql`
+      WITH existing_match AS (
+        SELECT ${security_findings.id} AS id,
+               ${security_findings.status} AS previous_status,
+               ${security_findings.created_at} AS created_at
+        FROM ${security_findings}
+        WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
+          AND ${security_findings.source} = ${params.source}
+          AND ${security_findings.source_id} = ${params.source_id}
+        FOR UPDATE
+      ),
+      updated AS (
+        UPDATE ${security_findings}
+        SET
+          ${security_findings.severity} = ${params.severity},
+          ${security_findings.ghsa_id} = ${params.ghsa_id},
+          ${security_findings.cve_id} = ${params.cve_id},
+          ${security_findings.vulnerable_version_range} = ${params.vulnerable_version_range},
+          ${security_findings.patched_version} = ${params.patched_version},
+          ${security_findings.title} = ${params.title},
+          ${security_findings.description} = ${params.description},
+          ${security_findings.status} = ${params.status},
+          ${security_findings.ignored_reason} = ${params.ignored_reason},
+          ${security_findings.ignored_by} = ${params.ignored_by},
+          ${security_findings.fixed_at} = ${params.fixed_at},
+          ${security_findings.sla_due_at} = ${params.slaDueAt?.toISOString() || null},
+          ${security_findings.dependabot_html_url} = ${params.dependabot_html_url},
+          ${security_findings.raw_data} = ${params.raw_data},
+          ${security_findings.cwe_ids} = ${params.cwe_ids},
+          ${security_findings.cvss_score} = ${params.cvss_score?.toString() || null},
+          ${security_findings.dependency_scope} = ${params.dependency_scope},
+          ${security_findings.last_synced_at} = now(),
+          ${security_findings.updated_at} = now()
+        FROM existing_match
+        WHERE ${security_findings.id} = existing_match.id
+        RETURNING
+          ${security_findings.id} AS id,
+          existing_match.previous_status AS previous_status,
+          ${security_findings.created_at} AS created_at
+      ),
+      inserted AS (
+        INSERT INTO ${security_findings} (
+          ${security_findings.owned_by_organization_id},
+          ${security_findings.owned_by_user_id},
+          ${security_findings.platform_integration_id},
+          ${security_findings.repo_full_name},
+          ${security_findings.source},
+          ${security_findings.source_id},
+          ${security_findings.severity},
+          ${security_findings.ghsa_id},
+          ${security_findings.cve_id},
+          ${security_findings.package_name},
+          ${security_findings.package_ecosystem},
+          ${security_findings.vulnerable_version_range},
+          ${security_findings.patched_version},
+          ${security_findings.manifest_path},
+          ${security_findings.title},
+          ${security_findings.description},
+          ${security_findings.status},
+          ${security_findings.ignored_reason},
+          ${security_findings.ignored_by},
+          ${security_findings.fixed_at},
+          ${security_findings.sla_due_at},
+          ${security_findings.dependabot_html_url},
+          ${security_findings.raw_data},
+          ${security_findings.first_detected_at},
+          ${security_findings.cwe_ids},
+          ${security_findings.cvss_score},
+          ${security_findings.dependency_scope}
+        )
+        SELECT
+          ${owner.type === 'org' ? owner.id : null},
+          ${owner.type === 'user' ? owner.id : null},
+          ${params.platformIntegrationId || null},
+          ${params.repoFullName},
+          ${params.source},
+          ${params.source_id},
+          ${params.severity},
+          ${params.ghsa_id},
+          ${params.cve_id},
+          ${params.package_name},
+          ${params.package_ecosystem},
+          ${params.vulnerable_version_range},
+          ${params.patched_version},
+          ${params.manifest_path},
+          ${params.title},
+          ${params.description},
+          ${params.status},
+          ${params.ignored_reason},
+          ${params.ignored_by},
+          ${params.fixed_at},
+          ${params.slaDueAt?.toISOString() || null},
+          ${params.dependabot_html_url},
+          ${params.raw_data},
+          ${params.first_detected_at},
+          ${params.cwe_ids},
+          ${params.cvss_score?.toString() || null},
+          ${params.dependency_scope}
+        WHERE NOT EXISTS (SELECT 1 FROM updated)
+        ON CONFLICT (${security_findings.repo_full_name}, ${security_findings.source}, ${security_findings.source_id}) DO NOTHING
+        RETURNING ${security_findings.id} AS id,
+          NULL::text AS previous_status,
+          ${security_findings.created_at} AS created_at
+      ),
+      -- fallback: concurrent insert race — previous_status reflects the current row state
+      -- (written by the concurrent winner), not the true pre-update value. This means
+      -- syncAutoAnalysisQueueForFinding may misidentify a status transition during races.
+      -- Acceptable because the concurrent winner's sync call will have the correct value.
+      fallback AS (
+        SELECT
+          ${security_findings.id} AS id,
+          ${security_findings.status} AS previous_status,
+          ${security_findings.created_at} AS created_at
+        FROM ${security_findings}
+        WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
+          AND ${security_findings.source} = ${params.source}
+          AND ${security_findings.source_id} = ${params.source_id}
+          AND NOT EXISTS (SELECT 1 FROM updated)
+          AND NOT EXISTS (SELECT 1 FROM inserted)
+        LIMIT 1
+      ),
+      chosen AS (
+        SELECT id, false AS was_inserted, previous_status, created_at FROM updated
+        UNION ALL
+        SELECT id, true AS was_inserted, previous_status, created_at FROM inserted
+        UNION ALL
+        SELECT id, false AS was_inserted, previous_status, created_at FROM fallback
+      )
+      SELECT
+        chosen.id AS "findingId",
+        chosen.was_inserted AS "wasInserted",
+        chosen.previous_status AS "previousStatus",
+        chosen.created_at AS "findingCreatedAt"
+      FROM chosen
+      LIMIT 1
+    `);
 
-    return finding.id;
+    const finding = rows[0];
+    if (!finding) {
+      throw new Error('Failed to upsert security finding');
+    }
+
+    return finding;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'upsertSecurityFinding' },
@@ -179,9 +250,6 @@ export async function upsertSecurityFinding(params: CreateFindingParams): Promis
   }
 }
 
-/**
- * Gets a security finding by ID
- */
 export async function getSecurityFindingById(findingId: string): Promise<SecurityFinding | null> {
   try {
     const [finding] = await db
@@ -200,24 +268,10 @@ export async function getSecurityFindingById(findingId: string): Promise<Securit
   }
 }
 
-/**
- * Exploitability filter type
- */
 type ExploitabilityFilter = 'all' | 'exploitable' | 'not_exploitable';
-
-/**
- * Suggested action filter type
- */
 type SuggestedActionFilter = 'all' | 'dismissable';
-
-/**
- * Analysis status filter type
- */
 type AnalysisStatusFilter = 'all' | 'not_analyzed' | 'pending' | 'running' | 'completed' | 'failed';
 
-/**
- * Parameters for listing security findings
- */
 type ListFindingsParams = {
   owner: SecurityReviewOwner;
   limit?: number;
@@ -231,9 +285,6 @@ type ListFindingsParams = {
   analysisStatus?: AnalysisStatusFilter;
 };
 
-/**
- * Lists security findings for an owner
- */
 export async function listSecurityFindings(params: ListFindingsParams): Promise<SecurityFinding[]> {
   try {
     const {
@@ -252,14 +303,12 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
 
     const conditions = [];
 
-    // Owner condition
     if (ownerConverted.type === 'org') {
       conditions.push(eq(security_findings.owned_by_organization_id, ownerConverted.id));
     } else {
       conditions.push(eq(security_findings.owned_by_user_id, ownerConverted.id));
     }
 
-    // Optional filters
     if (status) {
       if (status === 'closed') {
         conditions.push(
@@ -278,7 +327,6 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
     if (packageName) {
       conditions.push(eq(security_findings.package_name, packageName));
     }
-    // Exploitability filter - filters based on analysis.sandboxAnalysis.isExploitable
     if (exploitability && exploitability !== 'all') {
       if (exploitability === 'exploitable') {
         // isExploitable === true
@@ -292,10 +340,8 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
         );
       }
     }
-    // Suggested action filter - filters based on triage or sandbox suggestedAction = 'dismiss'
     if (suggestedAction && suggestedAction !== 'all') {
       if (suggestedAction === 'dismissable') {
-        // Either triage.suggestedAction = 'dismiss' OR sandboxAnalysis.suggestedAction = 'dismiss'
         conditions.push(
           or(
             sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'dismiss'`,
@@ -304,18 +350,14 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
         );
       }
     }
-    // Analysis status filter - filters based on analysis_status column
     if (analysisStatus && analysisStatus !== 'all') {
       if (analysisStatus === 'not_analyzed') {
-        // analysis_status is null (never analyzed)
         conditions.push(sql`${security_findings.analysis_status} IS NULL`);
       } else {
-        // Match specific analysis status
         conditions.push(eq(security_findings.analysis_status, analysisStatus));
       }
     }
 
-    // Sort by severity (critical > high > medium > low) then by created_at descending
     const severityOrder = sql`CASE ${security_findings.severity}
       WHEN 'critical' THEN 1
       WHEN 'high' THEN 2
@@ -342,9 +384,6 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
   }
 }
 
-/**
- * Counts security findings for an owner
- */
 export async function countSecurityFindings(params: {
   owner: SecurityReviewOwner;
   status?: SecurityFindingStatusFilter;
@@ -396,9 +435,6 @@ export async function countSecurityFindings(params: {
   }
 }
 
-/**
- * Gets summary counts by severity for an owner
- */
 export async function getSecurityFindingsSummary(params: {
   owner: SecurityReviewOwner;
   repoFullName?: string;
@@ -419,7 +455,6 @@ export async function getSecurityFindingsSummary(params: {
 
     const baseConditions = [];
 
-    // Owner condition
     if (ownerConverted.type === 'org') {
       baseConditions.push(eq(security_findings.owned_by_organization_id, ownerConverted.id));
     } else {
@@ -440,7 +475,6 @@ export async function getSecurityFindingsSummary(params: {
       }
     }
 
-    // Get counts by severity
     const severityCounts = await db
       .select({
         severity: security_findings.severity,
@@ -450,7 +484,6 @@ export async function getSecurityFindingsSummary(params: {
       .where(and(...baseConditions))
       .groupBy(security_findings.severity);
 
-    // Get counts by status
     const statusCounts = await db
       .select({
         status: security_findings.status,
@@ -488,9 +521,6 @@ export async function getSecurityFindingsSummary(params: {
   }
 }
 
-/**
- * Updates the status of a security finding
- */
 export async function updateSecurityFindingStatus(
   findingId: string,
   status: SecurityFindingStatus,
@@ -526,9 +556,6 @@ export async function updateSecurityFindingStatus(
   }
 }
 
-/**
- * Gets distinct repositories with security findings for an owner
- */
 export async function getRepositoriesWithFindings(owner: SecurityReviewOwner): Promise<string[]> {
   try {
     const ownerConverted = toOwner(owner);
@@ -553,9 +580,6 @@ export async function getRepositoriesWithFindings(owner: SecurityReviewOwner): P
   }
 }
 
-/**
- * Finds an existing security finding by source
- */
 export async function findSecurityFindingBySource(
   repoFullName: string,
   source: string,
@@ -584,10 +608,6 @@ export async function findSecurityFindingBySource(
   }
 }
 
-/**
- * Gets the most recent last_synced_at timestamp for an owner's findings
- * Optionally filtered by repository
- */
 export async function getLastSyncTime(params: {
   owner: SecurityReviewOwner;
   repoFullName?: string;
@@ -625,11 +645,6 @@ export async function getLastSyncTime(params: {
   }
 }
 
-/**
- * Gets repositories with findings that are not in the list of accessible repositories.
- * These are "orphaned" repositories - they have findings but the GitHub integration
- * no longer has access to them.
- */
 export async function getOrphanedRepositoriesWithFindingCounts(params: {
   owner: SecurityReviewOwner;
   accessibleRepoFullNames: string[];
@@ -647,7 +662,6 @@ export async function getOrphanedRepositoriesWithFindingCounts(params: {
       conditions.push(eq(security_findings.owned_by_user_id, ownerConverted.id));
     }
 
-    // Get all repositories with findings for this owner
     const reposWithFindings = await db
       .select({
         repoFullName: security_findings.repo_full_name,
@@ -657,7 +671,6 @@ export async function getOrphanedRepositoriesWithFindingCounts(params: {
       .where(and(...conditions))
       .groupBy(security_findings.repo_full_name);
 
-    // Filter to only include repos that are NOT in the accessible list
     const orphanedRepos = reposWithFindings.filter(
       repo => !accessibleRepoFullNames.includes(repo.repoFullName)
     );
@@ -672,10 +685,6 @@ export async function getOrphanedRepositoriesWithFindingCounts(params: {
   }
 }
 
-/**
- * Deletes all security findings for a specific repository owned by the given owner.
- * Returns the count of deleted findings.
- */
 export async function deleteFindingsByRepository(params: {
   owner: SecurityReviewOwner;
   repoFullName: string;

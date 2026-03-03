@@ -48,6 +48,7 @@ import {
   cloud_agent_feedback,
   free_model_usage,
   kilo_pass_scheduled_changes,
+  security_analysis_owner_state,
 } from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
@@ -434,7 +435,9 @@ export class SoftDeletePreconditionError extends Error {
  * - Various user-owned resources (platform_integrations, byok_api_keys,
  *   agent_configs, webhook_events, code_indexing_*, source_embeddings,
  *   cloud_agent_webhook_triggers, agent_environment_profiles,
- *   security_findings, auto_triage/fix_tickets, slack_bot_requests,
+ *   security_findings, security_analysis_owner_state,
+ *   security_analysis_queue (via cascade when security_findings are deleted),
+ *   auto_triage/fix_tickets, slack_bot_requests,
  *   cloud_agent_code_reviews, device_auth_requests, auto_top_up_configs,
  *   kiloclaw_instances/access_codes, user_period_cache,
  *   kilo_pass_scheduled_changes)
@@ -530,6 +533,9 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(byok_api_keys).where(eq(byok_api_keys.kilo_user_id, userId));
     await tx.delete(agent_configs).where(eq(agent_configs.owned_by_user_id, userId));
     await tx.delete(webhook_events).where(eq(webhook_events.owned_by_user_id, userId));
+    await tx
+      .delete(security_analysis_owner_state)
+      .where(eq(security_analysis_owner_state.owned_by_user_id, userId));
     await tx.delete(security_findings).where(eq(security_findings.owned_by_user_id, userId));
     await tx.delete(auto_fix_tickets).where(eq(auto_fix_tickets.owned_by_user_id, userId));
     await tx.delete(auto_triage_tickets).where(eq(auto_triage_tickets.owned_by_user_id, userId));
