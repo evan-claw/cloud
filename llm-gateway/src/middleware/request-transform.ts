@@ -53,7 +53,13 @@ export const requestTransformMiddleware: MiddlewareHandler<HonoContext> = async 
 
   // Provider-specific mutations (Anthropic beta header, Mistral tool normalization, etc.)
   const extraHeaders: Record<string, string> = {};
-  applyProviderSpecificLogic(provider, c.get('resolvedModel'), requestBody, extraHeaders, userByok);
+  await applyProviderSpecificLogic(
+    provider,
+    c.get('resolvedModel'),
+    requestBody,
+    extraHeaders,
+    userByok
+  );
   c.set('extraHeaders', extraHeaders);
 
   await next();

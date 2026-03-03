@@ -197,7 +197,7 @@ export async function classifyAbuse(
     system_prompt: systemPrompt,
     max_tokens: body.max_tokens ?? null,
     has_middle_out_transform: body.transforms?.includes('middle-out') ?? false,
-    has_tools: ((body.tools as unknown[] | undefined)?.length ?? 0) > 0,
+    has_tools: (body.tools?.length ?? 0) > 0,
     streamed: body.stream === true,
     is_user_byok: context?.isByok ?? null,
     editor_name: editorName,

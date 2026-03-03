@@ -90,7 +90,7 @@ export async function rewriteFreeModelResponse(
 
   const stream = new ReadableStream({
     async start(controller) {
-      const reader = response.body?.getReader();
+      const reader = (response.body as ReadableStream<Uint8Array> | null)?.getReader();
       if (!reader) {
         controller.close();
         return;

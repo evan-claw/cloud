@@ -229,7 +229,7 @@ export async function parseMicrodollarUsageFromStream(
   let inference_provider: string | null = null;
   let finish_reason: string | null = null;
 
-  const reader = stream.getReader();
+  const reader = (stream as ReadableStream<Uint8Array>).getReader();
   const decoder = new TextDecoder();
 
   const sseStreamParser = createParser({
@@ -541,6 +541,7 @@ async function ingestOrganizationTokenUsage(
   usage: { cost: number; kilo_user_id: string; organization_id: string | null }
 ): Promise<void> {
   if (!usage.organization_id) return;
+  const orgId = usage.organization_id;
 
   await db.transaction(async tx => {
     await tx
@@ -549,7 +550,7 @@ async function ingestOrganizationTokenUsage(
         microdollars_used: sql`${organizations.microdollars_used} + ${usage.cost}`,
         microdollars_balance: sql`${organizations.microdollars_balance} - ${usage.cost}`,
       })
-      .where(eq(organizations.id, usage.organization_id!));
+      .where(eq(organizations.id, orgId));
 
     await tx.execute(sql`
       INSERT INTO ${organization_user_usage} (

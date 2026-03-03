@@ -1,7 +1,7 @@
 // Port of src/lib/custom-llm/reasoning-details.ts
 // Minimal type definitions needed by customLlmRequest.
 
-import { ReasoningFormat } from './format';
+import type { ReasoningFormat } from './format';
 
 export enum ReasoningDetailType {
   Summary = 'reasoning.summary',

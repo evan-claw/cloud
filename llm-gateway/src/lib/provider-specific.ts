@@ -91,15 +91,14 @@ function applyXaiModelSettings(
   requestToMutate: OpenRouterChatCompletionRequest,
   extraHeaders: Record<string, string>
 ) {
-  extraHeaders['x-grok-conv-id'] =
-    (requestToMutate.prompt_cache_key as string | undefined) || crypto.randomUUID();
+  extraHeaders['x-grok-conv-id'] = requestToMutate.prompt_cache_key || crypto.randomUUID();
   extraHeaders['x-grok-req-id'] = crypto.randomUUID();
 }
 
 // --- Google ---
 
 function applyGoogleModelSettings(
-  provider: 'vercel' | string,
+  provider: string,
   requestToMutate: OpenRouterChatCompletionRequest
 ) {
   if (provider !== 'vercel') return;
@@ -139,13 +138,10 @@ function applyMoonshotProviderSettings(requestToMutate: OpenRouterChatCompletion
 
 function applyQwenModelSettings(requestToMutate: OpenRouterChatCompletionRequest) {
   if (requestToMutate.max_tokens) {
-    requestToMutate.max_tokens = Math.min(requestToMutate.max_tokens as number, 32768);
+    requestToMutate.max_tokens = Math.min(requestToMutate.max_tokens, 32768);
   }
-  if (requestToMutate.max_completion_tokens) {
-    requestToMutate.max_completion_tokens = Math.min(
-      requestToMutate.max_completion_tokens as number,
-      32768
-    );
+  if (typeof requestToMutate.max_completion_tokens === 'number') {
+    requestToMutate.max_completion_tokens = Math.min(requestToMutate.max_completion_tokens, 32768);
   }
 }
 
@@ -167,7 +163,7 @@ async function applyMistralProviderSettings(
   extraHeaders: Record<string, string>
 ) {
   if (requestToMutate.prompt_cache_key) {
-    extraHeaders['x-affinity'] = requestToMutate.prompt_cache_key as string;
+    extraHeaders['x-affinity'] = requestToMutate.prompt_cache_key;
   }
   for (const msg of requestToMutate.messages) {
     if ('reasoning_details' in msg) delete (msg as Record<string, unknown>).reasoning_details;
@@ -209,7 +205,7 @@ function applyGigaPotatoProviderSettings(
   const systemPrompt = requestToMutate.messages.find(m => m.role === 'system');
   if (systemPrompt) {
     if (Array.isArray(systemPrompt.content)) {
-      (systemPrompt.content as unknown[]).push(nonDisclosureRule);
+      systemPrompt.content.push(nonDisclosureRule);
     } else if (systemPrompt.content) {
       systemPrompt.content = [{ type: 'text', text: systemPrompt.content }, nonDisclosureRule];
     } else {
@@ -327,7 +323,8 @@ function mapModelIdToVercel(modelId: string): string {
     'mistralai/codestral-2508': 'mistral/codestral',
     'mistralai/devstral-2512': 'mistral/devstral-2',
   };
-  if (hardcoded[modelId]) return hardcoded[modelId]!;
+  const hardcodedId = hardcoded[modelId];
+  if (hardcodedId) return hardcodedId;
 
   const kiloFree = getKiloFreeModelWithGateway(modelId);
   const baseId =
@@ -390,7 +387,7 @@ async function applyToolChoiceSetting(
   const isReasoningEnabled =
     (requestToMutate.reasoning?.enabled ?? false) === true ||
     (requestToMutate.reasoning?.effort ?? 'none') !== 'none' ||
-    ((requestToMutate.reasoning?.max_tokens as number | undefined) ?? 0) > 0;
+    (requestToMutate.reasoning?.max_tokens ?? 0) > 0;
   if (
     isXaiModel(requestedModel) ||
     isOpenAiModel(requestedModel) ||

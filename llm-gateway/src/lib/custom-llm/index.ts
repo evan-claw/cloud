@@ -159,13 +159,13 @@ async function phaseKey(
 function extractMessageTextParts(content: unknown): string[] {
   if (typeof content === 'string') return [content];
   if (!Array.isArray(content)) return [];
-  return content
+  return (content as Array<Record<string, unknown>>)
     .filter(
       (part): part is { type: string; text: string } =>
         part !== null &&
         typeof part === 'object' &&
-        (part.type === 'input_text' || part.type === 'output_text') &&
-        typeof part.text === 'string'
+        (part['type'] === 'input_text' || part['type'] === 'output_text') &&
+        typeof part['text'] === 'string'
     )
     .map(p => p.text);
 }
@@ -382,18 +382,14 @@ function buildCommonParams(
   request: OpenRouterChatCompletionRequest,
   isLegacyExtension: boolean
 ) {
-  const verbosity = VerbositySchema.safeParse(
-    (request.verbosity as string | undefined) ?? customLlm.verbosity
-  ).data;
+  const verbosity = VerbositySchema.safeParse(request.verbosity ?? customLlm.verbosity).data;
   const reasoningEffort = ReasoningEffortSchema.safeParse(
-    (request.reasoning as { effort?: string } | undefined)?.effort ?? customLlm.reasoning_effort
+    request.reasoning?.effort ?? customLlm.reasoning_effort
   ).data;
   return {
     messages,
     tools: convertTools(request.tools),
-    toolChoice: convertToolChoice(
-      request.tool_choice as OpenRouterChatCompletionRequest['tool_choice']
-    ),
+    toolChoice: convertToolChoice(request.tool_choice),
     maxOutputTokens:
       (request['max_completion_tokens'] as number | undefined) ?? request.max_tokens ?? undefined,
     temperature: (request.temperature as number | undefined) ?? undefined,
@@ -873,7 +869,7 @@ export async function customLlmRequest(
           const converted = await convertStreamPartToChunk(chunk);
           if (converted) {
             if (isLegacyExtension) {
-              applyLegacyExtensionHack((converted.choices as ChatCompletionChunkChoice[])[0]);
+              applyLegacyExtensionHack(converted.choices[0]);
             }
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(converted)}\n\n`));
           }
