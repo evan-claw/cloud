@@ -265,12 +265,11 @@ export class SessionIngestDO extends DurableObject<Env> {
     }
 
     await this.env.O11Y.ingestSessionMetrics({
-      ...metrics,
       kiloUserId,
       sessionId,
       ingestVersion,
       model,
-      organizationId: metrics.organizationId,
+      ...metrics,
     });
 
     // Mark metrics as emitted to prevent duplicates
