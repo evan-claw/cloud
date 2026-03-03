@@ -11,7 +11,7 @@ import { runApiMetrics } from '../background/api-metrics';
 import { runRequestLogging } from '../background/request-logging';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
-import { getToolsAvailable } from '../background/api-metrics';
+import { getToolsAvailable, getToolsUsed } from '../background/api-metrics';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
@@ -58,6 +58,8 @@ export type BackgroundTaskParams = {
   userByok: boolean;
   isAnon: boolean;
   sessionId: string | null;
+  ttfbMs: number;
+  toolsUsed: ReturnType<typeof getToolsUsed>;
   connectionString: string;
   o11y: { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
 };
@@ -93,6 +95,8 @@ export function scheduleBackgroundTasks(
     userByok,
     isAnon,
     sessionId,
+    ttfbMs,
+    toolsUsed,
     connectionString,
     o11y,
   } = params;
@@ -158,8 +162,8 @@ export function scheduleBackgroundTasks(
                 requestedModel: requestBody.model ?? resolvedModel,
                 resolvedModel,
                 toolsAvailable: getToolsAvailable(requestBody.tools),
-                toolsUsed: [],
-                ttfbMs: 0,
+                toolsUsed,
+                ttfbMs,
                 statusCode: upstreamStatusCode,
               },
               metricsStream,

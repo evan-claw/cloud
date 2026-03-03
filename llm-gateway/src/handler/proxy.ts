@@ -6,9 +6,9 @@
 //   3. Handle 402 → 503 conversion for non-BYOK cases
 //   4. Log proxy errors for 4xx/5xx responses
 //   5. Await abuse classification result (2s timeout)
-//   6. Apply makeErrorReadable for BYOK/context-length errors
-//   7. Rewrite free model response (SSE or JSON)
-//   8. Schedule background tasks via ctx.waitUntil()
+//   6. Schedule background tasks (always, even for error responses)
+//   7. Apply makeErrorReadable for BYOK/context-length errors
+//   8. Rewrite free model response (SSE or JSON)
 
 import type { Handler } from 'hono';
 import type { HonoContext } from '../types/hono';
@@ -21,12 +21,14 @@ import { classifyAbuse, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { getWorkerDb } from '@kilocode/db/client';
 import { scheduleBackgroundTasks } from './background-tasks';
+import { getToolsUsed } from '../background/api-metrics';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
-// Build the upstream fetch URL — always /chat/completions on the provider base URL.
-function buildUpstreamUrl(providerApiUrl: string): string {
-  return `${providerApiUrl}/chat/completions`;
+// Build the upstream fetch URL — always /chat/completions on the provider base URL,
+// preserving any query string from the original request.
+function buildUpstreamUrl(providerApiUrl: string, search: string): string {
+  return `${providerApiUrl}/chat/completions${search}`;
 }
 
 // Send request to the provider API (non-custom-LLM path).
@@ -34,7 +36,9 @@ async function openRouterRequest(
   providerApiUrl: string,
   apiKey: string,
   body: unknown,
-  extraHeaders: Record<string, string>
+  extraHeaders: Record<string, string>,
+  search: string,
+  clientSignal: AbortSignal
 ): Promise<Response> {
   const headers = new Headers({
     Authorization: `Bearer ${apiKey}`,
@@ -44,11 +48,15 @@ async function openRouterRequest(
   });
   for (const [k, v] of Object.entries(extraHeaders)) headers.set(k, v);
 
-  return fetch(buildUpstreamUrl(providerApiUrl), {
+  // Abort on whichever comes first: client disconnect or 10-minute hard timeout.
+  const timeoutSignal = AbortSignal.timeout(TEN_MINUTES_MS);
+  const combinedSignal = AbortSignal.any([clientSignal, timeoutSignal]);
+
+  return fetch(buildUpstreamUrl(providerApiUrl, search), {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(TEN_MINUTES_MS),
+    signal: combinedSignal,
   });
 }
 
@@ -75,6 +83,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   const requestStartedAt = c.get('requestStartedAt');
   const modeHeader = c.get('modeHeader');
   const isAnon = isAnonymousContext(user);
+
+  // Preserve query string so it is forwarded to the upstream provider.
+  const { search } = new URL(c.req.url);
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
@@ -116,8 +127,18 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       db
     );
   } else {
-    response = await openRouterRequest(provider.apiUrl, provider.apiKey, requestBody, extraHeaders);
+    response = await openRouterRequest(
+      provider.apiUrl,
+      provider.apiKey,
+      requestBody,
+      extraHeaders,
+      search,
+      c.req.raw.signal
+    );
   }
+
+  // Record time-to-first-byte (wall-clock from request start to upstream response).
+  const ttfbMs = Math.max(0, Math.round(performance.now() - requestStartedAt));
 
   console.debug(`Upstream ${provider.id} responded with ${response.status}`);
 
@@ -180,16 +201,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     });
   }
 
-  // ── BYOK / context-length error messages ─────────────────────────────────────
-  const errorResponse = await makeErrorReadable({
-    requestedModel: resolvedModel,
-    request: requestBody,
-    response,
-    isUserByok: !!userByok,
-  });
-  if (errorResponse) return errorResponse;
-
   const abuseRequestId = classifyResult?.request_id ?? undefined;
+
+  // ── Shared background task context ──────────────────────────────────────────
   const bgCommon = {
     upstreamStatusCode: response.status,
     abuseServiceUrl,
@@ -197,6 +211,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     abuseRequestId,
     isStreaming: requestBody.stream === true,
     requestStartedAt,
+    ttfbMs,
     provider: provider.id,
     resolvedModel,
     requestBody,
@@ -214,9 +229,47 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     userByok: !!userByok,
     isAnon,
     sessionId: taskId,
+    toolsUsed: getToolsUsed(requestBody.messages),
     connectionString: c.env.HYPERDRIVE.connectionString,
     o11y: c.env.O11Y,
   } as const;
+
+  // ── Error responses: schedule background tasks before returning ──────────────
+  // Background tasks must be scheduled even when makeErrorReadable intercepts,
+  // matching the reference implementation which always runs accounting + logging.
+  if (response.status >= 400) {
+    // Error bodies are small JSON — buffer synchronously so background tasks can
+    // read the body independently of whatever response we send to the client.
+    const errorBodyBytes = new Uint8Array(await response.arrayBuffer());
+
+    function makeErrorStream(): ReadableStream<Uint8Array> {
+      return new ReadableStream({
+        start(ctrl) {
+          ctrl.enqueue(errorBodyBytes);
+          ctrl.close();
+        },
+      });
+    }
+
+    scheduleBackgroundTasks(c.executionCtx, {
+      ...bgCommon,
+      accountingStream: !isAnon ? makeErrorStream() : null,
+      metricsStream: makeErrorStream(),
+      loggingStream: !isAnon ? makeErrorStream() : null,
+    });
+
+    // BYOK / context-length readable error — return a custom message instead of
+    // the raw upstream body.
+    const errorResponse = await makeErrorReadable({
+      requestedModel: resolvedModel,
+      request: requestBody,
+      response: new Response(errorBodyBytes, response),
+      isUserByok: !!userByok,
+    });
+    if (errorResponse) return errorResponse;
+
+    return wrapResponse(new Response(errorBodyBytes, response));
+  }
 
   // ── Free model response rewrite ───────────────────────────────────────────────
   const shouldRewrite =
