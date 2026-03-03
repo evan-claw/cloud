@@ -42,6 +42,9 @@ export type BackgroundTaskParams = {
   isStreaming: boolean;
   requestStartedAt: number;
   provider: string;
+  providerApiUrl: string;
+  providerApiKey: string;
+  providerHasGenerationEndpoint: boolean;
   resolvedModel: string;
   requestBody: OpenRouterChatCompletionRequest;
   user: BgUser;
@@ -79,6 +82,9 @@ export function scheduleBackgroundTasks(
     isStreaming,
     requestStartedAt,
     provider,
+    providerApiUrl,
+    providerApiKey,
+    providerHasGenerationEndpoint,
     resolvedModel,
     requestBody,
     user,
@@ -123,6 +129,9 @@ export function scheduleBackgroundTasks(
               estimatedOutputTokens,
               isStreaming,
               prior_microdollar_usage: user.microdollars_used ?? 0,
+              providerApiUrl,
+              providerApiKey,
+              providerHasGenerationEndpoint,
               project_id: projectId,
               status_code: upstreamStatusCode,
               editor_name: editorName,

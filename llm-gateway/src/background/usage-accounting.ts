@@ -3,9 +3,9 @@
 // Port of src/lib/processUsage.ts — simplified:
 //   - No Sentry spans/captures (use console.error/warn)
 //   - No PostHog first-usage events
-//   - No generation endpoint refetch
 //   - No KiloPass threshold check
 //   - Uses crypto.randomUUID() (Web Crypto global) instead of Node `randomUUID`
+//   - Uses scheduler.wait() instead of setTimeout for CF Workers backoff
 
 import { createParser } from 'eventsource-parser';
 import type { EventSourceMessage } from 'eventsource-parser';
@@ -20,6 +20,39 @@ import { isFreeModel } from '../lib/models';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+export type OpenRouterGeneration = {
+  data: {
+    id: string;
+    is_byok?: boolean | null;
+    total_cost: number;
+    upstream_inference_cost?: number | null;
+    created_at: string;
+    model: string;
+    origin: string;
+    usage: number;
+    upstream_id?: string | null;
+    cache_discount?: number | null;
+    app_id?: number | null;
+    streamed?: boolean | null;
+    cancelled?: boolean | null;
+    provider_name?: string | null;
+    latency?: number | null;
+    moderation_latency?: number | null;
+    generation_time?: number | null;
+    finish_reason?: string | null;
+    native_finish_reason?: string | null;
+    tokens_prompt?: number | null;
+    tokens_completion?: number | null;
+    native_tokens_prompt?: number | null;
+    native_tokens_completion?: number | null;
+    native_tokens_reasoning?: number | null;
+    native_tokens_cached?: number | null;
+    num_media_prompt?: number | null;
+    num_media_completion?: number | null;
+    num_search_results?: number | null;
+  };
+};
 
 export type OpenRouterUsage = {
   cost?: number;
@@ -69,6 +102,12 @@ export type MicrodollarUsageContext = {
   isStreaming: boolean;
   /** User's microdollars_used before this request (for first-usage detection). */
   prior_microdollar_usage: number;
+  /** Provider base URL — used to call the /generation endpoint for accurate cost data. */
+  providerApiUrl: string;
+  /** Provider API key — used to authenticate /generation endpoint requests. */
+  providerApiKey: string;
+  /** Whether the provider supports the /generation?id= endpoint for post-stream cost lookup. */
+  providerHasGenerationEndpoint: boolean;
   project_id: string | null;
   status_code: number | null;
   editor_name: string | null;
@@ -210,6 +249,100 @@ function processOpenRouterUsage(
     outputTokens: usage?.completion_tokens ?? 0,
     cost_mUsd,
     is_byok,
+  };
+}
+
+// ─── Generation endpoint refetch ─────────────────────────────────────────────
+
+// Fetch generation data from the provider's /generation?id= endpoint.
+// Uses exponential backoff because OpenRouter may return 404 if called too soon after streaming.
+async function fetchWithBackoff(
+  url: string,
+  init: RequestInit,
+  shouldRetry: (r: Response) => boolean
+): Promise<Response> {
+  const maxElapsedMs = 20_000;
+  const startedAt = Date.now();
+  let nextDelayMs = 200 * (1 + (Math.random() - 0.5) / 10);
+  while (true) {
+    const response = await fetch(url, init);
+    if (!shouldRetry(response)) return response;
+    if (Date.now() - startedAt + nextDelayMs > maxElapsedMs) return response;
+    await scheduler.wait(nextDelayMs);
+    nextDelayMs = nextDelayMs * 1.5;
+  }
+}
+
+async function fetchGeneration(
+  apiUrl: string,
+  apiKey: string,
+  messageId: string
+): Promise<OpenRouterGeneration | null> {
+  // Delay 200ms — the provider may not have the cost ready immediately after streaming.
+  await scheduler.wait(200);
+  try {
+    const response = await fetchWithBackoff(
+      `${apiUrl}/generation?id=${messageId}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://kilocode.ai',
+          'X-Title': 'Kilo Code',
+        },
+      },
+      r => r.status >= 400 // retry on 404 (generation not yet available)
+    );
+    if (!response.ok) {
+      console.warn('fetchGeneration: non-ok response', {
+        status: response.status,
+        messageId,
+      });
+      return null;
+    }
+    return (await response.json()) as OpenRouterGeneration;
+  } catch (err) {
+    console.warn('fetchGeneration: fetch error', { messageId, err });
+    return null;
+  }
+}
+
+export function mapToUsageStats(
+  generation: OpenRouterGeneration,
+  responseContent: string
+): MicrodollarUsageStats {
+  const { data } = generation;
+  let llmCostUsd: number;
+  if (!data.is_byok) {
+    llmCostUsd = data.total_cost;
+  } else if (data.upstream_inference_cost == null) {
+    console.warn('SUSPICIOUS: openrouter missing upstream_inference_cost', { id: data.id });
+    llmCostUsd = data.total_cost * OPENROUTER_BYOK_COST_MULTIPLIER;
+  } else {
+    llmCostUsd = data.upstream_inference_cost;
+  }
+
+  return {
+    messageId: data.id,
+    hasError: false,
+    model: data.model,
+    responseContent,
+    inputTokens: data.native_tokens_prompt ?? 0,
+    cacheHitTokens: data.native_tokens_cached ?? 0,
+    cacheWriteTokens: 0,
+    outputTokens: data.native_tokens_completion ?? 0,
+    cost_mUsd: toMicrodollars(llmCostUsd),
+    is_byok: data.is_byok ?? null,
+    cacheDiscount_mUsd:
+      data.cache_discount == null ? undefined : toMicrodollars(data.cache_discount),
+    inference_provider: data.provider_name ?? null,
+    upstream_id: data.upstream_id ?? null,
+    finish_reason: data.finish_reason ?? null,
+    latency: data.latency ?? null,
+    moderation_latency: data.moderation_latency ?? null,
+    generation_time: data.generation_time ?? null,
+    streamed: data.streamed ?? null,
+    cancelled: data.cancelled ?? null,
   };
 }
 
@@ -617,6 +750,39 @@ export async function runUsageAccounting(
   } catch (err) {
     console.error('runUsageAccounting: parse error', err);
     return null;
+  }
+
+  // Refetch accurate cost/token data from the provider's generation endpoint when available.
+  // OpenRouter's /generation?id= gives more precise token counts and cost data than the SSE stream.
+  if (
+    usageContext.providerHasGenerationEndpoint &&
+    usageStats.messageId &&
+    !usageStats.hasError
+  ) {
+    try {
+      const generation = await fetchGeneration(
+        usageContext.providerApiUrl,
+        usageContext.providerApiKey,
+        usageStats.messageId
+      );
+      if (generation) {
+        const genStats = mapToUsageStats(generation, usageStats.responseContent);
+        // Preserve stream-derived fields that the generation endpoint may not have.
+        genStats.model = usageStats.model;
+        genStats.hasError = usageStats.hasError;
+        genStats.streamed ??= usageContext.isStreaming;
+        if (genStats.cost_mUsd !== usageStats.cost_mUsd) {
+          console.warn('DEV ODDITY: usage stats do not match generation data', {
+            model: genStats.model,
+            gen_cost: genStats.cost_mUsd,
+            stream_cost: usageStats.cost_mUsd,
+          });
+        }
+        usageStats = genStats;
+      }
+    } catch (err) {
+      console.warn('runUsageAccounting: fetchGeneration failed', err);
+    }
   }
 
   // Use requested_model as model fallback
