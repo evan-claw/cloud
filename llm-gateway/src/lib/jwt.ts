@@ -1,4 +1,5 @@
 import { verifyKiloToken, extractBearerToken, type KiloTokenPayload } from '@kilocode/worker-utils';
+import { timingSafeEqual } from '@kilocode/encryption';
 
 export { extractBearerToken };
 export type { KiloTokenPayload };
@@ -30,5 +31,6 @@ export function isPepperValid(
   dbPepper: string | null
 ): boolean {
   if (!dbPepper) return true;
-  return jwtPepper === dbPepper;
+  if (!jwtPepper) return false;
+  return timingSafeEqual(jwtPepper, dbPepper);
 }

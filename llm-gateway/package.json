@@ -25,6 +25,7 @@
     "@ai-sdk/anthropic": "^3.0.41",
     "@ai-sdk/openai": "^3.0.27",
     "@kilocode/db": "workspace:*",
+    "@kilocode/encryption": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
     "ai": "^6.0.78",
     "drizzle-orm": "catalog:",
