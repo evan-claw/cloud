@@ -229,16 +229,16 @@ export async function parseMicrodollarUsageFromStream(
   let inference_provider: string | null = null;
   let finish_reason: string | null = null;
 
-  const reader = (stream as ReadableStream<Uint8Array>).getReader();
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
 
   const sseStreamParser = createParser({
     onEvent(event: EventSourceMessage) {
       if (event.data === '[DONE]') return;
 
-      let json: ChatCompletionChunk;
+      let json: ChatCompletionChunk | undefined;
       try {
-        json = JSON.parse(event.data) as ChatCompletionChunk;
+        json = JSON.parse(event.data);
       } catch {
         return;
       }
@@ -333,7 +333,7 @@ export function parseMicrodollarUsageFromString(
   let responseJson: NonStreamingResponseJson | null = null;
 
   try {
-    responseJson = JSON.parse(fullResponse) as NonStreamingResponseJson;
+    responseJson = JSON.parse(fullResponse);
   } catch {
     console.warn('parseMicrodollarUsageFromString: failed to parse JSON', { kiloUserId });
   }
@@ -662,13 +662,13 @@ export async function runUsageAccounting(
     project_id: usageContext.project_id,
   };
 
-  let system_prompt_prefix = usageContext.promptInfo.system_prompt_prefix;
-  let user_prompt_prefix = usageContext.promptInfo.user_prompt_prefix;
+  let system_prompt_prefix: string | null = usageContext.promptInfo.system_prompt_prefix;
+  let user_prompt_prefix: string | null = usageContext.promptInfo.user_prompt_prefix;
 
   // Never log sensitive data for org requests
   if (usageContext.organizationId) {
     system_prompt_prefix = '';
-    user_prompt_prefix = null as unknown as string;
+    user_prompt_prefix = null;
   }
 
   const metadataFields: UsageMetaData = {
