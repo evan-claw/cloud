@@ -15,8 +15,7 @@ type ChatSidebarProps = {
   organizationId?: string;
   onNewSession: () => void;
   onSelectSession?: (sessionId: string) => void;
-  /** Delete handler - receives sessionId and source */
-  onDeleteSession?: (sessionId: string, source?: 'v1' | 'v2') => void;
+  onDeleteSession?: (sessionId: string) => void;
   isInSheet?: boolean;
 };
 
@@ -98,7 +97,7 @@ export function ChatSidebar({
                         onClick={event => event.stopPropagation()}
                       >
                         <InlineDeleteConfirmation
-                          onDelete={() => onDeleteSession(session.sessionId, session.source)}
+                          onDelete={() => onDeleteSession(session.sessionId)}
                           showAsButton={false}
                         />
                       </div>

@@ -14,6 +14,7 @@ import { useSetAtom } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTRPC } from '@/lib/trpc/utils';
+import { isNewSession } from '@/lib/cloud-agent/session-type';
 import { clearMessagesAtom, currentSessionIdAtom } from '../store/atoms';
 import { deleteSessionFromStoreAtom } from '../store/db-session-atoms';
 
@@ -26,7 +27,7 @@ type UseSessionDeletionOptions = {
 };
 
 type UseSessionDeletionReturn = {
-  handleDeleteSession: (sessionId: string, source?: 'v1' | 'v2') => Promise<void>;
+  handleDeleteSession: (sessionId: string) => Promise<void>;
 };
 
 export function useSessionDeletion({
@@ -51,7 +52,7 @@ export function useSessionDeletion({
   );
 
   const handleDeleteSession = useCallback(
-    async (sessionId: string, source?: 'v1' | 'v2') => {
+    async (sessionId: string) => {
       // If deleting the currently visible session, stop the stream first to prevent race conditions
       if (sessionId === currentDbSessionId) {
         cleanup();
@@ -72,7 +73,7 @@ export function useSessionDeletion({
       // Delete from server (source of truth)
       let serverDeleteFailed = false;
       try {
-        if (source === 'v2') {
+        if (isNewSession(sessionId)) {
           await deleteCliSessionV2({ session_id: sessionId });
         } else {
           await deleteCliSession({ session_id: sessionId });

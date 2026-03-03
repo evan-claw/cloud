@@ -18,10 +18,7 @@ import {
 } from '../store/db-session-atoms';
 import type { StoredSession } from '../types';
 
-function dbSessionToStoredSession(
-  session: DbSession | DbSessionV2,
-  source?: 'v1' | 'v2'
-): StoredSession {
+function dbSessionToStoredSession(session: DbSession | DbSessionV2): StoredSession {
   const title = session.title || `Session ${session.session_id.substring(0, 8)}`;
 
   return {
@@ -35,7 +32,6 @@ function dbSessionToStoredSession(
     updatedAt: session.updated_at.toISOString(),
     messages: [],
     cloudAgentSessionId: session.cloud_agent_session_id,
-    source,
   };
 }
 
@@ -70,7 +66,6 @@ export function useSidebarSessions(options?: UseSidebarSessionsOptions): UseSide
 
   // Track last processed data key to avoid unnecessary atom updates
   const lastDataKeyRef = useRef<string | null>(null);
-  const sourceMapRef = useRef<Map<string, 'v1' | 'v2'>>(new Map());
 
   // Populate Jotai atom when query data actually changes
   useEffect(() => {
@@ -83,11 +78,6 @@ export function useSidebarSessions(options?: UseSidebarSessionsOptions): UseSide
       // Only update atoms when data actually changes
       if (lastDataKeyRef.current !== dataKey) {
         lastDataKeyRef.current = dataKey;
-        const newSourceMap = new Map<string, 'v1' | 'v2'>();
-        for (const s of dbSessionsData.cliSessions) {
-          newSourceMap.set(s.session_id, s.source);
-        }
-        sourceMapRef.current = newSourceMap;
         const sessions = dbSessionsData.cliSessions.map(apiSessionToDbSession);
         setDbSessions(sessions);
       }
@@ -95,9 +85,7 @@ export function useSidebarSessions(options?: UseSidebarSessionsOptions): UseSide
   }, [dbSessionsData?.cliSessions, setDbSessions]);
 
   const sessions = useMemo<StoredSession[]>(() => {
-    return recentSessions.map(s =>
-      dbSessionToStoredSession(s, sourceMapRef.current.get(s.session_id))
-    );
+    return recentSessions.map(dbSessionToStoredSession);
   }, [recentSessions]);
 
   // Refetch sessions by invalidating the query cache
