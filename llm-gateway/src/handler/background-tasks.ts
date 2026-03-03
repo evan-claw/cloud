@@ -127,7 +127,7 @@ export function scheduleBackgroundTasks(
               requested_model: resolvedModel,
               promptInfo,
               max_tokens: requestBody.max_tokens ?? null,
-              has_middle_out_transform: requestBody.transforms?.includes('middle-out') ?? null,
+              has_middle_out_transform: requestBody.transforms?.includes('middle-out') ?? false,
               estimatedInputTokens,
               estimatedOutputTokens,
               isStreaming,
