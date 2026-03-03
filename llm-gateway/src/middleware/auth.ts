@@ -3,13 +3,13 @@ import { eq } from 'drizzle-orm';
 import { getWorkerDb } from '@kilocode/db/client';
 import { kilocode_users } from '@kilocode/db/schema';
 import type { HonoContext } from '../types/hono';
-import { extractBearerToken, userExistsWithCache } from '@kilocode/worker-utils';
+import { extractBearerToken } from '@kilocode/worker-utils';
 import { verifyGatewayJwt, isPepperValid } from '../lib/jwt';
 
 const ORGANIZATION_ID_HEADER = 'x-kilocode-organizationid';
 
 export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
-  const token = extractBearerToken(c.req.header('Authorization') ?? c.req.header('authorization'));
+  const token = extractBearerToken(c.req.header('Authorization'));
 
   if (!token) {
     // No token — let anonymous-gate decide
@@ -20,17 +20,11 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const verifyResult = await verifyGatewayJwt(token, secret);
 
   if (!verifyResult.ok) {
-    // Invalid / expired / wrong version — let anonymous-gate decide
-    return next();
+    return c.json({ error: { message: 'Invalid or expired token' } }, 401);
   }
 
   const { payload } = verifyResult;
   const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
-
-  const exists = await userExistsWithCache(c.env.USER_EXISTS_CACHE, db, payload.kiloUserId);
-  if (!exists) {
-    return next();
-  }
 
   const rows = await db
     .select()
@@ -40,12 +34,11 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const user = rows[0];
 
   if (!user) {
-    return next();
+    return c.json({ error: { message: 'User not found' } }, 401);
   }
 
   if (!isPepperValid(payload.apiTokenPepper, user.api_token_pepper)) {
-    // Token has been revoked — treat as unauthenticated
-    return next();
+    return c.json({ error: { message: 'Token has been revoked' } }, 401);
   }
 
   c.set('authUser', user);
