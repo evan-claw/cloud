@@ -77,6 +77,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     ABUSE_CF_ACCESS_CLIENT_SECRET: makeSecret('abuse-secret'),
     GIGAPOTATO_API_URL: makeSecret('https://gigapotato.example.com'),
     ABUSE_SERVICE_URL: makeSecret('https://abuse.example.com'),
+    POSTHOG_API_KEY: makeSecret('phk-test'),
     ...overrides,
   } as Cloudflare.Env;
 }

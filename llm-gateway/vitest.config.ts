@@ -19,8 +19,7 @@ export default defineConfig({
     name: 'unit',
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts', 'test/unit/**/*.test.ts'],
-    exclude: ['test/integration/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'test/unit/**/*.test.ts', 'test/integration/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
