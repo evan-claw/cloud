@@ -256,7 +256,7 @@ export async function startSecurityAnalysis(
     return { started: true, triageOnly: false };
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
-      await setFindingFailed(params.db, params.findingId, error.message);
+      // setFindingFailed already called at the throw site (line 231)
       throw error;
     }
 
