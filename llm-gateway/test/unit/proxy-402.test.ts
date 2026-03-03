@@ -37,10 +37,9 @@ beforeEach(() => {
   globalThis.fetch = fetchMock;
 
   // scheduler.wait is a Workers-only global — stub it for Node tests.
-  if (typeof globalThis.scheduler === 'undefined') {
-    (globalThis as Record<string, unknown>).scheduler = {
-      wait: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
-    };
+  const g = globalThis as Record<string, unknown>;
+  if (g.scheduler === undefined) {
+    g.scheduler = { wait: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) };
   }
 });
 
