@@ -8,6 +8,9 @@ import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kilocla
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
 import { KILOCLAW_API_URL } from '@/lib/config.server';
+import { db } from '@/lib/drizzle';
+import { kiloclaw_version_pins } from '@kilocode/db/schema';
+import { eq } from 'drizzle-orm';
 import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
@@ -123,6 +126,13 @@ async function provisionInstance(
   });
   const kilocodeApiKeyExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
+  // Check if the user has a version pin
+  const [pin] = await db
+    .select({ image_tag: kiloclaw_version_pins.image_tag })
+    .from(kiloclaw_version_pins)
+    .where(eq(kiloclaw_version_pins.user_id, user.id))
+    .limit(1);
+
   const client = new KiloClawInternalClient();
   return client.provision(user.id, {
     envVars: input.envVars,
@@ -131,6 +141,7 @@ async function provisionInstance(
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
+    pinnedImageTag: pin?.image_tag,
   });
 }
 

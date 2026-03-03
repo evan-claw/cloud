@@ -26,13 +26,25 @@ GIT_SHA="$(git -C "$KILOCLAW_DIR" rev-parse HEAD 2>/dev/null || echo 'unknown')"
 
 echo "Building + pushing $IMAGE (linux/amd64) ..."
 echo "Controller commit: $GIT_SHA"
+
+# Use --metadata-file to capture the pushed image digest
+METADATA_FILE="$(mktemp)"
+trap 'rm -f "$METADATA_FILE"' EXIT
+
 docker buildx build \
   --platform linux/amd64 \
   -f "$KILOCLAW_DIR/Dockerfile" \
   --build-arg "CONTROLLER_COMMIT=$GIT_SHA" \
   -t "$IMAGE" \
   --push \
+  --metadata-file "$METADATA_FILE" \
   "$KILOCLAW_DIR"
+
+# Extract digest from build metadata
+DIGEST=""
+if [ -f "$METADATA_FILE" ] && command -v jq >/dev/null 2>&1; then
+  DIGEST=$(jq -r '.["containerimage.digest"] // empty' "$METADATA_FILE" 2>/dev/null)
+fi
 
 # Update .dev.vars
 if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
@@ -41,7 +53,17 @@ if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
   else
     echo "FLY_IMAGE_TAG=$TAG" >> "$KILOCLAW_DIR/.dev.vars"
   fi
-  echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG"
+
+  if [ -n "$DIGEST" ]; then
+    if grep -q '^FLY_IMAGE_DIGEST=' "$KILOCLAW_DIR/.dev.vars"; then
+      sed -i '' "s|^FLY_IMAGE_DIGEST=.*|FLY_IMAGE_DIGEST=$DIGEST|" "$KILOCLAW_DIR/.dev.vars"
+    else
+      echo "FLY_IMAGE_DIGEST=$DIGEST" >> "$KILOCLAW_DIR/.dev.vars"
+    fi
+    echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG  FLY_IMAGE_DIGEST=$DIGEST"
+  else
+    echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG  (digest not captured)"
+  fi
 else
   echo "No .dev.vars found — set FLY_IMAGE_TAG=$TAG manually"
 fi

@@ -50,6 +50,9 @@ export const InstanceConfigSchema = z.object({
   // Examples: "us,eu" (try US first, then Europe), "lhr" (London only).
   // If omitted, falls back to the FLY_REGION env var.
   region: z.string().optional(),
+  // If set, use this image tag instead of resolving latest from KV.
+  // Set by the cloud app when the user has a version pin.
+  pinnedImageTag: z.string().optional(),
 });
 
 export type InstanceConfig = z.infer<typeof InstanceConfigSchema>;
@@ -130,6 +133,7 @@ export const PersistedStateSchema = z.object({
   openclawVersion: z.string().nullable().default(null),
   imageVariant: z.string().nullable().default(null),
   trackedImageTag: z.string().nullable().default(null),
+  trackedImageDigest: z.string().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

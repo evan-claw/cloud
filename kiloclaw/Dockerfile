@@ -74,7 +74,7 @@ RUN mkdir -p /root/.openclaw \
 
 # Copy startup script
 # Build cache bust: 2026-02-27-v57-openclaw-2026.2.26-1password-arch-fix
-RUN echo "7"
+RUN echo "8"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
 COPY openclaw-device-pairing-list.js /usr/local/bin/openclaw-device-pairing-list.js

@@ -4,6 +4,7 @@ import { kiloclaw_image_catalog, kiloclaw_version_pins, kilocode_users } from '@
 import { eq, desc, sql, or, ilike } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { TRPCError } from '@trpc/server';
+import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import * as z from 'zod';
 
 const ListVersionsSchema = z.object({
@@ -72,6 +73,18 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
   updateVersionStatus: adminProcedure
     .input(UpdateVersionStatusSchema)
     .mutation(async ({ input, ctx }) => {
+      // Prevent disabling the :latest version — it would break all unpinned users
+      if (input.status === 'disabled') {
+        const client = new KiloClawInternalClient();
+        const latestTag = (await client.getLatestVersion())?.imageTag;
+        if (latestTag === input.imageTag) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'Cannot disable the current :latest version. Push a new image first.',
+          });
+        }
+      }
+
       const [updated] = await db
         .update(kiloclaw_image_catalog)
         .set({
@@ -163,24 +176,36 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
   }),
 
   setPin: adminProcedure.input(SetPinSchema).mutation(async ({ input, ctx }) => {
-    const [result] = await db
-      .insert(kiloclaw_version_pins)
-      .values({
-        user_id: input.userId,
-        image_tag: input.imageTag,
-        pinned_by: ctx.user.id,
-        reason: input.reason ?? null,
-      })
-      .onConflictDoUpdate({
-        target: kiloclaw_version_pins.user_id,
-        set: {
+    let result;
+    try {
+      [result] = await db
+        .insert(kiloclaw_version_pins)
+        .values({
+          user_id: input.userId,
           image_tag: input.imageTag,
           pinned_by: ctx.user.id,
           reason: input.reason ?? null,
-          updated_at: new Date().toISOString(),
-        },
-      })
-      .returning();
+        })
+        .onConflictDoUpdate({
+          target: kiloclaw_version_pins.user_id,
+          set: {
+            image_tag: input.imageTag,
+            pinned_by: ctx.user.id,
+            reason: input.reason ?? null,
+            updated_at: new Date().toISOString(),
+          },
+        })
+        .returning();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('foreign key') || msg.includes('violates')) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Image tag '${input.imageTag}' not found in catalog`,
+        });
+      }
+      throw err;
+    }
 
     if (!result) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create pin' });
@@ -200,6 +225,45 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
     }
 
     return { success: true };
+  }),
+
+  getLatestTag: adminProcedure.query(async () => {
+    const client = new KiloClawInternalClient();
+    const latest = await client.getLatestVersion();
+    return latest?.imageTag ?? null;
+  }),
+
+  syncCatalog: adminProcedure.mutation(async () => {
+    const client = new KiloClawInternalClient();
+    const kvVersions = await client.listVersions();
+
+    let synced = 0;
+    let skipped = 0;
+
+    for (const entry of kvVersions) {
+      const [existing] = await db
+        .select({ image_tag: kiloclaw_image_catalog.image_tag })
+        .from(kiloclaw_image_catalog)
+        .where(eq(kiloclaw_image_catalog.image_tag, entry.imageTag))
+        .limit(1);
+
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      await db.insert(kiloclaw_image_catalog).values({
+        openclaw_version: entry.openclawVersion,
+        variant: entry.variant,
+        image_tag: entry.imageTag,
+        image_digest: entry.imageDigest,
+        status: 'available',
+        published_at: entry.publishedAt,
+      });
+      synced++;
+    }
+
+    return { synced, skipped, total: kvVersions.length };
   }),
 
   searchUsers: adminProcedure

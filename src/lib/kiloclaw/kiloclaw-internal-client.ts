@@ -2,6 +2,7 @@ import 'server-only';
 
 import { KILOCLAW_API_URL, KILOCLAW_INTERNAL_API_SECRET } from '@/lib/config.server';
 import type {
+  ImageVersionEntry,
   ProvisionInput,
   PlatformStatusResponse,
   KiloCodeConfigPatchInput,
@@ -74,6 +75,18 @@ export class KiloClawInternalClient {
     }
 
     return res.json() as Promise<T>;
+  }
+
+  async listVersions(): Promise<ImageVersionEntry[]> {
+    return this.request('/api/platform/versions');
+  }
+
+  async getLatestVersion(): Promise<ImageVersionEntry | null> {
+    try {
+      return await this.request('/api/platform/versions/latest');
+    } catch {
+      return null;
+    }
   }
 
   async provision(userId: string, config: ProvisionInput): Promise<{ sandboxId: string }> {

@@ -168,6 +168,39 @@ async function rebuildIndex(kv: KVNamespace): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Resolve a specific version by image tag (for pinned users)
+// ---------------------------------------------------------------------------
+
+/**
+ * Find a version entry in KV by its image tag.
+ * Scans versioned keys (not latest pointers) and returns the first match.
+ * Returns null if no entry matches the given tag.
+ */
+export async function resolveVersionByTag(
+  kv: KVNamespace,
+  imageTag: string
+): Promise<ImageVersionEntry | null> {
+  let cursor: string | undefined;
+
+  do {
+    const result = await kv.list({ prefix: 'image-version:', cursor });
+    for (const key of result.keys) {
+      if (key.name.startsWith('image-version:latest:') || key.name === IMAGE_VERSION_INDEX_KEY) {
+        continue;
+      }
+      const raw = await kv.get(key.name, 'json');
+      const parsed = ImageVersionEntrySchema.safeParse(raw);
+      if (parsed.success && parsed.data.imageTag === imageTag) {
+        return parsed.data;
+      }
+    }
+    cursor = result.list_complete ? undefined : result.cursor;
+  } while (cursor);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // List all versions (for admin tooling / triggerSync)
 // ---------------------------------------------------------------------------
 
