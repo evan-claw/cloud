@@ -1,12 +1,11 @@
-// Test: 402 upstream responses still emit background tasks (metrics, accounting, logging).
-//
-// B1 fix: the 402 → 503 conversion now happens AFTER scheduleBackgroundTasks,
-// matching the reference implementation which always calls emitApiMetricsForResponse
-// before the 402 check.
+// Tests for proxyHandler background task scheduling:
+// - B1: 402 upstream responses still emit background tasks
+// - B2: Free model responses include accounting and logging streams
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import type { HonoContext } from '../../src/types/hono';
+import type { ProviderId } from '../../src/lib/providers';
 import { fakeExecutionCtx } from './helpers';
 
 // ── Track scheduleBackgroundTasks calls ──────────────────────────────────────
@@ -65,20 +64,27 @@ const testEnv = {
   O11Y: { ingestApiMetrics: async () => {} },
 };
 
-function buildApp() {
+type ContextOverrides = {
+  model?: string;
+  providerId?: ProviderId;
+};
+
+function buildApp(overrides: ContextOverrides = {}) {
+  const model = overrides.model ?? 'anthropic/claude-sonnet-4-20250514';
+  const providerId = overrides.providerId ?? 'openrouter';
   const app = new Hono<HonoContext>();
 
   // Pre-populate context variables normally set by earlier middleware.
   app.use('*', async (c, next) => {
     c.set('requestStartedAt', performance.now());
     c.set('requestBody', {
-      model: 'anthropic/claude-sonnet-4-20250514',
+      model,
       messages: [{ role: 'user' as const, content: 'hi' }],
       stream: false,
     });
-    c.set('resolvedModel', 'anthropic/claude-sonnet-4-20250514');
+    c.set('resolvedModel', model);
     c.set('provider', {
-      id: 'openrouter',
+      id: providerId,
       apiUrl: 'https://openrouter.example.com/v1',
       apiKey: 'test-key',
       hasGenerationEndpoint: true,
@@ -219,5 +225,123 @@ describe('proxy handler – 402 upstream', () => {
     // Background tasks should be scheduled
     expect(scheduledCalls).toHaveLength(1);
     expect((scheduledCalls[0] as Record<string, unknown>).upstreamStatusCode).toBe(500);
+  });
+});
+
+// ── B2: Free model responses include accounting and logging ───────────────────
+
+describe('proxy handler – free model background tasks', () => {
+  it('provides accountingStream and loggingStream for free model responses', async () => {
+    // Upstream returns 200 OK for a free model
+    const upstreamBody = JSON.stringify({
+      id: 'chatcmpl-1',
+      choices: [{ message: { role: 'assistant', content: 'hi' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+    fetchMock.mockResolvedValue(
+      new Response(upstreamBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const { proxyHandler } = await import('../../src/handler/proxy');
+    const app = buildApp({ model: 'corethink:free', providerId: 'corethink' });
+    app.post('/api/gateway/chat/completions', proxyHandler);
+
+    const req = new Request('http://localhost/api/gateway/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    });
+
+    const res = await dispatch(app, req);
+    expect(res.status).toBe(200);
+
+    // Consume the response body to let the pipe promise complete.
+    await res.text();
+    // Allow microtasks / waitUntil promises to settle.
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Background tasks MUST include accounting and logging streams (B2 fix).
+    expect(scheduledCalls).toHaveLength(1);
+    const params = scheduledCalls[0] as Record<string, unknown>;
+    expect(params.accountingStream).not.toBeNull();
+    expect(params.metricsStream).not.toBeNull();
+    expect(params.loggingStream).not.toBeNull();
+  });
+
+  it('skips accountingStream and loggingStream for anonymous free model requests', async () => {
+    const upstreamBody = JSON.stringify({
+      id: 'chatcmpl-1',
+      choices: [{ message: { role: 'assistant', content: 'hi' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    });
+    fetchMock.mockResolvedValue(
+      new Response(upstreamBody, {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const { proxyHandler } = await import('../../src/handler/proxy');
+    // Build app with anonymous user (id starts with 'anon:')
+    const app = new Hono<HonoContext>();
+    app.use('*', async (c, next) => {
+      c.set('requestStartedAt', performance.now());
+      c.set('requestBody', {
+        model: 'corethink:free',
+        messages: [{ role: 'user' as const, content: 'hi' }],
+        stream: false,
+      });
+      c.set('resolvedModel', 'corethink:free');
+      c.set('provider', {
+        id: 'corethink' as const,
+        apiUrl: 'https://corethink.example.com/v1',
+        apiKey: 'test-key',
+        hasGenerationEndpoint: true,
+      });
+      c.set('userByok', null);
+      c.set('customLlm', null);
+      c.set('user', { id: 'anon:1.2.3.4', isAnonymous: true } as never);
+      c.set('organizationId', undefined);
+      c.set('projectId', null);
+      c.set('extraHeaders', {});
+      c.set('fraudHeaders', { cf_connecting_ip: '1.2.3.4' } as never);
+      c.set('editorName', null);
+      c.set('machineId', null);
+      c.set('taskId', null);
+      c.set('botId', undefined);
+      c.set('tokenSource', undefined);
+      c.set('feature', null);
+      c.set('autoModel', null);
+      c.set('modeHeader', null);
+      await next();
+    });
+    app.post('/api/gateway/chat/completions', proxyHandler);
+
+    const req = new Request('http://localhost/api/gateway/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'corethink:free',
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    });
+
+    const res = await dispatch(app, req);
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // For anonymous users: accounting and logging are null, but metrics are present.
+    expect(scheduledCalls).toHaveLength(1);
+    const params = scheduledCalls[0] as Record<string, unknown>;
+    expect(params.accountingStream).toBeNull();
+    expect(params.metricsStream).not.toBeNull();
+    expect(params.loggingStream).toBeNull();
   });
 });

@@ -326,20 +326,23 @@ export const proxyHandler: Handler<HonoContext> = async c => {
         }
       })();
 
+      function replayFreeStream(): ReadableStream<Uint8Array> {
+        return new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(chunk);
+            controller.close();
+          },
+        });
+      }
+
       c.executionCtx.waitUntil(
         pipePromise
           .then(() => {
-            const metricsStream = new ReadableStream<Uint8Array>({
-              start(controller) {
-                for (const chunk of chunks) controller.enqueue(chunk);
-                controller.close();
-              },
-            });
             scheduleBackgroundTasks(c.executionCtx, {
               ...bgCommon,
-              accountingStream: null, // free model — no cost accounting
-              metricsStream,
-              loggingStream: null,
+              accountingStream: !isAnon ? replayFreeStream() : null,
+              metricsStream: replayFreeStream(),
+              loggingStream: !isAnon ? replayFreeStream() : null,
             });
           })
           .catch(err => {
