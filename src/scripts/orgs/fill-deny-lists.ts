@@ -23,10 +23,10 @@ export async function run() {
         .where(eq(organizations.id, org.id));
 
       if (settings.model_allow_list) {
-        settings.model_allow_list = [...new Set<string>(settings.model_allow_list)];
+        settings.model_allow_list = [...new Set(settings.model_allow_list)];
       }
       if (settings.provider_allow_list) {
-        settings.provider_allow_list = [...new Set<string>(settings.provider_allow_list)];
+        settings.provider_allow_list = [...new Set(settings.provider_allow_list)];
       }
 
       const denyLists = await createDenyLists(
