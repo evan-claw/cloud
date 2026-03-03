@@ -44,10 +44,6 @@ function registerChatCompletions(path: string) {
 registerChatCompletions('/api/gateway/chat/completions');
 registerChatCompletions('/api/openrouter/chat/completions');
 
-app.get('/health', c => {
-  return c.json({ status: 'ok', service: 'llm-gateway' });
-});
-
 app.notFound(c => {
   return c.json({ error: 'Not found' }, 404);
 });
