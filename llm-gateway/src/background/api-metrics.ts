@@ -49,15 +49,20 @@ type ChatCompletionTool = {
   custom?: { name?: string };
 };
 
-export function getToolsAvailable(tools: ChatCompletionTool[] | undefined): string[] {
+function isTool(item: unknown): item is ChatCompletionTool {
+  return typeof item === 'object' && item !== null;
+}
+
+export function getToolsAvailable(tools: unknown[] | undefined): string[] {
   if (!tools) return [];
-  return tools.map(tool => {
-    if (tool.type === 'function') {
-      const name = typeof tool.function?.name === 'string' ? tool.function.name.trim() : '';
+  return tools.map(item => {
+    if (!isTool(item)) return 'unknown:unknown';
+    if (item.type === 'function') {
+      const name = typeof item.function?.name === 'string' ? item.function.name.trim() : '';
       return name ? `function:${name}` : 'function:unknown';
     }
-    if (tool.type === 'custom') {
-      const name = typeof tool.custom?.name === 'string' ? tool.custom.name.trim() : '';
+    if (item.type === 'custom') {
+      const name = typeof item.custom?.name === 'string' ? item.custom.name.trim() : '';
       return name ? `custom:${name}` : 'custom:unknown';
     }
     return 'unknown:unknown';
@@ -161,7 +166,7 @@ async function drainResponseBodyForInferenceProvider(
   const body = response.body;
   if (!body) return undefined;
 
-  const reader = (body as ReadableStream<Uint8Array>).getReader();
+  const reader = body.getReader();
   const contentType = response.headers.get('content-type') ?? '';
   const isEventStream = contentType.includes('text/event-stream');
 
@@ -198,7 +203,7 @@ async function drainResponseBodyForInferenceProvider(
 
       const result = await Promise.race([
         reader.read(),
-        scheduler.wait(remainingMs).then((): { timeout: true } => ({ timeout: true })),
+        scheduler.wait(remainingMs).then(() => ({ timeout: true }) as const),
       ]);
 
       if ('timeout' in result) {

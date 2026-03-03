@@ -11,6 +11,7 @@ import { runApiMetrics } from '../background/api-metrics';
 import { runRequestLogging } from '../background/request-logging';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
+import { getToolsAvailable } from '../background/api-metrics';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
@@ -144,19 +145,6 @@ export function scheduleBackgroundTasks(
     metricsStream && o11y
       ? withTimeout(
           (async () => {
-            const toolsAvailable = Array.isArray(requestBody.tools)
-              ? (requestBody.tools as Array<{ type?: string; function?: { name?: string } }>).map(
-                  t => {
-                    if (t.type === 'function') {
-                      const name =
-                        typeof t.function?.name === 'string' ? t.function.name.trim() : '';
-                      return name ? `function:${name}` : 'function:unknown';
-                    }
-                    return 'unknown:unknown';
-                  }
-                )
-              : [];
-
             await runApiMetrics(
               o11y,
               {
@@ -169,7 +157,7 @@ export function scheduleBackgroundTasks(
                 provider,
                 requestedModel: requestBody.model ?? resolvedModel,
                 resolvedModel,
-                toolsAvailable,
+                toolsAvailable: getToolsAvailable(requestBody.tools),
                 toolsUsed: [],
                 ttfbMs: 0,
                 statusCode: upstreamStatusCode,
