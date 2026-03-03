@@ -2,9 +2,9 @@
 // API keys come from Secrets Store bindings (resolved asynchronously at request time).
 
 import type { WorkerDb } from '@kilocode/db/client';
-import { custom_llm } from '@kilocode/db/schema';
+import { custom_llm, organization_memberships } from '@kilocode/db/schema';
 import type { CustomLlm } from '@kilocode/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { User } from '@kilocode/db';
 import type { BYOKResult } from './byok';
 import { getModelUserByokProviders, getBYOKforUser, getBYOKforOrganization } from './byok';
@@ -215,23 +215,37 @@ export async function getProvider(
     }
   }
 
-  // 2. Custom LLM check (kilo-internal/ prefix + organizationId)
-  if (requestedModel.startsWith('kilo-internal/') && organizationId) {
+  // 2. Custom LLM check (kilo-internal/ prefix + organizationId + membership)
+  if (requestedModel.startsWith('kilo-internal/') && organizationId && !isAnonymousContext(user)) {
     const [customLlmRow] = await db
       .select()
       .from(custom_llm)
       .where(eq(custom_llm.public_id, requestedModel));
     if (customLlmRow && customLlmRow.organization_ids.includes(organizationId)) {
-      return {
-        provider: {
-          id: 'custom',
-          apiUrl: customLlmRow.base_url,
-          apiKey: customLlmRow.api_key,
-          hasGenerationEndpoint: true,
-        },
-        userByok: null,
-        customLlm: customLlmRow,
-      };
+      // Verify the user actually belongs to this organization — the organizationId
+      // comes from a client-supplied header and is not otherwise validated.
+      const [membership] = await db
+        .select({ id: organization_memberships.id })
+        .from(organization_memberships)
+        .where(
+          and(
+            eq(organization_memberships.organization_id, organizationId),
+            eq(organization_memberships.kilo_user_id, user.id)
+          )
+        )
+        .limit(1);
+      if (membership) {
+        return {
+          provider: {
+            id: 'custom',
+            apiUrl: customLlmRow.base_url,
+            apiKey: customLlmRow.api_key,
+            hasGenerationEndpoint: true,
+          },
+          userByok: null,
+          customLlm: customLlmRow,
+        };
+      }
     }
   }
 
