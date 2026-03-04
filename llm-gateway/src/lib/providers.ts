@@ -242,7 +242,7 @@ export async function getProvider(
             id: 'custom',
             apiUrl: customLlmRow.base_url,
             apiKey: customLlmRow.api_key,
-            hasGenerationEndpoint: true,
+            hasGenerationEndpoint: false,
           },
           userByok: null,
           customLlm: customLlmRow,
