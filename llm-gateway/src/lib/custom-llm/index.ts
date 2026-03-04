@@ -785,8 +785,13 @@ function responseCreateParamsPatchFetch(userId: string, taskId: string | undefin
       type ResponseCreateParams = {
         input?: Array<{ role?: string; content?: unknown; phase?: string }>;
       };
-      const json = JSON.parse(init.body) as ResponseCreateParams;
-      if (Array.isArray(json.input)) {
+      let json: ResponseCreateParams | undefined;
+      try {
+        json = JSON.parse(init.body) as ResponseCreateParams;
+      } catch {
+        // Not valid JSON — pass through unmodified
+      }
+      if (json && Array.isArray(json.input)) {
         const assistantMessages = json.input.filter(m => 'role' in m && m.role === 'assistant');
 
         if (assistantMessages.length > 0) {
