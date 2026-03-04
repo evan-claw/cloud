@@ -3,8 +3,8 @@
 // x-kilocode-mode header. The rest of the proxy flow then behaves as if the
 // client had requested the resolved model directly.
 
-const CLAUDE_SONNET = 'anthropic/claude-sonnet-4-20250514';
-const CLAUDE_OPUS = 'anthropic/claude-opus-4-20250514';
+const CLAUDE_SONNET = 'anthropic/claude-sonnet-4.6';
+const CLAUDE_OPUS = 'anthropic/claude-opus-4.6';
 const MINIMAX_FREE = 'minimax/minimax-m2.5:free';
 
 export type ResolvedAutoModel = {
