@@ -6,6 +6,7 @@ import {
   LinkButton,
   Section,
   CardText,
+  type ActionEvent,
   type Message,
   type Thread,
 } from 'chat';
@@ -54,8 +55,13 @@ async function getPlatformIntegration(thread: Thread, message: Message) {
 
 // -- Link-account prompt ------------------------------------------------------
 
+const LINK_ACCOUNT_PATH = '/api/chat/link-account';
+
+/** Prefix that the Slack adapter auto-generates for LinkButton action_ids. */
+const LINK_ACCOUNT_ACTION_PREFIX = `link-${APP_URL}${LINK_ACCOUNT_PATH}`;
+
 function buildLinkAccountUrl(identity: PlatformIdentity): string {
-  const url = new URL('/api/chat/link-account', APP_URL);
+  const url = new URL(LINK_ACCOUNT_PATH, APP_URL);
   url.searchParams.set('token', createLinkToken(identity));
   return url.toString();
 }
@@ -142,5 +148,21 @@ bot.onNewMention(async function handleIncomingMessage(
     await thread.post({ markdown: 'Sorry, something went wrong while processing your message.' });
   } finally {
     await Promise.all([received.removeReaction(emoji.eyes), received.addReaction(emoji.check)]);
+  }
+});
+
+// When the user clicks the "Link Account" LinkButton, Slack fires a
+// block_actions event *in addition to* opening the URL in the browser.
+// For ephemeral messages the adapter encodes the response_url into the
+// messageId, so deleteMessage sends `{ delete_original: true }` — removing
+// the ephemeral card from the user's view.
+bot.onAction(async function handleLinkAccountClick(event: ActionEvent): Promise<void> {
+  if (!event.actionId.startsWith(LINK_ACCOUNT_ACTION_PREFIX)) return;
+
+  try {
+    await event.adapter.deleteMessage(event.threadId, event.messageId);
+  } catch (error) {
+    // Not critical — the ephemeral message will disappear on its own eventually
+    console.warn('[Bot] Failed to delete link-account ephemeral:', error);
   }
 });
