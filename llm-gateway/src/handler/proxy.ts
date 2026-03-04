@@ -144,34 +144,31 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   const { search } = new URL(c.req.url);
 
   // Fetch PostHog + abuse secrets in parallel — fail loudly if Secrets Store is down.
-  let posthogApiKey: string | undefined;
-  let abuseSecrets: AbuseServiceSecrets | undefined;
+  const [abuseServiceUrl, posthogApiKey, cfAccessClientId, cfAccessClientSecret] =
+    await Promise.all([
+      c.env.ABUSE_SERVICE_URL.get(),
+      c.env.POSTHOG_API_KEY.get(),
+      c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
+      c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
+    ]);
 
-  const [abuseServiceUrl] = await Promise.all([
-    c.env.ABUSE_SERVICE_URL.get(),
-    c.env.POSTHOG_API_KEY.get().then(k => {
-      posthogApiKey = k;
-    }),
-  ]);
+  const abuseSecrets: AbuseServiceSecrets = { cfAccessClientId, cfAccessClientSecret };
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.
-  const abuseSecretsPromise = Promise.all([
-    c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
-    c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
-  ]).then(([id, secret]) => {
-    abuseSecrets = { cfAccessClientId: id, cfAccessClientSecret: secret };
-  });
-
-  // Start classification in parallel with the upstream request.
-  const classifyPromise = abuseSecretsPromise.then(() =>
-    classifyAbuse(abuseServiceUrl, abuseSecrets, fraudHeaders, editorName, requestBody, {
+  const classifyPromise = classifyAbuse(
+    abuseServiceUrl,
+    abuseSecrets,
+    fraudHeaders,
+    editorName,
+    requestBody,
+    {
       kiloUserId: user.id,
       organizationId,
       projectId,
       provider: provider.id,
       isByok: !!userByok,
-    })
+    }
   );
 
   // ── Upstream request ────────────────────────────────────────────────────────
