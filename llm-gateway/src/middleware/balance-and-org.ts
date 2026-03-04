@@ -45,9 +45,9 @@ async function hasUserMadePaidTopup(db: WorkerDb, userId: string): Promise<boole
 }
 
 function isFreePromptTrainingAllowed(
-  provider: { data_collection?: 'allow' | 'deny' } | undefined
+  provider: { data_collection?: 'allow' | 'deny'; zdr?: boolean } | undefined
 ): boolean {
-  return provider?.data_collection !== 'deny';
+  return provider?.data_collection !== 'deny' && !provider?.zdr;
 }
 
 export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = async (c, next) => {
