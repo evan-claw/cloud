@@ -55,6 +55,20 @@ function buildSuccessReplyBody(params: {
   return `Implemented the requested fix around ${params.fixTarget} and pushed it to this PR branch.`;
 }
 
+const PUBLIC_ERROR_MAX_LENGTH = 500;
+
+/** Strip URLs, file paths, and stack traces that may leak infra details. */
+function sanitizePublicErrorMessage(raw: string): string {
+  return (
+    raw
+      // collapse multi-line stack traces to a single "(stack trace omitted)" note
+      .replace(/(\n\s+at\s.+)+/g, '\n(stack trace omitted)')
+      // strip URLs that aren't github.com
+      .replace(/https?:\/\/(?!github\.com)[^\s)]+/g, '[internal-url]')
+      .slice(0, PUBLIC_ERROR_MAX_LENGTH)
+  );
+}
+
 type FriendlyFailure = {
   summary: string;
   suggestedAction: string;
@@ -246,6 +260,7 @@ export async function handleCommentReply(
     const failureReason = payload.errorMessage?.trim() || 'Unknown error';
     const friendlyFailure = getFriendlyFailure(failureReason);
     const traceLine = sessionId ? `- Session ID: \`${sessionId}\`` : '- Session ID: unavailable';
+    const sanitizedReason = sanitizePublicErrorMessage(failureReason);
     const replyBody = [
       "I couldn't apply this fix automatically this time.",
       '',
@@ -259,7 +274,7 @@ export async function handleCommentReply(
       '<summary>Technical details</summary>',
       '',
       '```',
-      failureReason,
+      sanitizedReason,
       '```',
       '</details>',
     ].join('\n');
