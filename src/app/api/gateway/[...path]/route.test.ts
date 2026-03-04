@@ -13,6 +13,7 @@ const mockedOpenrouterPOST = jest.mocked(openrouterPOST);
 
 describe('POST /api/gateway/[...path]', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     mockedOpenrouterPOST.mockResolvedValue(NextResponse.json({}, { status: 200 }));
   });
 
@@ -23,7 +24,7 @@ describe('POST /api/gateway/[...path]', () => {
     expect(forwarded.headers.get(FEATURE_HEADER)).toBe('direct-gateway');
   });
 
-  test('overwrites a client-supplied x-kilocode-feature header', async () => {
+  test('does not overwrite a client-supplied x-kilocode-feature header', async () => {
     const request = new NextRequest('http://localhost:3000/api/gateway/chat/completions', {
       headers: { [FEATURE_HEADER]: 'vscode-extension' },
     });
@@ -31,6 +32,6 @@ describe('POST /api/gateway/[...path]', () => {
     await POST(request);
 
     const forwarded = mockedOpenrouterPOST.mock.calls[0][0];
-    expect(forwarded.headers.get(FEATURE_HEADER)).toBe('direct-gateway');
+    expect(forwarded.headers.get(FEATURE_HEADER)).toBe('vscode-extension');
   });
 });
