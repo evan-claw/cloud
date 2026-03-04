@@ -164,6 +164,17 @@ const kiloFreeModelsWithGateway: KiloFreeModelWithGateway[] = [
     inference_providers: ['stealth'],
   },
   {
+    public_id: 'minimax/minimax-m2.1:free',
+    internal_id: 'minimax/minimax-m2.1',
+    display_name: 'MiniMax: MiniMax M2.1 (free)',
+    context_length: 204_800,
+    max_completion_tokens: 131_072,
+    is_enabled: false,
+    flags: ['reasoning', 'prompt_cache'],
+    gateway: 'OPENROUTER',
+    inference_providers: [],
+  },
+  {
     public_id: 'z-ai/glm-5:free',
     internal_id: 'z-ai/glm-5',
     display_name: 'Z.ai: GLM 5 (free)',

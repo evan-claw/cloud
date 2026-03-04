@@ -47,6 +47,12 @@ const kiloFreeModels: KiloFreeModel[] = [
     inference_providers: ['stealth'],
   },
   {
+    public_id: 'minimax/minimax-m2.1:free',
+    context_length: 204_800,
+    is_enabled: false,
+    inference_providers: [],
+  },
+  {
     public_id: 'z-ai/glm-5:free',
     context_length: 202_800,
     is_enabled: false,

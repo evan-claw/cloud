@@ -57,6 +57,7 @@ describe('isDeadFreeModel', () => {
   it('returns true for disabled Kilo free models', () => {
     expect(isDeadFreeModel('x-ai/grok-code-fast-1:optimized:free')).toBe(true);
     expect(isDeadFreeModel('z-ai/glm-5:free')).toBe(true);
+    expect(isDeadFreeModel('minimax/minimax-m2.1:free')).toBe(true);
   });
 
   it('returns false for enabled models', () => {
