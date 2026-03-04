@@ -4,6 +4,8 @@ import { FEATURE_HEADER } from '@/lib/feature-detection';
 
 export function POST(request: NextRequest) {
   const headers = new Headers(request.headers);
-  headers.set(FEATURE_HEADER, 'direct-gateway');
+  if (!headers.has(FEATURE_HEADER)) {
+    headers.set(FEATURE_HEADER, 'direct-gateway');
+  }
   return openrouterPOST(new NextRequest(request, { headers }));
 }
