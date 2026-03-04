@@ -11,7 +11,7 @@ const STALE_CLAIM_MS = 5 * 60 * 1000; // 5 minutes
 export class IdempotencyDO extends DurableObject<Env> {
   async claim(): Promise<{ alreadyCompleted: boolean }> {
     const state = await this.ctx.storage.get<string>('state');
-    if (state === 'completed') return { alreadyCompleted: true };
+    if (state === 'completed' || state === 'processing') return { alreadyCompleted: true };
     await this.ctx.storage.put('state', 'processing');
     await this.ctx.storage.setAlarm(Date.now() + STALE_CLAIM_MS);
     return { alreadyCompleted: false };
