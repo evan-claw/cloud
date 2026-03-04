@@ -94,10 +94,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
   const [abuseServiceUrl] = await Promise.all([
     c.env.ABUSE_SERVICE_URL.get(),
-    c.env.POSTHOG_API_KEY.get()
-      .then(k => {
-        posthogApiKey = k;
-      }),
+    c.env.POSTHOG_API_KEY.get().then(k => {
+      posthogApiKey = k;
+    }),
   ]);
 
   // Abuse classification starts non-blocking — we hold a promise and
@@ -105,10 +104,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   const abuseSecretsPromise = Promise.all([
     c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
     c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
-  ])
-    .then(([id, secret]) => {
-      abuseSecrets = { cfAccessClientId: id, cfAccessClientSecret: secret };
-    });
+  ]).then(([id, secret]) => {
+    abuseSecrets = { cfAccessClientId: id, cfAccessClientSecret: secret };
+  });
 
   // Start classification in parallel with the upstream request.
   const classifyPromise = abuseSecretsPromise.then(() =>

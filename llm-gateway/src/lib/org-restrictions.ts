@@ -165,10 +165,7 @@ export async function getBalanceAndOrgSettings(
   // Lazy credit expiry check — random-hour jitter to spread load, matching reference.
   // subHours(new Date(), Math.random()) ≈ new Date(Date.now() - Math.random() * 3600000)
   const expireBefore = new Date(Date.now() - Math.random() * 3_600_000);
-  if (
-    row.next_credit_expiration_at &&
-    expireBefore >= new Date(row.next_credit_expiration_at)
-  ) {
+  if (row.next_credit_expiration_at && expireBefore >= new Date(row.next_credit_expiration_at)) {
     try {
       const expiryResult = await processOrganizationExpirations(
         db,

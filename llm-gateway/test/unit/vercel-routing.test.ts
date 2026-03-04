@@ -133,9 +133,7 @@ describe('shouldRouteToVercel', () => {
     const model = 'google/gemini-3.1-pro-preview';
     const req = makeRequest({ model });
     const results = await Promise.all(
-      Array.from({ length: 100 }, (_, i) =>
-        shouldRouteToVercel(db, model, req, `seed-${i}`)
-      )
+      Array.from({ length: 100 }, (_, i) => shouldRouteToVercel(db, model, req, `seed-${i}`))
     );
     const trueCount = results.filter(Boolean).length;
     // With 10% routing, we expect ~10 out of 100, but at least 1 and at most 30

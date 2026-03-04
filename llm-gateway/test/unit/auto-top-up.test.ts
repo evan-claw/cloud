@@ -61,8 +61,8 @@ describe('maybePerformOrganizationAutoTopUp', () => {
     await maybePerformOrganizationAutoTopUp(db, {
       id: 'org-1',
       auto_top_up_enabled: true,
-      total_microdollars_acquired: 100_000_000,  // $100
-      microdollars_used: 90_000_000,              // $90 used → $10 balance
+      total_microdollars_acquired: 100_000_000, // $100
+      microdollars_used: 90_000_000, // $90 used → $10 balance
     });
     // $10 > $5 threshold, so no DB operations
     expect(calls).toHaveLength(0);
@@ -109,7 +109,7 @@ describe('maybePerformOrganizationAutoTopUp', () => {
             limit: async () => [
               {
                 total_microdollars_acquired: 100_000_000, // $100
-                microdollars_used: 0,                      // $100 balance
+                microdollars_used: 0, // $100 balance
               },
             ],
           }),

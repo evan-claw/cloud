@@ -3,10 +3,7 @@
 
 import type { WorkerDb } from '@kilocode/db/client';
 import type { CreditTransaction, credit_transactions } from '@kilocode/db/schema';
-import {
-  credit_transactions as creditTransactionsTable,
-  organizations,
-} from '@kilocode/db/schema';
+import { credit_transactions as creditTransactionsTable, organizations } from '@kilocode/db/schema';
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
