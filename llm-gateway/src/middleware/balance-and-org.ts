@@ -15,7 +15,6 @@ import {
   getBalanceAndOrgSettings,
   checkOrganizationModelRestrictions,
 } from '../lib/org-restrictions';
-import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { maybePerformOrganizationAutoTopUp } from '../lib/auto-top-up';
 import type { WorkerDb } from '@kilocode/db/client';
 import { and, eq, gt, notExists, sql } from 'drizzle-orm';
@@ -56,8 +55,6 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   const organizationId = c.get('organizationId');
   const customLlm = c.get('customLlm');
   const userByok = c.get('userByok');
-  const botId = c.get('botId');
-  const tokenSource = c.get('tokenSource');
   const requestBody = c.get('requestBody');
 
   // Anonymous users only access free models, already rate-limited in earlier middleware
@@ -99,9 +96,7 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   if (
     balance <= 0 &&
     !isFreeModel(resolvedModel) &&
-    !userByok &&
-    !isActiveReviewPromo(botId, resolvedModel) &&
-    !isActiveCloudAgentPromo(tokenSource, resolvedModel)
+    !userByok
   ) {
     // Mirror usageLimitExceededResponse(): branch on payment history to choose title/message.
     const isReturningUser = await hasUserMadePaidTopup(db, user.id);

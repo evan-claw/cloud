@@ -18,7 +18,6 @@ import { customLlmRequest } from '../lib/custom-llm/index';
 import { getOutputHeaders, wrapResponse, makeErrorReadable } from '../lib/response-helpers';
 import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
 import { classifyAbuse } from '../lib/abuse-service';
-import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { scheduleBackgroundTasks, type BackgroundTaskParams } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
 import { captureException } from '../lib/sentry';
@@ -334,11 +333,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   }
 
   // ── Free model response rewrite ───────────────────────────────────────────────
-  const shouldRewrite =
-    provider.id !== 'custom' &&
-    (isKiloFreeModel(resolvedModel) ||
-      isActiveReviewPromo(botId, resolvedModel) ||
-      isActiveCloudAgentPromo(tokenSource, resolvedModel));
+  const shouldRewrite = provider.id !== 'custom' && isKiloFreeModel(resolvedModel);
 
   // Helper: schedule background tasks from a replay factory (after buffering completes).
   function scheduleBgFromReplay(replay: () => ReadableStream<Uint8Array>) {
