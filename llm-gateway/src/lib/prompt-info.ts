@@ -47,7 +47,7 @@ export function extractPromptInfo(body: OpenRouterChatCompletionRequest): Prompt
 
     return { system_prompt_prefix, system_prompt_length, user_prompt_prefix };
   } catch {
-    return { system_prompt_prefix: '', system_prompt_length: 0, user_prompt_prefix: '' };
+    return { system_prompt_prefix: '', system_prompt_length: -1, user_prompt_prefix: '' };
   }
 }
 
