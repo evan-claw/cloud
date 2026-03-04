@@ -391,7 +391,7 @@ export function estimateChatTokens(body: OpenRouterChatCompletionRequest): {
         : Array.isArray(m.content)
           ? m.content
               .filter(c => c.type === 'text')
-              .map(c => c.text.length)
+              .map(c => (c.text ?? '').length)
               .reduce((l, str) => str + 1 + l, 0)
           : 0),
     0

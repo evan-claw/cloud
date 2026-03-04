@@ -305,4 +305,23 @@ describe('estimateChatTokens', () => {
       estimatedOutputTokens: 0,
     });
   });
+
+  it('should handle content parts with undefined text', () => {
+    const body = {
+      model: 'test',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: undefined },
+            { type: 'text', text: 'hello' },
+          ],
+        },
+      ],
+    } as unknown as OpenRouterChatCompletionRequest;
+
+    const result = estimateChatTokens(body);
+    expect(result.estimatedInputTokens).toBeGreaterThan(0);
+    expect(result.estimatedOutputTokens).toBeGreaterThan(0);
+  });
 });
