@@ -1,7 +1,20 @@
 import { bot } from '@/lib/bot';
+import { APP_URL } from '@/lib/constants';
+import { db } from '@/lib/drizzle';
+import { INTEGRATION_STATUS, PLATFORM } from '@/lib/integrations/core/constants';
 import { SLACK_REDIRECT_URI } from '@/lib/integrations/slack-service';
+import { getUserFromAuth } from '@/lib/user.server';
+import { ensureOrganizationAccess } from '@/routers/organizations/utils';
+import { platform_integrations } from '@kilocode/db';
+import { and, eq } from 'drizzle-orm';
+import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
+  const { user, authFailedResponse } = await getUserFromAuth({ adminOnly: false });
+  if (authFailedResponse) {
+    return NextResponse.redirect(new URL('/users/sign_in', APP_URL));
+  }
+
   await bot.initialize();
   const slackAdapter = bot.getAdapter('slack');
 
@@ -11,6 +24,60 @@ export async function GET(request: Request) {
   url.searchParams.set('redirect_uri', SLACK_REDIRECT_URI);
   const patchedRequest = new Request(url, request);
 
-  const { teamId } = await slackAdapter.handleOAuthCallback(patchedRequest);
-  return new Response(`Installed for team ${teamId}!`);
+  const { teamId, installation } = await slackAdapter.handleOAuthCallback(patchedRequest);
+
+  const state = url?.searchParams.get('state');
+
+  if (state?.startsWith('org_')) {
+    const orgId = state.split('_')[1];
+    await ensureOrganizationAccess({ user }, orgId);
+
+    await db.transaction(async tx => {
+      await tx
+        .delete(platform_integrations)
+        .where(
+          and(
+            eq(platform_integrations.owned_by_organization_id, orgId),
+            eq(platform_integrations.platform, PLATFORM.SLACK)
+          )
+        );
+
+      await tx.insert(platform_integrations).values({
+        owned_by_organization_id: orgId,
+        platform: PLATFORM.SLACK,
+        integration_type: 'oauth',
+        platform_installation_id: teamId,
+        platform_account_id: teamId,
+        platform_account_login: installation.teamName,
+        integration_status: INTEGRATION_STATUS.ACTIVE,
+        metadata: {},
+        installed_at: new Date().toISOString(),
+      });
+    });
+  } else {
+    await db.transaction(async tx => {
+      await tx
+        .delete(platform_integrations)
+        .where(
+          and(
+            eq(platform_integrations.owned_by_user_id, user.id),
+            eq(platform_integrations.platform, PLATFORM.SLACK)
+          )
+        );
+
+      await tx.insert(platform_integrations).values({
+        owned_by_user_id: user.id,
+        platform: PLATFORM.SLACK,
+        integration_type: 'oauth',
+        platform_installation_id: teamId,
+        platform_account_id: teamId,
+        platform_account_login: installation.teamName,
+        integration_status: INTEGRATION_STATUS.ACTIVE,
+        metadata: {},
+        installed_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  return new Response(`Installed for team ${teamId} and ${state}!`);
 }

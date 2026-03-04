@@ -17,7 +17,7 @@ import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
 
 // Default model for Slack integrations - separate from the global platform default
-const SLACK_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
+export const SLACK_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
   ? minimax_m25_free_model.public_id
   : CLAUDE_OPUS_CURRENT_MODEL_ID;
 
