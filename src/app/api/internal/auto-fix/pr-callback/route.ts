@@ -141,6 +141,10 @@ export async function POST(req: NextRequest) {
         });
 
         if (!replyResult.ok) {
+          await updateFixTicketStatus(ticketId, 'failed', {
+            errorMessage: `Failed to post review-comment failure reply: ${replyResult.error}`,
+            completedAt: new Date(),
+          });
           throw new Error(`Failed to post review-comment failure reply: ${replyResult.error}`);
         }
       } else {
@@ -216,6 +220,10 @@ export async function POST(req: NextRequest) {
       });
 
       if (!replyResult.ok) {
+        await updateFixTicketStatus(ticketId, 'failed', {
+          errorMessage: `Failed to post review-comment success reply: ${replyResult.error}`,
+          completedAt: new Date(),
+        });
         throw new Error(`Failed to post review-comment success reply: ${replyResult.error}`);
       }
     } else {
