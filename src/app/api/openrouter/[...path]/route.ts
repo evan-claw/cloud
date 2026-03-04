@@ -238,12 +238,14 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   console.debug(`Routing request to ${provider.id}`);
 
   // Start abuse classification early (non-blocking) - we'll await it before creating usage context
+  // Bot users (code-review, auto-fix, etc.) are exempt — classifyAbuse short-circuits to null.
   const classifyPromise = classifyAbuse(request, requestBodyParsed, {
     kiloUserId: user.id,
     organizationId,
     projectId,
     provider: provider.id,
     isByok: !!userByok,
+    botId,
   });
 
   // large responses may run longer than the 800s serverless function timeout, usually this value is set to 8192 tokens

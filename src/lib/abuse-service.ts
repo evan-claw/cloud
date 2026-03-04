@@ -332,7 +332,16 @@ export type AbuseClassificationContext = {
   projectId?: string | null;
   provider?: string | null;
   isByok?: boolean | null;
+  /** When set, the request originates from an internal bot (e.g. 'reviewer', 'auto-fix'). */
+  botId?: string | null;
 };
+
+const ABUSE_EXEMPT_BOT_IDS = new Set(['reviewer']);
+
+/** Internal bots in this set are exempt from abuse classification. */
+function isAbuseExemptBot(botId: string | null | undefined): boolean {
+  return !!botId && ABUSE_EXEMPT_BOT_IDS.has(botId);
+}
 
 /**
  * High-level function to classify a request for abuse.
@@ -348,6 +357,10 @@ export async function classifyAbuse(
   body: OpenRouterChatCompletionRequest,
   context?: AbuseClassificationContext
 ): Promise<AbuseClassificationResponse | null> {
+  if (isAbuseExemptBot(context?.botId)) {
+    return null;
+  }
+
   const fraudHeaders = getFraudDetectionHeaders(request.headers);
   const { systemPrompt, userPrompt } = extractFullPrompts(body);
 
