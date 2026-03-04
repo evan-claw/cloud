@@ -73,5 +73,10 @@ else
 fi
 
 echo ""
+echo "FLY_IMAGE_TAG=$TAG"
+if [ -n "$DIGEST" ]; then
+  echo "FLY_IMAGE_DIGEST=$DIGEST"
+fi
+echo ""
 echo "Done. Restart wrangler dev to pick up the new tag."
 echo "Then restart your instance from the dashboard (or destroy + re-provision)."
