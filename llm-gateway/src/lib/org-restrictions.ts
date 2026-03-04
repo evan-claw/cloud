@@ -12,22 +12,7 @@ import {
   organization_user_usage,
 } from '@kilocode/db/schema';
 import { and, eq, sql, not } from 'drizzle-orm';
-import { normalizeModelId } from './models';
-
-// Inference providers that a Kilo free model REQUIRES (must all be in provider allow list)
-const kiloFreeModelProviders: Record<string, string[]> = {
-  'corethink:free': ['corethink'],
-  'giga-potato': ['stealth'],
-  'giga-potato-thinking': ['stealth'],
-  'moonshotai/kimi-k2.5:free': [],
-  'minimax/minimax-m2.5:free': [],
-  'x-ai/grok-code-fast-1:optimized:free': ['stealth'],
-  'z-ai/glm-5:free': [],
-};
-
-function extraRequiredProviders(model: string): string[] {
-  return kiloFreeModelProviders[model] ?? [];
-}
+import { normalizeModelId, extraRequiredProviders } from './models';
 
 export type OpenRouterProviderConfig = {
   order?: string[];

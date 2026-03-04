@@ -1,64 +1,118 @@
 // Model classification helpers.
 // Direct port of src/lib/models.ts — pure functions, no side effects.
+//
+// The canonical free-model list lives here. All consumers (providers.ts,
+// org-restrictions.ts, provider-specific.ts) derive their views from it.
 
-type KiloFreeModel = {
+// ─── Canonical free-model type & list ─────────────────────────────────────────
+// Matches the reference KiloFreeModel type in src/lib/providers/kilo-free-model.ts.
+
+export type KiloFreeModel = {
   public_id: string;
+  internal_id: string;
+  display_name: string;
   context_length: number;
+  max_completion_tokens: number;
   is_enabled: boolean;
+  flags: string[];
+  /** Key into the PROVIDERS map (e.g. 'OPENROUTER', 'GIGAPOTATO'). */
+  gateway: string;
   inference_providers: string[];
 };
 
 // Keep in sync with src/lib/providers/*.ts
-const kiloFreeModels: KiloFreeModel[] = [
+export const kiloFreeModels: KiloFreeModel[] = [
   {
     public_id: 'corethink:free',
+    internal_id: 'corethink',
+    display_name: 'CoreThink (free)',
     context_length: 78_000,
+    max_completion_tokens: 8192,
     is_enabled: true,
+    flags: [],
+    gateway: 'CORETHINK',
     inference_providers: ['corethink'],
   },
   {
     public_id: 'giga-potato',
+    internal_id: 'ep-20260109111813-hztxv',
+    display_name: 'Giga Potato (free)',
     context_length: 256_000,
+    max_completion_tokens: 32_000,
     is_enabled: true,
+    flags: ['prompt_cache', 'vision'],
+    gateway: 'GIGAPOTATO',
     inference_providers: ['stealth'],
   },
   {
     public_id: 'giga-potato-thinking',
+    internal_id: 'ep-20260109111813-hztxv',
+    display_name: 'Giga Potato Thinking (free)',
     context_length: 256_000,
+    max_completion_tokens: 32_000,
     is_enabled: true,
+    flags: ['prompt_cache', 'vision', 'reasoning'],
+    gateway: 'GIGAPOTATO',
     inference_providers: ['stealth'],
   },
   {
     public_id: 'moonshotai/kimi-k2.5:free',
-    context_length: 262_144,
+    internal_id: 'moonshotai/kimi-k2.5',
+    display_name: 'MoonshotAI: Kimi K2.5 (free)',
+    context_length: 262144,
+    max_completion_tokens: 65536,
     is_enabled: true,
+    flags: ['reasoning', 'prompt_cache', 'vision'],
+    gateway: 'OPENROUTER',
     inference_providers: [],
   },
   {
     public_id: 'minimax/minimax-m2.5:free',
+    internal_id: 'minimax/minimax-m2.5',
+    display_name: 'MiniMax M2.5 (free)',
     context_length: 204_800,
+    max_completion_tokens: 40960,
     is_enabled: true,
+    flags: ['reasoning', 'prompt_cache', 'vision'],
+    gateway: 'OPENROUTER',
     inference_providers: [],
   },
   {
     public_id: 'x-ai/grok-code-fast-1:optimized:free',
+    internal_id: 'x-ai/grok-code-fast-1:optimized',
+    display_name: 'xAI: Grok Code Fast 1 Optimized (experimental, free)',
     context_length: 256_000,
+    max_completion_tokens: 10_000,
     is_enabled: false,
+    flags: ['reasoning', 'prompt_cache'],
+    gateway: 'MARTIAN',
     inference_providers: ['stealth'],
   },
   {
     public_id: 'minimax/minimax-m2.1:free',
+    internal_id: 'minimax/minimax-m2.1',
+    display_name: 'MiniMax: MiniMax M2.1 (free)',
     context_length: 204_800,
+    max_completion_tokens: 131_072,
     is_enabled: false,
+    flags: ['reasoning', 'prompt_cache'],
+    gateway: 'OPENROUTER',
     inference_providers: [],
   },
   {
     public_id: 'z-ai/glm-5:free',
-    context_length: 202_800,
+    internal_id: 'z-ai/glm-5',
+    display_name: 'Z.ai: GLM 5 (free)',
+    context_length: 202800,
+    max_completion_tokens: 131072,
     is_enabled: false,
+    flags: ['reasoning', 'prompt_cache'],
+    gateway: 'OPENROUTER',
     inference_providers: [],
   },
 ];
+
+// ─── Derived lookups ──────────────────────────────────────────────────────────
 
 // Keep in sync with src/lib/providers/anthropic.ts
 const CLAUDE_OPUS_CURRENT_MODEL_ID = 'anthropic/claude-opus-4.6';
@@ -157,6 +211,11 @@ export function isKiloStealthModel(model: string): boolean {
   return kiloFreeModels.some(
     m => m.public_id === model && m.inference_providers.includes('stealth')
   );
+}
+
+// Inference providers required by a Kilo free model (for org restriction checks).
+export function extraRequiredProviders(model: string): string[] {
+  return kiloFreeModels.find(m => m.public_id === model)?.inference_providers ?? [];
 }
 
 // Strip `:free`, `:exacto` etc. suffixes — port of src/lib/model-utils.ts.

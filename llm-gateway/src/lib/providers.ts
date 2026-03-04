@@ -11,7 +11,7 @@ import { getModelUserByokProviders, getBYOKforUser, getBYOKforOrganization } fro
 import type { OpenRouterChatCompletionRequest } from '../types/request';
 import type { AnonymousUserContext } from './anonymous';
 import { isAnonymousContext } from './anonymous';
-import { isKiloFreeModel } from './models';
+import { isKiloFreeModel, kiloFreeModels, type KiloFreeModel } from './models';
 import { shouldRouteToVercel } from './vercel-routing';
 
 export type ProviderId =
@@ -83,114 +83,8 @@ export function buildProviders(secrets: SecretsBundle): Record<string, Provider>
   };
 }
 
-// Free model definitions — gateway field maps to a PROVIDERS key
-type KiloFreeModelWithGateway = {
-  public_id: string;
-  internal_id: string;
-  display_name: string;
-  context_length: number;
-  max_completion_tokens: number;
-  is_enabled: boolean;
-  flags: string[];
-  gateway: string;
-  inference_providers: string[];
-};
-
-const kiloFreeModelsWithGateway: KiloFreeModelWithGateway[] = [
-  {
-    public_id: 'corethink:free',
-    internal_id: 'corethink',
-    display_name: 'CoreThink (free)',
-    context_length: 78_000,
-    max_completion_tokens: 8192,
-    is_enabled: true,
-    flags: [],
-    gateway: 'CORETHINK',
-    inference_providers: ['corethink'],
-  },
-  {
-    public_id: 'giga-potato',
-    internal_id: 'ep-20260109111813-hztxv',
-    display_name: 'Giga Potato (free)',
-    context_length: 256_000,
-    max_completion_tokens: 32_000,
-    is_enabled: true,
-    flags: ['prompt_cache', 'vision'],
-    gateway: 'GIGAPOTATO',
-    inference_providers: ['stealth'],
-  },
-  {
-    public_id: 'giga-potato-thinking',
-    internal_id: 'ep-20260109111813-hztxv',
-    display_name: 'Giga Potato Thinking (free)',
-    context_length: 256_000,
-    max_completion_tokens: 32_000,
-    is_enabled: true,
-    flags: ['prompt_cache', 'vision', 'reasoning'],
-    gateway: 'GIGAPOTATO',
-    inference_providers: ['stealth'],
-  },
-  {
-    public_id: 'moonshotai/kimi-k2.5:free',
-    internal_id: 'moonshotai/kimi-k2.5',
-    display_name: 'MoonshotAI: Kimi K2.5 (free)',
-    context_length: 262144,
-    max_completion_tokens: 65536,
-    is_enabled: true,
-    flags: ['reasoning', 'prompt_cache', 'vision'],
-    gateway: 'OPENROUTER',
-    inference_providers: [],
-  },
-  {
-    public_id: 'minimax/minimax-m2.5:free',
-    internal_id: 'minimax/minimax-m2.5',
-    display_name: 'MiniMax M2.5 (free)',
-    context_length: 204_800,
-    max_completion_tokens: 40960,
-    is_enabled: true,
-    flags: ['reasoning', 'prompt_cache', 'vision'],
-    gateway: 'OPENROUTER',
-    inference_providers: [],
-  },
-  {
-    public_id: 'x-ai/grok-code-fast-1:optimized:free',
-    internal_id: 'x-ai/grok-code-fast-1:optimized',
-    display_name: 'xAI: Grok Code Fast 1 Optimized (experimental, free)',
-    context_length: 256_000,
-    max_completion_tokens: 10_000,
-    is_enabled: false,
-    flags: ['reasoning', 'prompt_cache'],
-    gateway: 'MARTIAN',
-    inference_providers: ['stealth'],
-  },
-  {
-    public_id: 'minimax/minimax-m2.1:free',
-    internal_id: 'minimax/minimax-m2.1',
-    display_name: 'MiniMax: MiniMax M2.1 (free)',
-    context_length: 204_800,
-    max_completion_tokens: 131_072,
-    is_enabled: false,
-    flags: ['reasoning', 'prompt_cache'],
-    gateway: 'OPENROUTER',
-    inference_providers: [],
-  },
-  {
-    public_id: 'z-ai/glm-5:free',
-    internal_id: 'z-ai/glm-5',
-    display_name: 'Z.ai: GLM 5 (free)',
-    context_length: 202800,
-    max_completion_tokens: 131072,
-    is_enabled: false,
-    flags: ['reasoning', 'prompt_cache'],
-    gateway: 'OPENROUTER',
-    inference_providers: [],
-  },
-];
-
-export function getKiloFreeModelWithGateway(
-  publicId: string
-): KiloFreeModelWithGateway | undefined {
-  return kiloFreeModelsWithGateway.find(m => m.public_id === publicId);
+export function getKiloFreeModelWithGateway(publicId: string): KiloFreeModel | undefined {
+  return kiloFreeModels.find(m => m.public_id === publicId);
 }
 
 export type ProviderResolutionResult = {
