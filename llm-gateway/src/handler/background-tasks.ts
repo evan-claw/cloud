@@ -84,8 +84,6 @@ export function scheduleBackgroundTasks(
     metricsStream,
     loggingStream,
     upstreamStatusCode,
-    abuseServiceUrl,
-    abuseSecrets,
     abuseRequestId,
     isStreaming,
     requestStartedAt,
