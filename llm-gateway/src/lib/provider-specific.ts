@@ -47,6 +47,10 @@ function isZaiModel(model: string) {
 
 // --- Anthropic ---
 
+// Kill-switch for automatic cache breakpoints — matches reference flag
+// ENABLE_ANTHROPIC_AUTOMATIC_CACHING in src/lib/providers/anthropic.ts.
+const ENABLE_ANTHROPIC_AUTOMATIC_CACHING = true;
+
 function appendAnthropicBetaHeader(headers: Record<string, string>, flag: string) {
   for (const header of ['anthropic-beta', 'x-anthropic-beta']) {
     headers[header] = [headers[header], flag].filter(Boolean).join(',');
@@ -83,7 +87,9 @@ async function applyAnthropicModelSettings(
   extraHeaders: Record<string, string>
 ) {
   appendAnthropicBetaHeader(extraHeaders, 'fine-grained-tool-streaming-2025-05-14');
-  addCacheBreakpoints(requestToMutate.messages);
+  if (ENABLE_ANTHROPIC_AUTOMATIC_CACHING) {
+    addCacheBreakpoints(requestToMutate.messages);
+  }
   await normalizeToolCallIds(requestToMutate, id => id.includes('.'), undefined);
 }
 
