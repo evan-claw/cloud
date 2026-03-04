@@ -68,7 +68,7 @@ export function checkOrganizationModelRestrictions(params: {
   const providerConfig: OpenRouterProviderConfig = {};
 
   if (params.organizationPlan === 'enterprise' && providerAllowList.length > 0) {
-    const requiredProviders = extraRequiredProviders(normalizedModelId);
+    const requiredProviders = extraRequiredProviders(params.modelId);
     if (
       requiredProviders.length > 0 &&
       !requiredProviders.every(p => providerAllowList.includes(p))
