@@ -109,8 +109,6 @@ export type Env = {
   KILOCODE_BACKEND_BASE_URL?: string;
   /** Base URL override for OpenRouter-compatible Kilo API */
   KILO_OPENROUTER_BASE?: string;
-  /** Wrapper idle timeout override (ms) */
-  WRAPPER_IDLE_TIMEOUT_MS?: string;
   /** Kilocode CLI timeout override (seconds) */
   CLI_TIMEOUT_SECONDS?: string;
   /** Reaper interval override (ms) */
