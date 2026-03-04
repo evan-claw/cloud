@@ -265,6 +265,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
         kiloUserId: user.id,
         model: requestBody.model,
         organizationId,
+        first4k: new TextDecoder().decode(errorBodyBytes).slice(0, 4096),
       });
       return c.json(
         {
