@@ -307,7 +307,7 @@ export function checkOrganizationModelRestrictions(params: {
 
   const providerConfig: OpenRouterProviderConfig = {};
 
-  if (params.organizationPlan === 'enterprise') {
+  if (params.organizationPlan === 'enterprise' && providerDenyList && providerDenyList.length > 0) {
     providerConfig.ignore = providerDenyList;
   }
 

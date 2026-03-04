@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthorizedOrgContext } from '@/lib/organizations/organization-auth';
 import type { NextRequest } from 'next/server';
-import { PRIMARY_DEFAULT_MODEL, getFirstFreeModel, preferredModels } from '@/lib/models';
+import { PRIMARY_DEFAULT_MODEL, getFirstFreeModel } from '@/lib/models';
 import { getEnhancedOpenRouterModels } from '@/lib/providers/openrouter';
 import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { getModelIdToProviderSlugsIndex } from '@/lib/providers/openrouter/models-by-provider-index.server';
@@ -74,7 +74,7 @@ export async function GET(
       // No restrictions - use PRIMARY_DEFAULT_MODEL directly
       defaultModel = PRIMARY_DEFAULT_MODEL;
     } else {
-      defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL, ...preferredModels]);
+      defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL]);
 
       if (!defaultModel) {
         defaultModel = await findFirstAllowedModelFromDbSnapshot();
@@ -86,7 +86,10 @@ export async function GET(
 
       if (!defaultModel) {
         return NextResponse.json(
-          { error: "No valid models are allowed by this organization's allow list." },
+          {
+            error:
+              "No valid models are available — all models are blocked by this organization's deny list.",
+          },
           { status: 409 }
         );
       }

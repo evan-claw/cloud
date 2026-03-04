@@ -4,7 +4,7 @@ import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 
 /**
  * Get a default model that is allowed for an organization.
- * Priority: org default model > preferred models > first non-wildcard in allow list.
+ * Priority: org default model > global default > preferred models > global default fallback.
  */
 export async function getDefaultAllowedModel(
   organizationId: string,
@@ -41,15 +41,9 @@ export async function getDefaultAllowedModel(
     }
   }
 
-  // Fall back to the first non-wildcard model in the allow list
-  const firstNonWildcard = modelDenyList.find(m => !m.endsWith('/*'));
-  if (firstNonWildcard) {
-    return firstNonWildcard;
-  }
-
-  // If only wildcards, fall back to global default (admin misconfiguration)
+  // All models were blocked; fall back to global default
   console.warn(
-    '[SlackBot] Organization has only wildcard entries in model allow list:',
+    '[SlackBot] No allowed model found; deny list blocks all preferred models:',
     modelDenyList
   );
   return globalDefault;

@@ -175,7 +175,8 @@ describe('GET /api/organizations/[id]/defaults', () => {
     expect(response.status).toBe(409);
     const body = await response.json();
     expect(body).toEqual({
-      error: "No valid models are allowed by this organization's allow list.",
+      error:
+        "No valid models are available — all models are blocked by this organization's deny list.",
     });
   });
 });

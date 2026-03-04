@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { normalizeModelId } from '@/lib/model-utils';
-
 export type ProviderAwareAllowPredicate = (modelId: string) => Promise<boolean>;
 
 export function createAllowPredicateFromDenyList(
@@ -9,7 +7,6 @@ export function createAllowPredicateFromDenyList(
 ): ProviderAwareAllowPredicate {
   const denyListSet = new Set(denyList);
   return (modelId: string): Promise<boolean> => {
-    const normalizedModelId = normalizeModelId(modelId);
-    return Promise.resolve(!denyListSet.has(normalizedModelId));
+    return Promise.resolve(!denyListSet.has(modelId));
   };
 }
