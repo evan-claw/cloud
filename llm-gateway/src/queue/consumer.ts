@@ -138,6 +138,9 @@ export async function handleBackgroundTaskQueue(
         continue;
       }
       if (status === 'processing') {
+        // Another worker is processing this message. Retry after the DO
+        // stale-claim alarm fires (60s) so it can either complete or reset.
+        message.retry({ delaySeconds: 60 });
         continue;
       }
 
