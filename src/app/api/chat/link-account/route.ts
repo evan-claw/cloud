@@ -1,7 +1,11 @@
 import { bot } from '@/lib/bot';
 import { APP_URL } from '@/lib/constants';
 import { linkKiloUser, verifyLinkToken } from '@/lib/bot-identity';
+import { db } from '@/lib/drizzle';
+import { isOrganizationMember } from '@/lib/organizations/organizations';
 import { getUserFromAuth } from '@/lib/user.server';
+import { platform_integrations } from '@kilocode/db';
+import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 function escapeHtml(s: string): string {
@@ -13,17 +17,62 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * Verify that the authenticated user is allowed to link to this
+ * platform installation. For org-owned integrations the user must be
+ * an org member; for user-owned integrations only the owner may link.
+ */
+async function verifyIntegrationAccess(
+  platform: string,
+  teamId: string,
+  kiloUserId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const [integration] = await db
+    .select()
+    .from(platform_integrations)
+    .where(
+      and(
+        eq(platform_integrations.platform, platform),
+        eq(platform_integrations.platform_installation_id, teamId)
+      )
+    )
+    .limit(1);
+
+  if (!integration) {
+    return { ok: false, error: 'No matching integration found for this workspace.' };
+  }
+
+  if (integration.owned_by_organization_id) {
+    const isMember = await isOrganizationMember(integration.owned_by_organization_id, kiloUserId);
+    if (!isMember) {
+      return {
+        ok: false,
+        error: 'You are not a member of the organization that owns this workspace integration.',
+      };
+    }
+  } else if (integration.owned_by_user_id) {
+    if (integration.owned_by_user_id !== kiloUserId) {
+      return { ok: false, error: 'You are not the owner of this workspace integration.' };
+    }
+  } else {
+    return { ok: false, error: 'This integration has invalid ownership data.' };
+  }
+
+  return { ok: true };
+}
+
+/**
  * GET /api/chat/link-account?token=<signed-token>
  *
  * Opened in the browser when a chat user clicks "Link Account".
- * The token is HMAC-signed and time-limited (10 min) so that a third
- * party cannot forge a link for an arbitrary platform identity.
+ * The token is HMAC-signed and time-limited so that a third party
+ * cannot forge a link for an arbitrary platform identity.
  *
  * Flow:
  *  1. Verify the signed token (reject expired / tampered tokens).
  *  2. Authenticate the user via NextAuth session (redirect to sign-in if needed).
- *  3. Write the platform identity → Kilo user mapping into Redis.
- *  4. Show a success page.
+ *  3. Verify the user belongs to the org that owns the integration.
+ *  4. Write the platform identity → Kilo user mapping into Redis.
+ *  5. Show a success page.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -48,6 +97,12 @@ export async function GET(request: Request) {
     const signInUrl = new URL('/users/sign_in', APP_URL);
     signInUrl.searchParams.set('callbackPath', url.pathname + url.search);
     return NextResponse.redirect(signInUrl);
+  }
+
+  // Verify the user is allowed to link to this integration
+  const access = await verifyIntegrationAccess(identity.platform, identity.teamId, user.id);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403 });
   }
 
   await bot.initialize();
