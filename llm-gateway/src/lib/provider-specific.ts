@@ -42,10 +42,6 @@ function isQwenModel(model: string) {
 function isOpenAiModel(model: string) {
   return model.startsWith('openai/') && !model.startsWith('openai/gpt-oss');
 }
-function isZaiModel(model: string) {
-  return model.startsWith('z-ai/');
-}
-
 // --- Anthropic ---
 
 // Kill-switch for automatic cache breakpoints — matches reference flag
@@ -426,10 +422,6 @@ export async function applyProviderSpecificLogic(
     await applyMistralProviderSettings(requestToMutate, extraHeaders);
   } else if (isMistralModel(requestedModel)) {
     await applyMistralModelSettings(requestToMutate);
-  }
-
-  if (isZaiModel(requestedModel)) {
-    // Z.AI uses specific routing
   }
 
   if (provider.id === 'vercel') {
