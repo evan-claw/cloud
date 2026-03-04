@@ -6,6 +6,8 @@ import {
 import { sendApiMetrics } from '../background/api-metrics';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { buildProviders, type SecretsBundle } from '../lib/providers';
+import { getIdempotencyDO } from '../dos/IdempotencyDO';
+import type { BackgroundTaskMessage, UsageAccountingMessage } from './messages';
 import type { Env } from '../env';
 
 async function resolveAbuseSecrets(
@@ -24,8 +26,6 @@ async function resolveAbuseSecrets(
         : undefined,
   };
 }
-import { getIdempotencyDO } from '../dos/IdempotencyDO';
-import type { BackgroundTaskMessage, UsageAccountingMessage } from './messages';
 
 async function resolveSecrets(env: Env): Promise<SecretsBundle> {
   const [
