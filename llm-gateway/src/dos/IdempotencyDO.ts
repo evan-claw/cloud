@@ -8,19 +8,16 @@ import type { Env } from '../env';
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const STALE_CLAIM_MS = 60 * 1000; // 60 seconds
 
-export type ClaimResult = {
-  claimed: boolean;
-  status: 'claimed' | 'processing' | 'completed';
-};
+export type ClaimStatus = 'claimed' | 'processing' | 'completed';
 
 export class IdempotencyDO extends DurableObject<Env> {
-  async claim(): Promise<ClaimResult> {
+  async claim(): Promise<ClaimStatus> {
     const state = await this.ctx.storage.get<string>('state');
-    if (state === 'completed') return { claimed: false, status: 'completed' };
-    if (state === 'processing') return { claimed: false, status: 'processing' };
+    if (state === 'completed') return 'completed';
+    if (state === 'processing') return 'processing';
     await this.ctx.storage.put('state', 'processing');
     await this.ctx.storage.setAlarm(Date.now() + STALE_CLAIM_MS);
-    return { claimed: true, status: 'claimed' };
+    return 'claimed';
   }
 
   async complete(): Promise<void> {

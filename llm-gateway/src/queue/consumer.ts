@@ -120,14 +120,12 @@ export async function handleBackgroundTaskQueue(
   for (const message of batch.messages) {
     try {
       const stub = getIdempotencyDO(env, message.body.idempotencyKey);
-      const { claimed, status } = await stub.claim();
-      if (!claimed) {
-        if (status === 'completed') {
-          message.ack();
-        } else {
-          // Still processing — let the queue retry later
-          message.retry();
-        }
+      const status = await stub.claim();
+      if (status === 'completed') {
+        message.ack();
+        continue;
+      }
+      if (status === 'processing') {
         continue;
       }
 
