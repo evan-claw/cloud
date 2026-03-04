@@ -106,6 +106,12 @@ export async function shouldRouteToVercel(
     return false;
   }
 
+  // OpenAI models excluded — Vercel returns model-not-found errors for them
+  if (requestedModel.startsWith('openai/') && !requestedModel.startsWith('openai/gpt-oss')) {
+    console.debug('[shouldRouteToVercel] OpenAI models excluded');
+    return false;
+  }
+
   if (!preferredModels.includes(requestedModel)) {
     console.debug('[shouldRouteToVercel] only preferred models are tested for Vercel routing');
     return false;

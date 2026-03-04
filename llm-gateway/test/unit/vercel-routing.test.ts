@@ -66,6 +66,28 @@ describe('shouldRouteToVercel', () => {
     expect(result).toBe(false);
   });
 
+  it('returns false for OpenAI models (Vercel model-not-found)', async () => {
+    const result = await shouldRouteToVercel(
+      fakeDb(),
+      'openai/gpt-5.2',
+      makeRequest({ model: 'openai/gpt-5.2' }),
+      'seed-1'
+    );
+    expect(result).toBe(false);
+  });
+
+  it('does not exclude openai/gpt-oss models from Vercel', async () => {
+    // gpt-oss models should NOT be excluded — they go through the normal preferred-model check
+    const result = await shouldRouteToVercel(
+      fakeDb(),
+      'openai/gpt-oss-120b',
+      makeRequest({ model: 'openai/gpt-oss-120b' }),
+      'seed-1'
+    );
+    // gpt-oss-120b is not in preferredModels, so it returns false for that reason, not the OpenAI exclusion
+    expect(result).toBe(false);
+  });
+
   it('returns false for models not in preferredModels', async () => {
     const result = await shouldRouteToVercel(
       fakeDb(),
@@ -98,17 +120,21 @@ describe('shouldRouteToVercel', () => {
 
   it('routes preferred model deterministically based on seed', async () => {
     const db = fakeDb();
-    const r1 = await shouldRouteToVercel(db, 'openai/gpt-5.2', makeRequest(), 'stable-seed');
-    const r2 = await shouldRouteToVercel(db, 'openai/gpt-5.2', makeRequest(), 'stable-seed');
+    const model = 'google/gemini-3.1-pro-preview';
+    const req = makeRequest({ model });
+    const r1 = await shouldRouteToVercel(db, model, req, 'stable-seed');
+    const r2 = await shouldRouteToVercel(db, model, req, 'stable-seed');
     expect(r1).toBe(r2);
   });
 
   it('can route to Vercel for eligible preferred models', async () => {
     // Try many seeds; at 10% routing at least one should hit Vercel
     const db = fakeDb();
+    const model = 'google/gemini-3.1-pro-preview';
+    const req = makeRequest({ model });
     const results = await Promise.all(
       Array.from({ length: 100 }, (_, i) =>
-        shouldRouteToVercel(db, 'openai/gpt-5.2', makeRequest(), `seed-${i}`)
+        shouldRouteToVercel(db, model, req, `seed-${i}`)
       )
     );
     const trueCount = results.filter(Boolean).length;
@@ -120,9 +146,11 @@ describe('shouldRouteToVercel', () => {
   it('routes ~90% to Vercel when OpenRouter error rate is high', async () => {
     // OpenRouter error rate > 50%, Vercel < 50% → 90% to Vercel
     const db = fakeDb(0.7, 0.1);
+    const model = 'google/gemini-3.1-pro-preview';
+    const req = makeRequest({ model });
     const results = await Promise.all(
       Array.from({ length: 100 }, (_, i) =>
-        shouldRouteToVercel(db, 'openai/gpt-5.2', makeRequest(), `failover-seed-${i}`)
+        shouldRouteToVercel(db, model, req, `failover-seed-${i}`)
       )
     );
     const trueCount = results.filter(Boolean).length;
