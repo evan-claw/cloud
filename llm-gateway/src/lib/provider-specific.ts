@@ -284,12 +284,6 @@ function applyVercelSettings(
   // Map to Vercel model ID
   requestToMutate.model = mapModelIdToVercel(requestedModel);
 
-  if (isAnthropicModel(requestedModel)) {
-    const existing = extraHeaders['x-anthropic-beta'];
-    extraHeaders['anthropic-beta'] = [existing, 'context-1m-2025-08-07'].filter(Boolean).join(',');
-    delete extraHeaders['x-anthropic-beta'];
-  }
-
   if (userByok) {
     if (userByok.length === 0) throw new Error('Invalid state: userByok is empty');
     const byokProviders: Record<string, VercelInferenceProviderConfig[]> = {};
