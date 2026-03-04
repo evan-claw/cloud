@@ -12,20 +12,21 @@ import { getBearerToken } from './gateway';
  * This is acceptable: the UI shows a "Modified" badge by comparing image vs running
  * version, and spawning a subprocess on every request is not worth the cost.
  */
-let cachedOpenclawVersion: string | null | undefined;
+let openclawVersionPromise: Promise<string | null> | undefined;
 function getOpenclawVersion(): Promise<string | null> {
-  if (cachedOpenclawVersion !== undefined) return Promise.resolve(cachedOpenclawVersion);
-  return new Promise(resolve => {
-    execFile(
-      '/usr/bin/env',
-      ['HOME=/root', 'openclaw', '--version'],
-      { timeout: 5000 },
-      (err, stdout) => {
-        cachedOpenclawVersion = err ? null : stdout.toString().trim();
-        resolve(cachedOpenclawVersion);
-      }
-    );
-  });
+  if (!openclawVersionPromise) {
+    openclawVersionPromise = new Promise(resolve => {
+      execFile(
+        '/usr/bin/env',
+        ['HOME=/root', 'openclaw', '--version'],
+        { timeout: 5000 },
+        (err, stdout) => {
+          resolve(err ? null : stdout.toString().trim());
+        }
+      );
+    });
+  }
+  return openclawVersionPromise;
 }
 
 export function registerHealthRoute(
@@ -33,6 +34,9 @@ export function registerHealthRoute(
   supervisor: Supervisor,
   expectedToken?: string
 ): void {
+  // Eagerly resolve so the first /_kilo/version request doesn't wait on the subprocess.
+  getOpenclawVersion();
+
   const handler = (c: Context) => c.json({ status: 'ok' });
 
   // Public Fly health probe endpoint. Keep response intentionally minimal.
