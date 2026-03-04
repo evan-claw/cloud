@@ -355,6 +355,13 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       );
       return rewriteFreeModelResponse(new Response(clientStream, response), resolvedModel);
     }
+    // Bodyless free model response — still schedule background tasks for metrics.
+    scheduleBackgroundTasks(c.executionCtx, {
+      ...bgCommon,
+      accountingStream: null,
+      metricsStream: null,
+      loggingStream: null,
+    });
     return rewriteFreeModelResponse(response, resolvedModel);
   }
 
@@ -415,6 +422,15 @@ export const proxyHandler: Handler<HonoContext> = async c => {
 
     return wrapResponse(new Response(clientStream, response));
   }
+
+  // Bodyless non-error response — still schedule background tasks so metrics
+  // and accounting are recorded (e.g. 204 No Content from a provider).
+  scheduleBackgroundTasks(c.executionCtx, {
+    ...bgCommon,
+    accountingStream: null,
+    metricsStream: null,
+    loggingStream: null,
+  });
 
   return wrapResponse(response);
 };
