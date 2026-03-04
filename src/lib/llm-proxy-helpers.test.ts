@@ -1,5 +1,8 @@
 import { describe, it, expect } from '@jest/globals';
-import { checkOrganizationModelRestrictions, estimateChatTokens } from './llm-proxy-helpers';
+import {
+  checkOrganizationModelRestrictions,
+  estimateChatTokens_ignoringToolDefinitions,
+} from './llm-proxy-helpers';
 import type { OpenRouterChatCompletionRequest } from './providers/openrouter/types';
 
 describe('checkOrganizationModelRestrictions', () => {
@@ -281,7 +284,7 @@ describe('estimateChatTokens', () => {
       ],
     } as OpenRouterChatCompletionRequest;
 
-    const result = estimateChatTokens(body);
+    const result = estimateChatTokens_ignoringToolDefinitions(body);
 
     expect(result.estimatedInputTokens).toBeGreaterThan(0);
     expect(result.estimatedOutputTokens).toBeGreaterThan(0);
@@ -296,11 +299,11 @@ describe('estimateChatTokens', () => {
       messages: null,
     } as unknown as OpenRouterChatCompletionRequest;
 
-    expect(estimateChatTokens(undefinedMessages)).toEqual({
+    expect(estimateChatTokens_ignoringToolDefinitions(undefinedMessages)).toEqual({
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
     });
-    expect(estimateChatTokens(nullMessages)).toEqual({
+    expect(estimateChatTokens_ignoringToolDefinitions(nullMessages)).toEqual({
       estimatedInputTokens: 0,
       estimatedOutputTokens: 0,
     });
@@ -320,7 +323,7 @@ describe('estimateChatTokens', () => {
       ],
     } as unknown as OpenRouterChatCompletionRequest;
 
-    const result = estimateChatTokens(body);
+    const result = estimateChatTokens_ignoringToolDefinitions(body);
     expect(result.estimatedInputTokens).toBeGreaterThan(0);
     expect(result.estimatedOutputTokens).toBeGreaterThan(0);
   });

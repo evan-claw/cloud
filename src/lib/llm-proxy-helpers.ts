@@ -376,7 +376,7 @@ export function extractFimPromptInfo(body: { prompt: string; suffix?: string | n
   };
 }
 
-export function estimateChatTokens(body: OpenRouterChatCompletionRequest): {
+export function estimateChatTokens_ignoringToolDefinitions(body: OpenRouterChatCompletionRequest): {
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
 } {
