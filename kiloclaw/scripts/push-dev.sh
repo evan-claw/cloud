@@ -24,6 +24,9 @@ TAG="dev-$(date +%s)"
 IMAGE="registry.fly.io/$APP_NAME:$TAG"
 GIT_SHA="$(git -C "$KILOCLAW_DIR" rev-parse HEAD 2>/dev/null || echo 'unknown')"
 
+# Extract OpenClaw version from Dockerfile
+OPENCLAW_VERSION=$(sed -n 's/.*openclaw@\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$KILOCLAW_DIR/Dockerfile")
+
 echo "Building + pushing $IMAGE (linux/amd64) ..."
 echo "Controller commit: $GIT_SHA"
 
@@ -68,6 +71,16 @@ if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
   else
     echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG  (digest not captured)"
   fi
+
+  if [ -n "$OPENCLAW_VERSION" ]; then
+    if grep -q '^OPENCLAW_VERSION=' "$KILOCLAW_DIR/.dev.vars"; then
+      sed "s/^OPENCLAW_VERSION=.*/OPENCLAW_VERSION=$OPENCLAW_VERSION/" "$KILOCLAW_DIR/.dev.vars" > "$KILOCLAW_DIR/.dev.vars.tmp"
+      mv "$KILOCLAW_DIR/.dev.vars.tmp" "$KILOCLAW_DIR/.dev.vars"
+    else
+      echo "OPENCLAW_VERSION=$OPENCLAW_VERSION" >> "$KILOCLAW_DIR/.dev.vars"
+    fi
+    echo "Updated .dev.vars: OPENCLAW_VERSION=$OPENCLAW_VERSION"
+  fi
 else
   echo "No .dev.vars found — set FLY_IMAGE_TAG=$TAG manually"
 fi
@@ -76,6 +89,9 @@ echo ""
 echo "FLY_IMAGE_TAG=$TAG"
 if [ -n "$DIGEST" ]; then
   echo "FLY_IMAGE_DIGEST=$DIGEST"
+fi
+if [ -n "$OPENCLAW_VERSION" ]; then
+  echo "OPENCLAW_VERSION=$OPENCLAW_VERSION"
 fi
 echo ""
 echo "Done. Restart wrangler dev to pick up the new tag."
