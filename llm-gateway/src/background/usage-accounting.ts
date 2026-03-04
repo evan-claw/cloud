@@ -299,7 +299,7 @@ async function fetchGeneration(
           'X-Title': 'Kilo Code',
         },
       },
-      r => r.status >= 400 // retry on 404 (generation not yet available)
+      r => r.status === 404 || r.status >= 500 // retry on 404 (not yet available) and 5xx
     );
     if (!response.ok) {
       console.warn('fetchGeneration: non-ok response', {
