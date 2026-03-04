@@ -61,7 +61,9 @@ afterEach(() => {
 });
 
 describe('auth', () => {
-  it('returns 401 for expired/malformed token', async () => {
+  // Auth failures pass through to anonymous-gate, which returns
+  // PAID_MODEL_AUTH_REQUIRED for paid models (matching the reference).
+  it('returns PAID_MODEL_AUTH_REQUIRED for expired token + paid model', async () => {
     const expiredToken = await signToken({}, TEST_SECRET, '0s');
     await new Promise(r => setTimeout(r, 10));
     const res = await dispatch(
@@ -74,11 +76,11 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body: { error: { message: string } } = await res.json();
-    expect(body.error.message).toBe('Invalid or expired token');
+    const body: { error: { code: string; message: string } } = await res.json();
+    expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
   });
 
-  it('returns 401 when user is not found in DB', async () => {
+  it('returns PAID_MODEL_AUTH_REQUIRED when user not found + paid model', async () => {
     _userRows = [];
     const token = await signToken({ kiloUserId: 'user-nonexistent' });
     const res = await dispatch(
@@ -91,11 +93,11 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body: { error: { message: string } } = await res.json();
-    expect(body.error.message).toBe('User not found');
+    const body: { error: { code: string; message: string } } = await res.json();
+    expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
   });
 
-  it('returns 401 when pepper does not match', async () => {
+  it('returns PAID_MODEL_AUTH_REQUIRED when pepper mismatch + paid model', async () => {
     _userRows = [{ ...VALID_USER, api_token_pepper: 'correct-pepper' }];
     const token = await signToken({ kiloUserId: 'user-1', apiTokenPepper: 'wrong-pepper' });
     const res = await dispatch(
@@ -108,7 +110,7 @@ describe('auth', () => {
       )
     );
     expect(res.status).toBe(401);
-    const body: { error: { message: string } } = await res.json();
-    expect(body.error.message).toBe('Token has been revoked');
+    const body: { error: { code: string; message: string } } = await res.json();
+    expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
   });
 });

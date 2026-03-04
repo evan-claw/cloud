@@ -20,7 +20,8 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const verifyResult = await verifyGatewayJwt(token, secret);
 
   if (!verifyResult.ok) {
-    return c.json({ error: { message: 'Invalid or expired token' } }, 401);
+    console.warn('AUTH-FAIL 401: Invalid or expired token');
+    return next();
   }
 
   const { payload } = verifyResult;
@@ -34,11 +35,13 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const user = rows[0];
 
   if (!user) {
-    return c.json({ error: { message: 'User not found' } }, 401);
+    console.warn(`AUTH-FAIL 401 (${payload.kiloUserId}): User not found`);
+    return next();
   }
 
   if (!isPepperValid(payload.apiTokenPepper, user.api_token_pepper)) {
-    return c.json({ error: { message: 'Token has been revoked' } }, 401);
+    console.warn(`AUTH-FAIL 401 (${user.id}): Token has been revoked`);
+    return next();
   }
 
   c.set('authUser', user);
