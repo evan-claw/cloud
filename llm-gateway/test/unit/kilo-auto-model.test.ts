@@ -9,7 +9,7 @@ describe('isKiloAutoModel', () => {
   });
 
   it('returns false for real models', () => {
-    expect(isKiloAutoModel('anthropic/claude-sonnet-4-20250514')).toBe(false);
+    expect(isKiloAutoModel('anthropic/claude-sonnet-4.6')).toBe(false);
     expect(isKiloAutoModel('openai/gpt-4o')).toBe(false);
   });
 });
@@ -27,21 +27,21 @@ describe('resolveAutoModel', () => {
 
   it('resolves kilo/auto with plan mode to Claude Opus', () => {
     const result = resolveAutoModel('kilo/auto', 'plan');
-    expect(result.model).toBe('anthropic/claude-opus-4-20250514');
+    expect(result.model).toBe('anthropic/claude-opus-4.6');
   });
 
   it('resolves kilo/auto with code mode to Claude Sonnet', () => {
     const result = resolveAutoModel('kilo/auto', 'code');
-    expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(result.model).toBe('anthropic/claude-sonnet-4.6');
   });
 
   it('falls back to code model for unknown mode', () => {
     const result = resolveAutoModel('kilo/auto', 'unknown-mode');
-    expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(result.model).toBe('anthropic/claude-sonnet-4.6');
   });
 
   it('falls back to code model when modeHeader is null', () => {
     const result = resolveAutoModel('kilo/auto', null);
-    expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(result.model).toBe('anthropic/claude-sonnet-4.6');
   });
 });

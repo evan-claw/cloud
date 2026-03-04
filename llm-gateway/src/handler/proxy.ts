@@ -35,7 +35,7 @@ const TEN_MINUTES_MS = 10 * 60 * 1000;
  * consumed, `onBuffered` is called with a factory that creates replay streams.
  */
 function bufferAndForward(
-  body: ReadableStream<Uint8Array>,
+  body: ReadableStream,
   ctx: { waitUntil: (promise: Promise<unknown>) => void },
   onBuffered: (replay: () => ReadableStream<Uint8Array>) => void,
   label: string
