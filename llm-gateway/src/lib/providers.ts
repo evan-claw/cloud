@@ -145,7 +145,7 @@ const kiloFreeModelsWithGateway: KiloFreeModelWithGateway[] = [
     public_id: 'minimax/minimax-m2.5:free',
     internal_id: 'minimax/minimax-m2.5',
     display_name: 'MiniMax M2.5 (free)',
-    context_length: 1_000_000,
+    context_length: 204_800,
     max_completion_tokens: 40960,
     is_enabled: true,
     flags: ['reasoning', 'prompt_cache', 'vision'],
