@@ -17,7 +17,6 @@ export type UsageAccountingMessage = {
   fraudHeaders: FraudDetectionHeaders;
   requested_model: string;
   kiloUserId: string;
-  connectionString: string;
   providerId: string;
 };
 

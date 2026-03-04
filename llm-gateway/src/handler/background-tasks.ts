@@ -186,7 +186,6 @@ export function scheduleBackgroundTasks(
                 fraudHeaders,
                 requested_model: resolvedModel,
                 kiloUserId: user.id,
-                connectionString,
                 providerId: provider,
               });
             } catch (err) {
