@@ -7,6 +7,7 @@ import { sendApiMetrics } from '../background/api-metrics';
 import { reportAbuseCost } from '../lib/abuse-service';
 import { buildProviders, type SecretsBundle } from '../lib/providers';
 import type { Env } from '../env';
+import { getIdempotencyDO } from '../dos/IdempotencyDO';
 import type { BackgroundTaskMessage, UsageAccountingMessage } from './messages';
 
 async function resolveSecrets(env: Env): Promise<SecretsBundle> {
@@ -113,6 +114,13 @@ export async function handleBackgroundTaskQueue(
 ): Promise<void> {
   for (const message of batch.messages) {
     try {
+      const stub = getIdempotencyDO(env, message.body.idempotencyKey);
+      const { alreadyCompleted } = await stub.claim();
+      if (alreadyCompleted) {
+        message.ack();
+        continue;
+      }
+
       switch (message.body.type) {
         case 'usage-accounting':
           await processUsageAccounting(message.body, env);
@@ -121,6 +129,8 @@ export async function handleBackgroundTaskQueue(
           await processApiMetrics(message.body, env);
           break;
       }
+
+      await stub.complete();
       message.ack();
     } catch (err) {
       console.error(`[queue] Failed to process ${message.body.type}`, err);

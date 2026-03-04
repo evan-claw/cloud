@@ -1,4 +1,5 @@
 export { RateLimitDO } from './dos/RateLimitDO';
+export { IdempotencyDO } from './dos/IdempotencyDO';
 import * as Sentry from '@sentry/cloudflare';
 import { SENTRY_DSN } from './lib/sentry';
 import { handleBackgroundTaskQueue } from './queue/consumer';

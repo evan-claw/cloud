@@ -31,12 +31,20 @@
         "name": "RATE_LIMIT_DO",
         "class_name": "RateLimitDO",
       },
+      {
+        "name": "IDEMPOTENCY_DO",
+        "class_name": "IdempotencyDO",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_classes": ["RateLimitDO"],
+    },
+    {
+      "tag": "v2",
+      "new_classes": ["IdempotencyDO"],
     },
   ],
   "services": [

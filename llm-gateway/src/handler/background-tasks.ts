@@ -177,6 +177,7 @@ export function scheduleBackgroundTasks(
             try {
               await queue.send({
                 type: 'usage-accounting',
+                idempotencyKey: crypto.randomUUID(),
                 usageStats,
                 usageContext,
                 abuseRequestId,
@@ -238,6 +239,7 @@ export function scheduleBackgroundTasks(
             try {
               await queue.send({
                 type: 'api-metrics',
+                idempotencyKey: crypto.randomUUID(),
                 params: metricsParams,
               });
             } catch (err) {
