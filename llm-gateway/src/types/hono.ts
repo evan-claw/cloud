@@ -1,5 +1,6 @@
 import type { User } from '@kilocode/db';
 import type { CustomLlm } from '@kilocode/db/schema';
+import type { WorkerDb } from '@kilocode/db/client';
 import type { Env } from '../env';
 import type { AnonymousUserContext } from '../lib/anonymous';
 import type { FeatureValue } from '../lib/feature-detection';
@@ -17,6 +18,9 @@ export type HonoContext = {
 // Values set via c.set() / c.get() across the middleware chain.
 // Each key is populated by the middleware named in the comment.
 export type Variables = {
+  // db.ts — single drizzle instance reused across the entire request
+  db: WorkerDb;
+
   // request-timing.ts
   requestStartedAt: number;
 

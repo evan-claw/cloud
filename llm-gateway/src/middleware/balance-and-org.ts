@@ -17,7 +17,7 @@ import {
 } from '../lib/org-restrictions';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { maybePerformOrganizationAutoTopUp } from '../lib/auto-top-up';
-import { getWorkerDb, type WorkerDb } from '@kilocode/db/client';
+import type { WorkerDb } from '@kilocode/db/client';
 import { and, eq, gt, notExists, sql } from 'drizzle-orm';
 import { credit_transactions, kilo_pass_issuance_items } from '@kilocode/db/schema';
 
@@ -74,7 +74,7 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
     return;
   }
 
-  const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+  const db = c.get('db');
   const { balance, settings, plan, autoTopUp } = await getBalanceAndOrgSettings(
     db,
     organizationId,

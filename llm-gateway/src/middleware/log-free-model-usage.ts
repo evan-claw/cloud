@@ -3,7 +3,6 @@ import type { HonoContext } from '../types/hono';
 import { isKiloFreeModel } from '../lib/models';
 import { isAnonymousContext } from '../lib/anonymous';
 import { incrementFreeModelUsage, incrementPromotionUsage } from '../lib/rate-limit';
-import { getWorkerDb } from '@kilocode/db/client';
 import { free_model_usage } from '@kilocode/db/schema';
 
 // Runs after rate limit + auth checks pass.
@@ -29,7 +28,7 @@ export const logFreeModelUsageMiddleware = createMiddleware<HonoContext>(async (
 
   // DB insert — awaited before processing, matching the reference.
   try {
-    const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+    const db = c.get('db');
     await db.insert(free_model_usage).values({
       ip_address: ip,
       model: resolvedModel,

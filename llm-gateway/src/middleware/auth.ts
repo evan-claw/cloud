@@ -1,6 +1,5 @@
 import { createMiddleware } from 'hono/factory';
 import { and, eq } from 'drizzle-orm';
-import { getWorkerDb } from '@kilocode/db/client';
 import { kilocode_users, organization_memberships } from '@kilocode/db/schema';
 import type { HonoContext } from '../types/hono';
 import { extractBearerToken } from '@kilocode/worker-utils';
@@ -39,7 +38,7 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   }
 
   const { payload } = verifyResult;
-  const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+  const db = c.get('db');
 
   const rows = await db
     .select()

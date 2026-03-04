@@ -19,7 +19,6 @@ import { getOutputHeaders, wrapResponse, makeErrorReadable } from '../lib/respon
 import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
 import { classifyAbuse, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
-import { getWorkerDb } from '@kilocode/db/client';
 import { scheduleBackgroundTasks, type BackgroundTaskParams } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
 import { captureException } from '../lib/sentry';
@@ -174,7 +173,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // ── Upstream request ────────────────────────────────────────────────────────
   let response: Response;
   if (customLlm) {
-    const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+    const db = c.get('db');
     const isLegacyExtension = !!fraudHeaders.http_user_agent?.startsWith('Kilo-Code/');
     response = await customLlmRequest(
       customLlm,

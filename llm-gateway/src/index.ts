@@ -8,6 +8,7 @@ import type { Env } from './env';
 import { Hono } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import type { HonoContext } from './types/hono';
+import { dbMiddleware } from './middleware/db';
 import { requestTimingMiddleware } from './middleware/request-timing';
 import { parseBodyMiddleware } from './middleware/parse-body';
 import { extractIpMiddleware } from './middleware/extract-ip';
@@ -31,6 +32,7 @@ app.use('*', useWorkersLogger('llm-gateway') as Parameters<typeof app.use>[1]);
 function registerChatCompletions(path: string) {
   app.post(
     path,
+    dbMiddleware,
     requestTimingMiddleware,
     parseBodyMiddleware,
     extractIpMiddleware,
