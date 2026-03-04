@@ -22,7 +22,7 @@ import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 import { codeReviewWorkerClient } from '../client/code-review-worker-client';
 import type { CodeReviewPlatform } from '../core/schemas';
 
-const MAX_CONCURRENT_REVIEWS_PER_OWNER = 20;
+const MAX_CONCURRENT_REVIEWS_PER_OWNER = 10;
 
 export interface DispatchResult {
   dispatched: number;
