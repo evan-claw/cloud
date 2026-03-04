@@ -1,5 +1,6 @@
 import type { SandboxInstance, ExecutionSession, SystemSandboxUsageEvent } from './types.js';
 import { logger } from './logger.js';
+import { findWrapperForSession } from './kilo/wrapper-manager.js';
 import { withTimeout } from '@kilocode/worker-utils';
 
 /**
@@ -157,6 +158,92 @@ export async function cleanupWorkspace(
   }
 }
 
+/**
+ * Clean up workspace directories for sessions that no longer have a running wrapper.
+ * Called when disk space is low to reclaim space from abandoned sessions.
+ * Errors are caught and logged — never rethrown — so cleanup failure never blocks setup.
+ */
+export async function cleanupStaleWorkspaces(
+  session: ExecutionSession,
+  sandbox: SandboxInstance,
+  baseWorkspacePath: string,
+  currentSessionId: string
+): Promise<void> {
+  logger
+    .withFields({ baseWorkspacePath, currentSessionId })
+    .info('Starting stale workspace cleanup');
+
+  let sessionDirs: string[];
+  try {
+    const lsResult = await session.exec(`ls -1 '${baseWorkspacePath}/sessions/'`);
+    if (lsResult.exitCode !== 0 || !lsResult.stdout) {
+      logger
+        .withFields({ stderr: lsResult.stderr })
+        .info('No sessions directory or listing failed, skipping cleanup');
+      return;
+    }
+    sessionDirs = lsResult.stdout
+      .trim()
+      .split('\n')
+      .map(d => d.trim())
+      .filter(Boolean);
+  } catch (error) {
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Failed to list sessions directory, skipping cleanup');
+    return;
+  }
+
+  logger.withFields({ found: sessionDirs.length }).info('Found session directories');
+
+  let cleaned = 0;
+  let skipped = 0;
+
+  for (const candidateSessionId of sessionDirs) {
+    if (candidateSessionId === currentSessionId) {
+      skipped++;
+      continue;
+    }
+
+    // Only process entries that look like session IDs (agent_<uuid>) to guard
+    // against unexpected directory names breaking the rm -rf shell commands.
+    if (!/^agent_[\w-]+$/.test(candidateSessionId)) {
+      logger
+        .withFields({ candidateSessionId })
+        .warn('Skipping unexpected sessions directory entry');
+      skipped++;
+      continue;
+    }
+
+    try {
+      const wrapperInfo = await findWrapperForSession(sandbox, candidateSessionId);
+      if (wrapperInfo !== null) {
+        logger.withFields({ candidateSessionId }).info('Skipping session: wrapper is running');
+        skipped++;
+        continue;
+      }
+
+      const workspacePath = `${baseWorkspacePath}/sessions/${candidateSessionId}`;
+      const sessionHome = getSessionHomePath(candidateSessionId);
+      logger
+        .withFields({ candidateSessionId, workspacePath, sessionHome })
+        .info('Removing stale session directories');
+
+      await cleanupWorkspace(session, workspacePath, sessionHome);
+      cleaned++;
+    } catch (error) {
+      logger
+        .withFields({
+          candidateSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Error while cleaning up stale session, continuing');
+    }
+  }
+
+  logger.withFields({ cleaned, skipped }).info('Stale workspace cleanup complete');
+}
+
 export type GitAuthorConfig = {
   name: string;
   email: string;
@@ -170,6 +257,7 @@ export const LOW_DISK_THRESHOLD_MB = 2048; // 2GB
 export type DiskSpaceResult = {
   availableMB: number;
   totalMB: number;
+  isLow: boolean;
 };
 
 /**
@@ -222,6 +310,7 @@ export async function checkDiskSpace(session: ExecutionSession): Promise<DiskSpa
   return {
     availableMB,
     totalMB,
+    isLow,
   };
 }
 

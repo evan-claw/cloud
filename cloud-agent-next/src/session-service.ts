@@ -10,9 +10,11 @@ import type { ExecutionParams as _ExecutionParams } from './schema.js';
 import { generateSandboxId } from './sandbox-id.js';
 import {
   checkDiskSpace,
+  cleanupStaleWorkspaces,
   cloneGitHubRepo,
   cloneGitRepo,
   cleanupWorkspace,
+  getBaseWorkspacePath,
   getSessionHomePath,
   getSessionWorkspacePath,
   manageBranch,
@@ -827,8 +829,16 @@ export class SessionService {
       mcpServers
     );
 
-    // Check disk space before clone for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space before clone; clean up stale workspaces if low
+    const diskSpace = await checkDiskSpace(session);
+    if (diskSpace.isLow) {
+      await cleanupStaleWorkspaces(
+        session,
+        sandbox,
+        getBaseWorkspacePath(orgId, userId),
+        sessionId
+      );
+    }
 
     // Clone repository using appropriate method
     // Shallow clone (depth: 1) can be enabled for faster checkout and reduced disk usage
@@ -1070,8 +1080,16 @@ export class SessionService {
       mcpServers
     );
 
-    // Check disk space before clone for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space before clone; clean up stale workspaces if low
+    const diskSpace = await checkDiskSpace(session);
+    if (diskSpace.isLow) {
+      await cleanupStaleWorkspaces(
+        session,
+        sandbox,
+        getBaseWorkspacePath(orgId, userId),
+        sessionId
+      );
+    }
 
     // Clone repository using appropriate method
     if (gitUrl) {
@@ -1254,8 +1272,16 @@ export class SessionService {
     const repoExists = repoCheck.stdout?.includes('exists') ?? false;
     const isColdStart = !repoExists;
 
-    // Check disk space for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space; clean up stale workspaces if low
+    const diskSpace = await checkDiskSpace(session);
+    if (diskSpace.isLow) {
+      await cleanupStaleWorkspaces(
+        session,
+        sandbox,
+        getBaseWorkspacePath(orgId, userId),
+        sessionId
+      );
+    }
 
     // Only re-run setup if we had to reclone (cold start)
     if (isColdStart) {
