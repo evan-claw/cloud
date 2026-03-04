@@ -32,18 +32,20 @@ export const requestTransformMiddleware: MiddlewareHandler<HonoContext> = async 
   c.set('xKiloCodeVersion', projectHeaders.xKiloCodeVersion);
   c.set('numericKiloCodeVersion', projectHeaders.numericKiloCodeVersion);
 
-  // safety_identifier — hash of userId, provider-specific salt
-  const safetyIdentifier = await generateProviderSpecificHash(user.id, provider);
-  requestBody.safety_identifier = safetyIdentifier;
-  // Deprecated field still expected by OpenRouter
-  requestBody.user = safetyIdentifier;
-
-  // prompt_cache_key — hash of userId+taskId when a task session is present
+  // safety_identifier + prompt_cache_key — compute in parallel when taskId is present
   if (projectHeaders.taskId) {
-    requestBody.prompt_cache_key = await generateProviderSpecificHash(
-      user.id + projectHeaders.taskId,
-      provider
-    );
+    const [safetyIdentifier, promptCacheKey] = await Promise.all([
+      generateProviderSpecificHash(user.id, provider),
+      generateProviderSpecificHash(user.id + projectHeaders.taskId, provider),
+    ]);
+    requestBody.safety_identifier = safetyIdentifier;
+    requestBody.user = safetyIdentifier;
+    requestBody.prompt_cache_key = promptCacheKey;
+  } else {
+    const safetyIdentifier = await generateProviderSpecificHash(user.id, provider);
+    requestBody.safety_identifier = safetyIdentifier;
+    // Deprecated field still expected by OpenRouter
+    requestBody.user = safetyIdentifier;
   }
 
   // Tool repair — fix malformed tool schemas before sending upstream
