@@ -18,7 +18,7 @@ import { captureException } from '@sentry/nextjs';
 import { errorExceptInTest } from '@/lib/utils.server';
 import {
   handleCommentReply,
-  type CommentReplyPayload,
+  CommentReplyPayloadSchema,
 } from '@/lib/auto-fix/github/handle-comment-reply';
 
 export async function POST(req: NextRequest) {
@@ -29,7 +29,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const payload: CommentReplyPayload = await req.json();
+    const raw: unknown = await req.json();
+    const parsed = CommentReplyPayloadSchema.safeParse(raw);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid payload', issues: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+    const payload = parsed.data;
     const result = await handleCommentReply(payload);
 
     if (result.ok) {

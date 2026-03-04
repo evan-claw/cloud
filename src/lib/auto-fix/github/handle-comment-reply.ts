@@ -15,14 +15,17 @@ import {
   getPRHeadCommit,
 } from '@/lib/integrations/platforms/github/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
+import { z } from 'zod';
 
-export type CommentReplyPayload = {
-  ticketId: string;
-  sessionId?: string;
-  outcome?: 'success' | 'failed';
-  errorMessage?: string;
-  prBranch?: string;
-};
+export const CommentReplyPayloadSchema = z.object({
+  ticketId: z.string(),
+  sessionId: z.string().optional(),
+  outcome: z.enum(['success', 'failed']),
+  errorMessage: z.string().optional(),
+  prBranch: z.string().optional(),
+});
+
+export type CommentReplyPayload = z.infer<typeof CommentReplyPayloadSchema>;
 
 type CommentReplyResult =
   | { ok: true; action: string }
@@ -106,8 +109,7 @@ function getFriendlyFailure(rawError: string): FriendlyFailure {
 export async function handleCommentReply(
   payload: CommentReplyPayload
 ): Promise<CommentReplyResult> {
-  const { ticketId, sessionId } = payload;
-  const outcome = payload.outcome ?? 'success';
+  const { ticketId, sessionId, outcome } = payload;
 
   if (!ticketId) {
     return { ok: false, error: 'Missing required field: ticketId', status: 400 };
