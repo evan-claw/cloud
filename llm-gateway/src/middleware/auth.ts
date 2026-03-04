@@ -29,6 +29,9 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
     return next();
   }
 
+  // Start blacklist fetch early — it's independent of JWT verification.
+  const blacklistDomainsPromise = c.env.BLACKLIST_DOMAINS.get();
+
   const secret = await c.env.NEXTAUTH_SECRET_PROD.get();
   const verifyResult = await verifyGatewayJwt(token, secret);
 
@@ -64,7 +67,7 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   }
 
   // Blacklisted email domain — treat as unauthenticated
-  const blacklistDomains = await c.env.BLACKLIST_DOMAINS.get();
+  const blacklistDomains = await blacklistDomainsPromise;
   if (isEmailBlacklistedByDomain(user.google_user_email, blacklistDomains ?? undefined)) {
     console.warn(`AUTH-FAIL 403 (${user.id}): Access denied (R0)`);
     return next();

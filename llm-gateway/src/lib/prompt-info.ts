@@ -10,7 +10,7 @@ export type PromptInfo = {
   user_prompt_prefix: string;
 };
 
-type MessageContent = string | Array<{ type: string; text?: string }> | null | undefined;
+export type MessageContent = string | Array<{ type?: string; text?: string }> | null | undefined;
 
 export function extractMessageTextContent(content: MessageContent): string {
   if (typeof content === 'string') return content;
