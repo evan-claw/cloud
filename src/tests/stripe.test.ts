@@ -1,4 +1,32 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest as jestGlobals } from '@jest/globals';
+
+// Allow spying on processTopUp / processTopupForOrganization inside stripe.ts.
+// The mock delegates to the real implementation by default so existing tests are unaffected.
+// We use global `jest` (not the @jest/globals import) because SWC only hoists bare
+// `jest.mock(...)` calls — it does NOT hoist `importedJest.mock(...)`.
+jest.mock('@/lib/credits', () => {
+  const actual = jest.requireActual('@/lib/credits') as Record<string, unknown>;
+  return {
+    __esModule: true,
+    ...actual,
+    processTopUp: jest.fn((...args: unknown[]) =>
+      (actual.processTopUp as (...a: unknown[]) => unknown)(...args)
+    ),
+  };
+});
+jest.mock('@/lib/organizations/organization-billing', () => {
+  const actual = jest.requireActual('@/lib/organizations/organization-billing') as Record<
+    string,
+    unknown
+  >;
+  return {
+    __esModule: true,
+    ...actual,
+    processTopupForOrganization: jest.fn((...args: unknown[]) =>
+      (actual.processTopupForOrganization as (...a: unknown[]) => unknown)(...args)
+    ),
+  };
+});
 import {
   type StripeTopupMetadata,
   ensurePaymentMethodStored,
@@ -31,6 +59,8 @@ import {
   KiloPassTier,
 } from '@/lib/kilo-pass/enums';
 import { cleanupDbForTest } from '@/lib/drizzle';
+import { processTopUp } from '@/lib/credits';
+import { processTopupForOrganization } from '@/lib/organizations/organization-billing';
 
 const sampleStripePaymentMethod = (): Stripe.PaymentMethod => ({
   id: `pm_test_${Math.random().toString(36).substring(7)}`,
@@ -1324,6 +1354,155 @@ describe('handleSuccessfulChargeWithPayment (org/user routing & side-effects)', 
       expect(configAfterSecond?.disabled_reason).toBeNull();
     } finally {
       retrieveSpy.mockRestore();
+    }
+  });
+
+  test('org-auto-topup-setup: created_by_user_id is persisted', async () => {
+    await cleanupDbForTest();
+
+    const user = await insertTestUser();
+    const org = await createOrganization('Org CreatedBy Test', user.id);
+
+    const { client } = await import('@/lib/stripe-client');
+    const stripePaymentMethod = sampleStripePaymentMethod();
+
+    const stripePaymentMethodResponse = {
+      ...stripePaymentMethod,
+      lastResponse: {
+        headers: {},
+        requestId: 'req_test_created_by',
+        statusCode: 200,
+      },
+    } satisfies Stripe.Response<Stripe.PaymentMethod>;
+
+    const retrieveSpy = jest
+      .spyOn(client.paymentMethods, 'retrieve')
+      .mockResolvedValue(stripePaymentMethodResponse);
+
+    const charge = makeCharge({
+      id: `ch_org_created_by_${Math.random()}`,
+      amount: 1500,
+      customer: user.stripe_customer_id,
+    });
+
+    const paymentIntent: Stripe.PaymentIntent = {
+      id: `pi_org_created_by_${Math.random()}`,
+      object: 'payment_intent',
+      status: 'succeeded',
+      payment_method: `pm_org_created_by_${Math.random()}`,
+      metadata: {
+        type: 'org-auto-topup-setup',
+        kiloUserId: user.id,
+        organizationId: org.id,
+        amountCents: '3000',
+      },
+    } as unknown as Stripe.PaymentIntent;
+
+    try {
+      await handleSuccessfulChargeWithPayment(charge, paymentIntent);
+
+      const config = await db.query.auto_top_up_configs.findFirst({
+        where: eq(auto_top_up_configs.owned_by_organization_id, org.id),
+      });
+
+      expect(config).toBeTruthy();
+      expect(config?.created_by_user_id).toBe(user.id);
+    } finally {
+      retrieveSpy.mockRestore();
+    }
+  });
+
+  test('invoice.paid releases attempt_started_at lock when processTopUp throws', async () => {
+    await cleanupDbForTest();
+
+    const user = await insertTestUser();
+    const userChargeId = `ch_user_lock_release_${Math.random()}`;
+
+    await db.insert(auto_top_up_configs).values({
+      owned_by_user_id: user.id,
+      stripe_payment_method_id: `pm_lock_user_${Math.random()}`,
+      amount_cents: 2000,
+      attempt_started_at: new Date().toISOString(),
+    });
+
+    const processTopUpMock = processTopUp as jestGlobals.MockedFunction<typeof processTopUp>;
+    processTopUpMock.mockRejectedValue(new Error('processTopUp test error'));
+
+    const userInvoiceEvent: Stripe.Event = {
+      ...baseStripeEvent(),
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: `in_user_lock_${Math.random()}`,
+          object: 'invoice',
+          charge: userChargeId,
+          amount_paid: 5000,
+          metadata: { type: 'auto-topup', kiloUserId: user.id },
+        } as unknown as Stripe.Invoice,
+        previous_attributes: {},
+      },
+    };
+
+    try {
+      await expect(processStripePaymentEventHook(userInvoiceEvent)).rejects.toThrow(
+        'processTopUp test error'
+      );
+
+      const userConfig = await db.query.auto_top_up_configs.findFirst({
+        where: eq(auto_top_up_configs.owned_by_user_id, user.id),
+      });
+      expect(userConfig?.attempt_started_at).toBeNull();
+    } finally {
+      processTopUpMock.mockRestore();
+    }
+  });
+
+  test('invoice.paid releases attempt_started_at lock when processTopupForOrganization throws', async () => {
+    await cleanupDbForTest();
+
+    const orgUser = await insertTestUser();
+    const org = await createOrganization('Org Lock Release Test', orgUser.id);
+    const orgChargeId = `ch_org_lock_release_${Math.random()}`;
+
+    await db.insert(auto_top_up_configs).values({
+      owned_by_organization_id: org.id,
+      stripe_payment_method_id: `pm_lock_org_${Math.random()}`,
+      amount_cents: 2000,
+      attempt_started_at: new Date().toISOString(),
+      created_by_user_id: orgUser.id,
+    });
+
+    const processOrgTopUpMock = processTopupForOrganization as jestGlobals.MockedFunction<
+      typeof processTopupForOrganization
+    >;
+    processOrgTopUpMock.mockRejectedValue(new Error('processTopupForOrganization test error'));
+
+    const orgInvoiceEvent: Stripe.Event = {
+      ...baseStripeEvent(),
+      type: 'invoice.paid',
+      data: {
+        object: {
+          id: `in_org_lock_${Math.random()}`,
+          object: 'invoice',
+          charge: orgChargeId,
+          amount_paid: 5000,
+          metadata: { type: 'org-auto-topup', organizationId: org.id },
+        } as unknown as Stripe.Invoice,
+        previous_attributes: {},
+      },
+    };
+
+    try {
+      await expect(processStripePaymentEventHook(orgInvoiceEvent)).rejects.toThrow(
+        'processTopupForOrganization test error'
+      );
+
+      const orgConfig = await db.query.auto_top_up_configs.findFirst({
+        where: eq(auto_top_up_configs.owned_by_organization_id, org.id),
+      });
+      expect(orgConfig?.attempt_started_at).toBeNull();
+    } finally {
+      processOrgTopUpMock.mockRestore();
     }
   });
 });

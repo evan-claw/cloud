@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { toast } from 'sonner';
 import type { OrganizationRole, TimePeriod } from '@/lib/organizations/organization-types';
 import { OrganizationContextProvider } from './OrganizationContext';
 import { OrganizationPageHeader } from './OrganizationPageHeader';
@@ -33,6 +34,20 @@ export function OrganizationPaymentDetails({ organizationId, role, isAutoTopUpEn
   const isKiloAdmin = session?.data?.isAdmin ?? false;
   const { data: organizationData } = useOrganizationWithMembers(organizationId);
   const { expiringBlocks, expiring_mUsd, earliestExpiry } = useExpiringCredits(organizationId);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const setupStatus = url.searchParams.get('auto_topup_setup');
+    if (setupStatus === 'success') {
+      toast.success('Automatic top up enabled');
+    } else if (setupStatus === 'cancelled') {
+      toast.info('Automatic top up setup cancelled');
+    }
+
+    if (!setupStatus) return;
+    url.searchParams.delete('auto_topup_setup');
+    window.history.replaceState({}, '', url.toString());
+  }, []);
 
   return (
     <OrganizationContextProvider value={{ userRole, isKiloAdmin, isAutoTopUpEnabled }}>
@@ -79,6 +94,7 @@ export function OrganizationPaymentDetails({ organizationId, role, isAutoTopUpEn
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <button
+                          type="button"
                           onClick={() => setIsSpendingAlertsModalOpen(true)}
                           className="hover:bg-muted inline-flex cursor-pointer items-center gap-1 rounded p-1 transition-all duration-200 focus:outline-none"
                         >

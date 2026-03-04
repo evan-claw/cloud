@@ -648,3 +648,45 @@ describe('maybePerformAutoTopUp with Kilo Pass', () => {
     expect(client.invoices.create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('invoice metadata includes traceId', () => {
+  beforeEach(async () => {
+    await cleanupDbForTest();
+    jest.clearAllMocks();
+  });
+
+  test('client.invoices.create receives metadata.traceId as a UUID', async () => {
+    const user = await insertTestUser({
+      auto_top_up_enabled: true,
+      stripe_customer_id: `cus_trace_${Date.now()}`,
+      total_microdollars_acquired: 0,
+      microdollars_used: toMicrodollars(10), // -$10 balance, well below $5 threshold
+    });
+
+    await db.insert(auto_top_up_configs).values({
+      owned_by_user_id: user.id,
+      stripe_payment_method_id: 'pm_trace_test',
+      amount_cents: 5000,
+      disabled_reason: null,
+    });
+
+    const { client } = await import('@/lib/stripe-client');
+    (client.invoices.create as jest.Mock).mockResolvedValue({ id: 'inv_trace_test' });
+    (client.invoiceItems.create as jest.Mock).mockResolvedValue({ id: 'ii_trace_test' });
+    (client.invoices.pay as jest.Mock).mockResolvedValue({ id: 'inv_trace_test', status: 'paid' });
+
+    const { maybePerformAutoTopUp } = await import('@/lib/autoTopUp');
+    await maybePerformAutoTopUp(user);
+
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    expect(client.invoices.create).toHaveBeenCalledTimes(1);
+    expect(client.invoices.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          traceId: expect.stringMatching(uuidPattern),
+        }),
+      })
+    );
+  });
+});
