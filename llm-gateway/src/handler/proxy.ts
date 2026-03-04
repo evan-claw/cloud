@@ -26,6 +26,61 @@ import { captureException } from '../lib/sentry';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
+/**
+ * Pipe an upstream response body through a TransformStream, buffering every
+ * chunk so that background tasks can replay the data after the stream completes
+ * without coupling consumer speed to client delivery (no `.tee()` backpressure).
+ *
+ * Returns the client-facing stream immediately. Once the upstream is fully
+ * consumed, `onBuffered` is called with a factory that creates replay streams.
+ */
+function bufferAndForward(
+  body: ReadableStream<Uint8Array>,
+  ctx: { waitUntil: (promise: Promise<unknown>) => void },
+  onBuffered: (replay: () => ReadableStream<Uint8Array>) => void,
+  label: string
+): ReadableStream<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+
+  const pipePromise = (async () => {
+    const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+    try {
+      for (;;) {
+        const result = await reader.read();
+        if (result.done) break;
+        chunks.push(result.value);
+        await writer.write(result.value);
+      }
+      await writer.close();
+    } catch (err) {
+      await reader.cancel().catch(() => {});
+      await writer.abort(err).catch(() => {});
+      throw err;
+    }
+  })();
+
+  function replay(): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+  }
+
+  ctx.waitUntil(
+    pipePromise
+      .then(() => onBuffered(replay))
+      .catch(err => {
+        console.error(`[proxy] ${label} stream pipe error`, err);
+      })
+  );
+
+  return clientStream;
+}
+
 // Build the upstream fetch URL — always /chat/completions on the provider base URL,
 // preserving any query string from the original request.
 function buildUpstreamUrl(providerApiUrl: string, search: string): string {
@@ -304,133 +359,54 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       isActiveReviewPromo(botId, resolvedModel) ||
       isActiveCloudAgentPromo(tokenSource, resolvedModel));
 
-  if (shouldRewrite) {
-    if (response.body) {
-      // Buffer chunks while forwarding to client (same pattern as the paid path
-      // below) so the metrics consumer can't stall the client via backpressure.
-      const responseBody = response.body;
-      const chunks: Uint8Array[] = [];
-      const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
-      const writer = writable.getWriter();
+  // Helper: schedule background tasks from a replay factory (after buffering completes).
+  function scheduleBgFromReplay(replay: () => ReadableStream<Uint8Array>) {
+    scheduleBackgroundTasks(c.executionCtx, {
+      ...bgCommon,
+      accountingStream: !isAnon ? replay() : null,
+      metricsStream: replay(),
+      loggingStream: !isAnon ? replay() : null,
+    });
+  }
 
-      const pipePromise = (async () => {
-        const reader = responseBody.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-        try {
-          for (;;) {
-            const result = await reader.read();
-            if (result.done) break;
-            chunks.push(result.value);
-            await writer.write(result.value);
-          }
-          await writer.close();
-        } catch (err) {
-          await reader.cancel().catch(() => {});
-          await writer.abort(err).catch(() => {});
-          throw err;
-        }
-      })();
-
-      function replayFreeStream(): ReadableStream<Uint8Array> {
-        return new ReadableStream({
-          start(controller) {
-            for (const chunk of chunks) controller.enqueue(chunk);
-            controller.close();
-          },
-        });
-      }
-
-      c.executionCtx.waitUntil(
-        pipePromise
-          .then(() => {
-            scheduleBackgroundTasks(c.executionCtx, {
-              ...bgCommon,
-              accountingStream: !isAnon ? replayFreeStream() : null,
-              metricsStream: replayFreeStream(),
-              loggingStream: !isAnon ? replayFreeStream() : null,
-            });
-          })
-          .catch(err => {
-            console.error('[proxy] Free model stream pipe error', err);
-          })
-      );
-      return rewriteFreeModelResponse(new Response(clientStream, response), resolvedModel);
-    }
-    // Bodyless free model response — still schedule background tasks for metrics.
+  // Helper: schedule background tasks without streams (bodyless or error responses).
+  function scheduleBgWithoutStreams() {
     scheduleBackgroundTasks(c.executionCtx, {
       ...bgCommon,
       accountingStream: null,
       metricsStream: null,
       loggingStream: null,
     });
+  }
+
+  if (shouldRewrite) {
+    if (response.body) {
+      const clientStream = bufferAndForward(
+        response.body,
+        c.executionCtx,
+        scheduleBgFromReplay,
+        'Free model'
+      );
+      return rewriteFreeModelResponse(new Response(clientStream, response), resolvedModel);
+    }
+    scheduleBgWithoutStreams();
     return rewriteFreeModelResponse(response, resolvedModel);
   }
 
   // ── Pass-through with background tasks (buffer-based, no .tee()) ────────────
   if (response.body) {
-    // Instead of .tee() (which couples consumer speeds via backpressure and stalls
-    // the client when background consumers are slow), pipe the upstream body through
-    // a TransformStream that forwards every chunk to the client immediately while
-    // accumulating a copy. After the stream completes, background tasks replay the
-    // buffered data without any coupling to client delivery speed.
-    const responseBody = response.body;
-    const chunks: Uint8Array[] = [];
-    const { readable: clientStream, writable } = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = writable.getWriter();
-
-    const pipePromise = (async () => {
-      const reader = responseBody.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-      try {
-        for (;;) {
-          const result = await reader.read();
-          if (result.done) break;
-          chunks.push(result.value);
-          await writer.write(result.value);
-        }
-        await writer.close();
-      } catch (err) {
-        await reader.cancel().catch(() => {});
-        await writer.abort(err).catch(() => {});
-        throw err;
-      }
-    })();
-
-    // Build a ReadableStream from the buffered chunks (usable after pipePromise resolves).
-    function replayStream(): ReadableStream<Uint8Array> {
-      return new ReadableStream({
-        start(controller) {
-          for (const chunk of chunks) controller.enqueue(chunk);
-          controller.close();
-        },
-      });
-    }
-
-    // Background tasks run after the stream completes (all chunks buffered).
-    c.executionCtx.waitUntil(
-      pipePromise
-        .then(() => {
-          scheduleBackgroundTasks(c.executionCtx, {
-            ...bgCommon,
-            accountingStream: !isAnon ? replayStream() : null,
-            metricsStream: replayStream(),
-            loggingStream: !isAnon ? replayStream() : null,
-          });
-        })
-        .catch(err => {
-          console.error('[proxy] Stream pipe error', err);
-        })
+    const clientStream = bufferAndForward(
+      response.body,
+      c.executionCtx,
+      scheduleBgFromReplay,
+      'Pass-through'
     );
-
     return wrapResponse(new Response(clientStream, response));
   }
 
   // Bodyless non-error response — still schedule background tasks so metrics
   // and accounting are recorded (e.g. 204 No Content from a provider).
-  scheduleBackgroundTasks(c.executionCtx, {
-    ...bgCommon,
-    accountingStream: null,
-    metricsStream: null,
-    loggingStream: null,
-  });
+  scheduleBgWithoutStreams();
 
   return wrapResponse(response);
 };
