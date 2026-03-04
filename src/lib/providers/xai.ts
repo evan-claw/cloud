@@ -33,7 +33,7 @@ export function convertReasoningDetailsToReasoningContent(
     const msgWithReasoning = message as MessageWithReasoning;
     const reasoningDetailsText = (msgWithReasoning.reasoning_details ?? [])
       .filter(r => r.type === ReasoningDetailType.Text)
-      .map(r => r.text)
+      .map(r => r.text ?? '')
       .join('');
     if (reasoningDetailsText) {
       msgWithReasoning.reasoning_content = reasoningDetailsText;
