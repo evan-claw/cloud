@@ -10,11 +10,16 @@ const ORGANIZATION_ID_HEADER = 'x-kilocode-organizationid';
 
 // Port of isEmailBlacklistedByDomain from src/lib/user.server.ts.
 // BLACKLIST_DOMAINS is a pipe-separated string (e.g. "domain1.com|domain2.com").
-function isEmailBlacklistedByDomain(email: string, blacklistDomainsRaw: string | undefined): boolean {
+function isEmailBlacklistedByDomain(
+  email: string,
+  blacklistDomainsRaw: string | undefined
+): boolean {
   if (!blacklistDomainsRaw) return false;
   const domains = blacklistDomainsRaw.split('|').map(d => d.trim().toLowerCase());
   const emailLower = email.toLowerCase();
-  return domains.some(domain => emailLower.endsWith('@' + domain) || emailLower.endsWith('.' + domain));
+  return domains.some(
+    domain => emailLower.endsWith('@' + domain) || emailLower.endsWith('.' + domain)
+  );
 }
 
 export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
@@ -60,7 +65,8 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   }
 
   // Blacklisted email domain — treat as unauthenticated
-  if (isEmailBlacklistedByDomain(user.google_user_email, c.env.BLACKLIST_DOMAINS)) {
+  const blacklistDomains = await c.env.BLACKLIST_DOMAINS.get();
+  if (isEmailBlacklistedByDomain(user.google_user_email, blacklistDomains ?? undefined)) {
     console.warn(`AUTH-FAIL 403 (${user.id}): Access denied (R0)`);
     return next();
   }

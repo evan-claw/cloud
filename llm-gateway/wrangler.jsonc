@@ -55,19 +55,16 @@
   ],
   "queues": {
     "producers": [
-      { "queue": "llm-gateway-background-tasks", "binding": "LLM_GATEWAY_BG_TASKS_QUEUE" }
+      { "queue": "llm-gateway-background-tasks", "binding": "LLM_GATEWAY_BG_TASKS_QUEUE" },
     ],
     "consumers": [
       {
         "queue": "llm-gateway-background-tasks",
         "max_batch_size": 10,
         "max_retries": 3,
-        "dead_letter_queue": "llm-gateway-background-tasks-dlq"
-      }
-    ]
-  },
-  "vars": {
-    "BLACKLIST_DOMAINS": ""
+        "dead_letter_queue": "llm-gateway-background-tasks-dlq",
+      },
+    ],
   },
   "secrets_store_secrets": [
     {
@@ -134,6 +131,11 @@
       "binding": "POSTHOG_API_KEY",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
       "secret_name": "POSTHOG_API_KEY",
+    },
+    {
+      "binding": "BLACKLIST_DOMAINS",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "BLACKLIST_DOMAINS",
     },
   ],
 }
