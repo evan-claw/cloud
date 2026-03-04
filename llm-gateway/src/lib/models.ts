@@ -112,6 +112,12 @@ export const kiloFreeModels: KiloFreeModel[] = [
   },
 ];
 
+// ─── Pre-computed lookup map — O(1) instead of linear scans ─────────────────
+
+export const kiloFreeModelMap = new Map<string, KiloFreeModel>(
+  kiloFreeModels.map(m => [m.public_id, m])
+);
+
 // ─── Derived lookups ──────────────────────────────────────────────────────────
 
 // Keep in sync with src/lib/providers/anthropic.ts
@@ -125,9 +131,7 @@ export const preferredModels: string[] = [
   'kilo/auto-free',
   'minimax/minimax-m2.5:free',
   'moonshotai/kimi-k2.5:free',
-  kiloFreeModels.some(m => m.public_id === 'giga-potato-thinking' && m.is_enabled)
-    ? 'giga-potato-thinking'
-    : null,
+  kiloFreeModelMap.get('giga-potato-thinking')?.is_enabled ? 'giga-potato-thinking' : null,
   'arcee-ai/trinity-large-preview:free',
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -142,7 +146,7 @@ export const preferredModels: string[] = [
 // OpenRouter free catch-all, or is an OpenRouter stealth (alpha/beta) model.
 export function isFreeModel(model: string): boolean {
   return (
-    kiloFreeModels.some(m => m.public_id === model && m.is_enabled) ||
+    (kiloFreeModelMap.get(model)?.is_enabled === true) ||
     model.endsWith(':free') ||
     model === 'openrouter/free' ||
     isOpenRouterStealthModel(model)
@@ -151,12 +155,13 @@ export function isFreeModel(model: string): boolean {
 
 // Kilo-hosted free models only (not generic :free OpenRouter models).
 export function isKiloFreeModel(model: string): boolean {
-  return kiloFreeModels.some(m => m.public_id === model && m.is_enabled);
+  return kiloFreeModelMap.get(model)?.is_enabled === true;
 }
 
 // A dead free model has been disabled — return a clear error instead of proxying.
 export function isDeadFreeModel(model: string): boolean {
-  return kiloFreeModels.some(m => m.public_id === model && !m.is_enabled);
+  const m = kiloFreeModelMap.get(model);
+  return m !== undefined && !m.is_enabled;
 }
 
 // Models that are so rate-limited upstream that they're effectively unusable.
@@ -198,24 +203,22 @@ function isOpenRouterStealthModel(model: string): boolean {
 // Data collection is required for Kilo-hosted free models when prompt training
 // is not explicitly allowed by the provider config.
 export function isDataCollectionRequiredOnKiloCodeOnly(model: string): boolean {
-  return kiloFreeModels.some(m => m.public_id === model && m.is_enabled);
+  return kiloFreeModelMap.get(model)?.is_enabled === true;
 }
 
 // Returns context_length for a Kilo free model, or undefined for other models.
 export function getKiloFreeModelContextLength(model: string): number | undefined {
-  return kiloFreeModels.find(m => m.public_id === model)?.context_length;
+  return kiloFreeModelMap.get(model)?.context_length;
 }
 
 // A Kilo free model routed through a stealth inference provider.
 export function isKiloStealthModel(model: string): boolean {
-  return kiloFreeModels.some(
-    m => m.public_id === model && m.inference_providers.includes('stealth')
-  );
+  return kiloFreeModelMap.get(model)?.inference_providers.includes('stealth') === true;
 }
 
 // Inference providers required by a Kilo free model (for org restriction checks).
 export function extraRequiredProviders(model: string): string[] {
-  return kiloFreeModels.find(m => m.public_id === model)?.inference_providers ?? [];
+  return kiloFreeModelMap.get(model)?.inference_providers ?? [];
 }
 
 // Strip `:free`, `:exacto` etc. suffixes — port of src/lib/model-utils.ts.

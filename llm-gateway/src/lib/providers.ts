@@ -11,7 +11,7 @@ import { getModelUserByokProviders, getBYOKforUser, getBYOKforOrganization } fro
 import type { OpenRouterChatCompletionRequest } from '../types/request';
 import type { AnonymousUserContext } from './anonymous';
 import { isAnonymousContext } from './anonymous';
-import { isKiloFreeModel, kiloFreeModels, type KiloFreeModel } from './models';
+import { isKiloFreeModel, kiloFreeModelMap, type KiloFreeModel } from './models';
 import { shouldRouteToVercel } from './vercel-routing';
 
 export type ProviderId =
@@ -84,7 +84,7 @@ export function buildProviders(secrets: SecretsBundle): Record<string, Provider>
 }
 
 export function getKiloFreeModelWithGateway(publicId: string): KiloFreeModel | undefined {
-  return kiloFreeModels.find(m => m.public_id === publicId);
+  return kiloFreeModelMap.get(publicId);
 }
 
 export type ProviderResolutionResult = {
