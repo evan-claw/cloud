@@ -161,7 +161,7 @@ export function DefaultModelDialog({
                 </SelectContent>
               </Select>
 
-              {availableModels.length === 0 && organizationSettings?.model_allow_list && (
+              {availableModels.length === 0 && (
                 <div className="mt-2 rounded bg-amber-950 p-2 text-sm text-amber-400">
                   No models available. Configure model access first.
                 </div>
