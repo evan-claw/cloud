@@ -1,7 +1,7 @@
 import { createMiddleware } from 'hono/factory';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getWorkerDb } from '@kilocode/db/client';
-import { kilocode_users } from '@kilocode/db/schema';
+import { kilocode_users, organization_memberships } from '@kilocode/db/schema';
 import type { HonoContext } from '../types/hono';
 import { extractBearerToken } from '@kilocode/worker-utils';
 import { verifyGatewayJwt, isPepperValid } from '../lib/jwt';
@@ -65,8 +65,30 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
     return next();
   }
 
+  // Validate org membership when an org ID header is present.
+  // The reference validates this in getUserFromAuth → validateUserAuthorization.
+  // If the user is not a member, treat as unauthenticated (prevents BYOK key leakage
+  // and unauthorized org balance usage).
+  const organizationId = c.req.header(ORGANIZATION_ID_HEADER) ?? undefined;
+  if (organizationId) {
+    const [membership] = await db
+      .select({ id: organization_memberships.id })
+      .from(organization_memberships)
+      .where(
+        and(
+          eq(organization_memberships.organization_id, organizationId),
+          eq(organization_memberships.kilo_user_id, user.id)
+        )
+      )
+      .limit(1);
+    if (!membership) {
+      console.warn(`AUTH-FAIL 403 (${user.id}): Access denied (not a member of the organization)`);
+      return next();
+    }
+  }
+
   c.set('authUser', user);
-  c.set('organizationId', c.req.header(ORGANIZATION_ID_HEADER) ?? undefined);
+  c.set('organizationId', organizationId);
   c.set('botId', payload.botId);
   c.set('tokenSource', payload.tokenSource);
 
