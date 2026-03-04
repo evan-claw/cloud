@@ -490,7 +490,7 @@ export async function maybeIssueKiloPassBonusFromUsageThreshold(
   kiloUserId: string,
   _nowIso: string
 ): Promise<void> {
-  await db.transaction(async tx => {
+  await db.transaction(async (tx: Tx) => {
     // Lock the user row to prevent concurrent issuance
     const userRows = await tx
       .select({
@@ -508,12 +508,12 @@ export async function maybeIssueKiloPassBonusFromUsageThreshold(
     const effectiveThreshold = getEffectiveKiloPassThreshold(user.kiloPassThreshold ?? null);
     if (effectiveThreshold === null || user.microdollarsUsed < effectiveThreshold) return;
 
-    const subscriptionState = await getKiloPassStateForUser(tx as unknown as Tx, kiloUserId);
+    const subscriptionState = await getKiloPassStateForUser(tx, kiloUserId);
     if (!subscriptionState || subscriptionState.status !== 'active') {
-      await clearKiloPassThreshold(tx as unknown as Tx, kiloUserId);
+      await clearKiloPassThreshold(tx, kiloUserId);
       return;
     }
 
-    await maybeIssueBonusFromUsageThreshold(tx as unknown as Tx, subscriptionState, kiloUserId);
+    await maybeIssueBonusFromUsageThreshold(tx, subscriptionState, kiloUserId);
   });
 }
