@@ -58,11 +58,11 @@ type PromptBody = {
   /** Message parts - only text parts are supported (file parts require URL upload which isn't implemented) */
   parts?: Array<{ type: 'text'; text: string }>;
   model?: { providerID?: string; modelID: string };
+  variant?: string;
   agent?: string;
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
-  variant?: string;
 };
 
 type CommandBody = {
@@ -312,11 +312,11 @@ function createPromptHandler(deps: ServerDependencies) {
         sessionId: job.kiloSessionId,
         parts: body.parts,
         prompt: body.prompt,
+        variant: body.variant,
         agent: body.agent,
         model: body.model,
         system: body.system,
         tools: body.tools,
-        variant: body.variant,
       });
       logToFile(`job/prompt: sent messageId=${messageId}`);
     } catch (error) {

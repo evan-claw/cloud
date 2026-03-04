@@ -110,6 +110,7 @@ describe('sync-service queue enqueue wiring', () => {
       auto_dismiss_confidence_threshold: 'high',
       auto_analysis_enabled: true,
       auto_analysis_min_severity: 'high',
+      auto_analysis_include_existing: false,
     };
     const configWithStatus: Awaited<ReturnType<typeof mockGetSecurityAgentConfigWithStatus>> = {
       isEnabled: true,

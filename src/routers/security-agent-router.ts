@@ -128,6 +128,7 @@ export const securityAgentRouter = createTRPCRouter({
         autoDismissConfidenceThreshold: 'high' as const,
         autoAnalysisEnabled: false,
         autoAnalysisMinSeverity: 'high' as const,
+        autoAnalysisIncludeExisting: false,
       };
     }
 
@@ -159,6 +160,7 @@ export const securityAgentRouter = createTRPCRouter({
       autoDismissConfidenceThreshold: result.config.auto_dismiss_confidence_threshold ?? 'high',
       autoAnalysisEnabled: result.config.auto_analysis_enabled ?? false,
       autoAnalysisMinSeverity: result.config.auto_analysis_min_severity ?? 'high',
+      autoAnalysisIncludeExisting: result.config.auto_analysis_include_existing ?? false,
     };
   }),
 
@@ -189,6 +191,7 @@ export const securityAgentRouter = createTRPCRouter({
             autoDismissConfidenceThreshold: existingConfig.config.auto_dismiss_confidence_threshold,
             autoAnalysisEnabled: existingConfig.config.auto_analysis_enabled,
             autoAnalysisMinSeverity: existingConfig.config.auto_analysis_min_severity,
+            autoAnalysisIncludeExisting: existingConfig.config.auto_analysis_include_existing,
             modelSlug: existingConfig.config.model_slug,
             triageModelSlug: existingTriageModelSlug,
             analysisModelSlug: existingAnalysisModelSlug,
@@ -233,6 +236,7 @@ export const securityAgentRouter = createTRPCRouter({
           auto_dismiss_confidence_threshold: input.autoDismissConfidenceThreshold,
           auto_analysis_enabled: input.autoAnalysisEnabled,
           auto_analysis_min_severity: input.autoAnalysisMinSeverity,
+          auto_analysis_include_existing: input.autoAnalysisIncludeExisting,
         },
         ctx.user.id
       );
@@ -267,6 +271,7 @@ export const securityAgentRouter = createTRPCRouter({
           autoDismissConfidenceThreshold: input.autoDismissConfidenceThreshold,
           autoAnalysisEnabled: input.autoAnalysisEnabled,
           autoAnalysisMinSeverity: input.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: input.autoAnalysisIncludeExisting,
           modelSlug,
           triageModelSlug,
           analysisModelSlug,

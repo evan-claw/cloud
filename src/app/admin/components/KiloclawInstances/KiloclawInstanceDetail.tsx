@@ -209,77 +209,89 @@ function VersionPinCard({ userId }: { userId: string }) {
               </DetailField>
               {pinData.reason && <DetailField label="Reason">{pinData.reason}</DetailField>}
             </div>
-            <div className="flex items-center gap-2 pt-2">
-              <Select value={selectedTag} onValueChange={setSelectedTag}>
-                <SelectTrigger className="w-[250px]">
-                  <SelectValue placeholder="Change image tag..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {versionsData?.items.map(v => (
-                    <SelectItem key={v.image_tag} value={v.image_tag}>
-                      {v.image_tag} (OpenClaw {v.openclaw_version})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                placeholder="Reason (optional)"
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                className="w-[200px]"
-              />
-              {selectedTag && (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center gap-2">
+                <Select value={selectedTag} onValueChange={setSelectedTag}>
+                  <SelectTrigger className="w-[250px]">
+                    <SelectValue placeholder="Change image tag..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {versionsData?.items.map(v => (
+                      <SelectItem key={v.image_tag} value={v.image_tag}>
+                        {v.image_tag} (OpenClaw {v.openclaw_version})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Reason (optional)"
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="w-[200px]"
+                />
+                {selectedTag && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
+                    }
+                    disabled={isPinning}
+                  >
+                    {isPinning ? 'Updating...' : 'Update Pin'}
+                  </Button>
+                )}
                 <Button
+                  variant="destructive"
                   size="sm"
-                  onClick={() =>
-                    void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
-                  }
-                  disabled={isPinning}
+                  onClick={() => void removePin({ userId })}
+                  disabled={isUnpinning}
                 >
-                  {isPinning ? 'Updating...' : 'Update Pin'}
+                  {isUnpinning ? 'Unpinning...' : 'Unpin'}
                 </Button>
-              )}
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void removePin({ userId })}
-                disabled={isUnpinning}
-              >
-                {isUnpinning ? 'Unpinning...' : 'Unpin'}
-              </Button>
+              </div>
+              <p className="flex items-center gap-1 text-xs text-red-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Reason is visible to the end user.
+              </p>
             </div>
           </div>
         ) : (
           <div className="space-y-3">
             <p className="text-muted-foreground text-sm">Following latest available version</p>
-            <div className="flex items-center gap-2">
-              <Select value={selectedTag} onValueChange={setSelectedTag}>
-                <SelectTrigger className="w-[250px]">
-                  <SelectValue placeholder="Select image tag to pin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {versionsData?.items.map(v => (
-                    <SelectItem key={v.image_tag} value={v.image_tag}>
-                      {v.image_tag} (OpenClaw {v.openclaw_version})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                placeholder="Reason (optional)"
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                className="w-[200px]"
-              />
-              <Button
-                size="sm"
-                onClick={() =>
-                  void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
-                }
-                disabled={!selectedTag || isPinning}
-              >
-                {isPinning ? 'Pinning...' : 'Pin Version'}
-              </Button>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Select value={selectedTag} onValueChange={setSelectedTag}>
+                  <SelectTrigger className="w-[250px]">
+                    <SelectValue placeholder="Select image tag to pin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {versionsData?.items.map(v => (
+                      <SelectItem key={v.image_tag} value={v.image_tag}>
+                        {v.image_tag} (OpenClaw {v.openclaw_version})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Reason (optional)"
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="w-[200px]"
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
+                  }
+                  disabled={!selectedTag || isPinning}
+                >
+                  {isPinning ? 'Pinning...' : 'Pin Version'}
+                </Button>
+              </div>
+              <p className="flex items-center gap-1 text-xs text-red-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Reason is visible to the end user.
+              </p>
             </div>
           </div>
         )}

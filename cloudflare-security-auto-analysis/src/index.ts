@@ -2,6 +2,19 @@ import { timingSafeEqual as nodeTSE } from 'crypto';
 import { consumeOwnerBatch } from './consumer.js';
 import { dispatchDueOwners } from './dispatcher.js';
 
+async function sendBetterStackHeartbeat(
+  heartbeatUrl: string | undefined,
+  failed: boolean
+): Promise<void> {
+  if (!heartbeatUrl) return;
+  const url = failed ? `${heartbeatUrl}/fail` : heartbeatUrl;
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(5000) });
+  } catch {
+    // best-effort
+  }
+}
+
 /**
  * Constant-time string equality that does not leak either string's length.
  * Both inputs are hashed first so the comparison is always on equal-length digests.
@@ -49,8 +62,20 @@ export default {
     return handleFetch(request, env);
   },
 
-  async scheduled(_controller: ScheduledController, env: CloudflareEnv): Promise<void> {
-    await dispatchDueOwners(env);
+  async scheduled(
+    _controller: ScheduledController,
+    env: CloudflareEnv,
+    ctx: ExecutionContext
+  ): Promise<void> {
+    let failed = false;
+    try {
+      await dispatchDueOwners(env);
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      ctx.waitUntil(sendBetterStackHeartbeat(env.BETTERSTACK_HEARTBEAT_URL, failed));
+    }
   },
 
   async queue(batch: MessageBatch<unknown>, env: CloudflareEnv): Promise<void> {

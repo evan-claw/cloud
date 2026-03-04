@@ -42,6 +42,7 @@ import {
   kiloclaw_instances,
   kiloclaw_access_codes,
   kiloclaw_version_pins,
+  kiloclaw_earlybird_purchases,
   user_period_cache,
   user_feedback,
   app_builder_feedback,
@@ -548,6 +549,9 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(kiloclaw_access_codes).where(eq(kiloclaw_access_codes.kilo_user_id, userId));
     await tx.delete(kiloclaw_instances).where(eq(kiloclaw_instances.user_id, userId));
     await tx.delete(kiloclaw_version_pins).where(eq(kiloclaw_version_pins.user_id, userId));
+    await tx
+      .delete(kiloclaw_earlybird_purchases)
+      .where(eq(kiloclaw_earlybird_purchases.user_id, userId));
     await tx.delete(user_period_cache).where(eq(user_period_cache.kilo_user_id, userId));
     await tx
       .delete(kilo_pass_scheduled_changes)

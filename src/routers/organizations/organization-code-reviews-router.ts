@@ -31,6 +31,8 @@ import {
 } from '@/lib/integrations/platforms/gitlab/webhook-sync';
 import { getValidGitLabToken } from '@/lib/integrations/gitlab-service';
 import { logExceptInTest } from '@/lib/utils.server';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
+import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 
 const PlatformSchema = z.enum(['github', 'gitlab']).default('github');
 
@@ -48,6 +50,12 @@ const SaveReviewConfigInputSchema = OrganizationIdInputSchema.extend({
   customInstructions: z.string().optional(),
   maxReviewTimeMinutes: z.number().min(5).max(30),
   modelSlug: z.string(),
+  thinkingEffort: z
+    .string()
+    .max(50)
+    .regex(/^[a-zA-Z]+$/)
+    .nullable()
+    .optional(),
   repositorySelectionMode: z.enum(['all', 'selected']).optional(),
   selectedRepositoryIds: z.array(z.number()).optional(),
   manuallyAddedRepositories: z.array(ManuallyAddedRepositoryInputSchema).optional(),
@@ -156,9 +164,17 @@ export const organizationReviewAgentRouter = createTRPCRouter({
    */
   getReviewConfig: organizationMemberProcedure
     .input(OrganizationIdInputSchema.extend({ platform: PlatformSchema }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const platform = input.platform ?? 'github';
-      const config = await getAgentConfig(input.organizationId, 'code_review', platform);
+      // Resolve bot user for flag evaluation — same identity used at dispatch time
+      const [config, botUserId] = await Promise.all([
+        getAgentConfig(input.organizationId, 'code_review', platform),
+        getBotUserId(input.organizationId, 'code-review'),
+      ]);
+      const flagDistinctId = botUserId ?? ctx.user.id;
+      const isCloudAgentNextEnabled =
+        process.env.NODE_ENV === 'development' ||
+        (await isFeatureFlagEnabled('code-review-cloud-agent-next', flagDistinctId));
 
       if (!config) {
         // Return default configuration
@@ -169,9 +185,11 @@ export const organizationReviewAgentRouter = createTRPCRouter({
           customInstructions: null,
           maxReviewTimeMinutes: 10,
           modelSlug: PRIMARY_DEFAULT_MODEL,
+          thinkingEffort: null satisfies string | null,
           repositorySelectionMode: 'all' as const,
           selectedRepositoryIds: [],
           manuallyAddedRepositories: [],
+          isCloudAgentNextEnabled,
         };
       }
 
@@ -183,9 +201,11 @@ export const organizationReviewAgentRouter = createTRPCRouter({
         customInstructions: cfg.custom_instructions || null,
         maxReviewTimeMinutes: cfg.max_review_time_minutes || 10,
         modelSlug: cfg.model_slug || PRIMARY_DEFAULT_MODEL,
+        thinkingEffort: cfg.thinking_effort ?? null,
         repositorySelectionMode: cfg.repository_selection_mode || 'all',
         selectedRepositoryIds: cfg.selected_repository_ids || [],
         manuallyAddedRepositories: cfg.manually_added_repositories || [],
+        isCloudAgentNextEnabled,
       };
     }),
 
@@ -216,6 +236,7 @@ export const organizationReviewAgentRouter = createTRPCRouter({
             custom_instructions: input.customInstructions || null,
             max_review_time_minutes: input.maxReviewTimeMinutes,
             model_slug: input.modelSlug,
+            thinking_effort: input.thinkingEffort ?? null,
             repository_selection_mode: input.repositorySelectionMode || 'all',
             selected_repository_ids: input.selectedRepositoryIds || [],
             manually_added_repositories: input.manuallyAddedRepositories || [],

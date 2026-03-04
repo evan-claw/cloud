@@ -36,6 +36,8 @@ export type SendPromptOptions = {
   prompt?: string;
   /** Full parts array (takes precedence over prompt) */
   parts?: MessagePart[];
+  /** Thinking effort variant name (e.g. "high", "max") */
+  variant?: string;
   /** Agent mode (e.g., 'code', 'architect', 'ask') */
   agent?: string;
   /** Model configuration */
@@ -46,7 +48,6 @@ export type SendPromptOptions = {
   system?: string;
   /** Enable/disable specific tools */
   tools?: Record<string, boolean>;
-  variant?: string;
 };
 
 /**
@@ -164,6 +165,7 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/session/${opts.sessionId}/prompt_async`, {
         parts,
         messageID: opts.messageId,
+        variant: opts.variant,
         agent: opts.agent,
         model: opts.model
           ? {
@@ -174,7 +176,6 @@ export function createKiloClient(baseUrl: string): KiloClient {
         noReply: opts.noReply,
         system: opts.system,
         tools: opts.tools,
-        variant: opts.variant,
       });
     },
 

@@ -10,6 +10,7 @@ export const SecurityAgentConfigSchema = z
     analysis_mode: z.enum(['auto', 'shallow', 'deep']).default('auto'),
     auto_analysis_enabled: z.boolean().default(false),
     auto_analysis_min_severity: z.enum(['critical', 'high', 'medium', 'all']).default('high'),
+    auto_analysis_include_existing: z.boolean().default(false),
   })
   .passthrough();
 
@@ -22,6 +23,7 @@ export const DEFAULT_SECURITY_AGENT_CONFIG: SecurityAgentConfig = {
   analysis_mode: 'auto',
   auto_analysis_enabled: false,
   auto_analysis_min_severity: 'high',
+  auto_analysis_include_existing: false,
 };
 
 export const AutoAnalysisFailureCodeSchema = z.enum([

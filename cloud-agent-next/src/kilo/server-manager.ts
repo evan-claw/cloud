@@ -23,8 +23,12 @@ const KILO_SERVER_START_PORT = 4096;
 /** Port range size for session-based port allocation */
 const KILO_SERVER_PORT_RANGE = 1000;
 
-/** Timeout for waiting for server to become healthy */
-const KILO_SERVER_STARTUP_TIMEOUT_MS = 60_000;
+/** Upper bound for waiting for server to become healthy.
+ *  In production, servers start in < 10s (or crash immediately on failure).
+ *  180s accommodates QEMU-emulated startup on Apple Silicon dev machines,
+ *  where the first-run SQLite migration can take 2+ minutes under emulation.
+ *  This is a safe ceiling — it does not delay healthy production starts. */
+const KILO_SERVER_STARTUP_TIMEOUT_MS = 180_000;
 
 /** Timeout for creating a CLI session via curl (30 seconds) */
 const KILO_CLI_SESSION_CREATE_TIMEOUT_SECONDS = 30;
@@ -388,36 +392,56 @@ export async function createKiloCliSession(
   logger.withFields({ port }).debug('Creating kilo CLI session');
 
   // Execute curl from within the session since the server runs on localhost inside the container
-  // -f: Fail silently on HTTP errors (exit code 22 for 4xx/5xx)
   // -s: Silent mode (no progress)
   // -S: Show errors when -s is used
+  // -w '\n%{http_code}': Append HTTP status code on a new line after the response body
+  // NOTE: We intentionally do NOT use -f so that we capture the response body on error
   // --max-time: Timeout for the entire operation
   const result = await session.exec(
-    `curl -f -s -S --max-time ${KILO_CLI_SESSION_CREATE_TIMEOUT_SECONDS} -X POST -H "Content-Type: application/json" -d "{}" "${url}"`
+    `curl -s -S -w '\\n%{http_code}' --max-time ${KILO_CLI_SESSION_CREATE_TIMEOUT_SECONDS} -X POST -H "Content-Type: application/json" -d "{}" "${url}"`
   );
 
   if (result.exitCode !== 0) {
-    // Exit code 22 = HTTP error (4xx/5xx), 28 = timeout
+    // Exit code 28 = timeout, 7 = connection refused, etc.
     const exitCodeInfo =
-      result.exitCode === 22
-        ? 'HTTP error from server'
-        : result.exitCode === 28
-          ? 'Request timed out'
+      result.exitCode === 28
+        ? 'Request timed out'
+        : result.exitCode === 7
+          ? 'Connection refused'
           : `exit code ${result.exitCode}`;
     throw new Error(
       `Failed to create kilo CLI session: ${exitCodeInfo} - ${result.stderr || result.stdout}`
     );
   }
 
+  // Parse the response: body is everything except the last line, HTTP status is the last line
+  const lines = result.stdout.trimEnd().split('\n');
+  const httpStatus = parseInt(lines[lines.length - 1] ?? '', 10);
+  const responseBody = lines.slice(0, -1).join('\n');
+
+  if (isNaN(httpStatus) || httpStatus >= 400) {
+    logger
+      .withFields({
+        port,
+        httpStatus: isNaN(httpStatus) ? 'unknown' : httpStatus,
+        responseBody: responseBody.slice(0, 2000),
+        stderr: result.stderr?.slice(0, 1000),
+      })
+      .error('Kilo CLI session creation failed');
+    throw new Error(
+      `Failed to create kilo CLI session: HTTP ${isNaN(httpStatus) ? 'unknown' : httpStatus} - ${responseBody || result.stderr || '(empty response)'}`
+    );
+  }
+
   let kiloSession: KiloCliSession;
   try {
-    kiloSession = JSON.parse(result.stdout) as KiloCliSession;
+    kiloSession = JSON.parse(responseBody) as KiloCliSession;
   } catch {
-    throw new Error(`Failed to parse kilo CLI session response: ${result.stdout}`);
+    throw new Error(`Failed to parse kilo CLI session response: ${responseBody}`);
   }
 
   if (!kiloSession.id) {
-    throw new Error(`Invalid kilo CLI session response - missing id: ${result.stdout}`);
+    throw new Error(`Invalid kilo CLI session response - missing id: ${responseBody}`);
   }
 
   logger.withFields({ port, kiloSessionId: kiloSession.id }).info('Created kilo CLI session');

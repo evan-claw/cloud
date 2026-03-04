@@ -135,6 +135,7 @@ export function createSessionInitHandlers() {
             for await (const event of streamKilocodeExec(input.mode, input.prompt, {
               sessionId,
               images: input.images,
+              variant: input.variant,
             })) {
               yield event;
               if (event.streamEventType === 'interrupted') {
@@ -314,6 +315,7 @@ export function createSessionInitHandlers() {
               sessionId,
               skipInterruptPolling: false,
               images: input.images,
+              variant: input.variant,
             })) {
               yield event;
               if (event.streamEventType === 'interrupted' || event.streamEventType === 'error') {

@@ -473,6 +473,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
         autoDismissConfidenceThreshold: 'high' | 'medium' | 'low';
         autoAnalysisEnabled: boolean;
         autoAnalysisMinSeverity: 'critical' | 'high' | 'medium' | 'all';
+        autoAnalysisIncludeExisting: boolean;
       }
     ) => {
       const modelConfigPayload = {
@@ -495,6 +496,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
           autoAnalysisEnabled: config.autoAnalysisEnabled,
           autoAnalysisMinSeverity: config.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: config.autoAnalysisIncludeExisting,
           ...modelConfigPayload,
         });
       } else if (!isOrg) {
@@ -510,6 +512,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
           autoAnalysisEnabled: config.autoAnalysisEnabled,
           autoAnalysisMinSeverity: config.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: config.autoAnalysisIncludeExisting,
           ...modelConfigPayload,
         });
       }
@@ -880,6 +883,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
               autoDismissConfidenceThreshold={configData?.autoDismissConfidenceThreshold ?? 'high'}
               autoAnalysisEnabled={configData?.autoAnalysisEnabled ?? false}
               autoAnalysisMinSeverity={configData?.autoAnalysisMinSeverity ?? 'high'}
+              autoAnalysisIncludeExisting={configData?.autoAnalysisIncludeExisting ?? false}
               repositories={allRepositories}
               onSave={handleSaveConfig}
               onToggleEnabled={handleToggleEnabled}
