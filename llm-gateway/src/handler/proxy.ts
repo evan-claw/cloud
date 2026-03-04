@@ -88,18 +88,15 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // Preserve query string so it is forwarded to the upstream provider.
   const { search } = new URL(c.req.url);
 
-  // Fetch PostHog + abuse secrets in parallel — all fail-open.
+  // Fetch PostHog + abuse secrets in parallel — fail loudly if Secrets Store is down.
   let posthogApiKey: string | undefined;
   let abuseSecrets: AbuseServiceSecrets | undefined;
 
   const [abuseServiceUrl] = await Promise.all([
-    c.env.ABUSE_SERVICE_URL.get().catch(() => ''),
+    c.env.ABUSE_SERVICE_URL.get(),
     c.env.POSTHOG_API_KEY.get()
       .then(k => {
         posthogApiKey = k;
-      })
-      .catch(() => {
-        /* fail-open */
       }),
   ]);
 
@@ -111,9 +108,6 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   ])
     .then(([id, secret]) => {
       abuseSecrets = { cfAccessClientId: id, cfAccessClientSecret: secret };
-    })
-    .catch(() => {
-      /* fail-open */
     });
 
   // Start classification in parallel with the upstream request.

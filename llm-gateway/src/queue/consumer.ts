@@ -15,8 +15,8 @@ async function resolveAbuseSecrets(
 ): Promise<{ url: string; secrets: AbuseServiceSecrets | undefined }> {
   const [url, cfAccessClientId, cfAccessClientSecret] = await Promise.all([
     env.ABUSE_SERVICE_URL.get(),
-    env.ABUSE_CF_ACCESS_CLIENT_ID.get().catch(() => undefined),
-    env.ABUSE_CF_ACCESS_CLIENT_SECRET.get().catch(() => undefined),
+    env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
+    env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
   ]);
   return {
     url,
