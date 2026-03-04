@@ -146,7 +146,11 @@ export const MetadataSchema = z.object({
   prompt: z.string().max(Limits.MAX_PROMPT_LENGTH).optional(),
   mode: AgentModeSchema.optional(),
   model: z.string().optional(),
-  variant: z.string().max(50).optional(),
+  variant: z
+    .string()
+    .max(50)
+    .regex(/^[a-zA-Z]+$/)
+    .optional(),
   autoCommit: z.boolean().optional(),
   condenseOnComplete: z.boolean().optional(),
   appendSystemPrompt: z.string().max(10000).optional(),

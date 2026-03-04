@@ -670,7 +670,10 @@ export class SessionService {
     // Shallow clone (depth: 1) can be enabled for faster checkout and reduced disk usage
     const cloneOptions = shallow ? { shallow: true } : undefined;
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, cloneOptions);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        ...cloneOptions,
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -742,7 +745,12 @@ export class SessionService {
       streamKilocodeExec: async function* (
         mode: string,
         prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
+        options?: {
+          sessionId?: string;
+          skipInterruptPolling?: boolean;
+          images?: Images;
+          variant?: string;
+        }
       ) {
         const currentIsFirst = isFirstCall;
         isFirstCall = false;
@@ -756,7 +764,11 @@ export class SessionService {
           context,
           mode,
           prompt,
-          { ...options, isFirstExecution: currentIsFirst, kiloSessionId, images: options?.images },
+          {
+            ...options,
+            isFirstExecution: currentIsFirst,
+            kiloSessionId,
+          },
           env
         )) {
           // Capture kiloSessionId from session_created event for subsequent calls
@@ -898,7 +910,9 @@ export class SessionService {
 
     // Clone repository using appropriate method
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -1124,7 +1138,16 @@ export class SessionService {
             .info('Recloning missing repository (generic git)');
 
           // Reclone the repository using generic git
-          await cloneGitRepo(session, workspacePath, metadata.gitUrl, effectiveGitToken);
+          await cloneGitRepo(
+            session,
+            workspacePath,
+            metadata.gitUrl,
+            effectiveGitToken,
+            undefined,
+            {
+              platform: context.platform,
+            }
+          );
         } else if (metadata?.githubRepo) {
           const effectiveGithubToken = freshGithubToken ?? metadata.githubToken;
           logger
@@ -1721,7 +1744,12 @@ export interface PreparedSession {
   streamKilocodeExec: (
     mode: string,
     prompt: string,
-    options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
+    options?: {
+      sessionId?: string;
+      skipInterruptPolling?: boolean;
+      images?: Images;
+      variant?: string;
+    }
   ) => AsyncGenerator<StreamEvent>;
 }
 

@@ -37,6 +37,8 @@ export type ServerDependencies = {
   getMaxRuntimeMs: () => number;
   /** Set the aborted flag to skip post-completion tasks */
   setAborted: () => void;
+  /** Reset lifecycle state for a new execution */
+  resetLifecycle: () => void;
 };
 
 // Request body types
@@ -56,11 +58,11 @@ type PromptBody = {
   /** Message parts - only text parts are supported (file parts require URL upload which isn't implemented) */
   parts?: Array<{ type: 'text'; text: string }>;
   model?: { providerID?: string; modelID: string };
+  variant?: string;
   agent?: string;
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
-  variant?: string;
 };
 
 type CommandBody = {
@@ -229,6 +231,9 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
       kilocodeToken: body.kilocodeToken,
     };
 
+    // Reset lifecycle state from previous execution (clears stale isAborted, isDraining, etc.)
+    deps.resetLifecycle();
+
     // Start the job (this stores context but doesn't connect yet)
     try {
       state.startJob(jobContext);
@@ -307,11 +312,11 @@ function createPromptHandler(deps: ServerDependencies) {
         sessionId: job.kiloSessionId,
         parts: body.parts,
         prompt: body.prompt,
+        variant: body.variant,
         agent: body.agent,
         model: body.model,
         system: body.system,
         tools: body.tools,
-        variant: body.variant,
       });
       logToFile(`job/prompt: sent messageId=${messageId}`);
     } catch (error) {

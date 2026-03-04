@@ -556,39 +556,43 @@ export class SessionService {
       createdOnPlatform === 'app-builder';
     const commandGuardPolicy = getCommandGuardPolicy(createdOnPlatform);
 
-    const configContent: Record<string, unknown> = {
-      permission: {
-        external_directory: {
-          [`/tmp/attachments/${sessionId}/**`]: 'allow',
-          [`${workspacePath}/**`]: 'allow',
-        },
-        ...(!isInteractive && { question: 'deny' }),
+    const permission: Record<string, unknown> = {
+      external_directory: {
+        [`/tmp/attachments/${sessionId}/**`]: 'allow',
+        [`${workspacePath}/**`]: 'allow',
       },
-      provider: {
-        kilo: {
-          options: providerOptions,
-        },
-      },
+      ...(!isInteractive && { question: 'deny' }),
     };
 
     if (commandGuardPolicy) {
-      configContent.autoApproval = {
-        enabled: true,
-        read: { enabled: true, outside: false },
-        write: { enabled: false, outside: false, protected: true },
-        browser: { enabled: false },
-        retry: { enabled: false, delay: 10 },
-        mcp: { enabled: true },
-        mode: { enabled: true },
-        subtasks: { enabled: true },
-        execute: {
-          enabled: true,
-          allowed: commandGuardPolicy.allowed,
-          denied: commandGuardPolicy.denied,
-        },
-        question: { enabled: false, timeout: 60 },
-        todo: { enabled: true },
-      };
+      // Build bash permission rules from guard policy.
+      // Denied patterns (e.g. "git add *") are more specific than allowed patterns
+      // (e.g. "git *"); the CLI resolves overlapping globs most-specific-first,
+      // so denied sub-commands correctly override broader allows.
+      const bashPermissions: Record<string, string> = {};
+      for (const cmd of commandGuardPolicy.denied) {
+        bashPermissions[`${cmd} *`] = 'deny';
+      }
+      for (const cmd of commandGuardPolicy.allowed) {
+        bashPermissions[`${cmd} *`] = 'allow';
+      }
+
+      // Parity with old autoApproval config:
+      //   read: allow  (was read.enabled: true)
+      //   edit: deny   (was write.enabled: false)
+      //   webfetch/websearch/codesearch: deny  (was browser.enabled: false)
+      //   MCP: allowed by default (was mcp.enabled: true)
+      //   question: handled above (line 564) for non-interactive sessions
+      Object.assign(permission, {
+        read: 'allow',
+        edit: 'deny',
+        bash: bashPermissions,
+        webfetch: 'deny',
+        websearch: 'deny',
+        codesearch: 'deny',
+        todowrite: 'allow',
+        todoread: 'allow',
+      });
 
       logger
         .withFields({
@@ -598,6 +602,15 @@ export class SessionService {
         })
         .info('Enabled read-only command guard policy');
     }
+
+    const configContent: Record<string, unknown> = {
+      permission,
+      provider: {
+        kilo: {
+          options: providerOptions,
+        },
+      },
+    };
     // MCP configs are already in CLI-native format — pass through directly
     if (mcpServers && Object.keys(mcpServers).length > 0) {
       configContent.mcp = mcpServers;
@@ -823,7 +836,10 @@ export class SessionService {
     // Shallow clone (depth: 1) can be enabled for faster checkout and reduced disk usage
     const cloneOptions = shallow ? { shallow: true } : undefined;
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, cloneOptions);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        ...cloneOptions,
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -1102,7 +1118,9 @@ export class SessionService {
 
     // Clone repository using appropriate method
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -1389,6 +1407,7 @@ export class SessionService {
       gitToken: freshGitToken ?? metadata.gitToken,
       gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
       lastSeenBranch: metadata.upstreamBranch,
+      platform: context.platform,
     });
 
     await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
@@ -1442,7 +1461,7 @@ export class SessionService {
           label,
           pattern,
         });
-        return session.exec(`pkill -f '${pattern}'`);
+        return session.exec(`pkill -f -- '${pattern}'`);
       };
 
       let execIdError: string | null = null;
@@ -1454,9 +1473,8 @@ export class SessionService {
         if (execResult.exitCode === 0) {
           return {
             success: true,
-            killedProcessIds: [], // pkill doesn't report individual PIDs
-            failedProcessIds: [],
             message: 'Interrupted execution using pkill (executionId)',
+            processesFound: true,
           };
         }
         if (execResult.exitCode !== 1) {
@@ -1482,11 +1500,10 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [], // pkill doesn't report individual PIDs
-          failedProcessIds: [],
           message: execIdError
             ? `Interrupted execution using pkill (sessionId fallback). ${execIdError}`
             : 'Interrupted execution using pkill',
+          processesFound: true,
         };
       }
       if (sessionResult.exitCode === 1) {
@@ -1497,11 +1514,10 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [],
-          failedProcessIds: [],
           message: execIdError
             ? `No running processes found for this session. ${execIdError}`
             : 'No running processes found for this session',
+          processesFound: false,
         };
       }
 
@@ -1514,11 +1530,10 @@ export class SessionService {
 
       return {
         success: false,
-        killedProcessIds: [],
-        failedProcessIds: [],
         message: execIdError
           ? `${execIdError}; sessionId pkill failed with exit code ${sessionResult.exitCode}: ${sessionResult.stderr}`
           : `pkill failed with exit code ${sessionResult.exitCode}: ${sessionResult.stderr}`,
+        processesFound: false,
       };
     } catch (error) {
       logger.error('Interrupt with pkill failed', {
@@ -1568,9 +1583,8 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [],
-          failedProcessIds: [],
           message: 'No running kilocode processes found for this session',
+          processesFound: false,
         };
       }
 
@@ -1607,12 +1621,11 @@ export class SessionService {
 
       return {
         success: killed.length > 0,
-        killedProcessIds: killed,
-        failedProcessIds: failed,
         message:
           killed.length > 0
             ? `Interrupted execution: killed ${killed.length} process(es)${failed.length > 0 ? `, ${failed.length} failed` : ''}`
             : `Failed to kill any processes (${failed.length} attempts failed)`,
+        processesFound: true,
       };
     } catch (error) {
       logger.error('Interrupt operation failed', {

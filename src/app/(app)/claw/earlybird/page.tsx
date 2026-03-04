@@ -1,25 +1,32 @@
 'use client';
 
-import { useUser } from '@/hooks/useUser';
+import { useTRPC } from '@/lib/trpc/utils';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { PageLayout } from '@/components/PageLayout';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-
-const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/00wcN64ot27OaIK0K4dAk00';
-const PROMO_CODE = 'KILOCLAWEARLYBIRD';
-
-function buildStripeUrl(email: string | undefined) {
-  const url = new URL(STRIPE_PAYMENT_LINK);
-  if (email) {
-    url.searchParams.set('prefilled_email', email);
-  }
-  url.searchParams.set('prefilled_promo_code', PROMO_CODE);
-  return url.toString();
-}
+import { toast } from 'sonner';
+import Link from 'next/link';
 
 export default function EarlybirdPage() {
-  const { data: user } = useUser();
-  const stripeUrl = buildStripeUrl(user?.google_user_email);
+  const trpc = useTRPC();
+  const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
+  const alreadyPurchased = earlybirdStatus?.purchased === true;
+
+  const checkoutMutation = useMutation(
+    trpc.kiloclaw.createEarlybirdCheckoutSession.mutationOptions({
+      onSuccess: result => {
+        if (!result.url) {
+          toast.error('Failed to create checkout session');
+          return;
+        }
+        window.location.href = result.url;
+      },
+      onError: error => {
+        toast.error(error.message || 'Failed to start checkout');
+      },
+    })
+  );
 
   return (
     <PageLayout title="">
@@ -33,7 +40,7 @@ export default function EarlybirdPage() {
               <span className="text-3xl" role="img" aria-label="lobster">
                 🦞
               </span>
-              <CardTitle className="text-2xl">Presale: 50% Off for the First 100</CardTitle>
+              <CardTitle className="text-2xl">Presale: 50% Off for the First 1,000</CardTitle>
             </div>
             <span className="bg-brand-primary/15 text-brand-primary mt-2 w-fit rounded-full px-3 py-1 text-xs font-bold tracking-wide uppercase">
               Early Bird &mdash; 50% Off
@@ -42,8 +49,8 @@ export default function EarlybirdPage() {
 
           <CardContent className="relative flex flex-col gap-4">
             <p className="text-muted-foreground leading-relaxed">
-              To thank those of you who have been early adopters, we&apos;re offering the first 100
-              users 6 months of KiloClaw compute at 50% off. That&apos;s{' '}
+              To thank those of you who have been early adopters, we&apos;re offering the first
+              1,000 users 6 months of KiloClaw compute at 50% off. That&apos;s{' '}
               <span className="text-brand-primary font-semibold">$150 total</span> &mdash; works out
               to <span className="text-brand-primary font-semibold">$25/month</span> instead of $49.
             </p>
@@ -51,18 +58,33 @@ export default function EarlybirdPage() {
               The discount applies to compute only, not inference. At $25/month for a hosted AI
               agent, that&apos;s hard to beat. 🦀
             </p>
+            <p className="rounded-md bg-amber-500/10 px-3 py-2 text-center text-sm font-medium text-amber-600 dark:text-amber-400">
+              ⚠ All early bird purchases are final. No refunds will be issued.
+            </p>
           </CardContent>
 
           <CardFooter className="relative pt-2">
-            <Button
-              className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary w-full text-black hover:bg-black hover:ring-2"
-              size="lg"
-              asChild
-            >
-              <a href={stripeUrl} target="_blank" rel="noopener noreferrer">
-                🦞 Get the Early Bird Offer
-              </a>
-            </Button>
+            {alreadyPurchased ? (
+              <div className="flex w-full flex-col items-center gap-2">
+                <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                  You&apos;ve already purchased the early bird offer.
+                </p>
+                <Button variant="outline" size="lg" className="w-full" asChild>
+                  <Link href="/claw">Back to KiloClaw</Link>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary w-full text-black hover:bg-black hover:ring-2"
+                size="lg"
+                disabled={checkoutMutation.isPending || !earlybirdStatus}
+                onClick={() => checkoutMutation.mutate()}
+              >
+                {checkoutMutation.isPending
+                  ? 'Redirecting to checkout...'
+                  : '🦞 Get the Early Bird Offer'}
+              </Button>
+            )}
           </CardFooter>
         </Card>
       </div>

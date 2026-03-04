@@ -18,6 +18,8 @@ export interface SessionInput {
   prompt: string;
   mode: 'code';
   model: string;
+  /** Thinking effort variant name (e.g. "high", "max") — undefined means model default */
+  variant?: string;
   upstreamBranch: string;
   /** GitHub installation token (for GitHub platform) */
   githubToken?: string;

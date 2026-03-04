@@ -43,6 +43,8 @@ type AnalysisMode = 'auto' | 'shallow' | 'deep';
 
 type AutoDismissConfidenceThreshold = 'high' | 'medium' | 'low';
 
+type AutoAnalysisMinSeverity = 'critical' | 'high' | 'medium' | 'all';
+
 type RepositoryData = {
   id: number;
   fullName: string;
@@ -62,6 +64,9 @@ type SecurityConfigFormProps = {
   analysisMode: AnalysisMode;
   autoDismissEnabled: boolean;
   autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
+  autoAnalysisEnabled: boolean;
+  autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+  autoAnalysisIncludeExisting: boolean;
   repositories: RepositoryData[];
   repositoriesSyncedAt?: string | null;
   isLoadingRepositories?: boolean;
@@ -75,6 +80,9 @@ type SecurityConfigFormProps = {
       analysisMode: AnalysisMode;
       autoDismissEnabled: boolean;
       autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
+      autoAnalysisEnabled: boolean;
+      autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+      autoAnalysisIncludeExisting: boolean;
     }
   ) => void;
   onToggleEnabled: (
@@ -85,6 +93,7 @@ type SecurityConfigFormProps = {
     }
   ) => void;
   onRefreshRepositories?: () => void;
+  onHasChangesChange?: (hasChanges: boolean) => void;
   isSaving: boolean;
   isToggling: boolean;
   isRefreshingRepositories?: boolean;
@@ -136,6 +145,29 @@ const CONFIDENCE_THRESHOLD_OPTIONS = [
   },
 ];
 
+const AUTO_ANALYSIS_MIN_SEVERITY_OPTIONS = [
+  {
+    value: 'critical' as const,
+    label: 'Critical only',
+    description: 'Only auto-analyse findings with critical severity',
+  },
+  {
+    value: 'high' as const,
+    label: 'High and above',
+    description: 'Auto-analyse findings with high or critical severity',
+  },
+  {
+    value: 'medium' as const,
+    label: 'Medium and above',
+    description: 'Auto-analyse findings with medium, high, or critical severity',
+  },
+  {
+    value: 'all' as const,
+    label: 'All severities',
+    description: 'Auto-analyse all findings regardless of severity',
+  },
+];
+
 const SEVERITY_INFO = [
   {
     key: 'critical' as const,
@@ -179,12 +211,16 @@ export function SecurityConfigForm({
   analysisMode: initialAnalysisMode,
   autoDismissEnabled: initialAutoDismissEnabled,
   autoDismissConfidenceThreshold: initialAutoDismissThreshold,
+  autoAnalysisEnabled: initialAutoAnalysisEnabled,
+  autoAnalysisMinSeverity: initialAutoAnalysisMinSeverity,
+  autoAnalysisIncludeExisting: initialAutoAnalysisIncludeExisting,
   repositories,
   repositoriesSyncedAt,
   isLoadingRepositories,
   onSave,
   onToggleEnabled,
   onRefreshRepositories,
+  onHasChangesChange,
   isSaving,
   isToggling,
   isRefreshingRepositories,
@@ -207,7 +243,18 @@ export function SecurityConfigForm({
   const [autoDismissEnabled, setAutoDismissEnabled] = useState(initialAutoDismissEnabled);
   const [autoDismissConfidenceThreshold, setAutoDismissConfidenceThreshold] =
     useState<AutoDismissConfidenceThreshold>(initialAutoDismissThreshold);
+  const [autoAnalysisEnabled, setAutoAnalysisEnabled] = useState(initialAutoAnalysisEnabled);
+  const [autoAnalysisMinSeverity, setAutoAnalysisMinSeverity] = useState<AutoAnalysisMinSeverity>(
+    initialAutoAnalysisMinSeverity
+  );
+  const [autoAnalysisIncludeExisting, setAutoAnalysisIncludeExisting] = useState(
+    initialAutoAnalysisIncludeExisting
+  );
   const [hasChanges, setHasChanges] = useState(false);
+
+  useEffect(() => {
+    onHasChangesChange?.(hasChanges);
+  }, [hasChanges, onHasChangesChange]);
 
   useEffect(() => {
     setLocalConfig(slaConfig);
@@ -218,6 +265,9 @@ export function SecurityConfigForm({
     setAnalysisMode(initialAnalysisMode);
     setAutoDismissEnabled(initialAutoDismissEnabled);
     setAutoDismissConfidenceThreshold(initialAutoDismissThreshold);
+    setAutoAnalysisEnabled(initialAutoAnalysisEnabled);
+    setAutoAnalysisMinSeverity(initialAutoAnalysisMinSeverity);
+    setAutoAnalysisIncludeExisting(initialAutoAnalysisIncludeExisting);
     setHasChanges(false);
   }, [
     slaConfig,
@@ -228,45 +278,59 @@ export function SecurityConfigForm({
     initialAnalysisMode,
     initialAutoDismissEnabled,
     initialAutoDismissThreshold,
+    initialAutoAnalysisEnabled,
+    initialAutoAnalysisMinSeverity,
+    initialAutoAnalysisIncludeExisting,
   ]);
 
+  type FormState = {
+    config: SlaConfig;
+    repositorySelectionMode: 'all' | 'selected';
+    selectedRepositoryIds: number[];
+    triageModel: string;
+    analysisModel: string;
+    analysisMode: AnalysisMode;
+    autoDismissEnabled: boolean;
+    autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
+    autoAnalysisEnabled: boolean;
+    autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+    autoAnalysisIncludeExisting: boolean;
+  };
+
+  const currentFormState = (): FormState => ({
+    config: localConfig,
+    repositorySelectionMode,
+    selectedRepositoryIds,
+    triageModel: selectedTriageModel,
+    analysisModel: selectedAnalysisModel,
+    analysisMode,
+    autoDismissEnabled,
+    autoDismissConfidenceThreshold,
+    autoAnalysisEnabled,
+    autoAnalysisMinSeverity,
+    autoAnalysisIncludeExisting,
+  });
+
   const checkForChanges = useCallback(
-    (
-      newConfig: SlaConfig,
-      newMode: 'all' | 'selected',
-      newSelectedIds: number[],
-      newTriageModel: string,
-      newAnalysisModel: string,
-      newAnalysisMode: AnalysisMode,
-      newAutoDismissEnabled: boolean,
-      newAutoDismissThreshold: AutoDismissConfidenceThreshold
-    ) => {
-      const configChanged =
-        newConfig.critical !== slaConfig.critical ||
-        newConfig.high !== slaConfig.high ||
-        newConfig.medium !== slaConfig.medium ||
-        newConfig.low !== slaConfig.low;
+    (s: FormState) => {
+      const changed =
+        s.config.critical !== slaConfig.critical ||
+        s.config.high !== slaConfig.high ||
+        s.config.medium !== slaConfig.medium ||
+        s.config.low !== slaConfig.low ||
+        s.repositorySelectionMode !== initialSelectionMode ||
+        JSON.stringify([...s.selectedRepositoryIds].sort()) !==
+          JSON.stringify([...initialSelectedIds].sort()) ||
+        s.triageModel !== initialTriageModel ||
+        s.analysisModel !== initialAnalysisModel ||
+        s.analysisMode !== initialAnalysisMode ||
+        s.autoDismissEnabled !== initialAutoDismissEnabled ||
+        s.autoDismissConfidenceThreshold !== initialAutoDismissThreshold ||
+        s.autoAnalysisEnabled !== initialAutoAnalysisEnabled ||
+        s.autoAnalysisMinSeverity !== initialAutoAnalysisMinSeverity ||
+        s.autoAnalysisIncludeExisting !== initialAutoAnalysisIncludeExisting;
 
-      const modeChanged = newMode !== initialSelectionMode;
-      const idsChanged =
-        JSON.stringify([...newSelectedIds].sort()) !==
-        JSON.stringify([...initialSelectedIds].sort());
-      const triageModelChanged = newTriageModel !== initialTriageModel;
-      const analysisModelChanged = newAnalysisModel !== initialAnalysisModel;
-      const analysisModeChanged = newAnalysisMode !== initialAnalysisMode;
-      const autoDismissEnabledChanged = newAutoDismissEnabled !== initialAutoDismissEnabled;
-      const autoDismissThresholdChanged = newAutoDismissThreshold !== initialAutoDismissThreshold;
-
-      setHasChanges(
-        configChanged ||
-          modeChanged ||
-          idsChanged ||
-          triageModelChanged ||
-          analysisModelChanged ||
-          analysisModeChanged ||
-          autoDismissEnabledChanged ||
-          autoDismissThresholdChanged
-      );
+      setHasChanges(changed);
     },
     [
       slaConfig,
@@ -277,6 +341,9 @@ export function SecurityConfigForm({
       initialAnalysisMode,
       initialAutoDismissEnabled,
       initialAutoDismissThreshold,
+      initialAutoAnalysisEnabled,
+      initialAutoAnalysisMinSeverity,
+      initialAutoAnalysisIncludeExisting,
     ]
   );
 
@@ -286,114 +353,57 @@ export function SecurityConfigForm({
 
     const newConfig = { ...localConfig, [key]: numValue };
     setLocalConfig(newConfig);
-    checkForChanges(
-      newConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), config: newConfig });
   };
 
   const handleSelectionModeChange = (mode: 'all' | 'selected') => {
     setRepositorySelectionMode(mode);
-    checkForChanges(
-      localConfig,
-      mode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), repositorySelectionMode: mode });
   };
 
   const handleSelectedIdsChange = (ids: number[]) => {
     setSelectedRepositoryIds(ids);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      ids,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), selectedRepositoryIds: ids });
   };
 
   const handleTriageModelChange = (model: string) => {
     setSelectedTriageModel(model);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      model,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), triageModel: model });
   };
 
   const handleAnalysisModelChange = (model: string) => {
     setSelectedAnalysisModel(model);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      model,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), analysisModel: model });
   };
 
   const handleAnalysisModeChange = (mode: AnalysisMode) => {
     setAnalysisMode(mode);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      mode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), analysisMode: mode });
   };
 
   const handleAutoDismissEnabledChange = (newEnabled: boolean) => {
     setAutoDismissEnabled(newEnabled);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      newEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), autoDismissEnabled: newEnabled });
   };
 
   const handleAutoDismissThresholdChange = (threshold: AutoDismissConfidenceThreshold) => {
     setAutoDismissConfidenceThreshold(threshold);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      threshold
-    );
+    checkForChanges({ ...currentFormState(), autoDismissConfidenceThreshold: threshold });
+  };
+
+  const handleAutoAnalysisEnabledChange = (newEnabled: boolean) => {
+    setAutoAnalysisEnabled(newEnabled);
+    checkForChanges({ ...currentFormState(), autoAnalysisEnabled: newEnabled });
+  };
+
+  const handleAutoAnalysisMinSeverityChange = (severity: AutoAnalysisMinSeverity) => {
+    setAutoAnalysisMinSeverity(severity);
+    checkForChanges({ ...currentFormState(), autoAnalysisMinSeverity: severity });
+  };
+
+  const handleAutoAnalysisIncludeExistingChange = (newIncludeExisting: boolean) => {
+    setAutoAnalysisIncludeExisting(newIncludeExisting);
+    checkForChanges({ ...currentFormState(), autoAnalysisIncludeExisting: newIncludeExisting });
   };
 
   const handleSave = () => {
@@ -407,21 +417,15 @@ export function SecurityConfigForm({
       analysisMode,
       autoDismissEnabled,
       autoDismissConfidenceThreshold,
+      autoAnalysisEnabled,
+      autoAnalysisMinSeverity,
+      autoAnalysisIncludeExisting,
     });
   };
 
   const handleReset = () => {
     setLocalConfig(DEFAULT_SLA_CONFIG);
-    checkForChanges(
-      DEFAULT_SLA_CONFIG,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold
-    );
+    checkForChanges({ ...currentFormState(), config: DEFAULT_SLA_CONFIG });
   };
 
   // Map repositories to the format expected by RepositoryMultiSelect
@@ -582,24 +586,28 @@ export function SecurityConfigForm({
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <ModelCombobox
-                label="Triage Model"
-                models={modelOptions}
-                value={selectedTriageModel}
-                onValueChange={handleTriageModelChange}
-                isLoading={isLoadingModels}
-                helperText="Used for initial triage and exploitability recommendation"
-              />
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="flex flex-col justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                <ModelCombobox
+                  label="Triage Model"
+                  models={modelOptions}
+                  value={selectedTriageModel}
+                  onValueChange={handleTriageModelChange}
+                  isLoading={isLoadingModels}
+                  helperText="Used for initial triage and exploitability recommendation"
+                />
+              </div>
 
-              <ModelCombobox
-                label="Analysis Model"
-                models={modelOptions}
-                value={selectedAnalysisModel}
-                onValueChange={handleAnalysisModelChange}
-                isLoading={isLoadingModels}
-                helperText="Used for sandbox/codebase analysis and final extraction"
-              />
+              <div className="flex flex-col justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                <ModelCombobox
+                  label="Analysis Model"
+                  models={modelOptions}
+                  value={selectedAnalysisModel}
+                  onValueChange={handleAnalysisModelChange}
+                  isLoading={isLoadingModels}
+                  helperText="Used for sandbox/codebase analysis and final extraction"
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -621,27 +629,127 @@ export function SecurityConfigForm({
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             <RadioGroup
               value={analysisMode}
               onValueChange={value => handleAnalysisModeChange(value as AnalysisMode)}
-              className="space-y-3"
+              className="grid grid-cols-1 gap-3 md:grid-cols-3"
             >
               {ANALYSIS_MODE_OPTIONS.map(option => (
-                <div key={option.value} className="flex items-start space-x-3">
-                  <RadioGroupItem value={option.value} id={`analysis-mode-${option.value}`} />
+                <Label
+                  key={option.value}
+                  htmlFor={`analysis-mode-${option.value}`}
+                  className={cn(
+                    'flex cursor-pointer items-start space-x-3 rounded-lg border p-4 transition-colors',
+                    analysisMode === option.value
+                      ? 'border-indigo-500 bg-indigo-500/10'
+                      : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                  )}
+                >
+                  <RadioGroupItem
+                    value={option.value}
+                    id={`analysis-mode-${option.value}`}
+                    className="mt-0.5"
+                  />
                   <div className="space-y-1">
-                    <Label
-                      htmlFor={`analysis-mode-${option.value}`}
-                      className="cursor-pointer font-normal"
-                    >
-                      {option.label}
-                    </Label>
+                    <span className="font-medium">{option.label}</span>
                     <p className="text-muted-foreground text-xs">{option.description}</p>
                   </div>
-                </div>
+                </Label>
               ))}
             </RadioGroup>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Auto-Analysis Configuration Card - only show when enabled */}
+      {enabled && (
+        <Card className="w-full">
+          <CardHeader className="pb-3">
+            <div className="flex items-center space-x-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-500/20">
+                <ScanSearch className="h-5 w-5 text-teal-400" />
+              </div>
+              <div>
+                <CardTitle className="text-lg font-bold">Auto-Analysis</CardTitle>
+                <p className="text-muted-foreground text-xs">
+                  Automatically analyse new findings as they are synced
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+              <div className="space-y-1">
+                <Label htmlFor="auto-analysis-enabled" className="font-medium">
+                  Enable Auto-Analysis
+                </Label>
+                <p className="text-muted-foreground text-sm">
+                  When enabled, new findings will be automatically triaged and analysed based on the
+                  analysis mode configured above
+                </p>
+              </div>
+              <Switch
+                id="auto-analysis-enabled"
+                checked={autoAnalysisEnabled}
+                onCheckedChange={handleAutoAnalysisEnabledChange}
+              />
+            </div>
+
+            {autoAnalysisEnabled && (
+              <div className="space-y-3">
+                <Label>Minimum Severity</Label>
+                <RadioGroup
+                  value={autoAnalysisMinSeverity}
+                  onValueChange={value =>
+                    handleAutoAnalysisMinSeverityChange(value as AutoAnalysisMinSeverity)
+                  }
+                  className="grid grid-cols-1 gap-3 md:grid-cols-4"
+                >
+                  {AUTO_ANALYSIS_MIN_SEVERITY_OPTIONS.map(option => (
+                    <Label
+                      key={option.value}
+                      htmlFor={`auto-analysis-severity-${option.value}`}
+                      className={cn(
+                        'flex cursor-pointer items-start space-x-3 rounded-lg border p-4 transition-colors',
+                        autoAnalysisMinSeverity === option.value
+                          ? 'border-teal-500 bg-teal-500/10'
+                          : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                      )}
+                    >
+                      <RadioGroupItem
+                        value={option.value}
+                        id={`auto-analysis-severity-${option.value}`}
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-1">
+                        <span className="font-medium">{option.label}</span>
+                        <p className="text-muted-foreground text-xs">{option.description}</p>
+                      </div>
+                    </Label>
+                  ))}
+                </RadioGroup>
+              </div>
+            )}
+
+            {autoAnalysisEnabled && (
+              <div className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                <div className="space-y-1">
+                  <Label htmlFor="auto-analysis-include-existing" className="font-medium">
+                    Include Existing Findings
+                  </Label>
+                  <p className="text-muted-foreground text-sm">
+                    Also analyse findings that were synced before auto-analysis was enabled. This
+                    may use additional credits if there are many existing findings.
+                  </p>
+                </div>
+                <Switch
+                  id="auto-analysis-include-existing"
+                  checked={autoAnalysisIncludeExisting}
+                  onCheckedChange={handleAutoAnalysisIncludeExistingChange}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -688,21 +796,29 @@ export function SecurityConfigForm({
                   onValueChange={value =>
                     handleAutoDismissThresholdChange(value as AutoDismissConfidenceThreshold)
                   }
-                  className="space-y-3"
+                  className="grid grid-cols-1 gap-3 md:grid-cols-3"
                 >
                   {CONFIDENCE_THRESHOLD_OPTIONS.map(option => (
-                    <div key={option.value} className="flex items-start space-x-3">
-                      <RadioGroupItem value={option.value} id={`threshold-${option.value}`} />
+                    <Label
+                      key={option.value}
+                      htmlFor={`threshold-${option.value}`}
+                      className={cn(
+                        'flex cursor-pointer items-start space-x-3 rounded-lg border p-4 transition-colors',
+                        autoDismissConfidenceThreshold === option.value
+                          ? 'border-amber-500 bg-amber-500/10'
+                          : 'border-gray-800 bg-gray-900/50 hover:border-gray-700'
+                      )}
+                    >
+                      <RadioGroupItem
+                        value={option.value}
+                        id={`threshold-${option.value}`}
+                        className="mt-0.5"
+                      />
                       <div className="space-y-1">
-                        <Label
-                          htmlFor={`threshold-${option.value}`}
-                          className="cursor-pointer font-normal"
-                        >
-                          {option.label}
-                        </Label>
+                        <span className="font-medium">{option.label}</span>
                         <p className="text-muted-foreground text-xs">{option.description}</p>
                       </div>
-                    </div>
+                    </Label>
                   ))}
                 </RadioGroup>
               </div>
@@ -728,32 +844,37 @@ export function SecurityConfigForm({
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            {SEVERITY_INFO.map(({ key, label, description, icon: Icon, color }) => (
-              <div key={key} className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  <Icon className={`mt-0.5 h-5 w-5 ${color}`} />
-                  <div>
-                    <Label htmlFor={`sla-${key}`} className="font-medium">
-                      {label}
-                    </Label>
-                    <p className="text-muted-foreground text-sm">{description}</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              {SEVERITY_INFO.map(({ key, label, description, icon: Icon, color }) => (
+                <div
+                  key={key}
+                  className="flex flex-col justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4"
+                >
+                  <div className="flex items-start gap-3">
+                    <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${color}`} />
+                    <div>
+                      <Label htmlFor={`sla-${key}`} className="font-medium">
+                        {label}
+                      </Label>
+                      <p className="text-muted-foreground text-xs">{description}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2 pl-8">
+                    <Input
+                      id={`sla-${key}`}
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={localConfig[key]}
+                      onChange={e => handleChange(key, e.target.value)}
+                      className="w-20 text-center"
+                      disabled={!enabled}
+                    />
+                    <span className="text-muted-foreground text-sm">days</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id={`sla-${key}`}
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={localConfig[key]}
-                    onChange={e => handleChange(key, e.target.value)}
-                    className="w-20 text-center"
-                    disabled={!enabled}
-                  />
-                  <span className="text-muted-foreground text-sm">days</span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
 
             <div className="flex justify-between border-t border-gray-800 pt-4">
               <Button variant="outline" onClick={handleReset} disabled={!enabled || isSaving}>

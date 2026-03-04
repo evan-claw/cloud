@@ -39,11 +39,11 @@ export type WrapperPromptOptions = {
   prompt?: string;
   parts?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
   model?: { providerID?: string; modelID: string };
+  variant?: string;
   agent?: string;
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
-  variant?: string;
 };
 
 export type WrapperPermissionResponse = 'always' | 'once' | 'reject';

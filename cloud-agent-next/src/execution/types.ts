@@ -308,9 +308,9 @@ export type WrapperPlan = {
   kiloSessionId?: string;
   kiloSessionTitle?: string;
   model?: ModelConfig;
+  variant?: string;
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
-  variant?: string;
 };
 
 // ---------------------------------------------------------------------------
