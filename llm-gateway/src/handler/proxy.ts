@@ -93,7 +93,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   let abuseSecrets: AbuseServiceSecrets | undefined;
 
   const [abuseServiceUrl] = await Promise.all([
-    c.env.ABUSE_SERVICE_URL.get(),
+    c.env.ABUSE_SERVICE_URL.get().catch(() => ''),
     c.env.POSTHOG_API_KEY.get()
       .then(k => {
         posthogApiKey = k;
