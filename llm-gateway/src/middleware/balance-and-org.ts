@@ -93,11 +93,7 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   }
 
   // Balance check for paid models
-  if (
-    balance <= 0 &&
-    !isFreeModel(resolvedModel) &&
-    !userByok
-  ) {
+  if (balance <= 0 && !isFreeModel(resolvedModel) && !userByok) {
     // Mirror usageLimitExceededResponse(): branch on payment history to choose title/message.
     const isReturningUser = await hasUserMadePaidTopup(db, user.id);
     const title = isReturningUser ? 'Low Credit Warning!' : 'Paid Model - Credits Required';

@@ -146,7 +146,7 @@ export const preferredModels: string[] = [
 // OpenRouter free catch-all, or is an OpenRouter stealth (alpha/beta) model.
 export function isFreeModel(model: string): boolean {
   return (
-    (kiloFreeModelMap.get(model)?.is_enabled === true) ||
+    kiloFreeModelMap.get(model)?.is_enabled === true ||
     model.endsWith(':free') ||
     model === 'openrouter/free' ||
     isOpenRouterStealthModel(model)
