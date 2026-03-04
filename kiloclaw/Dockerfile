@@ -42,7 +42,7 @@ RUN npm install -g pnpm
 
 # Install OpenClaw
 # Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.2.26 \
+RUN npm install -g openclaw@2026.3.2 \
     && openclaw --version
 
 # Install ClawHub CLI
@@ -73,7 +73,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-27-v57-openclaw-2026.2.26-1password-arch-fix
+# Build cache bust: 2026-03-04-v58-openclaw-2026.3.2
 RUN echo "7"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
