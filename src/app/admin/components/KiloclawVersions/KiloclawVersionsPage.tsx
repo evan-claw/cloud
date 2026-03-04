@@ -319,7 +319,7 @@ export function PinsTab() {
         </CardHeader>
         <CardContent>
           <div className="flex items-end gap-3">
-            <div className="flex-1">
+            <div className="w-[280px] shrink-0">
               <label className="text-muted-foreground mb-1 block text-xs">User</label>
               {selectedUserId ? (
                 <div className="flex items-center gap-2">
@@ -393,13 +393,13 @@ export function PinsTab() {
                 </Popover>
               )}
             </div>
-            <div className="w-[300px]">
+            <div className="w-[300px] shrink-0">
               <label className="text-muted-foreground mb-1 block text-xs">Image Tag</label>
               <Select value={pinImageTag} onValueChange={setPinImageTag}>
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select image tag..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="min-w-[500px]">
                   {availableVersions?.items.map(v => (
                     <SelectItem key={v.image_tag} value={v.image_tag}>
                       {v.image_tag} (OpenClaw {v.openclaw_version})
@@ -408,7 +408,11 @@ export function PinsTab() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="w-[200px]">
+            <div className="flex-1">
+              <p className="mb-1 flex items-center gap-1 text-xs text-red-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Reason is visible to the end user.
+              </p>
               <label className="text-muted-foreground mb-1 block text-xs">Reason</label>
               <Input
                 placeholder="Why pin this user?"

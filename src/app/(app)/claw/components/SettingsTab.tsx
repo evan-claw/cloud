@@ -20,6 +20,7 @@ import { DetailTile } from './DetailTile';
 import { ChannelTokenInput } from './ChannelTokenInput';
 import { CHANNELS, CHANNEL_TYPES, type ChannelDefinition } from './channel-config';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
+import { VersionPinCard } from './VersionPinCard';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -334,6 +335,10 @@ export function SettingsTab({
           ))}
         </div>
       </div>
+
+      <Separator />
+
+      <VersionPinCard />
 
       <Separator />
 
