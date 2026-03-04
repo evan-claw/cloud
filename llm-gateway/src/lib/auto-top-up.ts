@@ -47,7 +47,7 @@ export async function maybePerformOrganizationAutoTopUp(
             isNull(auto_top_up_configs.attempt_started_at),
             lt(
               auto_top_up_configs.attempt_started_at,
-              sql`NOW() - INTERVAL '${sql.raw(String(ATTEMPT_LOCK_TIMEOUT_SECONDS))} second'`
+              sql`NOW() - INTERVAL '1 second' * ${ATTEMPT_LOCK_TIMEOUT_SECONDS}`
             )
           )
         )

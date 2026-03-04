@@ -211,7 +211,7 @@ function applyGigaPotatoProviderSettings(
   if (systemPrompt) {
     if (Array.isArray(systemPrompt.content)) {
       systemPrompt.content.push(nonDisclosureRule);
-    } else if (systemPrompt.content) {
+    } else if (typeof systemPrompt.content === 'string') {
       systemPrompt.content = [{ type: 'text', text: systemPrompt.content }, nonDisclosureRule];
     } else {
       systemPrompt.content = [nonDisclosureRule];
