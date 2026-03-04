@@ -60,7 +60,8 @@ export function computeProviderSelectionsForSummaryCard(params: {
     return null;
   }
 
-  return selections.length > 0 ? selections : null;
+  // Empty array means restrictions exist but nothing survived — distinct from null ("no restrictions")
+  return selections.length > 0 ? selections : [];
 }
 
 export function OrganizationProvidersAndModelsConfigurationCard({
