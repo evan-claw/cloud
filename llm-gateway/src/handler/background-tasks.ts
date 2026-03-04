@@ -38,7 +38,7 @@ type BgUser = {
 };
 
 export type BackgroundTaskParams = {
-  accountingStream: ReadableStream | null;
+  accountingStream: ReadableStream<Uint8Array> | null;
   metricsStream: ReadableStream | null;
   loggingStream: ReadableStream | null;
   upstreamStatusCode: number;

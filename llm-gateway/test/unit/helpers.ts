@@ -1,7 +1,7 @@
 // Shared test helpers for mocking Cloudflare bindings and building requests.
 
 import { SignJWT } from 'jose';
-import type { ExecutionContext } from 'hono';
+import type { Env } from '../../src/env';
 
 const TEST_SECRET = 'test-secret-at-least-32-characters-long';
 
@@ -23,13 +23,13 @@ export async function signToken(
 }
 
 // Build a minimal mock Env matching worker-configuration.d.ts.
-export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloudflare.Env {
+export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Env {
   function makeSecret(value: string): SecretsStoreSecret {
     return { get: async () => value };
   }
 
   // Fake DO namespace that creates stubs returning a fixed result.
-  function makeFakeDONamespace(): Cloudflare.Env['RATE_LIMIT_DO'] {
+  function makeFakeDONamespace(): Env['RATE_LIMIT_DO'] {
     const stub = {
       checkFreeModel: async () => ({ allowed: true, requestCount: 0 }),
       checkPromotion: async () => ({ allowed: true, requestCount: 0 }),
@@ -55,7 +55,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
       jurisdiction() {
         return this;
       },
-    } as unknown as Cloudflare.Env['RATE_LIMIT_DO'];
+    } as unknown as Env['RATE_LIMIT_DO'];
   }
 
   return {
@@ -68,7 +68,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     O11Y: {
       fetch: async () => new Response(JSON.stringify({ success: true })),
       ingestApiMetrics: async () => {},
-    } as unknown as Fetcher,
+    } as unknown as Env['O11Y'],
     NEXTAUTH_SECRET_PROD: makeSecret(TEST_SECRET),
     OPENROUTER_API_KEY: makeSecret('or-key'),
     GIGAPOTATO_API_KEY: makeSecret('gp-key'),
@@ -83,7 +83,7 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
     ABUSE_SERVICE_URL: makeSecret('https://abuse.example.com'),
     POSTHOG_API_KEY: makeSecret('phk-test'),
     ...overrides,
-  } as Cloudflare.Env;
+  } as Env;
 }
 
 export { TEST_SECRET };
@@ -93,7 +93,8 @@ export function fakeExecutionCtx(): ExecutionContext {
     waitUntil: () => {},
     passThroughOnException: () => {},
     props: {},
-  };
+    exports: {},
+  } as unknown as ExecutionContext;
 }
 
 // Build a POST request for /api/gateway/chat/completions.

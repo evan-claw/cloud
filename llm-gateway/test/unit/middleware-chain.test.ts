@@ -58,7 +58,7 @@ afterEach(() => {
 async function dispatch(req: Request, envOverrides: Partial<Record<string, unknown>> = {}) {
   const { default: worker } = await import('../../src/index');
   const env = makeEnv(envOverrides);
-  return worker.fetch(req, env, fakeExecutionCtx());
+  return worker.fetch!(req as Request<unknown, IncomingRequestCfProperties>, env, fakeExecutionCtx());
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────

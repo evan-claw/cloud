@@ -17,6 +17,7 @@ export {
 // Dynamically imports the worker and calls its fetch method.
 
 import { makeEnv, fakeExecutionCtx } from '../unit/helpers';
+import type { Env } from '../../src/env';
 
 export async function dispatch(
   req: Request,
@@ -24,7 +25,7 @@ export async function dispatch(
 ) {
   const { default: worker } = await import('../../src/index');
   const env = makeEnv(envOverrides);
-  return worker.fetch(req, env, fakeExecutionCtx());
+  return worker.fetch!(req as Request<unknown, IncomingRequestCfProperties>, env, fakeExecutionCtx());
 }
 
 // ── User fixtures ─────────────────────────────────────────────────────────────
@@ -153,5 +154,5 @@ export function makeFakeDONamespace(opts: {
     jurisdiction() {
       return this;
     },
-  } as unknown as Cloudflare.Env['RATE_LIMIT_DO'];
+  } as unknown as Env['RATE_LIMIT_DO'];
 }
