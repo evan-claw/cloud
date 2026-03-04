@@ -25,7 +25,7 @@ IMAGE="registry.fly.io/$APP_NAME:$TAG"
 GIT_SHA="$(git -C "$KILOCLAW_DIR" rev-parse HEAD 2>/dev/null || echo 'unknown')"
 
 # Extract OpenClaw version from Dockerfile
-OPENCLAW_VERSION=$(sed -n 's/.*openclaw@\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$KILOCLAW_DIR/Dockerfile")
+OPENCLAW_VERSION=$(sed -n 's/.*openclaw@\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$KILOCLAW_DIR/Dockerfile" | head -1)
 
 echo "Building + pushing $IMAGE (linux/amd64) ..."
 echo "Controller commit: $GIT_SHA"

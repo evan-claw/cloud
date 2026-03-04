@@ -97,7 +97,7 @@ jobs:
         id: check-image
         run: |
           IMAGE="registry.fly.io/kiloclaw-machines:${{ steps.image-hash.outputs.tag }}"
-          if timeout 15 docker manifest inspect "${IMAGE}" > /tmp/manifest.json 2>&1; then
+          if timeout 15 docker manifest inspect "${IMAGE}" > /tmp/manifest.json 2>/dev/null; then
             # Handle both manifest list (.manifests[]) and single manifest (.config.digest) formats
             DIGEST=$(jq -r 'if .manifests then .manifests[0].digest else .config.digest end' /tmp/manifest.json 2>/dev/null || echo "")
             if [ -n "$DIGEST" ] && [ "$DIGEST" != "null" ] && [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
