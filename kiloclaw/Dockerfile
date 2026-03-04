@@ -51,6 +51,14 @@ RUN npm install -g clawhub
 # Install mcporter (MCP server tooling)
 RUN npm install -g mcporter@0.7.3
 
+# Install gog (gogcli - Google Workspace CLI)
+RUN curl -fsSL https://github.com/steipete/gogcli/releases/download/v0.11.0/gogcli_0.11.0_linux_amd64.tar.gz \
+    -o /tmp/gogcli.tar.gz \
+    && tar -xzf /tmp/gogcli.tar.gz -C /tmp gog \
+    && mv /tmp/gog /usr/local/bin/gog \
+    && chmod +x /usr/local/bin/gog \
+    && rm /tmp/gogcli.tar.gz
+
 # Install pinned Bun (build-time only) and compile the controller bundle.
 ARG BUN_VERSION=1.2.4
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
