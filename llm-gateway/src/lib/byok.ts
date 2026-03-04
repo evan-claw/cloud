@@ -6,6 +6,7 @@ import type { WorkerDb } from '@kilocode/db/client';
 import { byok_api_keys, modelsByProvider } from '@kilocode/db/schema';
 import { and, eq, inArray, desc } from 'drizzle-orm';
 import * as z from 'zod';
+import { mapModelIdToVercel } from './vercel-model-mapping';
 
 // --- Types ---
 
@@ -97,40 +98,6 @@ export async function getModelUserByokProviders(
   return endpoints
     .map(ep => UserByokProviderIdSchema.safeParse(ep.tag).data)
     .filter((id): id is UserByokProviderId => id !== undefined);
-}
-
-// Model-id → Vercel key mapping (mirrors src/lib/providers/vercel/mapModelIdToVercel.ts)
-const vercelModelIdMapping: Record<string, string | undefined> = {
-  'arcee-ai/trinity-large-preview:free': 'arcee-ai/trinity-large-preview',
-  'mistralai/codestral-2508': 'mistral/codestral',
-  'mistralai/devstral-2512': 'mistral/devstral-2',
-};
-
-const modelPrefixToVercelProvider: Record<string, string | undefined> = {
-  anthropic: 'anthropic',
-  google: 'google',
-  openai: 'openai',
-  minimax: 'minimax',
-  mistralai: 'mistral',
-  // qwen → alibaba (no BYOK for alibaba)
-  'x-ai': 'xai',
-  'z-ai': 'zai',
-};
-
-function mapModelIdToVercel(modelId: string): string {
-  const hardcoded = vercelModelIdMapping[modelId];
-  if (hardcoded) return hardcoded;
-
-  const slashIndex = modelId.indexOf('/');
-  if (slashIndex < 0) return modelId;
-
-  const prefix = modelId.slice(0, slashIndex);
-  const rest = modelId.slice(slashIndex);
-  const vercelProvider =
-    prefix === 'openai' && modelId.startsWith('openai/gpt-oss')
-      ? undefined
-      : modelPrefixToVercelProvider[prefix];
-  return vercelProvider ? vercelProvider + rest : modelId;
 }
 
 async function decryptRow(

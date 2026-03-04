@@ -9,6 +9,7 @@ import {
   AutocompleteUserByokProviderIdSchema,
 } from './byok';
 import { getKiloFreeModelWithGateway, getPreferredProviderOrder } from './providers';
+import { mapModelIdToVercel } from './vercel-model-mapping';
 import {
   hasAttemptCompletionTool,
   normalizeToolCallIds,
@@ -288,7 +289,7 @@ function applyVercelSettings(
   userByok: BYOKResult[] | null
 ) {
   // Map to Vercel model ID
-  requestToMutate.model = mapModelIdToVercel(requestedModel);
+  requestToMutate.model = mapModelIdToVercel(requestedModel, resolveKiloFreeModelInternalId);
 
   if (userByok) {
     if (userByok.length === 0) throw new Error('Invalid state: userByok is empty');
@@ -322,35 +323,10 @@ function applyVercelSettings(
   delete requestToMutate.provider;
 }
 
-function mapModelIdToVercel(modelId: string): string {
-  const hardcoded: Record<string, string | undefined> = {
-    'arcee-ai/trinity-large-preview:free': 'arcee-ai/trinity-large-preview',
-    'mistralai/codestral-2508': 'mistral/codestral',
-    'mistralai/devstral-2512': 'mistral/devstral-2',
-  };
-  const hardcodedId = hardcoded[modelId];
-  if (hardcodedId) return hardcodedId;
-
-  const kiloFree = getKiloFreeModelWithGateway(modelId);
-  const baseId =
-    kiloFree?.is_enabled && kiloFree.gateway === 'OPENROUTER' ? kiloFree.internal_id : modelId;
-
-  const slashIndex = baseId.indexOf('/');
-  if (slashIndex < 0) return baseId;
-
-  const prefixToVercel: Record<string, string | undefined> = {
-    anthropic: 'anthropic',
-    google: 'google',
-    openai: 'openai',
-    minimax: 'minimax',
-    mistralai: 'mistral',
-    'x-ai': 'xai',
-    'z-ai': 'zai',
-  };
-  const prefix = baseId.slice(0, slashIndex);
-  const isGptOss = baseId.startsWith('openai/gpt-oss');
-  const vercelProvider = isGptOss ? undefined : prefixToVercel[prefix];
-  return vercelProvider ? vercelProvider + baseId.slice(slashIndex) : baseId;
+function resolveKiloFreeModelInternalId(publicId: string): string | undefined {
+  const kiloFree = getKiloFreeModelWithGateway(publicId);
+  if (kiloFree?.is_enabled && kiloFree.gateway === 'OPENROUTER') return kiloFree.internal_id;
+  return undefined;
 }
 
 // --- Kilo free model internal_id mapping ----
