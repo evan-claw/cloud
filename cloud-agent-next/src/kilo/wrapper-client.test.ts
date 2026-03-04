@@ -39,11 +39,12 @@ const createMockSession = (
       ? vi.fn().mockImplementation((cmd: string) => Promise.resolve(execResult(cmd)))
       : vi.fn().mockResolvedValue(execResult);
 
-  // Mock startProcess that returns a process with waitForPort
+  // Mock startProcess that returns a process with waitForPort and getLogs
   const startProcessFn = vi.fn().mockImplementation(() =>
     Promise.resolve({
       id: 'mock-process-id',
       waitForPort: vi.fn().mockResolvedValue(undefined),
+      getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
     })
   );
 
@@ -485,6 +486,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: waitForPortMock,
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -506,14 +508,18 @@ describe('WrapperClient', () => {
       });
     });
 
-    it('throws WrapperNotReadyError on timeout', async () => {
+    it('throws WrapperNotReadyError after exhausting all retry attempts', async () => {
       // Health check fails (not running)
       const session = createMockSession(createCurlError(7, 'Connection refused'));
 
+      const getLogsMock = vi
+        .fn()
+        .mockResolvedValue({ stdout: 'some output', stderr: 'some error' });
       // Make startProcess return a process where waitForPort times out
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockRejectedValue(new Error('Port not ready within timeout')),
+        getLogs: getLogsMock,
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -527,6 +533,81 @@ describe('WrapperClient', () => {
           workspacePath: '/workspace/test',
         })
       ).rejects.toThrow(WrapperNotReadyError);
+
+      // Should have retried (2 attempts total)
+      expect(session.startProcess).toHaveBeenCalledTimes(2);
+      // getLogs should be called on each failed attempt
+      expect(getLogsMock).toHaveBeenCalledTimes(2);
+      // pkill should be called between attempts to clean up the failed process
+      const execCalls = (session.exec as ReturnType<typeof vi.fn>).mock.calls;
+      const pkillCalls = execCalls.filter(call => String(call[0]).includes('pkill'));
+      expect(pkillCalls).toHaveLength(1);
+      expect(pkillCalls[0][0]).toContain('--agent-session test-session');
+    });
+
+    it('retries once on failure then succeeds', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+
+      let attempt = 0;
+      (session.startProcess as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        attempt++;
+        const waitForPort =
+          attempt === 1
+            ? vi.fn().mockRejectedValue(new Error('SIGILL'))
+            : vi.fn().mockResolvedValue(undefined);
+        return Promise.resolve({
+          id: `mock-process-${attempt}`,
+          waitForPort,
+          getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+        });
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        maxWaitMs: 5000,
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+      });
+
+      // First attempt fails, second succeeds
+      expect(session.startProcess).toHaveBeenCalledTimes(2);
+
+      // pkill should be called between attempts to clean up the failed process
+      const execCalls = (session.exec as ReturnType<typeof vi.fn>).mock.calls;
+      const pkillCalls = execCalls.filter(call => String(call[0]).includes('pkill'));
+      expect(pkillCalls).toHaveLength(1);
+      expect(pkillCalls[0][0]).toContain('--agent-session test-session');
+    });
+
+    it('calls getLogs on process when startup fails', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+
+      const getLogsMock = vi.fn().mockResolvedValue({
+        stdout: 'wrapper output before crash',
+        stderr: 'illegal instruction',
+      });
+
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockRejectedValue(new Error('Process exited with code 132')),
+        getLogs: getLogsMock,
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          maxWaitMs: 100,
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(WrapperNotReadyError);
+
+      // getLogs should be called for each failed attempt
+      expect(getLogsMock).toHaveBeenCalledTimes(2);
     });
 
     it('uses default wrapper path and calls startProcess', async () => {
@@ -571,6 +652,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -591,6 +673,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -611,6 +694,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -631,6 +715,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -651,6 +736,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -673,6 +759,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });

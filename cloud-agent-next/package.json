@@ -25,7 +25,7 @@
     "typecheck": "tsgo --noEmit --incremental false && pnpm -C wrapper run typecheck"
   },
   "dependencies": {
-    "@cloudflare/sandbox": "0.7.5",
+    "@cloudflare/sandbox": "0.7.8",
     "@kilocode/db": "workspace:*",
     "@kilocode/encryption": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",

@@ -115,6 +115,13 @@ const ERROR_STATUS_CODES: Record<string, number> = {
 };
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Max attempts for wrapper startup (1 retry on transient failures like Bun SIGILL) */
+const MAX_WRAPPER_START_ATTEMPTS = 2;
+
+// ---------------------------------------------------------------------------
 // WrapperClient Implementation
 // ---------------------------------------------------------------------------
 
@@ -252,26 +259,85 @@ export class WrapperClient {
 
     const command = `${envParts.join(' ')} bun run ${wrapperPath} ${sessionMarker}`;
 
-    logger.debug('WrapperClient: starting wrapper process', { command, port: this.port });
+    let lastError: Error | undefined;
 
-    try {
-      const proc = await this.session.startProcess(command, {
-        cwd: workspacePath,
+    for (let attempt = 0; attempt < MAX_WRAPPER_START_ATTEMPTS; attempt++) {
+      logger.debug('WrapperClient: starting wrapper process', {
+        command,
+        port: this.port,
+        attempt: attempt + 1,
       });
 
-      // Wait for wrapper to become healthy via port check
-      await proc.waitForPort(this.port, {
-        mode: 'http',
-        path: '/health',
-        timeout: maxWaitMs,
-      });
+      let proc: Awaited<ReturnType<ExecutionSession['startProcess']>> | undefined;
 
-      logger.debug('WrapperClient: wrapper is ready', { port: this.port, processId: proc.id });
-    } catch (error) {
-      throw new WrapperNotReadyError(
-        `Wrapper did not become ready within ${maxWaitMs}ms: ${error instanceof Error ? error.message : String(error)}`
-      );
+      try {
+        proc = await this.session.startProcess(command, {
+          cwd: workspacePath,
+        });
+
+        // Wait for wrapper to become healthy via port check
+        await proc.waitForPort(this.port, {
+          mode: 'http',
+          path: '/health',
+          timeout: maxWaitMs,
+        });
+
+        logger.debug('WrapperClient: wrapper is ready', { port: this.port, processId: proc.id });
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        // Capture process logs for diagnostics
+        let stdout: string | undefined;
+        let stderr: string | undefined;
+        if (proc) {
+          try {
+            const logs = await proc.getLogs();
+            stdout = logs.stdout;
+            stderr = logs.stderr;
+          } catch (logError) {
+            logger.debug('Failed to read wrapper process logs', {
+              port: this.port,
+              processId: proc.id,
+              error: logError instanceof Error ? logError.message : String(logError),
+            });
+          }
+        }
+
+        if (attempt + 1 < MAX_WRAPPER_START_ATTEMPTS) {
+          // Kill the failed process before retrying (proc.kill() is unreliable
+          // in the sandbox SDK, so use pkill -f against the session marker).
+          try {
+            await this.session.exec(`pkill -f -- '${sessionMarker}'`);
+          } catch {
+            // Process may already be dead — ignore
+          }
+
+          logger.warn('Wrapper startup failed, retrying', {
+            port: this.port,
+            attempt: attempt + 1,
+            error: lastError.message,
+            stdout,
+            stderr,
+          });
+          continue;
+        }
+
+        // Final attempt failed
+        logger.error('Wrapper startup failed after all attempts', {
+          port: this.port,
+          attempt: attempt + 1,
+          error: lastError.message,
+          stdout,
+          stderr,
+        });
+      }
     }
+
+    const logsHint = ' (check logs above for process stdout/stderr)';
+    throw new WrapperNotReadyError(
+      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'}${logsHint}`
+    );
   }
 
   /**
