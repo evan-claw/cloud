@@ -24,11 +24,22 @@ export function writeApiMetricsDataPoint(
 ): void {
 	const isError = params.statusCode >= 400;
 
-	env.O11Y_API_METRICS.writeDataPoint({
-		indexes: [params.resolvedModel],
-		blobs: [params.provider, params.resolvedModel, clientName, isError ? '1' : '0', params.inferenceProvider, params.userByok ? '1' : '0'],
-		doubles: [params.ttfbMs, params.completeRequestMs, params.statusCode],
-	});
+	try {
+		env.O11Y_API_METRICS.writeDataPoint({
+			indexes: [params.resolvedModel],
+			blobs: [
+				params.provider,
+				params.resolvedModel,
+				clientName,
+				isError ? '1' : '0',
+				params.inferenceProvider,
+				params.userByok ? '1' : '0',
+			],
+			doubles: [params.ttfbMs, params.completeRequestMs, params.statusCode],
+		});
+	} catch (err) {
+		console.error('[o11y] Failed to write AE data point', err);
+	}
 
 	waitUntil(
 		// Changing this schema? Stream schemas are immutable — run:
