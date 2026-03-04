@@ -192,30 +192,24 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   console.debug(`Upstream ${provider.id} responded with ${response.status}`);
 
   // ── Error logging ────────────────────────────────────────────────────────────
+  // For error responses we buffer the body once and reuse it for logging,
+  // background tasks, and the client response — no response.clone() needed.
+  let errorBodyBytes: Uint8Array | undefined;
   if (response.status >= 400) {
-    const responseClone = response.clone();
+    errorBodyBytes = new Uint8Array(await response.arrayBuffer());
     const logLevel = response.status >= 500 ? 'error' : 'warn';
-    c.executionCtx.waitUntil(
-      responseClone
-        .text()
-        .then(body => {
-          const errorMessage = `${provider.id} returned error ${response.status}`;
-          const extra = {
-            kiloUserId: user.id,
-            model: requestBody.model,
-            organizationId,
-            status: response.status,
-            first4k: body.slice(0, 4096),
-          };
-          console[logLevel](errorMessage, extra);
-          if (response.status >= 500) {
-            captureException(new Error(errorMessage), extra);
-          }
-        })
-        .catch(() => {
-          /* ignore */
-        })
-    );
+    const errorMessage = `${provider.id} returned error ${response.status}`;
+    const extra = {
+      kiloUserId: user.id,
+      model: requestBody.model,
+      organizationId,
+      status: response.status,
+      first4k: new TextDecoder().decode(errorBodyBytes).slice(0, 4096),
+    };
+    console[logLevel](errorMessage, extra);
+    if (response.status >= 500) {
+      captureException(new Error(errorMessage), extra);
+    }
   }
 
   // ── Await abuse classification (2s timeout) ───────────────────────────────────
@@ -283,11 +277,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // ── Error responses ──────────────────────────────────────────────────────────
   // 402 non-BYOK: only metrics (no accounting/logging), matching the reference.
   // All other errors: full background tasks (accounting + metrics + logging).
-  if (response.status >= 400) {
-    // Error bodies are small JSON — buffer synchronously so background tasks can
-    // read the body independently of whatever response we send to the client.
-    const errorBodyBytes = new Uint8Array(await response.arrayBuffer());
-
+  if (errorBodyBytes) {
     function makeErrorStream(): ReadableStream<Uint8Array> {
       return new ReadableStream({
         start(ctrl) {
