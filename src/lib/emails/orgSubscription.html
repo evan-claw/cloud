@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to Kilo for Teams!</title>
+  </head>
+
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+      background-color: #1A1A1A;
+      color: #D1D5DB;
+    "
+  >
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #1A1A1A">
+      <tr>
+        <td align="center" style="padding: 40px 20px">
+          <table
+            width="600"
+            cellpadding="0"
+            cellspacing="0"
+            style="background-color: #2A2A2A; border-radius: 8px; border: 1px solid #3A3A3A"
+          >
+            <!-- Header -->
+            <tr>
+              <td style="padding: 40px 40px 20px">
+                <h1
+                  style="
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #F4E452;
+                  "
+                >
+                  Welcome to Kilo for Teams!
+                </h1>
+              </td>
+            </tr>
+
+            <!-- Body -->
+            <tr>
+              <td style="padding: 0 40px 30px">
+
+                <p style="margin:0 0 16px;font-size:14px;line-height:20px;color:#9ca3af;">
+Congratulations on choosing your <strong style="color:#d1d5db;">Team plan</strong>.
+We're excited to have you with us!
+</p>
+
+<p style="margin:0 0 16px;font-size:14px;line-height:20px;color:#9ca3af;">
+I'm <strong style="color:#d1d5db;">Ligia</strong>, your Customer Experience contact.
+I'll be here to support you throughout your journey with Kilo Code.
+</p>
+
+<p style="margin:0 0 16px;font-size:14px;line-height:20px;color:#9ca3af;">
+Your subscription for <strong style="color:#d1d5db;">{{ seats }}</strong> is now active.
+Visit your
+<a href="{{ organization_url }}" style="color:#f4e452;text-decoration:underline;">
+organization dashboard</a>
+to invite members and purchase AI credits to get your team going.
+</p>
+
+
+<p style="margin:0 0 16px;font-size:14px;line-height:20px;color:#9ca3af;">
+If you have any questions—technical or related to your experience—don't hesitate to reach out.
+I'm here to help!
+</p>
+
+                <!-- CTA -->
+                <table cellpadding="0" cellspacing="0" style="margin-top:10px;">
+                  <tr>
+                    <td
+                      style="
+                        background-color:#f4e452;
+                        border-radius:6px;
+                        text-align:center;
+                      "
+                    >
+                      <a
+                        href="https://calendar.app.google/NgcNgzxp4QusdSRQ9"
+                        style="
+                          display:inline-block;
+                          padding:12px 22px;
+                          text-decoration:none;
+                          color:#1a1a1a;
+                          font-weight:700;
+                          font-size:14px;
+                        "
+                      >
+                        Schedule your setup call
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="margin:18px 0 0;font-size:14px;line-height:20px;color:#9ca3af;">
+                  Looking forward to helping you get the most out of Kilo Code.
+                </p>
+
+              </td>
+            </tr>
+
+            <!-- Sign-off -->
+            <tr>
+              <td style="padding:0 40px 40px;border-top:1px solid #3A3A3A">
+                <p style="margin:20px 0 0;font-size:14px;color:#9ca3af;">
+                  Ligia<br />
+                  Customer Experience — Kilo Code
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Footer -->
+          <table width="600" cellpadding="0" cellspacing="0">
+            <tr>
+              <td align="center" style="padding:30px 20px">
+                <p style="margin:0;font-size:12px;color:#6b7280;">
+                  © {{ year }} Kilo Code, LLC<br />
+                  455 Market St, Ste 1940 PMB 993504<br />
+                  San Francisco, CA 94105, USA
+                </p>
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
