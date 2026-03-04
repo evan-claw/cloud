@@ -113,4 +113,44 @@ describe('auth', () => {
     const body: { error: { code: string; message: string } } = await res.json();
     expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
   });
+
+  it('treats user with blacklisted email domain as unauthenticated', async () => {
+    _userRows = [{ ...VALID_USER, google_user_email: 'attacker@spam.example.com' }];
+    const token = await signToken({ kiloUserId: 'user-1' });
+    const res = await dispatch(
+      chatRequest(
+        {
+          model: 'anthropic/claude-sonnet-4-20250514',
+          messages: [{ role: 'user', content: 'hi' }],
+        },
+        { token }
+      ),
+      { BLACKLIST_DOMAINS: { get: async () => 'spam.example.com|other.bad' } }
+    );
+    expect(res.status).toBe(401);
+    const body: { error: { code: string } } = await res.json();
+    expect(body.error.code).toBe('PAID_MODEL_AUTH_REQUIRED');
+  });
+
+  it('authenticates user whose email domain is not blacklisted', async () => {
+    _userRows = [{ ...VALID_USER, google_user_email: 'user@safe.example.com' }];
+    const token = await signToken({ kiloUserId: 'user-1' });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const res = await dispatch(
+      chatRequest(
+        {
+          model: 'anthropic/claude-sonnet-4-20250514',
+          messages: [{ role: 'user', content: 'hi' }],
+        },
+        { token }
+      ),
+      { BLACKLIST_DOMAINS: { get: async () => 'spam.example.com|other.bad' } }
+    );
+    expect(res.status).toBe(200);
+  });
 });
