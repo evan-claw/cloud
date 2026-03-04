@@ -149,10 +149,13 @@ export async function handleBackgroundTaskQueue(
 
       switch (message.body.type) {
         case 'usage-accounting':
-          resolved ??= {
-            secrets: await resolveSecrets(env),
-            abuse: await resolveAbuseSecrets(env),
-          };
+          if (!resolved) {
+            const [secrets, abuse] = await Promise.all([
+              resolveSecrets(env),
+              resolveAbuseSecrets(env),
+            ]);
+            resolved = { secrets, abuse };
+          }
           await processUsageAccounting(message.body, env, resolved);
           break;
         case 'api-metrics':
