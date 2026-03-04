@@ -12,7 +12,7 @@ export type PromptInfo = {
 
 type MessageContent = string | Array<{ type: string; text?: string }> | null | undefined;
 
-function extractMessageTextContent(content: MessageContent): string {
+export function extractMessageTextContent(content: MessageContent): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content

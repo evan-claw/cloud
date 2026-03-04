@@ -3,6 +3,7 @@
 
 import type { OpenRouterChatCompletionRequest } from '../types/request';
 import type { FraudDetectionHeaders } from './extract-headers';
+import { extractMessageTextContent } from './prompt-info';
 
 // ─── Public types (mirror the Next.js version for Phase 6 compatibility) ────
 
@@ -99,17 +100,6 @@ export type AbuseServiceSecrets = {
 
 type Message = { role: string; content?: string | Array<{ type?: string; text?: string }> };
 
-function extractMessageTextContent(m: Message): string {
-  if (typeof m.content === 'string') return m.content;
-  if (Array.isArray(m.content)) {
-    return m.content
-      .filter(c => c.type === 'text')
-      .map(c => c.text ?? '')
-      .join('\n');
-  }
-  return '';
-}
-
 function extractFullPrompts(body: OpenRouterChatCompletionRequest): {
   systemPrompt: string | null;
   userPrompt: string | null;
@@ -118,12 +108,12 @@ function extractFullPrompts(body: OpenRouterChatCompletionRequest): {
   const systemPrompt =
     messages
       .filter(m => m.role === 'system' || m.role === 'developer')
-      .map(extractMessageTextContent)
+      .map(m => extractMessageTextContent(m.content))
       .join('\n') || null;
   const userPrompt =
     messages
       .filter(m => m.role === 'user')
-      .map(extractMessageTextContent)
+      .map(m => extractMessageTextContent(m.content))
       .at(-1) ?? null;
   return { systemPrompt, userPrompt };
 }
