@@ -277,10 +277,10 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // 402 non-BYOK: only metrics (no accounting/logging), matching the reference.
   // All other errors: full background tasks (accounting + metrics + logging).
   if (errorBodyBytes) {
-    function makeErrorStream(): ReadableStream<Uint8Array> {
+    function makeErrorStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
       return new ReadableStream({
         start(ctrl) {
-          ctrl.enqueue(errorBodyBytes);
+          ctrl.enqueue(bytes);
           ctrl.close();
         },
       });
@@ -293,7 +293,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       scheduleBackgroundTasks(c.executionCtx, {
         ...bgCommon,
         accountingStream: null,
-        metricsStream: makeErrorStream(),
+        metricsStream: makeErrorStream(errorBodyBytes),
         loggingStream: null,
       });
       captureException(new Error(`${provider.id} returned 402 Payment Required`), {
@@ -314,9 +314,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     // All other errors: full background tasks (accounting + metrics + logging)
     scheduleBackgroundTasks(c.executionCtx, {
       ...bgCommon,
-      accountingStream: !isAnon ? makeErrorStream() : null,
-      metricsStream: makeErrorStream(),
-      loggingStream: !isAnon ? makeErrorStream() : null,
+      accountingStream: !isAnon ? makeErrorStream(errorBodyBytes) : null,
+      metricsStream: makeErrorStream(errorBodyBytes),
+      loggingStream: !isAnon ? makeErrorStream(errorBodyBytes) : null,
     });
 
     // BYOK / context-length readable error — return a custom message instead of
