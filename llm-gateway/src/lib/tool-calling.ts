@@ -43,17 +43,29 @@ export async function normalizeToolCallIds(
   filter: (toolCallId: string) => boolean,
   maxIdLength: number | undefined
 ): Promise<void> {
+  // Collect all IDs needing hashing, compute in parallel, then apply results.
+  const pending: Array<{ apply: (hashed: string) => void; original: string }> = [];
+
   for (const msg of requestToMutate.messages) {
     if (isAssistantMessage(msg)) {
       for (const toolCall of msg.tool_calls ?? []) {
         if (filter(toolCall.id)) {
-          toolCall.id = await hashToolCallId(toolCall.id, maxIdLength);
+          const tc = toolCall; // capture for closure
+          pending.push({ original: tc.id, apply: h => (tc.id = h) });
         }
       }
     }
     if (isToolMessage(msg) && filter(msg.tool_call_id)) {
-      msg.tool_call_id = await hashToolCallId(msg.tool_call_id, maxIdLength);
+      const m = msg; // capture for closure
+      pending.push({ original: m.tool_call_id, apply: h => (m.tool_call_id = h) });
     }
+  }
+
+  if (pending.length === 0) return;
+
+  const hashed = await Promise.all(pending.map(p => hashToolCallId(p.original, maxIdLength)));
+  for (let i = 0; i < pending.length; i++) {
+    pending[i].apply(hashed[i]);
   }
 }
 
