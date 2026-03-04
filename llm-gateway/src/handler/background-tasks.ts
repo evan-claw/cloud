@@ -181,8 +181,6 @@ export function scheduleBackgroundTasks(
                 usageStats,
                 usageContext,
                 abuseRequestId,
-                abuseServiceUrl,
-                abuseSecrets,
                 fraudHeaders,
                 requested_model: resolvedModel,
                 kiloUserId: user.id,

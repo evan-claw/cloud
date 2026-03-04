@@ -4,9 +4,23 @@ import {
   type MicrodollarUsageContext,
 } from '../background/usage-accounting';
 import { sendApiMetrics } from '../background/api-metrics';
-import { reportAbuseCost } from '../lib/abuse-service';
+import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { buildProviders, type SecretsBundle } from '../lib/providers';
 import type { Env } from '../env';
+
+async function resolveAbuseSecrets(env: Env): Promise<{ url: string; secrets: AbuseServiceSecrets | undefined }> {
+  const [url, cfAccessClientId, cfAccessClientSecret] = await Promise.all([
+    env.ABUSE_SERVICE_URL.get(),
+    env.ABUSE_CF_ACCESS_CLIENT_ID.get().catch(() => undefined),
+    env.ABUSE_CF_ACCESS_CLIENT_SECRET.get().catch(() => undefined),
+  ]);
+  return {
+    url,
+    secrets: cfAccessClientId && cfAccessClientSecret
+      ? { cfAccessClientId, cfAccessClientSecret }
+      : undefined,
+  };
+}
 import { getIdempotencyDO } from '../dos/IdempotencyDO';
 import type { BackgroundTaskMessage, UsageAccountingMessage } from './messages';
 
@@ -67,9 +81,10 @@ async function processUsageAccounting(msg: UsageAccountingMessage, env: Env): Pr
   // Abuse cost reporting chains on the usage accounting result
   if (msg.abuseRequestId && usageStats.messageId) {
     try {
+      const abuse = await resolveAbuseSecrets(env);
       await reportAbuseCost(
-        msg.abuseServiceUrl,
-        msg.abuseSecrets,
+        abuse.url,
+        abuse.secrets,
         {
           kiloUserId: msg.kiloUserId,
           fraudHeaders: msg.fraudHeaders,
