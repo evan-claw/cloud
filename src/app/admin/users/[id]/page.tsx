@@ -11,6 +11,7 @@ import {
   organization_memberships,
   organizations,
   auto_top_up_configs,
+  kiloclaw_earlybird_purchases,
 } from '@kilocode/db/schema';
 import { eq, inArray, desc } from 'drizzle-orm';
 import { findUserById } from '@/lib/user';
@@ -72,6 +73,12 @@ async function getUserData(userId: string): Promise<UserDetailProps | null> {
       where: eq(auto_top_up_configs.owned_by_user_id, userId),
     })) ?? null;
 
+  // Fetch KiloClaw earlybird purchase
+  const earlybirdPurchase =
+    (await db.query.kiloclaw_earlybird_purchases.findFirst({
+      where: eq(kiloclaw_earlybird_purchases.user_id, userId),
+    })) ?? null;
+
   // Check if user's email domain has SSO configured
   const emailDomain = getLowerDomainFromEmail(user.google_user_email);
   const isSSOProtectedDomain = emailDomain
@@ -93,6 +100,7 @@ async function getUserData(userId: string): Promise<UserDetailProps | null> {
     organization_memberships: organizationMemberships,
     autoTopUpConfig,
     is_sso_protected_domain: isSSOProtectedDomain,
+    earlybirdPurchase,
   };
 }
 

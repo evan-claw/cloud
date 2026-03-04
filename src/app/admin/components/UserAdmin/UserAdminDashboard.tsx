@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/breadcrumb';
 import { UserAdminOrganizations } from '@/app/admin/components/UserAdmin/UserAdminOrganizations';
 import { UserAdminKiloPass } from '@/app/admin/components/UserAdmin/UserAdminKiloPass';
+import { UserAdminEarlybirdPurchase } from '@/app/admin/components/UserAdmin/UserAdminEarlybirdPurchase';
 
 export function UserAdminDashboard({ ...user }: UserDetailProps) {
   const breadcrumbs = (
@@ -48,6 +49,7 @@ export function UserAdminDashboard({ ...user }: UserDetailProps) {
           <UserAdminNotes {...user} />
           <UserAdminGdprRemoval {...user} />
           <UserAdminKiloPass userId={user.id} />
+          <UserAdminEarlybirdPurchase earlybirdPurchase={user.earlybirdPurchase} />
           <UserAdminUsageBilling {...user} />
           <UserAdminCreditGrant
             {...user}

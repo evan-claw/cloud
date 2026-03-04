@@ -5,6 +5,7 @@ import type {
   Organization,
   OrganizationMembership,
   AutoTopUpConfig,
+  KiloClawEarlybirdPurchase,
 } from '@kilocode/db/schema';
 import type { describePaymentMethods } from '@/lib/admin-utils-serverside';
 import { OrganizationSchema } from '@/lib/organizations/organization-types';
@@ -35,11 +36,15 @@ export type HasAutoTopUpConfig = {
 export type HasSSOProtectedDomain = {
   is_sso_protected_domain: boolean;
 };
+export type HasEarlybirdPurchase = {
+  earlybirdPurchase: KiloClawEarlybirdPurchase | null;
+};
 export type UserDetailProps = UserTableProps &
   HasCreditInfo &
   UserOrganizationMembershipProps &
   HasAutoTopUpConfig &
-  HasSSOProtectedDomain;
+  HasSSOProtectedDomain &
+  HasEarlybirdPurchase;
 export type UsersApiResponse = {
   users: UserTableProps[];
   pagination: PaginationMetadata;
