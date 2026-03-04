@@ -32,6 +32,7 @@ import { postIssueComment } from '@/lib/auto-fix/github/post-comment';
 import { generateGitHubInstallationToken } from '@/lib/integrations/platforms/github/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
 import { handleCommentReply } from '@/lib/auto-fix/github/handle-comment-reply';
+import { handleCreateIssuePR } from '@/lib/auto-fix/github/handle-create-issue-pr';
 
 type LegacyCallbackPayload = {
   sessionId: string;
@@ -48,15 +49,6 @@ type CloudAgentNextCallbackPayload = {
 };
 
 type CallbackPayload = LegacyCallbackPayload | CloudAgentNextCallbackPayload;
-
-type AutoFixConfigResponse = {
-  githubToken?: string;
-  config: {
-    pr_base_branch: string;
-    pr_title_template: string;
-    pr_body_template?: string | null;
-  };
-};
 
 function normalizePayload(raw: CallbackPayload): {
   sessionId?: string;
@@ -227,11 +219,14 @@ export async function POST(req: NextRequest) {
         throw new Error(`Failed to post review-comment success reply: ${replyResult.error}`);
       }
     } else {
-      await createIssueFixPullRequest(req, {
+      const prResult = await handleCreateIssuePR({
         ticketId,
         sessionId,
         branchName: lastSeenBranch,
       });
+      if (!prResult.ok) {
+        throw new Error(prResult.error);
+      }
     }
 
     // Trigger dispatch for pending fixes
@@ -264,80 +259,6 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-async function createIssueFixPullRequest(
-  req: NextRequest,
-  params: {
-    ticketId: string;
-    sessionId: string;
-    branchName?: string;
-  }
-): Promise<void> {
-  const configResponse = await fetch(new URL('/api/internal/auto-fix/config', req.url), {
-    method: 'POST',
-    headers: {
-      'X-Internal-Secret': INTERNAL_API_SECRET,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ticketId: params.ticketId,
-    }),
-  });
-
-  if (!configResponse.ok) {
-    const configError = await configResponse.text();
-    const message = `Failed to load auto-fix config for PR creation: ${configResponse.status} ${configResponse.statusText} - ${configError}`;
-    await markIssueTicketFailed(params.ticketId, message);
-    throw new Error(message);
-  }
-
-  const configData = (await configResponse.json()) as AutoFixConfigResponse;
-
-  if (!configData.githubToken) {
-    const message = 'Cannot create PR: missing GitHub installation token from auto-fix config';
-    await markIssueTicketFailed(params.ticketId, message);
-    throw new Error(message);
-  }
-
-  const createPrResponse = await fetch(new URL('/api/internal/auto-fix/create-pr', req.url), {
-    method: 'POST',
-    headers: {
-      'X-Internal-Secret': INTERNAL_API_SECRET,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      ticketId: params.ticketId,
-      sessionId: params.sessionId,
-      ...(params.branchName ? { branchName: params.branchName } : {}),
-      githubToken: configData.githubToken,
-      config: {
-        pr_base_branch: configData.config.pr_base_branch,
-        pr_title_template: configData.config.pr_title_template,
-        pr_body_template: configData.config.pr_body_template,
-      },
-    }),
-  });
-
-  if (!createPrResponse.ok) {
-    const createPrError = await createPrResponse.text();
-    const message = `Failed to create PR from callback: ${createPrResponse.status} ${createPrResponse.statusText} - ${createPrError}`;
-    await markIssueTicketFailed(params.ticketId, message);
-    throw new Error(message);
-  }
-
-  logExceptInTest('[auto-fix-pr-callback] Created PR for issue-triggered ticket', {
-    ticketId: params.ticketId,
-    sessionId: params.sessionId,
-    branchName: params.branchName,
-  });
-}
-
-async function markIssueTicketFailed(ticketId: string, errorMessage: string): Promise<void> {
-  await updateFixTicketStatus(ticketId, 'failed', {
-    errorMessage,
-    completedAt: new Date(),
-  });
 }
 
 /**
