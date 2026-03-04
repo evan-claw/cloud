@@ -23,6 +23,7 @@ vi.mock('@kilocode/db/client', () => ({
         if (name === 'kilocode_users') return chainResult(_userRows);
         if (name === 'credit_transactions') return chainResult([{ count: _creditCount }]);
         if (name === 'organizations') return chainResult(_orgRow ? [_orgRow] : []);
+        if (name === 'organization_memberships') return chainResult([{ id: 'mem-1' }]);
         if (name === 'model_user_byok_providers') return chainResult([]);
         if (name === 'custom_llm') return chainResult([]);
         if (name === 'models_by_provider') return chainResult([]);
