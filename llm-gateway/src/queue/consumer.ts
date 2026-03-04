@@ -77,12 +77,15 @@ async function processUsageAccounting(
   env: Env,
   resolved: ResolvedSecrets
 ): Promise<void> {
-  const providerApiKey = resolveProviderApiKey(resolved.secrets, msg.providerId) ?? '';
+  const providerApiKey = resolveProviderApiKey(resolved.secrets, msg.providerId);
+  if (providerApiKey === undefined) {
+    console.warn('[queue] No API key found for provider', { providerId: msg.providerId });
+  }
 
   // Re-hydrate the full MicrodollarUsageContext with the provider API key
   const usageContext: MicrodollarUsageContext = {
     ...msg.usageContext,
-    providerApiKey,
+    providerApiKey: providerApiKey ?? '',
   };
 
   const db = getWorkerDb(env.HYPERDRIVE.connectionString);
