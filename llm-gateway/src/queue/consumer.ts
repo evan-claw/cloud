@@ -5,7 +5,7 @@ import {
 } from '../background/usage-accounting';
 import { sendApiMetrics } from '../background/api-metrics';
 import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
-import { buildProviders, type SecretsBundle } from '../lib/providers';
+import { buildProviderApiKeyMap, type SecretsBundle } from '../lib/providers';
 import { getIdempotencyDO } from '../dos/IdempotencyDO';
 import type { BackgroundTaskMessage, UsageAccountingMessage } from './messages';
 import type { Env } from '../env';
@@ -59,16 +59,9 @@ async function resolveSecrets(env: Env): Promise<SecretsBundle> {
   };
 }
 
-function resolveProviderApiKey(secrets: SecretsBundle, providerId: string): string | undefined {
-  const providers = buildProviders(secrets);
-  for (const provider of Object.values(providers)) {
-    if (provider.id === providerId) return provider.apiKey;
-  }
-  return undefined;
-}
-
 interface ResolvedSecrets {
   secrets: SecretsBundle;
+  providerApiKeys: Map<string, string>;
   abuse: { url: string; secrets: AbuseServiceSecrets | undefined };
 }
 
@@ -77,7 +70,7 @@ async function processUsageAccounting(
   env: Env,
   resolved: ResolvedSecrets
 ): Promise<void> {
-  const providerApiKey = resolveProviderApiKey(resolved.secrets, msg.providerId);
+  const providerApiKey = resolved.providerApiKeys.get(msg.providerId);
   if (providerApiKey === undefined) {
     console.warn('[queue] No API key found for provider', { providerId: msg.providerId });
   }
@@ -154,7 +147,7 @@ export async function handleBackgroundTaskQueue(
               resolveSecrets(env),
               resolveAbuseSecrets(env),
             ]);
-            resolved = { secrets, abuse };
+            resolved = { secrets, providerApiKeys: buildProviderApiKeyMap(secrets), abuse };
           }
           await processUsageAccounting(message.body, env, resolved);
           break;

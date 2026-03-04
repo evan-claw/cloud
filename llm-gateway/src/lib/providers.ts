@@ -211,4 +211,11 @@ export function getPreferredProviderOrder(requestedModel: string): string[] {
   return [];
 }
 
+// Build a providerId → apiKey map once so callers don't need to rebuild the
+// full providers object for each message in a queue batch.
+export function buildProviderApiKeyMap(secrets: SecretsBundle): Map<string, string> {
+  const providers = buildProviders(secrets);
+  return new Map(Object.values(providers).map(p => [p.id, p.apiKey]));
+}
+
 export { isKiloFreeModel };
