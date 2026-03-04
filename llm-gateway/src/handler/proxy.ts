@@ -20,7 +20,7 @@ import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
 import { classifyAbuse, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { getWorkerDb } from '@kilocode/db/client';
-import { scheduleBackgroundTasks } from './background-tasks';
+import { scheduleBackgroundTasks, type BackgroundTaskParams } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
 import { captureException } from '../lib/sentry';
 
@@ -254,7 +254,10 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   const abuseRequestId = classifyResult?.request_id ?? undefined;
 
   // ── Shared background task context ──────────────────────────────────────────
-  const bgCommon = {
+  const bgCommon: Omit<
+    BackgroundTaskParams,
+    'accountingStream' | 'metricsStream' | 'loggingStream'
+  > = {
     upstreamStatusCode: response.status,
     abuseServiceUrl,
     abuseSecrets,
@@ -287,7 +290,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     connectionString: c.env.HYPERDRIVE.connectionString,
     o11y: c.env.O11Y,
     queue: c.env.LLM_GATEWAY_BG_TASKS_QUEUE,
-  } as const;
+  };
 
   // ── Error responses ──────────────────────────────────────────────────────────
   // 402 non-BYOK: only metrics (no accounting/logging), matching the reference.
