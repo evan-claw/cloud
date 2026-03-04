@@ -73,18 +73,14 @@ export function extractWrapperSessionIdFromCommand(command: string): string | nu
 }
 
 /**
- * Find an existing wrapper for the given session.
- * Scans listProcesses() for a command containing "--agent-session {sessionId}".
- *
- * @param sandbox - The sandbox instance to search in
- * @param sessionId - The cloud-agent session ID to find
- * @returns Wrapper info if found, null otherwise
+ * Find a wrapper for the given session in a pre-fetched process list.
+ * Useful when the caller already has the process list (e.g. to avoid
+ * repeated listProcesses() calls in a loop).
  */
-export async function findWrapperForSession(
-  sandbox: SandboxInstance,
+export function findWrapperForSessionInProcesses(
+  processes: Process[],
   sessionId: string
-): Promise<WrapperInfo | null> {
-  const processes = await sandbox.listProcesses();
+): WrapperInfo | null {
   const marker = `${KILO_WRAPPER_SESSION_FLAG} ${sessionId}`;
 
   for (const proc of processes) {
@@ -103,6 +99,22 @@ export async function findWrapperForSession(
   }
 
   return null;
+}
+
+/**
+ * Find an existing wrapper for the given session.
+ * Scans listProcesses() for a command containing "--agent-session {sessionId}".
+ *
+ * @param sandbox - The sandbox instance to search in
+ * @param sessionId - The cloud-agent session ID to find
+ * @returns Wrapper info if found, null otherwise
+ */
+export async function findWrapperForSession(
+  sandbox: SandboxInstance,
+  sessionId: string
+): Promise<WrapperInfo | null> {
+  const processes = await sandbox.listProcesses();
+  return findWrapperForSessionInProcesses(processes, sessionId);
 }
 
 /**
