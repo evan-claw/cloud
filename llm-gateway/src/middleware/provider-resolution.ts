@@ -3,6 +3,7 @@ import type { HonoContext } from '../types/hono';
 import { getProvider } from '../lib/providers';
 import type { SecretsBundle } from '../lib/providers';
 import { getWorkerDb } from '@kilocode/db/client';
+import { extractHeaderAndLimitLength } from '../lib/extract-headers';
 
 // Resolves API keys from Secrets Store, then determines which provider to route to.
 // Sets provider, userByok, and customLlm on the Hono context.
@@ -42,7 +43,8 @@ export const providerResolutionMiddleware = createMiddleware<HonoContext>(async 
   const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
 
   // Random seed for Vercel A/B routing — same as reference: taskId || user.id
-  const taskId = c.req.header('x-kilocode-taskid') ?? undefined;
+  // Apply the same 500-char truncation as the reference (extractHeaderAndLimitLength).
+  const taskId = extractHeaderAndLimitLength(c.req.raw.headers, 'x-kilocode-taskid') ?? undefined;
   const user = c.get('user');
   const randomSeed = taskId ?? user.id;
 
