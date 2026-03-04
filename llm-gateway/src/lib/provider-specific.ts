@@ -48,7 +48,9 @@ function isZaiModel(model: string) {
 // --- Anthropic ---
 
 function appendAnthropicBetaHeader(headers: Record<string, string>, flag: string) {
-  headers['x-anthropic-beta'] = [headers['x-anthropic-beta'], flag].filter(Boolean).join(',');
+  for (const header of ['anthropic-beta', 'x-anthropic-beta']) {
+    headers[header] = [headers[header], flag].filter(Boolean).join(',');
+  }
 }
 
 function hasCacheControl(msg: ChatMessage): boolean {
