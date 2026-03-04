@@ -2,28 +2,23 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Capture what runApiMetrics receives ──────────────────────────────────────
+// ── Capture what gets enqueued ────────────────────────────────────────────────
 
-const apiMetricsCalls: unknown[] = [];
+const queuedMessages: unknown[] = [];
 
 vi.mock('../../src/background/api-metrics', () => ({
-  runApiMetrics: async (_o11y: unknown, params: unknown) => {
-    apiMetricsCalls.push(params);
-  },
+  drainResponseBodyForInferenceProvider: async () => undefined,
   getToolsAvailable: () => [],
   getToolsUsed: () => [],
 }));
 
 vi.mock('../../src/background/usage-accounting', () => ({
-  runUsageAccounting: async () => null,
+  parseMicrodollarUsageFromStream: async () => ({ messageId: null }),
+  parseMicrodollarUsageFromString: () => ({ messageId: null }),
 }));
 
 vi.mock('../../src/background/request-logging', () => ({
   runRequestLogging: async () => {},
-}));
-
-vi.mock('../../src/lib/abuse-service', () => ({
-  reportAbuseCost: async () => {},
 }));
 
 vi.mock('../../src/lib/prompt-info', () => ({
@@ -36,7 +31,7 @@ vi.mock('@kilocode/db/client', () => ({
 }));
 
 beforeEach(() => {
-  apiMetricsCalls.length = 0;
+  queuedMessages.length = 0;
 
   // scheduler.wait is a Workers-only global — stub it for Node tests.
   const g = globalThis as Record<string, unknown>;
@@ -54,6 +49,15 @@ function makeStream(): ReadableStream {
       ctrl.close();
     },
   });
+}
+
+function makeQueue() {
+  return {
+    send: async (msg: unknown) => {
+      queuedMessages.push(msg);
+    },
+    sendBatch: async () => {},
+  };
 }
 
 function baseParams() {
@@ -90,6 +94,7 @@ function baseParams() {
     posthogApiKey: undefined,
     connectionString: 'postgres://localhost:5432/test',
     o11y: { ingestApiMetrics: async () => {} },
+    queue: makeQueue(),
   } as const;
 }
 
@@ -113,10 +118,12 @@ describe('scheduleBackgroundTasks – requestedModel (B3)', () => {
     // Wait for all background tasks to complete
     await Promise.all(waitUntilPromises);
 
-    expect(apiMetricsCalls).toHaveLength(1);
-    const params = apiMetricsCalls[0] as Record<string, unknown>;
-    expect(params.requestedModel).toBe('kilo/auto');
-    expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    const metricsMsg = queuedMessages.find(
+      (m: unknown) => (m as { type: string }).type === 'api-metrics'
+    ) as { type: string; params: Record<string, unknown> };
+    expect(metricsMsg).toBeDefined();
+    expect(metricsMsg.params.requestedModel).toBe('kilo/auto');
+    expect(metricsMsg.params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
 
   it('uses resolvedModel as requestedModel when autoModel is null', async () => {
@@ -135,10 +142,12 @@ describe('scheduleBackgroundTasks – requestedModel (B3)', () => {
 
     await Promise.all(waitUntilPromises);
 
-    expect(apiMetricsCalls).toHaveLength(1);
-    const params = apiMetricsCalls[0] as Record<string, unknown>;
-    expect(params.requestedModel).toBe('anthropic/claude-sonnet-4-20250514');
-    expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    const metricsMsg = queuedMessages.find(
+      (m: unknown) => (m as { type: string }).type === 'api-metrics'
+    ) as { type: string; params: Record<string, unknown> };
+    expect(metricsMsg).toBeDefined();
+    expect(metricsMsg.params.requestedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(metricsMsg.params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
 });
 
@@ -159,12 +168,14 @@ describe('scheduleBackgroundTasks – resolvedModel normalization (B4)', () => {
 
     await Promise.all(waitUntilPromises);
 
-    expect(apiMetricsCalls).toHaveLength(1);
-    const params = apiMetricsCalls[0] as Record<string, unknown>;
+    const metricsMsg = queuedMessages.find(
+      (m: unknown) => (m as { type: string }).type === 'api-metrics'
+    ) as { type: string; params: Record<string, unknown> };
+    expect(metricsMsg).toBeDefined();
     // B4: resolvedModel must be normalized — :free stripped
-    expect(params.resolvedModel).toBe('corethink');
+    expect(metricsMsg.params.resolvedModel).toBe('corethink');
     // requestedModel is NOT normalized (preserves original for tracking)
-    expect(params.requestedModel).toBe('corethink:free');
+    expect(metricsMsg.params.requestedModel).toBe('corethink:free');
   });
 
   it('strips :exacto suffix from resolvedModel in metrics', async () => {
@@ -183,9 +194,11 @@ describe('scheduleBackgroundTasks – resolvedModel normalization (B4)', () => {
 
     await Promise.all(waitUntilPromises);
 
-    expect(apiMetricsCalls).toHaveLength(1);
-    const params = apiMetricsCalls[0] as Record<string, unknown>;
-    expect(params.resolvedModel).toBe('some-model');
+    const metricsMsg = queuedMessages.find(
+      (m: unknown) => (m as { type: string }).type === 'api-metrics'
+    ) as { type: string; params: Record<string, unknown> };
+    expect(metricsMsg).toBeDefined();
+    expect(metricsMsg.params.resolvedModel).toBe('some-model');
   });
 
   it('leaves models without colon suffix unchanged', async () => {
@@ -204,8 +217,10 @@ describe('scheduleBackgroundTasks – resolvedModel normalization (B4)', () => {
 
     await Promise.all(waitUntilPromises);
 
-    expect(apiMetricsCalls).toHaveLength(1);
-    const params = apiMetricsCalls[0] as Record<string, unknown>;
-    expect(params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
+    const metricsMsg = queuedMessages.find(
+      (m: unknown) => (m as { type: string }).type === 'api-metrics'
+    ) as { type: string; params: Record<string, unknown> };
+    expect(metricsMsg).toBeDefined();
+    expect(metricsMsg.params.resolvedModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
 });

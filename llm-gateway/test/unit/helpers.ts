@@ -61,6 +61,10 @@ export function makeEnv(overrides: Partial<Record<string, unknown>> = {}): Cloud
   return {
     HYPERDRIVE: { connectionString: 'postgres://localhost:5432/test' } as Hyperdrive,
     RATE_LIMIT_DO: makeFakeDONamespace(),
+    LLM_GATEWAY_BG_TASKS_QUEUE: {
+      send: async () => {},
+      sendBatch: async () => {},
+    } as unknown as Queue,
     O11Y: {
       fetch: async () => new Response(JSON.stringify({ success: true })),
       ingestApiMetrics: async () => {},

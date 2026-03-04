@@ -21,6 +21,7 @@ declare namespace Cloudflare {
 		GIGAPOTATO_API_URL: SecretsStoreSecret;
 		ABUSE_SERVICE_URL: SecretsStoreSecret;
 		POSTHOG_API_KEY: SecretsStoreSecret;
+		LLM_GATEWAY_BG_TASKS_QUEUE: Queue;
 		RATE_LIMIT_DO: DurableObjectNamespace<import("./src/index").RateLimitDO>;
 		O11Y: Fetcher /* o11y */;
 	}

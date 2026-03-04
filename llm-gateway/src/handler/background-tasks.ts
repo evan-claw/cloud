@@ -1,15 +1,18 @@
 // Background tasks scheduled via ctx.waitUntil() after the client response is sent.
-// Handles usage accounting, API metrics, request logging, and abuse cost reporting.
+// Stream parsing runs in-process (fast, in-memory replay of buffered chunks), then
+// usage accounting and API metrics messages are enqueued to a Cloudflare Queue for
+// processing with automatic retries and no waitUntil budget pressure.
+// Request logging stays in-process (simple, employees-only).
 
 import { getWorkerDb } from '@kilocode/db/client';
 import {
-  runUsageAccounting,
+  parseMicrodollarUsageFromStream,
+  parseMicrodollarUsageFromString,
   type MicrodollarUsageContext,
   type MicrodollarUsageStats,
 } from '../background/usage-accounting';
-import { runApiMetrics } from '../background/api-metrics';
+import { drainResponseBodyForInferenceProvider } from '../background/api-metrics';
 import { runRequestLogging } from '../background/request-logging';
-import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service';
 import { extractPromptInfo, estimateChatTokens } from '../lib/prompt-info';
 import { normalizeModelId } from '../lib/models';
 import { getToolsAvailable, type getToolsUsed } from '../background/api-metrics';
@@ -17,6 +20,8 @@ import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { OpenRouterChatCompletionRequest } from '../types/request';
 import type { ApiMetricsParams } from '@kilocode/worker-utils';
+import type { AbuseServiceSecrets } from '../lib/abuse-service';
+import type { BackgroundTaskMessage } from '../queue/messages';
 
 const BACKGROUND_TASK_TIMEOUT_MS = 25_000;
 
@@ -67,6 +72,7 @@ export type BackgroundTaskParams = {
   posthogApiKey: string | undefined;
   connectionString: string;
   o11y: { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
+  queue: Queue<BackgroundTaskMessage>;
 };
 
 export function scheduleBackgroundTasks(
@@ -85,7 +91,6 @@ export function scheduleBackgroundTasks(
     requestStartedAt,
     provider,
     providerApiUrl,
-    providerApiKey,
     providerHasGenerationEndpoint,
     resolvedModel,
     requestBody,
@@ -108,18 +113,36 @@ export function scheduleBackgroundTasks(
     posthogApiKey,
     connectionString,
     o11y,
+    queue,
   } = params;
 
-  // ── Usage accounting ───────────────────────────────────────────────────────
-  const usageTask: Promise<MicrodollarUsageStats | null | undefined> =
+  // ── Parse accounting stream + enqueue usage accounting ─────────────────────
+  const usageParseAndEnqueueTask: Promise<void> =
     accountingStream && !isAnon
       ? withTimeout(
           (async () => {
-            const db = getWorkerDb(connectionString);
+            let usageStats: MicrodollarUsageStats;
+            try {
+              if (isStreaming) {
+                usageStats = await parseMicrodollarUsageFromStream(
+                  accountingStream,
+                  user.id,
+                  provider,
+                  upstreamStatusCode
+                );
+              } else {
+                const text = await new Response(accountingStream).text();
+                usageStats = parseMicrodollarUsageFromString(text, user.id, upstreamStatusCode);
+              }
+            } catch (err) {
+              console.error('[bg] Usage stream parse error', err);
+              return;
+            }
+
             const promptInfo = extractPromptInfo(requestBody);
             const { estimatedInputTokens, estimatedOutputTokens } = estimateChatTokens(requestBody);
 
-            const usageContext: MicrodollarUsageContext = {
+            const usageContext: Omit<MicrodollarUsageContext, 'providerApiKey'> = {
               kiloUserId: user.id,
               fraudHeaders,
               organizationId,
@@ -135,7 +158,6 @@ export function scheduleBackgroundTasks(
               posthog_distinct_id: user.google_user_email,
               posthogApiKey,
               providerApiUrl,
-              providerApiKey,
               providerHasGenerationEndpoint,
               project_id: projectId,
               status_code: upstreamStatusCode,
@@ -152,43 +174,81 @@ export function scheduleBackgroundTasks(
               auto_model: autoModel,
             };
 
-            return runUsageAccounting(accountingStream, usageContext, db);
+            try {
+              await queue.send({
+                type: 'usage-accounting',
+                usageStats,
+                usageContext,
+                abuseRequestId,
+                abuseServiceUrl,
+                abuseSecrets,
+                fraudHeaders,
+                requested_model: resolvedModel,
+                kiloUserId: user.id,
+                connectionString,
+                providerId: provider,
+              });
+            } catch (err) {
+              console.error('[bg] Failed to enqueue usage-accounting', err);
+            }
           })(),
           BACKGROUND_TASK_TIMEOUT_MS
         )
-      : (accountingStream?.cancel(), Promise.resolve(null));
+      : (accountingStream?.cancel(), Promise.resolve());
 
-  // ── API metrics ────────────────────────────────────────────────────────────
-  const metricsTask =
+  // ── Parse metrics stream + enqueue API metrics ─────────────────────────────
+  const metricsParseAndEnqueueTask: Promise<void> =
     metricsStream && o11y
       ? withTimeout(
           (async () => {
-            await runApiMetrics(
-              o11y,
-              {
-                kiloUserId: user.id,
-                organizationId,
-                isAnonymous: isAnon,
-                isStreaming,
-                userByok,
-                mode: modeHeader ?? undefined,
-                provider,
-                requestedModel: autoModel ?? resolvedModel,
-                resolvedModel: normalizeModelId(resolvedModel),
-                toolsAvailable: getToolsAvailable(requestBody.tools),
-                toolsUsed,
-                ttfbMs,
-                statusCode: upstreamStatusCode,
-              },
-              metricsStream,
-              requestStartedAt
-            );
+            let inferenceProvider: string | undefined;
+            try {
+              inferenceProvider = await drainResponseBodyForInferenceProvider(
+                new Response(metricsStream, {
+                  headers: {
+                    'content-type': isStreaming ? 'text/event-stream' : 'application/json',
+                  },
+                }),
+                60_000
+              );
+            } catch {
+              /* ignore drain errors — still emit timing */
+            }
+
+            const completeRequestMs = Math.max(0, Math.round(performance.now() - requestStartedAt));
+
+            const metricsParams: ApiMetricsParams = {
+              kiloUserId: user.id,
+              organizationId,
+              isAnonymous: isAnon,
+              isStreaming,
+              userByok,
+              mode: modeHeader ?? undefined,
+              provider,
+              requestedModel: autoModel ?? resolvedModel,
+              resolvedModel: normalizeModelId(resolvedModel),
+              toolsAvailable: getToolsAvailable(requestBody.tools),
+              toolsUsed,
+              ttfbMs,
+              statusCode: upstreamStatusCode,
+              inferenceProvider,
+              completeRequestMs,
+            };
+
+            try {
+              await queue.send({
+                type: 'api-metrics',
+                params: metricsParams,
+              });
+            } catch (err) {
+              console.error('[bg] Failed to enqueue api-metrics', err);
+            }
           })(),
           BACKGROUND_TASK_TIMEOUT_MS
         )
-      : (metricsStream?.cancel(), Promise.resolve(undefined));
+      : (metricsStream?.cancel(), Promise.resolve());
 
-  // ── Request logging (Kilo employees only) ──────────────────────────────────
+  // ── Request logging (Kilo employees only — stays in-process) ───────────────
   const loggingTask =
     loggingStream && !isAnon
       ? withTimeout(
@@ -209,34 +269,8 @@ export function scheduleBackgroundTasks(
         )
       : (loggingStream?.cancel(), Promise.resolve(undefined));
 
-  // ── Abuse cost (depends on usage accounting result) ────────────────────────
-  const abuseCostTask = withTimeout(
-    usageTask.then(usageStats => {
-      if (!usageStats || !abuseRequestId) return;
-      return reportAbuseCost(
-        abuseServiceUrl,
-        abuseSecrets,
-        {
-          kiloUserId: user.id,
-          fraudHeaders,
-          requested_model: resolvedModel,
-          abuse_request_id: abuseRequestId,
-        },
-        {
-          messageId: usageStats.messageId,
-          cost_mUsd: usageStats.market_cost ?? usageStats.cost_mUsd,
-          inputTokens: usageStats.inputTokens,
-          outputTokens: usageStats.outputTokens,
-          cacheWriteTokens: usageStats.cacheWriteTokens,
-          cacheHitTokens: usageStats.cacheHitTokens,
-        }
-      );
-    }),
-    BACKGROUND_TASK_TIMEOUT_MS
-  );
-
   ctx.waitUntil(
-    Promise.all([usageTask, metricsTask, loggingTask, abuseCostTask]).catch(err => {
+    Promise.all([usageParseAndEnqueueTask, metricsParseAndEnqueueTask, loggingTask]).catch(err => {
       console.error('[proxy] Background task error', err);
     })
   );

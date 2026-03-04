@@ -45,6 +45,19 @@
       "service": "o11y",
     },
   ],
+  "queues": {
+    "producers": [
+      { "queue": "llm-gateway-background-tasks", "binding": "LLM_GATEWAY_BG_TASKS_QUEUE" }
+    ],
+    "consumers": [
+      {
+        "queue": "llm-gateway-background-tasks",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "llm-gateway-background-tasks-dlq"
+      }
+    ]
+  },
   "secrets_store_secrets": [
     {
       "binding": "NEXTAUTH_SECRET_PROD",

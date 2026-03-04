@@ -764,44 +764,15 @@ async function isFirstUsageEver(
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
- * Parse usage from the background response stream, build the DB record, and insert.
- * Returns the MicrodollarUsageStats (including inference_provider and messageId) for
- * downstream use by api-metrics and abuse-cost background tasks.
+ * Post-parse processing: generation refetch, cost zeroing, DB insert, org usage,
+ * KiloPass bonus, PostHog events. Called by the queue consumer with pre-parsed stats,
+ * or by runUsageAccounting after in-process stream parsing.
  */
-export async function runUsageAccounting(
-  stream: ReadableStream<Uint8Array> | null,
+export async function processUsageAccountingAfterParse(
+  usageStats: MicrodollarUsageStats,
   usageContext: MicrodollarUsageContext,
   db: WorkerDb
-): Promise<MicrodollarUsageStats | null> {
-  if (!stream) {
-    console.warn('runUsageAccounting: no stream provided', {
-      kiloUserId: usageContext.kiloUserId,
-    });
-    return null;
-  }
-
-  let usageStats: MicrodollarUsageStats;
-  try {
-    if (usageContext.isStreaming) {
-      usageStats = await parseMicrodollarUsageFromStream(
-        stream,
-        usageContext.kiloUserId,
-        usageContext.provider,
-        usageContext.status_code ?? 200
-      );
-    } else {
-      const text = await new Response(stream).text();
-      usageStats = parseMicrodollarUsageFromString(
-        text,
-        usageContext.kiloUserId,
-        usageContext.status_code ?? 200
-      );
-    }
-  } catch (err) {
-    console.error('runUsageAccounting: parse error', err);
-    return null;
-  }
-
+): Promise<MicrodollarUsageStats> {
   // Refetch accurate cost/token data from the provider's generation endpoint when available.
   // OpenRouter's /generation?id= gives more precise token counts and cost data than the SSE stream.
   if (usageContext.providerHasGenerationEndpoint && usageStats.messageId && !usageStats.hasError) {
@@ -1015,4 +986,46 @@ export async function runUsageAccounting(
   }
 
   return usageStats;
+}
+
+/**
+ * Parse usage from the background response stream, build the DB record, and insert.
+ * Returns the MicrodollarUsageStats (including inference_provider and messageId) for
+ * downstream use by api-metrics and abuse-cost background tasks.
+ */
+export async function runUsageAccounting(
+  stream: ReadableStream<Uint8Array> | null,
+  usageContext: MicrodollarUsageContext,
+  db: WorkerDb
+): Promise<MicrodollarUsageStats | null> {
+  if (!stream) {
+    console.warn('runUsageAccounting: no stream provided', {
+      kiloUserId: usageContext.kiloUserId,
+    });
+    return null;
+  }
+
+  let usageStats: MicrodollarUsageStats;
+  try {
+    if (usageContext.isStreaming) {
+      usageStats = await parseMicrodollarUsageFromStream(
+        stream,
+        usageContext.kiloUserId,
+        usageContext.provider,
+        usageContext.status_code ?? 200
+      );
+    } else {
+      const text = await new Response(stream).text();
+      usageStats = parseMicrodollarUsageFromString(
+        text,
+        usageContext.kiloUserId,
+        usageContext.status_code ?? 200
+      );
+    }
+  } catch (err) {
+    console.error('runUsageAccounting: parse error', err);
+    return null;
+  }
+
+  return processUsageAccountingAfterParse(usageStats, usageContext, db);
 }

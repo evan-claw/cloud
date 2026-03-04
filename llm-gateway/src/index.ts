@@ -1,6 +1,9 @@
 export { RateLimitDO } from './dos/RateLimitDO';
 import * as Sentry from '@sentry/cloudflare';
 import { SENTRY_DSN } from './lib/sentry';
+import { handleBackgroundTaskQueue } from './queue/consumer';
+import type { BackgroundTaskMessage } from './queue/messages';
+import type { Env } from './env';
 import { Hono } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import type { HonoContext } from './types/hono';
@@ -70,10 +73,10 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal server error' }, 500);
 });
 
-export default Sentry.withSentry(
+export default Sentry.withSentry<Env, BackgroundTaskMessage>(
   (_env: Env) => ({
     dsn: SENTRY_DSN,
     sendDefaultPii: true,
   }),
-  { fetch: app.fetch }
+  { fetch: app.fetch, queue: handleBackgroundTaskQueue }
 );

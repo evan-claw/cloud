@@ -159,7 +159,7 @@ function safeParseJson(payload: string): unknown {
   }
 }
 
-async function drainResponseBodyForInferenceProvider(
+export async function drainResponseBodyForInferenceProvider(
   response: Response,
   timeoutMs: number
 ): Promise<string | undefined> {
@@ -243,7 +243,7 @@ type O11YRpc = { ingestApiMetrics(params: ApiMetricsParams): Promise<void> };
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
-async function sendApiMetrics(o11y: O11YRpc, params: ApiMetricsParams): Promise<void> {
+export async function sendApiMetrics(o11y: O11YRpc, params: ApiMetricsParams): Promise<void> {
   try {
     await o11y.ingestApiMetrics(params);
   } catch (err) {

@@ -239,6 +239,7 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     posthogApiKey,
     connectionString: c.env.HYPERDRIVE.connectionString,
     o11y: c.env.O11Y,
+    queue: c.env.LLM_GATEWAY_BG_TASKS_QUEUE,
   } as const;
 
   // ── Error responses: schedule background tasks before returning ──────────────
