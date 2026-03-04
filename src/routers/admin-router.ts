@@ -11,6 +11,7 @@ import {
   cliSessions,
   cli_sessions_v2,
   credit_transactions,
+  kiloclaw_earlybird_purchases,
 } from '@kilocode/db/schema';
 import { isNewSession } from '@/lib/cloud-agent/session-type';
 import { fetchSessionSnapshot, type SessionMessage } from '@/lib/session-ingest-client';
@@ -658,6 +659,17 @@ export const adminRouter = createTRPCRouter({
           balanceResetAmountUsd,
           alreadyBlocked: !!user.blocked_reason,
         };
+      }),
+
+    getKiloclawEarlybirdPurchase: adminProcedure
+      .input(z.object({ kilo_user_id: z.string() }))
+      .query(async ({ input }) => {
+        const [purchase] = await db
+          .select()
+          .from(kiloclaw_earlybird_purchases)
+          .where(eq(kiloclaw_earlybird_purchases.user_id, input.kilo_user_id))
+          .limit(1);
+        return { purchase: purchase ?? null };
       }),
   }),
 
