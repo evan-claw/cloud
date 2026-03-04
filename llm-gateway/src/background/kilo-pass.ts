@@ -309,9 +309,7 @@ function computeYearlyIssueMonth(
   const anchor = parsedNext ?? parseIso(startedAtIso);
   if (!anchor) return null;
   // currentPeriodStart = nextYearlyIssueAt - 1 month (or startedAt)
-  const currentPeriodStart = parsedNext
-    ? addMonths(parsedNext, -1)
-    : anchor;
+  const currentPeriodStart = parsedNext ? addMonths(parsedNext, -1) : anchor;
   return computeIssueMonth(currentPeriodStart);
 }
 

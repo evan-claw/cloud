@@ -8,7 +8,9 @@ import { reportAbuseCost, type AbuseServiceSecrets } from '../lib/abuse-service'
 import { buildProviders, type SecretsBundle } from '../lib/providers';
 import type { Env } from '../env';
 
-async function resolveAbuseSecrets(env: Env): Promise<{ url: string; secrets: AbuseServiceSecrets | undefined }> {
+async function resolveAbuseSecrets(
+  env: Env
+): Promise<{ url: string; secrets: AbuseServiceSecrets | undefined }> {
   const [url, cfAccessClientId, cfAccessClientSecret] = await Promise.all([
     env.ABUSE_SERVICE_URL.get(),
     env.ABUSE_CF_ACCESS_CLIENT_ID.get().catch(() => undefined),
@@ -16,9 +18,10 @@ async function resolveAbuseSecrets(env: Env): Promise<{ url: string; secrets: Ab
   ]);
   return {
     url,
-    secrets: cfAccessClientId && cfAccessClientSecret
-      ? { cfAccessClientId, cfAccessClientSecret }
-      : undefined,
+    secrets:
+      cfAccessClientId && cfAccessClientSecret
+        ? { cfAccessClientId, cfAccessClientSecret }
+        : undefined,
   };
 }
 import { getIdempotencyDO } from '../dos/IdempotencyDO';
