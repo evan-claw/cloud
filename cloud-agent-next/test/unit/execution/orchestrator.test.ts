@@ -29,6 +29,7 @@ import type {
   ExecutionResult,
   WorkspacePlan,
   ModelConfig,
+  ExecutionAction,
   ResumeContext,
   InitContext,
   ExistingSessionMetadata,
@@ -444,5 +445,114 @@ describe('ExistingSessionMetadata types', () => {
 
     expect(metadata.sandboxId).toBe('sandbox_123');
     expect(metadata.appendSystemPrompt).toBe('Additional instructions');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ExecutionAction Type Tests
+// ---------------------------------------------------------------------------
+
+describe('ExecutionAction types', () => {
+  it('sendMessage action has prompt', () => {
+    const action: ExecutionAction = {
+      kind: 'sendMessage',
+      prompt: 'Hello world',
+    };
+
+    expect(action.kind).toBe('sendMessage');
+    if (action.kind === 'sendMessage') {
+      expect(action.prompt).toBe('Hello world');
+    }
+  });
+
+  it('answerQuestion action has questionId and answers', () => {
+    const action: ExecutionAction = {
+      kind: 'answerQuestion',
+      questionId: 'que_abc123',
+      answers: [['Yes', 'No'], ['Option A']],
+    };
+
+    expect(action.kind).toBe('answerQuestion');
+    if (action.kind === 'answerQuestion') {
+      expect(action.questionId).toBe('que_abc123');
+      expect(action.answers).toHaveLength(2);
+    }
+  });
+
+  it('rejectQuestion action has only questionId', () => {
+    const action: ExecutionAction = {
+      kind: 'rejectQuestion',
+      questionId: 'que_xyz789',
+    };
+
+    expect(action.kind).toBe('rejectQuestion');
+    if (action.kind === 'rejectQuestion') {
+      expect(action.questionId).toBe('que_xyz789');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ExecutionPlan action Tests
+// ---------------------------------------------------------------------------
+
+describe('ExecutionPlan action', () => {
+  it('sendMessage action carries prompt', () => {
+    const plan: ExecutionPlan = {
+      executionId: 'exc_test' as ExecutionPlan['executionId'],
+      sessionId: 'session_test' as ExecutionPlan['sessionId'],
+      userId: 'user_test' as ExecutionPlan['userId'],
+      mode: 'code',
+      workspace: createResumeWorkspacePlan(),
+      wrapper: {},
+      action: { kind: 'sendMessage', prompt: 'Hello world' },
+    };
+
+    expect(plan.action.kind).toBe('sendMessage');
+    if (plan.action.kind === 'sendMessage') {
+      expect(plan.action.prompt).toBe('Hello world');
+    }
+  });
+
+  it('answerQuestion action carries questionId and answers', () => {
+    const plan: ExecutionPlan = {
+      executionId: 'exc_test' as ExecutionPlan['executionId'],
+      sessionId: 'session_test' as ExecutionPlan['sessionId'],
+      userId: 'user_test' as ExecutionPlan['userId'],
+      mode: 'code',
+      workspace: createResumeWorkspacePlan(),
+      wrapper: {},
+      action: {
+        kind: 'answerQuestion',
+        questionId: 'que_123',
+        answers: [['selected']],
+      },
+    };
+
+    expect(plan.action.kind).toBe('answerQuestion');
+    if (plan.action.kind === 'answerQuestion') {
+      expect(plan.action.questionId).toBe('que_123');
+      expect(plan.action.answers).toHaveLength(1);
+    }
+  });
+
+  it('rejectQuestion action carries questionId', () => {
+    const plan: ExecutionPlan = {
+      executionId: 'exc_test' as ExecutionPlan['executionId'],
+      sessionId: 'session_test' as ExecutionPlan['sessionId'],
+      userId: 'user_test' as ExecutionPlan['userId'],
+      mode: 'code',
+      workspace: createResumeWorkspacePlan(),
+      wrapper: {},
+      action: {
+        kind: 'rejectQuestion',
+        questionId: 'que_456',
+      },
+    };
+
+    expect(plan.action.kind).toBe('rejectQuestion');
+    if (plan.action.kind === 'rejectQuestion') {
+      expect(plan.action.questionId).toBe('que_456');
+    }
   });
 });

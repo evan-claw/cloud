@@ -52,6 +52,7 @@ import { ExecutionOrchestrator, type OrchestratorDeps } from '../execution/orche
 import type {
   ExecutionMode,
   ExecutionPlan,
+  ExecutionAction,
   StartExecutionV2Request,
   StartExecutionV2Result,
   InitializeContext,
@@ -1372,7 +1373,7 @@ export class CloudAgentSession extends DurableObject {
     userId: UserId;
     orgId?: string;
     mode: ExecutionMode;
-    prompt: string;
+    action: ExecutionAction;
     model?: string;
     variant?: string;
     autoCommit?: boolean;
@@ -1433,7 +1434,7 @@ export class CloudAgentSession extends DurableObject {
       sessionId: params.sessionId,
       userId: params.userId,
       orgId: params.orgId,
-      prompt: params.prompt,
+      action: params.action,
       mode: params.mode,
       workspace,
       wrapper: {
@@ -1620,7 +1621,7 @@ export class CloudAgentSession extends DurableObject {
           userId: request.userId,
           orgId: request.orgId,
           mode: request.mode,
-          prompt: request.prompt,
+          action: { kind: 'sendMessage', prompt: request.prompt },
           model: normalizedModel,
           variant: request.variant,
           autoCommit: request.autoCommit,
@@ -1706,7 +1707,7 @@ export class CloudAgentSession extends DurableObject {
           userId: metadata.userId as UserId,
           orgId: metadata.orgId,
           mode: metadata.mode as ExecutionMode,
-          prompt: metadata.prompt,
+          action: { kind: 'sendMessage', prompt: metadata.prompt },
           model: metadata.model,
           variant: metadata.variant,
           autoCommit: metadata.autoCommit,
@@ -1719,7 +1720,72 @@ export class CloudAgentSession extends DurableObject {
         return await this.executeDirectly(plan);
       }
 
-      // Follow-up message (kind === 'followup')
+      if (request.kind === 'answerQuestion' || request.kind === 'rejectQuestion') {
+        // Question answer/rejection recovery: same flow as followup but with question action
+        const metadata = await this.getMetadata();
+        if (!metadata) {
+          return this.buildStartError('NOT_FOUND', 'Session not found');
+        }
+        if (!metadata.initiatedAt) {
+          return this.buildStartError('BAD_REQUEST', 'Session has not been initiated yet');
+        }
+
+        const mode = (metadata.mode ?? 'code') as ExecutionMode;
+        const model = normalizeKilocodeModel(metadata.model);
+        if (!model) {
+          return this.buildStartError(
+            'BAD_REQUEST',
+            'No model specified and session has no default model'
+          );
+        }
+
+        let githubToken = metadata.githubToken;
+        if (metadata.githubInstallationId) {
+          const appType = metadata.githubAppType || 'standard';
+          githubToken = await this.getGitHubTokenService().getToken(
+            metadata.githubInstallationId,
+            appType
+          );
+        }
+
+        const sandboxId = await generateSandboxId(metadata.orgId, metadata.userId, request.botId);
+        const resumeContext: TokenResumeContext = {
+          kilocodeToken: metadata.kilocodeToken ?? '',
+          kilocodeModel: model,
+          githubToken,
+        };
+
+        const action: ExecutionAction =
+          request.kind === 'answerQuestion'
+            ? { kind: 'answerQuestion', questionId: request.questionId, answers: request.answers }
+            : { kind: 'rejectQuestion', questionId: request.questionId };
+
+        const plan = this.buildExecutionPlan({
+          executionId,
+          sandboxId,
+          sessionId,
+          userId: metadata.userId as UserId,
+          orgId: metadata.orgId,
+          mode,
+          action,
+          model,
+          autoCommit: metadata.autoCommit,
+          condenseOnComplete: metadata.condenseOnComplete,
+          resumeContext,
+          existingMetadata: metadata,
+          kiloSessionId: metadata.kiloSessionId,
+        });
+
+        return await this.executeDirectly(plan);
+      }
+
+      // Follow-up message
+      if (request.kind !== 'followup') {
+        return this.buildStartError(
+          'BAD_REQUEST',
+          `Unknown execution kind: ${(request as { kind: string }).kind}`
+        );
+      }
       const metadata = await this.getMetadata();
       if (!metadata) {
         return this.buildStartError('NOT_FOUND', 'Session not found');
@@ -1778,7 +1844,7 @@ export class CloudAgentSession extends DurableObject {
         userId: metadata.userId as UserId,
         orgId: metadata.orgId,
         mode,
-        prompt: request.prompt,
+        action: { kind: 'sendMessage', prompt: request.prompt },
         model,
         variant,
         autoCommit: request.autoCommit ?? metadata.autoCommit,

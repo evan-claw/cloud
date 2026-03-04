@@ -8,7 +8,10 @@ import { SessionService, fetchSessionMetadata } from '../../session-service.js';
 import { protectedProcedure } from '../auth.js';
 import { sessionIdSchema } from '../schemas.js';
 import { findWrapperForSession } from '../../kilo/wrapper-manager.js';
-import { WrapperClient } from '../../kilo/wrapper-client.js';
+import { WrapperClient, WrapperNoJobError } from '../../kilo/wrapper-client.js';
+import { withDORetry } from '../../utils/do-retry.js';
+import type { CloudAgentSession } from '../../persistence/CloudAgentSession.js';
+import type { StartExecutionV2Result } from '../../execution/types.js';
 
 async function resolveWrapperClient(opts: {
   sessionId: SessionId;
@@ -52,6 +55,21 @@ async function resolveWrapperClient(opts: {
   return new WrapperClient({ session, port: wrapperInfo.port });
 }
 
+function isRecoverableError(error: unknown): boolean {
+  return (
+    error instanceof WrapperNoJobError || (error instanceof TRPCError && error.code === 'NOT_FOUND')
+  );
+}
+
+function throwIfStartFailed(result: StartExecutionV2Result): void {
+  if (!result.success) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: `Recovery failed: ${result.error}`,
+    });
+  }
+}
+
 export function createSessionQuestionHandlers() {
   return {
     answerQuestion: protectedProcedure
@@ -80,13 +98,40 @@ export function createSessionQuestionHandlers() {
             const result = await wrapperClient.answerQuestion(input.questionId, input.answers);
             return { success: result.success };
           } catch (error) {
-            if (error instanceof TRPCError) throw error;
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            logger.withFields({ error: errorMsg }).error('Failed to answer question');
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: `Failed to answer question: ${errorMsg}`,
-            });
+            if (!isRecoverableError(error)) {
+              if (error instanceof TRPCError) throw error;
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              logger.withFields({ error: errorMsg }).error('Failed to answer question');
+              throw new TRPCError({
+                code: 'INTERNAL_SERVER_ERROR',
+                message: `Failed to answer question: ${errorMsg}`,
+              });
+            }
+
+            // Recovery: wrapper has no job or no wrapper found — run full execution cycle
+            logger.info('Recovering: starting full execution cycle for question answer');
+
+            const doKey = `${userId}:${sessionId}`;
+            const doId = env.CLOUD_AGENT_SESSION.idFromName(doKey);
+
+            const startResult = await withDORetry<
+              DurableObjectStub<CloudAgentSession>,
+              StartExecutionV2Result
+            >(
+              () => env.CLOUD_AGENT_SESSION.get(doId),
+              stub =>
+                stub.startExecutionV2({
+                  kind: 'answerQuestion',
+                  userId: userId as `user_${string}`,
+                  botId: ctx.botId,
+                  questionId: input.questionId,
+                  answers: input.answers,
+                }),
+              'startExecutionV2'
+            );
+
+            throwIfStartFailed(startResult);
+            return { success: true };
           }
         });
       }),
@@ -116,13 +161,39 @@ export function createSessionQuestionHandlers() {
             const result = await wrapperClient.rejectQuestion(input.questionId);
             return { success: result.success };
           } catch (error) {
-            if (error instanceof TRPCError) throw error;
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            logger.withFields({ error: errorMsg }).error('Failed to reject question');
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: `Failed to reject question: ${errorMsg}`,
-            });
+            if (!isRecoverableError(error)) {
+              if (error instanceof TRPCError) throw error;
+              const errorMsg = error instanceof Error ? error.message : String(error);
+              logger.withFields({ error: errorMsg }).error('Failed to reject question');
+              throw new TRPCError({
+                code: 'INTERNAL_SERVER_ERROR',
+                message: `Failed to reject question: ${errorMsg}`,
+              });
+            }
+
+            // Recovery: wrapper has no job or no wrapper found — run full execution cycle
+            logger.info('Recovering: starting full execution cycle for question rejection');
+
+            const doKey = `${userId}:${sessionId}`;
+            const doId = env.CLOUD_AGENT_SESSION.idFromName(doKey);
+
+            const startResult = await withDORetry<
+              DurableObjectStub<CloudAgentSession>,
+              StartExecutionV2Result
+            >(
+              () => env.CLOUD_AGENT_SESSION.get(doId),
+              stub =>
+                stub.startExecutionV2({
+                  kind: 'rejectQuestion',
+                  userId: userId as `user_${string}`,
+                  botId: ctx.botId,
+                  questionId: input.questionId,
+                }),
+              'startExecutionV2'
+            );
+
+            throwIfStartFailed(startResult);
+            return { success: true };
           }
         });
       }),

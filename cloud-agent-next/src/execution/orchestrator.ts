@@ -62,7 +62,7 @@ export class ExecutionOrchestrator {
    * @throws ExecutionError with appropriate code on failure (no internal retry)
    */
   async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
-    const { executionId, sessionId, userId, orgId, prompt, mode, workspace, wrapper } = plan;
+    const { executionId, sessionId, userId, orgId, mode, workspace, wrapper, action } = plan;
 
     logger.setTags({
       executionId,
@@ -182,20 +182,39 @@ export class ExecutionOrchestrator {
       );
     }
 
-    // 7. Send prompt (async - returns messageId immediately)
-    // Normalize mode to internal mode (e.g., 'architect' -> 'plan', 'orchestrator' -> 'code')
-    const normalizedMode = normalizeAgentMode(mode);
+    // 7. Perform the action (send prompt, answer question, or reject question)
     try {
-      const result = await wrapperClient.prompt({
-        prompt,
-        model: wrapper.model,
-        agent: normalizedMode,
-        variant: wrapper.variant,
-      });
-      logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
+      switch (action.kind) {
+        case 'sendMessage': {
+          const normalizedMode = normalizeAgentMode(mode);
+          const result = await wrapperClient.prompt({
+            prompt: action.prompt,
+            model: wrapper.model,
+            agent: normalizedMode,
+            variant: wrapper.variant,
+          });
+          logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
+          break;
+        }
+        case 'answerQuestion': {
+          await wrapperClient.answerQuestion(action.questionId, action.answers);
+          logger
+            .withFields({ questionId: action.questionId })
+            .info('Question answered via recovery');
+          break;
+        }
+        case 'rejectQuestion': {
+          await wrapperClient.rejectQuestion(action.questionId);
+          logger
+            .withFields({ questionId: action.questionId })
+            .info('Question rejected via recovery');
+          break;
+        }
+      }
     } catch (error) {
+      const actionDesc = action.kind === 'sendMessage' ? 'send prompt' : `${action.kind} question`;
       throw ExecutionError.wrapperStartFailed(
-        `Failed to send prompt: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to ${actionDesc}: ${error instanceof Error ? error.message : String(error)}`,
         error
       );
     }

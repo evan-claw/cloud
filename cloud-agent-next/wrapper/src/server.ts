@@ -406,7 +406,7 @@ function createAnswerPermissionHandler(deps: ServerDependencies) {
 
 function createAnswerQuestionHandler(deps: ServerDependencies) {
   return async (req: Request): Promise<Response> => {
-    const { state, kiloClient } = deps;
+    const { state, kiloClient, openConnection, getMaxRuntimeMs } = deps;
 
     if (!state.hasJob) {
       return errorResponse('NO_JOB', 'Call /job/start first', 400);
@@ -423,12 +423,30 @@ function createAnswerQuestionHandler(deps: ServerDependencies) {
       return errorResponse('INVALID_REQUEST', 'questionId and answers are required', 400);
     }
 
+    // Open connection if idle (same pattern as /job/prompt)
+    if (state.isIdle && !state.isConnected) {
+      try {
+        await openConnection();
+        logToFile(`job/answer-question: connection opened`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logToFile(`job/answer-question: failed to open connection: ${msg}`);
+        return errorResponse('CONNECTION_ERROR', `Failed to open connection: ${msg}`, 500);
+      }
+    }
+
+    // Track as inflight so idle timeout doesn't fire while agent works
+    const messageId = state.nextMessageId();
+    const deadline = Date.now() + getMaxRuntimeMs();
+    state.addInflight(messageId, deadline);
+
     try {
       const success = await kiloClient.answerQuestion(body.questionId, body.answers);
       state.updateActivity();
       logToFile(`job/answer-question: questionId=${body.questionId}`);
       return jsonResponse({ status: 'answered', success });
     } catch (error) {
+      state.removeInflight(messageId);
       const msg = error instanceof Error ? error.message : String(error);
       logToFile(`job/answer-question: failed: ${msg}`);
       return errorResponse('QUESTION_ERROR', `Failed to answer question: ${msg}`, 500);
@@ -438,7 +456,7 @@ function createAnswerQuestionHandler(deps: ServerDependencies) {
 
 function createRejectQuestionHandler(deps: ServerDependencies) {
   return async (req: Request): Promise<Response> => {
-    const { state, kiloClient } = deps;
+    const { state, kiloClient, openConnection, getMaxRuntimeMs } = deps;
 
     if (!state.hasJob) {
       return errorResponse('NO_JOB', 'Call /job/start first', 400);
@@ -455,12 +473,30 @@ function createRejectQuestionHandler(deps: ServerDependencies) {
       return errorResponse('INVALID_REQUEST', 'questionId is required', 400);
     }
 
+    // Open connection if idle (same pattern as /job/prompt)
+    if (state.isIdle && !state.isConnected) {
+      try {
+        await openConnection();
+        logToFile(`job/reject-question: connection opened`);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logToFile(`job/reject-question: failed to open connection: ${msg}`);
+        return errorResponse('CONNECTION_ERROR', `Failed to open connection: ${msg}`, 500);
+      }
+    }
+
+    // Track as inflight so idle timeout doesn't fire while agent works
+    const messageId = state.nextMessageId();
+    const deadline = Date.now() + getMaxRuntimeMs();
+    state.addInflight(messageId, deadline);
+
     try {
       const success = await kiloClient.rejectQuestion(body.questionId);
       state.updateActivity();
       logToFile(`job/reject-question: questionId=${body.questionId}`);
       return jsonResponse({ status: 'rejected', success });
     } catch (error) {
+      state.removeInflight(messageId);
       const msg = error instanceof Error ? error.message : String(error);
       logToFile(`job/reject-question: failed: ${msg}`);
       return errorResponse('QUESTION_ERROR', `Failed to reject question: ${msg}`, 500);

@@ -158,12 +158,33 @@ type FollowupExecutionRequest = BaseExecutionRequest & {
 };
 
 /**
+ * Request for answering a question when wrapper has no active job.
+ * Triggers full execution lifecycle to recover, then answers the question.
+ */
+type AnswerQuestionExecutionRequest = BaseExecutionRequest & {
+  kind: 'answerQuestion';
+  questionId: string;
+  answers: string[][];
+};
+
+/**
+ * Request for rejecting a question when wrapper has no active job.
+ * Triggers full execution lifecycle to recover, then rejects the question.
+ */
+type RejectQuestionExecutionRequest = BaseExecutionRequest & {
+  kind: 'rejectQuestion';
+  questionId: string;
+};
+
+/**
  * Request payload for starting a V2 execution.
  */
 export type StartExecutionV2Request =
   | InitiateExecutionRequest
   | InitiatePreparedRequest
-  | FollowupExecutionRequest;
+  | FollowupExecutionRequest
+  | AnswerQuestionExecutionRequest
+  | RejectQuestionExecutionRequest;
 
 /**
  * Retryable error codes that map to 503 Service Unavailable.
@@ -321,6 +342,11 @@ export type WrapperPlan = {
  * Complete plan for executing a prompt.
  * Contains all information needed to set up and execute.
  */
+export type ExecutionAction =
+  | { kind: 'sendMessage'; prompt: string }
+  | { kind: 'answerQuestion'; questionId: string; answers: string[][] }
+  | { kind: 'rejectQuestion'; questionId: string };
+
 export type ExecutionPlan = {
   /** Unique execution ID (exc_<ulid> format) */
   executionId: ExecutionId;
@@ -330,8 +356,6 @@ export type ExecutionPlan = {
   userId: UserId;
   /** Organization ID (optional) */
   orgId?: string;
-  /** The prompt to execute */
-  prompt: string;
   /** Execution mode */
   mode: AgentMode;
   /** Workspace preparation plan */
@@ -340,6 +364,8 @@ export type ExecutionPlan = {
   wrapper: WrapperPlan;
   /** Optional image attachments */
   images?: Images;
+  /** The action to perform: send a prompt, answer a question, or reject a question */
+  action: ExecutionAction;
 };
 
 // ---------------------------------------------------------------------------
