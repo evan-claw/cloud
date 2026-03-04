@@ -1,29 +1,31 @@
-import { describe, test, expect, beforeEach, jest as jestGlobals } from '@jest/globals';
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import type * as creditsModule from '@/lib/credits';
+import type * as organizationBillingModule from '@/lib/organizations/organization-billing';
 
 // Allow spying on processTopUp / processTopupForOrganization inside stripe.ts.
 // The mock delegates to the real implementation by default so existing tests are unaffected.
 // We use global `jest` (not the @jest/globals import) because SWC only hoists bare
 // `jest.mock(...)` calls — it does NOT hoist `importedJest.mock(...)`.
 jest.mock('@/lib/credits', () => {
-  const actual = jest.requireActual('@/lib/credits') as Record<string, unknown>;
+  const actual = jest.requireActual<typeof creditsModule>('@/lib/credits');
   return {
     __esModule: true,
     ...actual,
-    processTopUp: jest.fn((...args: unknown[]) =>
-      (actual.processTopUp as (...a: unknown[]) => unknown)(...args)
+    processTopUp: jest.fn((...args: Parameters<typeof actual.processTopUp>) =>
+      actual.processTopUp(...args)
     ),
   };
 });
 jest.mock('@/lib/organizations/organization-billing', () => {
-  const actual = jest.requireActual('@/lib/organizations/organization-billing') as Record<
-    string,
-    unknown
-  >;
+  const actual = jest.requireActual<typeof organizationBillingModule>(
+    '@/lib/organizations/organization-billing'
+  );
   return {
     __esModule: true,
     ...actual,
-    processTopupForOrganization: jest.fn((...args: unknown[]) =>
-      (actual.processTopupForOrganization as (...a: unknown[]) => unknown)(...args)
+    processTopupForOrganization: jest.fn(
+      (...args: Parameters<typeof actual.processTopupForOrganization>) =>
+        actual.processTopupForOrganization(...args)
     ),
   };
 });
@@ -1425,7 +1427,7 @@ describe('handleSuccessfulChargeWithPayment (org/user routing & side-effects)', 
       attempt_started_at: new Date().toISOString(),
     });
 
-    const processTopUpMock = processTopUp as jestGlobals.MockedFunction<typeof processTopUp>;
+    const processTopUpMock = processTopUp as jest.MockedFunction<typeof processTopUp>;
     processTopUpMock.mockRejectedValue(new Error('processTopUp test error'));
 
     const userInvoiceEvent: Stripe.Event = {
@@ -1472,7 +1474,7 @@ describe('handleSuccessfulChargeWithPayment (org/user routing & side-effects)', 
       created_by_user_id: orgUser.id,
     });
 
-    const processOrgTopUpMock = processTopupForOrganization as jestGlobals.MockedFunction<
+    const processOrgTopUpMock = processTopupForOrganization as jest.MockedFunction<
       typeof processTopupForOrganization
     >;
     processOrgTopUpMock.mockRejectedValue(new Error('processTopupForOrganization test error'));
