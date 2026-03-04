@@ -1,10 +1,10 @@
 // Organization balance and model restriction checks.
 // Ports checkOrganizationModelRestrictions from src/lib/llm-proxy-helpers.ts and
 // getBalanceForOrganizationUser from src/lib/organizations/organization-usage.ts.
-// Credit expiration and auto-top-up are deferred background tasks (Phase 6).
 
 import type { WorkerDb } from '@kilocode/db/client';
 import type { OrganizationSettings, OrganizationPlan } from '@kilocode/db/schema-types';
+import { processOrganizationExpirations } from './credit-expiration';
 import {
   organizations,
   organization_memberships,
@@ -92,6 +92,13 @@ export type OrgBalanceAndSettings = {
   balance: number;
   settings: OrganizationSettings | undefined;
   plan: OrganizationPlan | undefined;
+  /** Fields needed for auto-top-up (org requests only) */
+  autoTopUp?: {
+    organizationId: string;
+    auto_top_up_enabled: boolean;
+    total_microdollars_acquired: number;
+    microdollars_used: number;
+  };
 };
 
 export async function getBalanceAndOrgSettings(
@@ -112,6 +119,8 @@ export async function getBalanceAndOrgSettings(
       settings: organizations.settings,
       plan: organizations.plan,
       require_seats: organizations.require_seats,
+      auto_top_up_enabled: organizations.auto_top_up_enabled,
+      next_credit_expiration_at: organizations.next_credit_expiration_at,
       microdollar_limit: organization_user_limits.microdollar_limit,
       microdollar_usage: organization_user_usage.microdollar_usage,
     })
@@ -150,13 +159,50 @@ export async function getBalanceAndOrgSettings(
     return { balance: 0, settings: undefined, plan: undefined };
   }
 
-  const orgBalance = (row.total_microdollars_acquired - row.microdollars_used) / 1_000_000;
+  let { total_microdollars_acquired } = row;
+  const { microdollars_used } = row;
+
+  // Lazy credit expiry check — random-hour jitter to spread load, matching reference.
+  // subHours(new Date(), Math.random()) ≈ new Date(Date.now() - Math.random() * 3600000)
+  const expireBefore = new Date(Date.now() - Math.random() * 3_600_000);
+  if (
+    row.next_credit_expiration_at &&
+    expireBefore >= new Date(row.next_credit_expiration_at)
+  ) {
+    try {
+      const expiryResult = await processOrganizationExpirations(
+        db,
+        {
+          id: organizationId,
+          microdollars_used,
+          next_credit_expiration_at: row.next_credit_expiration_at,
+          total_microdollars_acquired,
+        },
+        expireBefore
+      );
+      if (expiryResult) {
+        total_microdollars_acquired = expiryResult.total_microdollars_acquired;
+      }
+    } catch (err) {
+      console.error('[getBalanceAndOrgSettings] credit expiry failed', err);
+    }
+  }
+
+  const orgBalance = (total_microdollars_acquired - microdollars_used) / 1_000_000;
+
+  const autoTopUp = {
+    organizationId,
+    auto_top_up_enabled: row.auto_top_up_enabled,
+    total_microdollars_acquired,
+    microdollars_used,
+  };
 
   if (row.require_seats) {
     return {
       balance: orgBalance,
       settings: row.settings ?? undefined,
       plan: row.plan ?? undefined,
+      autoTopUp,
     };
   }
 
@@ -165,6 +211,7 @@ export async function getBalanceAndOrgSettings(
       balance: orgBalance,
       settings: row.settings ?? undefined,
       plan: row.plan ?? undefined,
+      autoTopUp,
     };
   }
 
@@ -176,5 +223,6 @@ export async function getBalanceAndOrgSettings(
     balance: cappedBalance,
     settings: row.settings ?? undefined,
     plan: row.plan ?? undefined,
+    autoTopUp,
   };
 }
