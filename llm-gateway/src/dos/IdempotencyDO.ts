@@ -6,15 +6,21 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const STALE_CLAIM_MS = 5 * 60 * 1000; // 5 minutes
+const STALE_CLAIM_MS = 60 * 1000; // 60 seconds
+
+export type ClaimResult = {
+  claimed: boolean;
+  status: 'claimed' | 'processing' | 'completed';
+};
 
 export class IdempotencyDO extends DurableObject<Env> {
-  async claim(): Promise<{ alreadyCompleted: boolean }> {
+  async claim(): Promise<ClaimResult> {
     const state = await this.ctx.storage.get<string>('state');
-    if (state === 'completed' || state === 'processing') return { alreadyCompleted: true };
+    if (state === 'completed') return { claimed: false, status: 'completed' };
+    if (state === 'processing') return { claimed: false, status: 'processing' };
     await this.ctx.storage.put('state', 'processing');
     await this.ctx.storage.setAlarm(Date.now() + STALE_CLAIM_MS);
-    return { alreadyCompleted: false };
+    return { claimed: true, status: 'claimed' };
   }
 
   async complete(): Promise<void> {
