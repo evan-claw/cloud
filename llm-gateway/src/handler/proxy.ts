@@ -17,7 +17,7 @@ import { isKiloFreeModel } from '../lib/models';
 import { customLlmRequest } from '../lib/custom-llm/index';
 import { getOutputHeaders, wrapResponse, makeErrorReadable } from '../lib/response-helpers';
 import { rewriteFreeModelResponse } from '../lib/rewrite-free-model-response';
-import { classifyAbuse, type AbuseServiceSecrets } from '../lib/abuse-service';
+import { classifyAbuse } from '../lib/abuse-service';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
 import { scheduleBackgroundTasks, type BackgroundTaskParams } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
@@ -142,16 +142,8 @@ export const proxyHandler: Handler<HonoContext> = async c => {
   // Preserve query string so it is forwarded to the upstream provider.
   const { search } = new URL(c.req.url);
 
-  // Fetch PostHog + abuse secrets in parallel — fail loudly if Secrets Store is down.
-  const [abuseServiceUrl, posthogApiKey, cfAccessClientId, cfAccessClientSecret] =
-    await Promise.all([
-      c.env.ABUSE_SERVICE_URL.get(),
-      c.env.POSTHOG_API_KEY.get(),
-      c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
-      c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
-    ]);
-
-  const abuseSecrets: AbuseServiceSecrets = { cfAccessClientId, cfAccessClientSecret };
+  // Abuse/PostHog secrets were started in providerResolutionMiddleware — await here.
+  const { abuseServiceUrl, posthogApiKey, abuseSecrets } = await c.get('abuseSecretsPromise');
 
   // Abuse classification starts non-blocking — we hold a promise and
   // await it (with a 2s timeout) after the upstream response arrives.

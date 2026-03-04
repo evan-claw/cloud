@@ -62,5 +62,21 @@ export const providerResolutionMiddleware = createMiddleware<HonoContext>(async 
   c.set('customLlm', customLlm);
   c.set('secrets', secrets);
 
+  // Start fetching abuse/PostHog secrets in parallel with the rest of the
+  // middleware chain. The proxy handler will await this promise.
+  c.set(
+    'abuseSecretsPromise',
+    Promise.all([
+      c.env.ABUSE_SERVICE_URL.get(),
+      c.env.POSTHOG_API_KEY.get(),
+      c.env.ABUSE_CF_ACCESS_CLIENT_ID.get(),
+      c.env.ABUSE_CF_ACCESS_CLIENT_SECRET.get(),
+    ]).then(([abuseServiceUrl, posthogApiKey, cfAccessClientId, cfAccessClientSecret]) => ({
+      abuseServiceUrl,
+      posthogApiKey,
+      abuseSecrets: { cfAccessClientId, cfAccessClientSecret },
+    }))
+  );
+
   return next();
 });

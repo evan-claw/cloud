@@ -8,6 +8,7 @@ import type { OpenRouterChatCompletionRequest } from './request';
 import type { Provider, SecretsBundle } from '../lib/providers';
 import type { BYOKResult } from '../lib/byok';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
+import type { AbuseServiceSecrets } from '../lib/abuse-service';
 
 // Hono app context — bindings + all middleware variables.
 export type HonoContext = {
@@ -51,6 +52,12 @@ export type Variables = {
   userByok: BYOKResult[] | null;
   customLlm: CustomLlm | null;
   secrets: SecretsBundle;
+  // Started in provider-resolution.ts, awaited in proxy handler
+  abuseSecretsPromise: Promise<{
+    abuseServiceUrl: string;
+    posthogApiKey: string;
+    abuseSecrets: AbuseServiceSecrets;
+  }>;
 
   // request-transform.ts — extracted from request headers, stored for background tasks
   fraudHeaders: FraudDetectionHeaders;
