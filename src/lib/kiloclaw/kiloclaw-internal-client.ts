@@ -5,6 +5,7 @@ import type {
   ImageVersionEntry,
   ProvisionInput,
   PlatformStatusResponse,
+  PlatformDebugStatusResponse,
   KiloCodeConfigPatchInput,
   KiloCodeConfigResponse,
   ChannelsPatchInput,
@@ -124,6 +125,10 @@ export class KiloClawInternalClient {
 
   async getStatus(userId: string): Promise<PlatformStatusResponse> {
     return this.request(`/api/platform/status?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async getDebugStatus(userId: string): Promise<PlatformDebugStatusResponse> {
+    return this.request(`/api/platform/debug-status?userId=${encodeURIComponent(userId)}`);
   }
 
   async getGatewayToken(userId: string): Promise<{ gatewayToken: string }> {

@@ -515,6 +515,27 @@ platform.get('/status', async c => {
   }
 });
 
+// GET /api/platform/debug-status?userId=...
+// Internal/admin-only debug status that includes DO destroy internals.
+platform.get('/debug-status', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+
+  try {
+    const status = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getDebugState(),
+      'getDebugState'
+    );
+    return c.json(status);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'debug-status');
+    return jsonError(message, status);
+  }
+});
+
 // GET /api/platform/gateway-token?userId=...
 // Returns the derived gateway token for a user's sandbox. The Next.js
 // dashboard calls this so it never needs GATEWAY_TOKEN_SECRET directly.

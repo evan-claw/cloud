@@ -1384,6 +1384,63 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     };
   }
 
+  async getDebugState(): Promise<{
+    userId: string | null;
+    sandboxId: string | null;
+    status: InstanceStatus | null;
+    provisionedAt: number | null;
+    lastStartedAt: number | null;
+    lastStoppedAt: number | null;
+    envVarCount: number;
+    secretCount: number;
+    channelCount: number;
+    flyAppName: string | null;
+    flyMachineId: string | null;
+    flyVolumeId: string | null;
+    flyRegion: string | null;
+    machineSize: MachineSize | null;
+    openclawVersion: string | null;
+    imageVariant: string | null;
+    trackedImageTag: string | null;
+    trackedImageDigest: string | null;
+    pendingDestroyMachineId: string | null;
+    pendingDestroyVolumeId: string | null;
+    pendingPostgresMarkOnFinalize: boolean;
+    lastMetadataRecoveryAt: number | null;
+    lastLiveCheckAt: number | null;
+    alarmScheduledAt: number | null;
+  }> {
+    await this.loadState();
+    const alarmScheduledAt = await this.ctx.storage.getAlarm();
+
+    return {
+      userId: this.userId,
+      sandboxId: this.sandboxId,
+      status: this.status,
+      provisionedAt: this.provisionedAt,
+      lastStartedAt: this.lastStartedAt,
+      lastStoppedAt: this.lastStoppedAt,
+      envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
+      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
+      flyAppName: this.flyAppName,
+      flyMachineId: this.flyMachineId,
+      flyVolumeId: this.flyVolumeId,
+      flyRegion: this.flyRegion,
+      machineSize: this.machineSize,
+      openclawVersion: this.openclawVersion,
+      imageVariant: this.imageVariant,
+      trackedImageTag: this.trackedImageTag,
+      trackedImageDigest: this.trackedImageDigest,
+      pendingDestroyMachineId: this.pendingDestroyMachineId,
+      pendingDestroyVolumeId: this.pendingDestroyVolumeId,
+      pendingPostgresMarkOnFinalize: this.pendingPostgresMarkOnFinalize,
+      lastMetadataRecoveryAt: this.lastMetadataRecoveryAt,
+      lastLiveCheckAt: this.lastLiveCheckAt,
+      alarmScheduledAt,
+    };
+  }
+
   async getConfig(): Promise<InstanceConfig> {
     await this.loadState();
 

@@ -125,6 +125,16 @@ export type PlatformStatusResponse = {
   trackedImageDigest: string | null;
 };
 
+/** Response from GET /api/platform/debug-status (internal/admin only). */
+export type PlatformDebugStatusResponse = PlatformStatusResponse & {
+  pendingDestroyMachineId: string | null;
+  pendingDestroyVolumeId: string | null;
+  pendingPostgresMarkOnFinalize: boolean;
+  lastMetadataRecoveryAt: number | null;
+  lastLiveCheckAt: number | null;
+  alarmScheduledAt: number | null;
+};
+
 /** A Fly volume snapshot. */
 export type VolumeSnapshot = {
   id: string;
