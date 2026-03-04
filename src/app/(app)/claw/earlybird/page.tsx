@@ -87,6 +87,57 @@ export default function EarlybirdPage() {
             )}
           </CardFooter>
         </Card>
+
+        {/* Credit Options Note */}
+        <div className="mt-6 max-w-2xl rounded-lg border border-border bg-muted/50 p-4">
+          <h3 className="mb-3 text-center text-sm font-semibold">
+            Credits are not included with your hosting subscription. Use what works best for you.
+          </h3>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-border bg-background/50 p-3">
+              <h4 className="text-sm font-medium">Kilo Pass</h4>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Credit subscription with bonus credits.{' '}
+                <a
+                  href="https://kilo.ai/features/kilo-pass"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-primary hover:underline"
+                >
+                  Learn more
+                </a>
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-background/50 p-3">
+              <h4 className="text-sm font-medium">Pay-as-you-go</h4>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Purchase credits as needed. Only pay for what you use with no commitments.{' '}
+                <a
+                  href="https://app.kilo.ai/credits"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-primary hover:underline"
+                >
+                  Learn more
+                </a>
+              </p>
+            </div>
+            <div className="rounded-md border border-border bg-background/50 p-3">
+              <h4 className="text-sm font-medium">Bring Your Own Key</h4>
+              <p className="text-muted-foreground mt-1 text-xs">
+                Use API keys from your existing AI provider accounts.{' '}
+                <a
+                  href="https://kilo.ai/docs/getting-started/byok"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-primary hover:underline"
+                >
+                  Learn more
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
     </PageLayout>
   );
