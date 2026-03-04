@@ -313,9 +313,9 @@ describe('free model rewrite', () => {
     );
     expect(res.status).toBe(200);
     const events = await readSSEEvents(res);
-    const usageEvent = events.find(
-      e => (e as { usage?: unknown }).usage !== undefined
-    ) as { usage: Record<string, unknown> } | undefined;
+    const usageEvent = events.find(e => (e as { usage?: unknown }).usage !== undefined) as
+      | { usage: Record<string, unknown> }
+      | undefined;
     expect(usageEvent).toBeDefined();
     expect(usageEvent!.usage.cost).toBeUndefined();
     expect(usageEvent!.usage.cost_details).toBeUndefined();

@@ -49,7 +49,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 
 // Spy on scheduleBackgroundTasks
 const bgTasksSpy = vi.fn();
-vi.mock('../../src/handler/background-tasks', async (importOriginal) => {
+vi.mock('../../src/handler/background-tasks', async importOriginal => {
   const mod = await importOriginal();
   return {
     ...(mod as Record<string, unknown>),

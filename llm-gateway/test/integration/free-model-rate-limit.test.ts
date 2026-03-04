@@ -51,8 +51,7 @@ describe('freeModelRateLimit', () => {
     const body = await res.json();
     expect(body).toEqual({
       error: 'Rate limit exceeded',
-      message:
-        'Free model usage limit reached. Please try again later or upgrade to a paid model.',
+      message: 'Free model usage limit reached. Please try again later or upgrade to a paid model.',
     });
   });
 

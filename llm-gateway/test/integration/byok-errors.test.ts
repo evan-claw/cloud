@@ -50,7 +50,7 @@ vi.mock('../../src/lib/abuse-service', () => ({
 // Mock BYOK module to return BYOK keys for the test user.
 // This bypasses DB+crypto complexity while exercising the full
 // provider-resolution → proxy → makeErrorReadable chain.
-vi.mock('../../src/lib/byok', async (importOriginal) => {
+vi.mock('../../src/lib/byok', async importOriginal => {
   const mod = await importOriginal();
   return {
     ...(mod as Record<string, unknown>),

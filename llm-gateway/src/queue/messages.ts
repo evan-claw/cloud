@@ -1,4 +1,7 @@
-import type { MicrodollarUsageStats, MicrodollarUsageContext } from '../background/usage-accounting';
+import type {
+  MicrodollarUsageStats,
+  MicrodollarUsageContext,
+} from '../background/usage-accounting';
 import type { ApiMetricsParams } from '@kilocode/worker-utils';
 import type { AbuseServiceSecrets } from '../lib/abuse-service';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';

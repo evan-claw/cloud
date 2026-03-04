@@ -19,13 +19,14 @@ export {
 import { makeEnv, fakeExecutionCtx } from '../unit/helpers';
 import type { Env } from '../../src/env';
 
-export async function dispatch(
-  req: Request,
-  envOverrides: Partial<Record<string, unknown>> = {}
-) {
+export async function dispatch(req: Request, envOverrides: Partial<Record<string, unknown>> = {}) {
   const { default: worker } = await import('../../src/index');
   const env = makeEnv(envOverrides);
-  return worker.fetch!(req as Request<unknown, IncomingRequestCfProperties>, env, fakeExecutionCtx());
+  return worker.fetch!(
+    req as Request<unknown, IncomingRequestCfProperties>,
+    env,
+    fakeExecutionCtx()
+  );
 }
 
 // ── User fixtures ─────────────────────────────────────────────────────────────
@@ -112,10 +113,12 @@ export const ENCRYPTION_MOCK = {
 
 // ── DO namespace factory ──────────────────────────────────────────────────────
 
-export function makeFakeDONamespace(opts: {
-  freeModelBlocked?: Set<string>;
-  promotionBlocked?: Set<string>;
-} = {}) {
+export function makeFakeDONamespace(
+  opts: {
+    freeModelBlocked?: Set<string>;
+    promotionBlocked?: Set<string>;
+  } = {}
+) {
   const freeModelBlocked = opts.freeModelBlocked ?? new Set();
   const promotionBlocked = opts.promotionBlocked ?? new Set();
 

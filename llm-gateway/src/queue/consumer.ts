@@ -42,10 +42,7 @@ async function resolveSecrets(env: Env): Promise<SecretsBundle> {
   };
 }
 
-function resolveProviderApiKey(
-  secrets: SecretsBundle,
-  providerId: string
-): string | undefined {
+function resolveProviderApiKey(secrets: SecretsBundle, providerId: string): string | undefined {
   const providers = buildProviders(secrets);
   for (const provider of Object.values(providers)) {
     if (provider.id === providerId) return provider.apiKey;
@@ -53,10 +50,7 @@ function resolveProviderApiKey(
   return undefined;
 }
 
-async function processUsageAccounting(
-  msg: UsageAccountingMessage,
-  env: Env
-): Promise<void> {
+async function processUsageAccounting(msg: UsageAccountingMessage, env: Env): Promise<void> {
   const secrets = await resolveSecrets(env);
   const providerApiKey = resolveProviderApiKey(secrets, msg.providerId) ?? '';
 
@@ -68,11 +62,7 @@ async function processUsageAccounting(
 
   const db = getWorkerDb(env.HYPERDRIVE.connectionString);
 
-  const usageStats = await processUsageAccountingAfterParse(
-    msg.usageStats,
-    usageContext,
-    db
-  );
+  const usageStats = await processUsageAccountingAfterParse(msg.usageStats, usageContext, db);
 
   // Abuse cost reporting chains on the usage accounting result
   if (msg.abuseRequestId && usageStats.messageId) {

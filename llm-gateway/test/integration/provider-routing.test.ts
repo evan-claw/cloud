@@ -1,12 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  dispatch,
-  chatRequest,
-  signToken,
-  VALID_USER,
-  getTableName,
-  chainResult,
-} from './_setup';
+import { dispatch, chatRequest, signToken, VALID_USER, getTableName, chainResult } from './_setup';
 
 // ── Configurable DB ────────────────────────────────────────────────────────────
 
