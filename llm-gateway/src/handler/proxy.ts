@@ -236,9 +236,9 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     queue: c.env.LLM_GATEWAY_BG_TASKS_QUEUE,
   } as const;
 
-  // ── Error responses: schedule background tasks before returning ──────────────
-  // Background tasks must be scheduled even when makeErrorReadable intercepts,
-  // matching the reference implementation which always runs accounting + logging.
+  // ── Error responses ──────────────────────────────────────────────────────────
+  // 402 non-BYOK: only metrics (no accounting/logging), matching the reference.
+  // All other errors: full background tasks (accounting + metrics + logging).
   if (response.status >= 400) {
     // Error bodies are small JSON — buffer synchronously so background tasks can
     // read the body independently of whatever response we send to the client.
@@ -253,17 +253,16 @@ export const proxyHandler: Handler<HonoContext> = async c => {
       });
     }
 
-    scheduleBackgroundTasks(c.executionCtx, {
-      ...bgCommon,
-      accountingStream: !isAnon ? makeErrorStream() : null,
-      metricsStream: makeErrorStream(),
-      loggingStream: !isAnon ? makeErrorStream() : null,
-    });
-
     // ── 402 → 503 conversion (non-BYOK) ───────────────────────────────────────
-    // Placed after scheduleBackgroundTasks so metrics/accounting/logging are
-    // emitted even for 402 responses, matching the reference implementation.
+    // In the reference, 402 returns BEFORE accountForMicrodollarUsage and
+    // handleRequestLogging — only emitApiMetricsForResponse runs for 402s.
     if (response.status === 402 && !userByok) {
+      scheduleBackgroundTasks(c.executionCtx, {
+        ...bgCommon,
+        accountingStream: null,
+        metricsStream: makeErrorStream(),
+        loggingStream: null,
+      });
       captureException(new Error(`${provider.id} returned 402 Payment Required`), {
         kiloUserId: user.id,
         model: requestBody.model,
@@ -277,6 +276,14 @@ export const proxyHandler: Handler<HonoContext> = async c => {
         503
       );
     }
+
+    // All other errors: full background tasks (accounting + metrics + logging)
+    scheduleBackgroundTasks(c.executionCtx, {
+      ...bgCommon,
+      accountingStream: !isAnon ? makeErrorStream() : null,
+      metricsStream: makeErrorStream(),
+      loggingStream: !isAnon ? makeErrorStream() : null,
+    });
 
     // BYOK / context-length readable error — return a custom message instead of
     // the raw upstream body.

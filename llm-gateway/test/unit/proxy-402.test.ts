@@ -153,8 +153,10 @@ describe('proxy handler – 402 upstream', () => {
     expect(scheduledCalls).toHaveLength(1);
     const params = scheduledCalls[0] as Record<string, unknown>;
     expect(params.upstreamStatusCode).toBe(402);
-    // metricsStream should be provided (non-null)
+    // Only metricsStream — no accounting or logging for 402 (matches reference)
     expect(params.metricsStream).not.toBeNull();
+    expect(params.accountingStream).toBeNull();
+    expect(params.loggingStream).toBeNull();
   });
 
   it('does NOT convert 402 to 503 when userByok is set', async () => {
