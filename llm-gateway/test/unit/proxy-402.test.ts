@@ -56,10 +56,6 @@ function makeSecret(value: string) {
 
 const testEnv = {
   HYPERDRIVE: { connectionString: 'postgres://localhost:5432/test' },
-  POSTHOG_API_KEY: makeSecret('ph-key'),
-  ABUSE_SERVICE_URL: makeSecret('https://abuse.example.com'),
-  ABUSE_CF_ACCESS_CLIENT_ID: makeSecret('abuse-id'),
-  ABUSE_CF_ACCESS_CLIENT_SECRET: makeSecret('abuse-secret'),
   O11Y: { ingestApiMetrics: async () => {} },
 };
 
@@ -107,6 +103,15 @@ function buildApp(overrides: ContextOverrides = {}) {
     c.set('feature', null);
     c.set('autoModel', null);
     c.set('modeHeader', null);
+    c.set('db', {} as never);
+    c.set(
+      'abuseSecretsPromise',
+      Promise.resolve({
+        abuseServiceUrl: 'https://abuse.example.com',
+        posthogApiKey: 'ph-key',
+        abuseSecrets: { cfAccessClientId: 'abuse-id', cfAccessClientSecret: 'abuse-secret' },
+      })
+    );
     await next();
   });
 
@@ -320,6 +325,15 @@ describe('proxy handler – free model background tasks', () => {
       c.set('feature', null);
       c.set('autoModel', null);
       c.set('modeHeader', null);
+      c.set('db', {} as never);
+      c.set(
+        'abuseSecretsPromise',
+        Promise.resolve({
+          abuseServiceUrl: 'https://abuse.example.com',
+          posthogApiKey: 'ph-key',
+          abuseSecrets: { cfAccessClientId: 'abuse-id', cfAccessClientSecret: 'abuse-secret' },
+        })
+      );
       await next();
     });
     app.post('/api/gateway/chat/completions', proxyHandler);

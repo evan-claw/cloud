@@ -11,15 +11,17 @@ import { fakeExecutionCtx } from './helpers';
 
 const timeline: string[] = [];
 
-vi.mock('@kilocode/db/client', () => ({
-  getWorkerDb: () => ({
-    insert: () => ({
-      values: () => {
-        timeline.push('db-insert');
-        return Promise.resolve();
-      },
-    }),
+const fakeDb = {
+  insert: () => ({
+    values: () => {
+      timeline.push('db-insert');
+      return Promise.resolve();
+    },
   }),
+};
+
+vi.mock('@kilocode/db/client', () => ({
+  getWorkerDb: () => fakeDb,
 }));
 
 vi.mock('../../src/lib/rate-limit', () => ({
@@ -49,6 +51,7 @@ describe('logFreeModelUsageMiddleware', () => {
       c.set('resolvedModel', 'corethink:free');
       c.set('clientIp', '1.2.3.4');
       c.set('user', { id: 'user-1' } as never);
+      c.set('db', fakeDb as never);
       await next();
     });
 
@@ -91,6 +94,7 @@ describe('logFreeModelUsageMiddleware', () => {
       c.set('resolvedModel', 'corethink:free');
       c.set('clientIp', '1.2.3.4');
       c.set('user', { id: 'user-1' } as never);
+      c.set('db', fakeDb as never);
       await next();
     });
 
@@ -129,6 +133,7 @@ describe('logFreeModelUsageMiddleware', () => {
       c.set('resolvedModel', 'anthropic/claude-sonnet-4-20250514');
       c.set('clientIp', '1.2.3.4');
       c.set('user', { id: 'user-1' } as never);
+      c.set('db', fakeDb as never);
       await next();
     });
 
