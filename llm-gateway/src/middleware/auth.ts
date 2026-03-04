@@ -8,6 +8,15 @@ import { verifyGatewayJwt, isPepperValid } from '../lib/jwt';
 
 const ORGANIZATION_ID_HEADER = 'x-kilocode-organizationid';
 
+// Port of isEmailBlacklistedByDomain from src/lib/user.server.ts.
+// BLACKLIST_DOMAINS is a pipe-separated string (e.g. "domain1.com|domain2.com").
+function isEmailBlacklistedByDomain(email: string, blacklistDomainsRaw: string | undefined): boolean {
+  if (!blacklistDomainsRaw) return false;
+  const domains = blacklistDomainsRaw.split('|').map(d => d.trim().toLowerCase());
+  const emailLower = email.toLowerCase();
+  return domains.some(domain => emailLower.endsWith('@' + domain) || emailLower.endsWith('.' + domain));
+}
+
 export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
   const token = extractBearerToken(c.req.header('Authorization'));
 
@@ -41,6 +50,18 @@ export const authMiddleware = createMiddleware<HonoContext>(async (c, next) => {
 
   if (!isPepperValid(payload.apiTokenPepper, user.api_token_pepper)) {
     console.warn(`AUTH-FAIL 401 (${user.id}): Token has been revoked`);
+    return next();
+  }
+
+  // Blocked user — treat as unauthenticated (matches reference validateUserAuthorization)
+  if (user.blocked_reason) {
+    console.warn(`AUTH-FAIL 403 (${user.id}): Access denied (R1)`);
+    return next();
+  }
+
+  // Blacklisted email domain — treat as unauthenticated
+  if (isEmailBlacklistedByDomain(user.google_user_email, c.env.BLACKLIST_DOMAINS)) {
+    console.warn(`AUTH-FAIL 403 (${user.id}): Access denied (R0)`);
     return next();
   }
 

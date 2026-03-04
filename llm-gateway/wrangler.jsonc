@@ -66,6 +66,9 @@
       }
     ]
   },
+  "vars": {
+    "BLACKLIST_DOMAINS": ""
+  },
   "secrets_store_secrets": [
     {
       "binding": "NEXTAUTH_SECRET_PROD",
