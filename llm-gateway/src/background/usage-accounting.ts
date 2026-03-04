@@ -7,10 +7,14 @@
 
 import { createParser } from 'eventsource-parser';
 import type { EventSourceMessage } from 'eventsource-parser';
-import { sql } from 'drizzle-orm';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { WorkerDb } from '@kilocode/db/client';
-import { microdollar_usage, organizations, organization_user_usage } from '@kilocode/db/schema';
+import {
+  microdollar_usage,
+  organizations,
+  organization_user_usage,
+  payment_methods,
+} from '@kilocode/db/schema';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { PromptInfo } from '../lib/prompt-info';
@@ -215,6 +219,15 @@ type CoreUsageFields = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function hasPaymentMethod(db: WorkerDb, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: payment_methods.id })
+    .from(payment_methods)
+    .where(and(eq(payment_methods.user_id, userId), isNull(payment_methods.deleted_at)))
+    .limit(1);
+  return row !== undefined;
+}
 
 function toMicrodollars(usd: number): number {
   return Math.round(usd * 1_000_000);
@@ -944,17 +957,20 @@ export async function processUsageAccountingAfterParse(
     const apiKey = usageContext.posthogApiKey;
     const distinctId = usageContext.posthog_distinct_id;
 
+    let isFirst = false;
     try {
-      const isFirst = await isFirstUsageEver(
+      isFirst = await isFirstUsageEver(
         db,
         coreUsageFields.kilo_user_id,
         usageContext.prior_microdollar_usage,
         usageContext.organizationId
       );
       if (isFirst) {
+        const userHasPaymentMethod = await hasPaymentMethod(db, coreUsageFields.kilo_user_id);
         await sendPostHogEvent(apiKey, distinctId, 'first_usage', {
           model: usageStats.model,
           cost_mUsd: coreUsageFields.cost,
+          has_payment_method: userHasPaymentMethod,
         });
         console.log('first_usage PostHog event sent');
       }
@@ -969,9 +985,12 @@ export async function processUsageAccountingAfterParse(
       );
       if (priorUsageAtEnd < 1) {
         try {
+          const userHasPaymentMethod = await hasPaymentMethod(db, coreUsageFields.kilo_user_id);
           await sendPostHogEvent(apiKey, distinctId, 'first_microdollar_usage', {
             model: usageStats.model,
             cost_mUsd: coreUsageFields.cost,
+            has_payment_method: userHasPaymentMethod,
+            has_prior_free_usage: !isFirst,
           });
         } catch (err) {
           console.warn('[posthog] first_microdollar_usage send failed', err);
