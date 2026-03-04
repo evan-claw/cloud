@@ -2,47 +2,42 @@ import { describe, test, expect } from '@jest/globals';
 import { computeProviderSelectionsForSummaryCard } from './OrganizationProvidersAndModelsConfigurationCard';
 
 describe('computeProviderSelectionsForSummaryCard', () => {
-  test('expands provider wildcard entries (e.g., anthropic/*) when provider is allowed', () => {
+  test('both deny lists empty returns null (all providers and models)', () => {
     const openRouterProviders = [
       {
         slug: 'anthropic',
         models: [
           { slug: 'anthropic/claude-3-opus', endpoint: 'chat' },
           { slug: 'anthropic/claude-3-sonnet', endpoint: 'chat' },
-          { slug: 'anthropic/disabled-model' },
         ],
       },
     ];
 
     const selections = computeProviderSelectionsForSummaryCard({
       openRouterProviders,
-      providerAllowList: ['anthropic'],
-      modelAllowList: ['anthropic/*'],
+      providerDenyList: [],
+      modelDenyList: [],
     });
 
-    expect(selections).toEqual([
-      {
-        slug: 'anthropic',
-        models: ['anthropic/claude-3-opus', 'anthropic/claude-3-sonnet'],
-      },
-    ]);
+    expect(selections).toBeNull();
   });
 
-  test('keeps existing exact-match behavior for model allow list entries', () => {
+  test('providerDenyList excludes denied providers', () => {
     const openRouterProviders = [
       {
+        slug: 'openai',
+        models: [{ slug: 'openai/gpt-4', endpoint: 'chat' }],
+      },
+      {
         slug: 'anthropic',
-        models: [
-          { slug: 'anthropic/claude-3-opus', endpoint: 'chat' },
-          { slug: 'anthropic/claude-3-sonnet', endpoint: 'chat' },
-        ],
+        models: [{ slug: 'anthropic/claude-3-opus', endpoint: 'chat' }],
       },
     ];
 
     const selections = computeProviderSelectionsForSummaryCard({
       openRouterProviders,
-      providerAllowList: ['anthropic'],
-      modelAllowList: ['anthropic/claude-3-opus'],
+      providerDenyList: ['openai'],
+      modelDenyList: [],
     });
 
     expect(selections).toEqual([
@@ -53,11 +48,36 @@ describe('computeProviderSelectionsForSummaryCard', () => {
     ]);
   });
 
-  test('supports wildcard-only model allow lists even when provider allow list is empty', () => {
+  test('modelDenyList excludes denied models', () => {
+    const openRouterProviders = [
+      {
+        slug: 'anthropic',
+        models: [
+          { slug: 'anthropic/claude-3-opus', endpoint: 'chat' },
+          { slug: 'anthropic/claude-3-sonnet', endpoint: 'chat' },
+        ],
+      },
+    ];
+
+    const selections = computeProviderSelectionsForSummaryCard({
+      openRouterProviders,
+      providerDenyList: [],
+      modelDenyList: ['anthropic/claude-3-opus'],
+    });
+
+    expect(selections).toEqual([
+      {
+        slug: 'anthropic',
+        models: ['anthropic/claude-3-sonnet'],
+      },
+    ]);
+  });
+
+  test('combined deny lists exclude both providers and models', () => {
     const openRouterProviders = [
       {
         slug: 'openai',
-        models: [{ slug: 'openai/gpt-4.1', endpoint: 'chat' }],
+        models: [{ slug: 'openai/gpt-4', endpoint: 'chat' }],
       },
       {
         slug: 'anthropic',
@@ -70,37 +90,53 @@ describe('computeProviderSelectionsForSummaryCard', () => {
 
     const selections = computeProviderSelectionsForSummaryCard({
       openRouterProviders,
-      providerAllowList: [],
-      modelAllowList: ['anthropic/*'],
+      providerDenyList: ['openai'],
+      modelDenyList: ['anthropic/claude-3-opus'],
     });
 
     expect(selections).toEqual([
       {
         slug: 'anthropic',
-        models: ['anthropic/claude-3-opus', 'anthropic/claude-3-sonnet'],
+        models: ['anthropic/claude-3-sonnet'],
       },
     ]);
   });
 
-  test('supports provider-membership wildcard when model namespace differs (e.g. cerebras/* allows z-ai/glm4.6)', () => {
+  test('returns null when all providers are denied', () => {
     const openRouterProviders = [
       {
-        slug: 'cerebras',
-        models: [{ slug: 'z-ai/glm4.6', endpoint: 'chat' }],
+        slug: 'openai',
+        models: [{ slug: 'openai/gpt-4', endpoint: 'chat' }],
       },
     ];
 
     const selections = computeProviderSelectionsForSummaryCard({
       openRouterProviders,
-      providerAllowList: ['cerebras'],
-      modelAllowList: ['cerebras/*'],
+      providerDenyList: ['openai'],
+      modelDenyList: [],
     });
 
-    expect(selections).toEqual([
+    expect(selections).toBeNull();
+  });
+
+  test('models without endpoint are excluded', () => {
+    const openRouterProviders = [
       {
-        slug: 'cerebras',
-        models: ['z-ai/glm4.6'],
+        slug: 'anthropic',
+        models: [
+          { slug: 'anthropic/claude-3-opus', endpoint: 'chat' },
+          { slug: 'anthropic/disabled-model' },
+        ],
       },
-    ]);
+    ];
+
+    const selections = computeProviderSelectionsForSummaryCard({
+      openRouterProviders,
+      providerDenyList: [],
+      modelDenyList: ['anthropic/claude-3-opus'],
+    });
+
+    // Both models are excluded (one by deny list, one by no endpoint)
+    expect(selections).toBeNull();
   });
 });

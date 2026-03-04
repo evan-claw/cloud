@@ -70,34 +70,26 @@ export async function GET(
 
   // Fallback to global default if no organization default is set or it's not allowed
   if (!defaultModel) {
-    defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL]);
+    if (!denyList?.length) {
+      // No restrictions - use PRIMARY_DEFAULT_MODEL directly
+      defaultModel = PRIMARY_DEFAULT_MODEL;
+    } else {
+      defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL, ...preferredModels]);
 
-    if (!defaultModel) {
-      if (!denyList?.length) {
-        defaultModel = PRIMARY_DEFAULT_MODEL;
-      } else {
-        const firstConcreteAllowedModel = denyList.find(modelId => !modelId.endsWith('/*'));
-        defaultModel = firstConcreteAllowedModel;
+      if (!defaultModel) {
+        defaultModel = await findFirstAllowedModelFromDbSnapshot();
       }
-    }
 
-    if (!defaultModel && denyList?.length) {
-      defaultModel = await findFirstAllowedModel(preferredModels);
-    }
+      if (!defaultModel) {
+        defaultModel = await findFirstAllowedModelFromOpenRouter();
+      }
 
-    if (!defaultModel && denyList?.length) {
-      defaultModel = await findFirstAllowedModelFromDbSnapshot();
-    }
-
-    if (!defaultModel && denyList?.length) {
-      defaultModel = await findFirstAllowedModelFromOpenRouter();
-    }
-
-    if (!defaultModel) {
-      return NextResponse.json(
-        { error: "No valid models are allowed by this organization's allow list." },
-        { status: 409 }
-      );
+      if (!defaultModel) {
+        return NextResponse.json(
+          { error: "No valid models are allowed by this organization's allow list." },
+          { status: 409 }
+        );
+      }
     }
   }
 

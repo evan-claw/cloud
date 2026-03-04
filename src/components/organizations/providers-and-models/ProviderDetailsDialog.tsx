@@ -26,13 +26,10 @@ export function ProviderDetailsDialog({
   canEdit,
   infoProvider,
   enabledProviderSlugs,
-  draftModelAllowListLength,
-  infoProviderAllowsAllModels,
   infoProviderModels,
   allowedModelIds,
   formatPriceCompact,
   onToggleProviderEnabled,
-  onToggleAllowFutureModelsForProvider,
   onToggleModelAllowed,
   onClose,
 }: {
@@ -40,27 +37,16 @@ export function ProviderDetailsDialog({
   canEdit: boolean;
   infoProvider: ProviderRow | null;
   enabledProviderSlugs: ReadonlySet<string>;
-  draftModelAllowListLength: number;
-  infoProviderAllowsAllModels: boolean;
   infoProviderModels: ReadonlyArray<ProviderModelRow>;
   allowedModelIds: ReadonlySet<string>;
   formatPriceCompact: (raw: string) => string;
   onToggleProviderEnabled: (providerSlug: string, nextEnabled: boolean) => void;
-  onToggleAllowFutureModelsForProvider: (providerSlug: string, nextAllowed: boolean) => void;
   onToggleModelAllowed: (modelId: string, nextAllowed: boolean) => void;
   onClose: () => void;
 }) {
   const isProviderEnabled = infoProvider
     ? enabledProviderSlugs.has(infoProvider.providerSlug)
     : false;
-  const allowAllModelsChecked =
-    draftModelAllowListLength === 0 ? true : Boolean(infoProvider && infoProviderAllowsAllModels);
-
-  const allowAllModelsDisabled =
-    !canEdit ||
-    !infoProvider ||
-    draftModelAllowListLength === 0 ||
-    !enabledProviderSlugs.has(infoProvider.providerSlug);
 
   return (
     <Dialog open={open} onOpenChange={nextOpen => (nextOpen ? null : onClose())}>
@@ -99,30 +85,6 @@ export function ProviderDetailsDialog({
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {infoProvider ? (
             <div className="space-y-3">
-              <div className="bg-muted/40 rounded-lg border p-3">
-                <label className="flex items-start gap-3">
-                  <Checkbox
-                    checked={allowAllModelsChecked}
-                    disabled={allowAllModelsDisabled}
-                    onCheckedChange={nextChecked => {
-                      onToggleAllowFutureModelsForProvider(
-                        infoProvider.providerSlug,
-                        Boolean(nextChecked)
-                      );
-                    }}
-                    className="mt-1"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">Allow all models</div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
-                      {draftModelAllowListLength === 0
-                        ? 'All models are allowed (no restrictions), so future models are already included.'
-                        : 'Allow all current and future models offered by this provider.'}
-                    </div>
-                  </div>
-                </label>
-              </div>
-
               <div className="flex flex-wrap items-center gap-2">
                 <ProviderPolicyTag value={infoProvider.trains} variant="trains" />
                 <ProviderPolicyTag value={infoProvider.retainsPrompts} variant="retainsPrompts" />
@@ -165,7 +127,7 @@ export function ProviderDetailsDialog({
                     <TableCell>
                       <Checkbox
                         checked={isAllowed}
-                        disabled={!canEdit || infoProviderAllowsAllModels}
+                        disabled={!canEdit}
                         onCheckedChange={nextChecked => {
                           onToggleModelAllowed(model.modelId, Boolean(nextChecked));
                         }}
