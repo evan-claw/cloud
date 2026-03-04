@@ -346,6 +346,318 @@ describe('two-phase destroy', () => {
   });
 });
 
+describe('destroy: recover bound machine from volume', () => {
+  // Recovery tests use hex machine IDs matching real Fly format (MACHINE_ID_RE = /^[a-z0-9]+$/)
+  const recoveredMachineId = '3d8de100be4289';
+
+  it('recovers bound machine from volume and completes destroy in one alarm', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: recoveredMachineId,
+      state: 'attached',
+    });
+    (flyClient.destroyMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // Recovery populated pendingDestroyMachineId, then both deletes succeeded → finalized
+    expect(storage._store.size).toBe(0);
+    expect(storage._getAlarm()).toBeNull();
+  });
+
+  it('completes destroy over two alarms after machine recovery', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    // Alarm 1: getVolume returns attached machine, destroyMachine succeeds,
+    // but deleteVolume still fails (e.g. Fly needs a moment to unbind)
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: recoveredMachineId,
+      state: 'attached',
+    });
+    (flyClient.destroyMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.deleteVolume as Mock).mockRejectedValue(
+      new FlyApiError('failed_precondition: volume is currently bound to machine', 412, '{}')
+    );
+
+    const { instance: inst1 } = createInstance(storage);
+    await inst1.alarm();
+
+    expect(storage._store.get('pendingDestroyMachineId')).toBeNull();
+    expect(storage._store.get('pendingDestroyVolumeId')).toBe('vol-1');
+    expect(storage._store.size).toBeGreaterThan(0);
+
+    // Alarm 2: volume delete succeeds. No recovery needed (machine already cleared).
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance: inst2 } = createInstance(storage);
+    await inst2.alarm();
+
+    expect(storage._store.size).toBe(0);
+    expect(storage._getAlarm()).toBeNull();
+  });
+
+  it('skips recovery when pendingDestroyMachineId already set', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: 'machine-1',
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: 'machine-1',
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    (flyClient.destroyMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // getVolume should NOT have been called (recovery skipped)
+    expect(flyClient.getVolume).not.toHaveBeenCalled();
+    expect(storage._store.size).toBe(0);
+  });
+
+  it('handles getVolume 404 during destroy recovery', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    // Volume already gone
+    (flyClient.getVolume as Mock).mockRejectedValue(new FlyApiError('not found', 404, '{}'));
+    // deleteVolume will also see 404 → treated as success
+    (flyClient.deleteVolume as Mock).mockRejectedValue(new FlyApiError('not found', 404, '{}'));
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // Both treated as gone → full cleanup
+    expect(storage._store.size).toBe(0);
+  });
+
+  it('handles getVolume transient error during destroy recovery', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    // Recovery fails with transient error
+    (flyClient.getVolume as Mock).mockRejectedValue(new FlyApiError('server error', 500, 'fail'));
+    // Volume delete also fails (machine still bound)
+    (flyClient.deleteVolume as Mock).mockRejectedValue(
+      new FlyApiError('failed_precondition: bound', 412, '{}')
+    );
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // Recovery failed, volume still pending → alarm rescheduled
+    expect(storage._store.get('pendingDestroyVolumeId')).toBe('vol-1');
+    expect(storage._store.get('pendingDestroyMachineId')).toBeNull();
+    expect(storage._getAlarm()).not.toBeNull();
+  });
+
+  it('ignores null attached_machine_id from getVolume', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    // Volume exists but no machine attached
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: null,
+      state: 'detached',
+    });
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // No machine recovered, but volume delete succeeded → finalized
+    expect(flyClient.destroyMachine).not.toHaveBeenCalled();
+    expect(storage._store.size).toBe(0);
+  });
+
+  it('persists flyMachineId alongside pendingDestroyMachineId on recovery', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: recoveredMachineId,
+      state: 'attached',
+    });
+    // Machine delete fails so we can inspect persisted state before finalization
+    (flyClient.destroyMachine as Mock).mockRejectedValue(
+      new FlyApiError('server error', 500, 'fail')
+    );
+    (flyClient.deleteVolume as Mock).mockRejectedValue(
+      new FlyApiError('failed_precondition', 412, '{}')
+    );
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    expect(flyClient.getVolume).toHaveBeenCalledTimes(1);
+    expect(flyClient.destroyMachine).toHaveBeenCalledTimes(1);
+    expect(storage._store.get('pendingDestroyMachineId')).toBe(recoveredMachineId);
+    expect(storage._store.get('flyMachineId')).toBe(recoveredMachineId);
+  });
+
+  it('respects bound machine recovery cooldown', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+      lastBoundMachineRecoveryAt: Date.now(), // just checked
+    });
+
+    // Volume delete still fails (machine bound)
+    (flyClient.deleteVolume as Mock).mockRejectedValue(
+      new FlyApiError('failed_precondition: bound', 412, '{}')
+    );
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // getVolume should NOT have been called — cooldown active
+    expect(flyClient.getVolume).not.toHaveBeenCalled();
+    expect(storage._store.get('pendingDestroyVolumeId')).toBe('vol-1');
+    expect(storage._getAlarm()).not.toBeNull();
+  });
+
+  it('retries bound machine recovery after cooldown expires', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+      lastBoundMachineRecoveryAt: Date.now() - 6 * 60 * 1000, // 6 min ago, past 5 min cooldown
+    });
+
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: recoveredMachineId,
+      state: 'attached',
+    });
+    (flyClient.destroyMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // Cooldown expired → getVolume called → recovery → full cleanup
+    expect(flyClient.getVolume).toHaveBeenCalledTimes(1);
+    expect(storage._store.size).toBe(0);
+    expect(storage._getAlarm()).toBeNull();
+  });
+});
+
+describe('destroy error tracking', () => {
+  it('persists structured destroy error on volume delete failure', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+    });
+
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: null,
+      state: 'detached',
+    });
+    (flyClient.deleteVolume as Mock).mockRejectedValue(
+      new FlyApiError(
+        'failed_precondition: volume is currently bound to machine: abc123',
+        412,
+        '{}'
+      )
+    );
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    expect(storage._store.get('lastDestroyErrorOp')).toBe('volume');
+    expect(storage._store.get('lastDestroyErrorStatus')).toBe(412);
+    expect(storage._store.get('lastDestroyErrorMessage')).toContain('failed_precondition');
+    expect(storage._store.get('lastDestroyErrorAt')).toBeTypeOf('number');
+  });
+
+  it('clears destroy error on successful delete', async () => {
+    const { storage } = createInstance();
+    await seedProvisioned(storage, {
+      status: 'destroying',
+      flyMachineId: null,
+      flyVolumeId: 'vol-1',
+      pendingDestroyMachineId: null,
+      pendingDestroyVolumeId: 'vol-1',
+      lastDestroyErrorOp: 'volume',
+      lastDestroyErrorStatus: 412,
+      lastDestroyErrorMessage: 'old error',
+      lastDestroyErrorAt: Date.now() - 60_000,
+    });
+
+    (flyClient.getVolume as Mock).mockResolvedValue({
+      id: 'vol-1',
+      attached_machine_id: null,
+      state: 'detached',
+    });
+    (flyClient.deleteVolume as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(storage);
+    await instance.alarm();
+
+    // Error fields cleared after successful volume delete
+    expect(storage._store.has('lastDestroyErrorOp')).toBe(false);
+  });
+});
+
 describe('reconciliation: machine status sync', () => {
   it('syncs DO status from running to stopped after threshold failures', async () => {
     const { storage } = createInstance();

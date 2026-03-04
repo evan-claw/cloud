@@ -294,6 +294,9 @@ export function deprioritizeRegion(regions: string[], failedRegion: string | nul
 /** Cooldown between metadata recovery attempts (1 alarm cycle at idle cadence). */
 const METADATA_RECOVERY_COOLDOWN_MS = ALARM_INTERVAL_IDLE_MS;
 
+/** Cooldown after getVolume finds no attached machine during destroy recovery. */
+const BOUND_MACHINE_RECOVERY_COOLDOWN_MS = 5 * 60 * 1000;
+
 /** States that indicate the machine is dead and should be ignored for recovery. */
 const DEAD_STATES: ReadonlySet<FlyMachineState> = new Set(['destroyed', 'destroying']);
 
@@ -384,6 +387,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private imageVariant: string | null = null;
   private trackedImageTag: string | null = null;
   private trackedImageDigest: string | null = null;
+  private lastDestroyErrorOp: 'machine' | 'volume' | 'recover' | null = null;
+  private lastDestroyErrorStatus: number | null = null;
+  private lastDestroyErrorMessage: string | null = null;
+  private lastDestroyErrorAt: number | null = null;
+  private lastBoundMachineRecoveryAt: number | null = null;
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
@@ -425,6 +433,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.imageVariant = s.imageVariant;
       this.trackedImageTag = s.trackedImageTag;
       this.trackedImageDigest = s.trackedImageDigest;
+      this.lastDestroyErrorOp = s.lastDestroyErrorOp;
+      this.lastDestroyErrorStatus = s.lastDestroyErrorStatus;
+      this.lastDestroyErrorMessage = s.lastDestroyErrorMessage;
+      this.lastDestroyErrorAt = s.lastDestroyErrorAt;
+      this.lastBoundMachineRecoveryAt = s.lastBoundMachineRecoveryAt;
     } else {
       const hasAnyData = entries.size > 0;
       if (hasAnyData) {
@@ -1409,6 +1422,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     lastMetadataRecoveryAt: number | null;
     lastLiveCheckAt: number | null;
     alarmScheduledAt: number | null;
+    lastDestroyErrorOp: 'machine' | 'volume' | 'recover' | null;
+    lastDestroyErrorStatus: number | null;
+    lastDestroyErrorMessage: string | null;
+    lastDestroyErrorAt: number | null;
   }> {
     await this.loadState();
     const alarmScheduledAt = await this.ctx.storage.getAlarm();
@@ -1438,6 +1455,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastMetadataRecoveryAt: this.lastMetadataRecoveryAt,
       lastLiveCheckAt: this.lastLiveCheckAt,
       alarmScheduledAt,
+      lastDestroyErrorOp: this.lastDestroyErrorOp,
+      lastDestroyErrorStatus: this.lastDestroyErrorStatus,
+      lastDestroyErrorMessage: this.lastDestroyErrorMessage,
+      lastDestroyErrorAt: this.lastDestroyErrorAt,
     };
   }
 
@@ -2113,13 +2134,86 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   // Two-phase destroy helpers
   // ========================================================================
 
+  /** Fly machine IDs are lowercase alphanumeric. */
+  private static MACHINE_ID_RE = /^[a-z0-9]+$/;
+
   /**
    * Retry deleting pending Fly resources. Called from alarm for destroying instances.
    */
   private async retryPendingDestroy(flyConfig: FlyClientConfig, reason: string): Promise<void> {
+    await this.recoverBoundMachineForDestroy(flyConfig, reason);
     await this.tryDeleteMachine(flyConfig, reason);
     await this.tryDeleteVolume(flyConfig, reason);
     await this.finalizeDestroyIfComplete();
+  }
+
+  /**
+   * When a volume has a pending destroy but the machine ID was lost (null),
+   * query the volume to discover the attached machine so we can delete it first.
+   * Without this, volume deletion returns 412 "bound to machine" forever.
+   */
+  private async recoverBoundMachineForDestroy(
+    flyConfig: FlyClientConfig,
+    reason: string
+  ): Promise<void> {
+    if (this.pendingDestroyMachineId) return; // already know the machine
+    if (!this.pendingDestroyVolumeId) return; // nothing to check
+
+    // Cooldown: skip if we recently checked and found no attached machine
+    if (
+      this.lastBoundMachineRecoveryAt &&
+      Date.now() - this.lastBoundMachineRecoveryAt < BOUND_MACHINE_RECOVERY_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    try {
+      const volume = await fly.getVolume(flyConfig, this.pendingDestroyVolumeId);
+      const machineId = volume.attached_machine_id;
+
+      if (!machineId || !KiloClawInstance.MACHINE_ID_RE.test(machineId)) {
+        if (machineId) {
+          reconcileLog(reason, 'recover_bound_machine_invalid_id', {
+            volume_id: this.pendingDestroyVolumeId,
+            attached_machine_id: machineId,
+          });
+        }
+        // No machine to recover — set cooldown to avoid repeated getVolume calls
+        this.lastBoundMachineRecoveryAt = Date.now();
+        await this.ctx.storage.put(
+          storageUpdate({ lastBoundMachineRecoveryAt: this.lastBoundMachineRecoveryAt })
+        );
+        return;
+      }
+
+      reconcileLog(reason, 'recover_bound_machine_for_destroy', {
+        volume_id: this.pendingDestroyVolumeId,
+        machine_id: machineId,
+      });
+
+      this.pendingDestroyMachineId = machineId;
+      this.flyMachineId = machineId;
+      this.lastBoundMachineRecoveryAt = null;
+      await this.ctx.storage.put(
+        storageUpdate({
+          pendingDestroyMachineId: machineId,
+          flyMachineId: machineId,
+          lastBoundMachineRecoveryAt: null,
+        })
+      );
+    } catch (err) {
+      if (fly.isFlyNotFound(err)) {
+        // Volume already gone — tryDeleteVolume will handle the 404.
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      const status = err instanceof fly.FlyApiError ? err.status : null;
+      reconcileLog(reason, 'recover_bound_machine_failed', {
+        volume_id: this.pendingDestroyVolumeId,
+        error: message,
+      });
+      await this.persistDestroyError('recover', status, message);
+    }
   }
 
   /**
@@ -2139,10 +2233,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           machine_id: this.pendingDestroyMachineId,
         });
       } else {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof fly.FlyApiError ? err.status : null;
         reconcileLog(reason, 'destroy_machine_failed', {
           machine_id: this.pendingDestroyMachineId,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
         });
+        await this.persistDestroyError('machine', status, message);
         return; // Leave pending, retry next alarm
       }
     }
@@ -2153,6 +2250,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await this.ctx.storage.put(
       storageUpdate({ pendingDestroyMachineId: null, flyMachineId: null })
     );
+    await this.clearDestroyError();
   }
 
   /**
@@ -2172,10 +2270,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           volume_id: this.pendingDestroyVolumeId,
         });
       } else {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof fly.FlyApiError ? err.status : null;
         reconcileLog(reason, 'destroy_volume_failed', {
           volume_id: this.pendingDestroyVolumeId,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
         });
+        await this.persistDestroyError('volume', status, message);
         return; // Leave pending, retry next alarm
       }
     }
@@ -2184,6 +2285,42 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.pendingDestroyVolumeId = null;
     this.flyVolumeId = null;
     await this.ctx.storage.put(storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null }));
+    await this.clearDestroyError();
+  }
+
+  private async persistDestroyError(
+    op: 'machine' | 'volume' | 'recover',
+    status: number | null,
+    message: string
+  ): Promise<void> {
+    this.lastDestroyErrorOp = op;
+    this.lastDestroyErrorStatus = status;
+    this.lastDestroyErrorMessage = message;
+    this.lastDestroyErrorAt = Date.now();
+    await this.ctx.storage.put(
+      storageUpdate({
+        lastDestroyErrorOp: op,
+        lastDestroyErrorStatus: status,
+        lastDestroyErrorMessage: message,
+        lastDestroyErrorAt: this.lastDestroyErrorAt,
+      })
+    );
+  }
+
+  private async clearDestroyError(): Promise<void> {
+    if (!this.lastDestroyErrorOp) return; // already clear
+    this.lastDestroyErrorOp = null;
+    this.lastDestroyErrorStatus = null;
+    this.lastDestroyErrorMessage = null;
+    this.lastDestroyErrorAt = null;
+    await this.ctx.storage.put(
+      storageUpdate({
+        lastDestroyErrorOp: null,
+        lastDestroyErrorStatus: null,
+        lastDestroyErrorMessage: null,
+        lastDestroyErrorAt: null,
+      })
+    );
   }
 
   /**
@@ -2267,6 +2404,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.imageVariant = null;
     this.trackedImageTag = null;
     this.trackedImageDigest = null;
+    this.lastDestroyErrorOp = null;
+    this.lastDestroyErrorStatus = null;
+    this.lastDestroyErrorMessage = null;
+    this.lastDestroyErrorAt = null;
+    this.lastBoundMachineRecoveryAt = null;
     this.loaded = false;
   }
 

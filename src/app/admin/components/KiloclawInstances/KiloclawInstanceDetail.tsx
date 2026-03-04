@@ -690,6 +690,27 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                   {data.workerStatus.pendingPostgresMarkOnFinalize ? 'true' : 'false'}
                 </DetailField>
 
+                <DetailField label="Last Destroy Error">
+                  {data.workerStatus.lastDestroyErrorOp ? (
+                    <span className="text-destructive text-xs">
+                      <code>
+                        {data.workerStatus.lastDestroyErrorOp}
+                        {data.workerStatus.lastDestroyErrorStatus
+                          ? ` ${data.workerStatus.lastDestroyErrorStatus}`
+                          : ''}
+                        {' — '}
+                        {data.workerStatus.lastDestroyErrorMessage ?? 'unknown'}
+                      </code>
+                      <br />
+                      <span className="text-muted-foreground">
+                        {formatEpochTime(data.workerStatus.lastDestroyErrorAt)}
+                      </span>
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </DetailField>
+
                 <DetailField label="Last Metadata Recovery Attempt">
                   {formatEpochTime(data.workerStatus.lastMetadataRecoveryAt)}
                 </DetailField>
