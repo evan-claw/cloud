@@ -134,7 +134,6 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
       githubToken?: string;
       config: {
         model_slug: string;
-        pr_branch_prefix: string;
         custom_instructions?: string | null;
       };
     } = await configResponse.json();
@@ -192,7 +191,6 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
         },
         classification,
         {
-          pr_branch_prefix: config.pr_branch_prefix,
           custom_instructions: config.custom_instructions,
         },
         this.state.ticketId

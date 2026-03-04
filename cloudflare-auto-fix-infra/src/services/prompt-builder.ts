@@ -16,7 +16,6 @@ type IssueInfo = {
 };
 
 type PRConfig = {
-  pr_branch_prefix: string;
   custom_instructions?: string | null;
 };
 
