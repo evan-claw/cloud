@@ -4,7 +4,6 @@ import type {
   SandboxId,
   SessionContext,
   SessionId,
-  StreamEvent,
   InterruptResult,
 } from './types.js';
 import type { ExecutionParams as _ExecutionParams } from './schema.js';
@@ -21,7 +20,6 @@ import {
   setupWorkspace,
 } from './workspace.js';
 import { logger, WithLogTags } from './logger.js';
-import { streamKilocodeExecution } from './streaming.js';
 import type {
   PersistenceEnv,
   CloudAgentSessionState,
@@ -30,7 +28,7 @@ import type {
 import { MetadataSchema } from './persistence/schemas.js';
 import { withDORetry } from './utils/do-retry.js';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
-import type { EncryptedSecrets, Images } from './router/schemas.js';
+import type { EncryptedSecrets } from './router/schemas.js';
 
 const SETUP_COMMAND_TIMEOUT_SECONDS = 120; // 2 minutes
 const SANDBOX_RETRY_DEFAULTS = {
@@ -895,50 +893,9 @@ export class SessionService {
       existingMetadata ?? undefined
     );
 
-    // Track first execution to optimize DO fetch and store captured kiloSessionId
-    let isFirstCall = true;
-    let capturedKiloSessionId: string | undefined = undefined;
-
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        const currentIsFirst = isFirstCall;
-        isFirstCall = false;
-
-        // Use captured kiloSessionId if available for subsequent calls
-        const kiloSessionId = capturedKiloSessionId;
-
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...options, isFirstExecution: currentIsFirst, kiloSessionId, images: options?.images },
-          env
-        )) {
-          // Capture kiloSessionId from session_created event for subsequent calls
-          if (
-            event.streamEventType === 'kilocode' &&
-            event.payload?.event === 'session_created' &&
-            typeof event.payload?.sessionId === 'string' &&
-            !capturedKiloSessionId
-          ) {
-            capturedKiloSessionId = event.payload.sessionId;
-            logger.setTags({ kiloSessionId: capturedKiloSessionId });
-          }
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1189,30 +1146,9 @@ export class SessionService {
       metadataToPreserve
     );
 
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        execOptions?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...execOptions, isFirstExecution: false, kiloSessionId, images: execOptions?.images },
-          env
-        )) {
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1340,25 +1276,6 @@ export class SessionService {
     return {
       context,
       session,
-      streamKilocodeExec: (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) =>
-        streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          {
-            ...options,
-            isFirstExecution: false,
-            kiloSessionId: metadata?.kiloSessionId,
-            images: options?.images,
-          },
-          env
-        ),
     };
   }
 
@@ -1844,11 +1761,6 @@ function getGitAuthorEnv(
 export interface PreparedSession {
   context: SessionContext;
   session: Awaited<ReturnType<SessionService['getOrCreateSession']>>;
-  streamKilocodeExec: (
-    mode: string,
-    prompt: string,
-    options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-  ) => AsyncGenerator<StreamEvent>;
 }
 
 export interface InitiateOptions {

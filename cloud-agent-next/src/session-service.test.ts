@@ -28,11 +28,6 @@ vi.mock('./workspace.js', () => {
   };
 });
 
-const streamKilocodeExecutionMock = vi.hoisted(() => vi.fn());
-vi.mock('./streaming.js', () => ({
-  streamKilocodeExecution: streamKilocodeExecutionMock,
-}));
-
 import {
   setupWorkspace as mockSetupWorkspace,
   cloneGitHubRepo as mockCloneGitHubRepo,
@@ -169,7 +164,6 @@ describe('SessionService', () => {
         expect.stringContaining(`git checkout -b 'session/${sessionId}'`)
       );
       expect(result.context.sessionId).toBe(sessionId);
-      expect(result.streamKilocodeExec).toBeDefined();
     });
 
     it('does not restore session snapshot during initiate (no exportSession call)', async () => {
@@ -318,255 +312,6 @@ describe('SessionService', () => {
       // manageBranch should NOT be called when repo exists (warm start)
       expect(mockManageBranch).not.toHaveBeenCalled();
       expect(result.context.sessionId).toBe(sessionId);
-      expect(result.streamKilocodeExec).toBeDefined();
-    });
-  });
-
-  describe('streamKilocodeExec first-execution handling', () => {
-    const noopStream = async function* () {};
-
-    it('passes isFirstExecution=true only on first initiate call', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
-      const fakeSession = {
-        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
-      };
-      const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-      } as unknown as SandboxInstance;
-      const sessionId: SessionId = 'agent_first_call';
-      mockedSetupWorkspace.mockResolvedValue({
-        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
-        sessionHome: `/home/${sessionId}`,
-      });
-
-      const service = new SessionService();
-      const result = await service.initiate({
-        sandbox,
-        sandboxId: 'org__user',
-        orgId: 'org',
-        userId: 'user',
-        sessionId,
-        kilocodeToken: 'token',
-        kilocodeModel: 'test-model',
-        githubRepo: 'acme/repo',
-        env: mockEnv,
-      });
-
-      // Consume the generators to trigger the underlying streamKilocodeExecution calls
-      for await (const _ of result.streamKilocodeExec('code', 'prompt-1')) {
-        // noop - just consume
-      }
-      for await (const _ of result.streamKilocodeExec('code', 'prompt-2', {
-        sessionId: 'custom-session',
-      })) {
-        // noop - just consume
-      }
-
-      expect(streamKilocodeExecutionMock).toHaveBeenNthCalledWith(
-        1,
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'prompt-1',
-        { isFirstExecution: true, kiloSessionId: undefined },
-        mockEnv
-      );
-      expect(streamKilocodeExecutionMock).toHaveBeenNthCalledWith(
-        2,
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'prompt-2',
-        { sessionId: 'custom-session', isFirstExecution: false, kiloSessionId: undefined },
-        mockEnv
-      );
-    });
-
-    it('always passes isFirstExecution=false when resuming', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
-      const fakeSession = {
-        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0, stdout: 'exists' }),
-        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
-      };
-      const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-      } as unknown as SandboxInstance;
-      const sessionId: SessionId = 'agent_resume_first_flag';
-
-      const service = new SessionService();
-      const result = await service.resume({
-        sandbox,
-        sandboxId: 'org__user',
-        orgId: 'org',
-        userId: 'user',
-        sessionId,
-        kilocodeToken: 'token',
-        kilocodeModel: 'test-model',
-        env: mockEnv,
-      });
-
-      result.streamKilocodeExec('code', 'prompt');
-
-      expect(streamKilocodeExecutionMock).toHaveBeenCalledWith(
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'prompt',
-        expect.objectContaining({ isFirstExecution: false, kiloSessionId: undefined }),
-        mockEnv
-      );
-    });
-
-    it('passes kiloSessionId from metadata when resuming', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
-      const kiloSessionId = '123e4567-e89b-12d3-a456-426614174000';
-      const { env: metadataEnv } = createMetadataEnv({
-        getMetadata: vi.fn().mockResolvedValue({
-          version: 12345,
-          sessionId: 'agent_resume_kilo',
-          orgId: 'org',
-          userId: 'user',
-          timestamp: 12345,
-          kiloSessionId,
-        }),
-      });
-
-      const fakeSession = {
-        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0, stdout: 'exists' }),
-        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
-      };
-      const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-      } as unknown as SandboxInstance;
-
-      const service = new SessionService();
-      const result = await service.resume({
-        sandbox,
-        sandboxId: 'org__user',
-        orgId: 'org',
-        userId: 'user',
-        sessionId: 'agent_resume_kilo',
-        kilocodeToken: 'token',
-        kilocodeModel: 'test-model',
-        env: metadataEnv,
-      });
-
-      result.streamKilocodeExec('code', 'prompt');
-
-      expect(streamKilocodeExecutionMock).toHaveBeenCalledWith(
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId: 'agent_resume_kilo' }),
-        'code',
-        'prompt',
-        expect.objectContaining({ isFirstExecution: false, kiloSessionId }),
-        metadataEnv
-      );
-    });
-
-    it('captures and reuses kiloSessionId from session_created event', async () => {
-      const capturedKiloSessionId = '123e4567-e89b-12d3-a456-426614174000';
-
-      // Mock stream that emits session_created event
-      const mockStreamWithSessionCreated = async function* () {
-        yield {
-          streamEventType: 'kilocode',
-          payload: {
-            event: 'session_created',
-            sessionId: capturedKiloSessionId,
-          },
-        };
-      };
-
-      streamKilocodeExecutionMock.mockReturnValue(mockStreamWithSessionCreated());
-
-      const fakeSession = {
-        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
-      };
-      const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-      } as unknown as SandboxInstance;
-      const sessionId: SessionId = 'agent_capture_test';
-      mockedSetupWorkspace.mockResolvedValue({
-        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
-        sessionHome: `/home/${sessionId}`,
-      });
-
-      const service = new SessionService();
-      const result = await service.initiate({
-        sandbox,
-        sandboxId: 'org__user',
-        orgId: 'org',
-        userId: 'user',
-        sessionId,
-        kilocodeToken: 'token',
-        kilocodeModel: 'test-model',
-        githubRepo: 'acme/repo',
-        env: mockEnv,
-      });
-
-      // First call - should not have kiloSessionId
-      for await (const _ of result.streamKilocodeExec('code', 'prompt-1')) {
-        // noop - consumes stream and captures sessionId
-      }
-
-      // Second call - should reuse captured kiloSessionId
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-      for await (const _ of result.streamKilocodeExec('code', 'prompt-2')) {
-        // noop
-      }
-
-      // Verify first call had no kiloSessionId
-      expect(streamKilocodeExecutionMock).toHaveBeenNthCalledWith(
-        1,
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'prompt-1',
-        { isFirstExecution: true, kiloSessionId: undefined },
-        mockEnv
-      );
-
-      // Verify second call reused captured kiloSessionId
-      expect(streamKilocodeExecutionMock).toHaveBeenNthCalledWith(
-        2,
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'prompt-2',
-        { isFirstExecution: false, kiloSessionId: capturedKiloSessionId },
-        mockEnv
-      );
     });
   });
 
@@ -2723,11 +2468,7 @@ describe('SessionService', () => {
   });
 
   describe('initiateFromKiloSession', () => {
-    const noopStream = async function* () {};
-
     it('should setup workspace and clone repo without creating session branch', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       const { env: testEnv } = createMetadataEnv({
         updateMetadata: vi.fn().mockResolvedValue(undefined),
       });
@@ -2783,12 +2524,9 @@ describe('SessionService', () => {
       expect(mockManageBranch).not.toHaveBeenCalled();
 
       expect(result.context.sessionId).toBe(sessionId);
-      expect(result.streamKilocodeExec).toBeDefined();
     });
 
     it('should save kiloSessionId in metadata', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       const updateMetadata = vi.fn().mockResolvedValue(undefined);
       const { env: testEnv } = createMetadataEnv({
         updateMetadata,
@@ -2837,66 +2575,7 @@ describe('SessionService', () => {
       );
     });
 
-    it('should pass isFirstExecution=false since resuming existing kilo session', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
-      const { env: testEnv } = createMetadataEnv({
-        updateMetadata: vi.fn().mockResolvedValue(undefined),
-      });
-
-      const fakeSession = {
-        exec: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-        deleteFile: vi.fn().mockResolvedValue(undefined),
-      };
-      const sandbox = {
-        createSession: vi.fn().mockResolvedValue(fakeSession),
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
-      } as unknown as SandboxInstance;
-      const sessionId: SessionId = 'agent_first_exec_false';
-      const kiloSessionId = '123e4567-e89b-12d3-a456-426614174000';
-      mockedSetupWorkspace.mockResolvedValue({
-        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
-        sessionHome: `/home/${sessionId}`,
-      });
-
-      const service = new SessionService();
-      const result = await service.initiateFromKiloSession({
-        sandbox,
-        sandboxId: 'org__user',
-        orgId: 'org',
-        userId: 'user',
-        sessionId,
-        kilocodeToken: 'token',
-        kilocodeModel: 'test-model',
-        kiloSessionId,
-        githubRepo: 'acme/repo',
-        env: testEnv,
-      });
-
-      // Consume the generator
-      for await (const _ of result.streamKilocodeExec('code', 'test prompt')) {
-        // noop
-      }
-
-      // Verify isFirstExecution=false and kiloSessionId is passed
-      expect(streamKilocodeExecutionMock).toHaveBeenCalledWith(
-        sandbox,
-        fakeSession,
-        expect.objectContaining({ sessionId }),
-        'code',
-        'test prompt',
-        expect.objectContaining({ isFirstExecution: false, kiloSessionId }),
-        testEnv
-      );
-    });
-
     it('should run setup commands after clone', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       const { env: testEnv } = createMetadataEnv({
         updateMetadata: vi.fn().mockResolvedValue(undefined),
       });
@@ -3088,9 +2767,6 @@ describe('SessionService', () => {
 
   describe('saveSessionMetadata preserves prepared session fields', () => {
     it('should preserve preparedAt, initiatedAt, prompt, mode, model, autoCommit when existingMetadata is provided', async () => {
-      const noopStream = async function* () {};
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       // Existing metadata with prepared session fields
       const existingMetadata: CloudAgentSessionState = {
         version: 123456789,
@@ -3170,9 +2846,6 @@ describe('SessionService', () => {
     });
 
     it('should NOT have prepared fields when existingMetadata is not provided (legacy flow)', async () => {
-      const noopStream = async function* () {};
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       const updateMetadata = vi.fn().mockResolvedValue(undefined);
       const { env: testEnv } = createMetadataEnv({
         getMetadata: vi.fn().mockResolvedValue(null),
@@ -3225,11 +2898,7 @@ describe('SessionService', () => {
   });
 
   describe('isPreparedSession branch management logic', () => {
-    const noopStream = async function* () {};
-
     it('uses manageBranch when prepared session has upstreamBranch', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       // Existing metadata with preparedAt AND upstreamBranch
       const existingMetadata: CloudAgentSessionState = {
         version: 123456789,
@@ -3299,8 +2968,6 @@ describe('SessionService', () => {
     });
 
     it('creates session branch directly when prepared session has no upstreamBranch', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       // Existing metadata with preparedAt but NO upstreamBranch
       const existingMetadata: CloudAgentSessionState = {
         version: 123456789,
@@ -3367,8 +3034,6 @@ describe('SessionService', () => {
     });
 
     it('skips branch operations for legacy CLI resumes (no preparedAt)', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       // NO existingMetadata passed - simulates legacy CLI resume where
       // preparedAt won't be set
       const { env: testEnv } = createMetadataEnv({
@@ -3417,8 +3082,6 @@ describe('SessionService', () => {
     });
 
     it('skips branch operations when existingMetadata has no preparedAt (explicit legacy)', async () => {
-      streamKilocodeExecutionMock.mockReturnValue(noopStream());
-
       // existingMetadata WITHOUT preparedAt - this is a legacy session
       const legacyMetadata: CloudAgentSessionState = {
         version: 123456789,

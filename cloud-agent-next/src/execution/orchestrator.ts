@@ -292,10 +292,6 @@ export class ExecutionOrchestrator {
         return {
           context,
           session,
-          // eslint-disable-next-line require-yield
-          streamKilocodeExec: async function* (): AsyncGenerator<never, void, unknown> {
-            throw new Error('streamKilocodeExec not available for fast path');
-          },
         };
       }
 

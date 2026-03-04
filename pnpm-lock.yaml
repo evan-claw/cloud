@@ -564,8 +564,8 @@ importers:
   cloud-agent-next:
     dependencies:
       '@cloudflare/sandbox':
-        specifier: 0.7.5
-        version: 0.7.5(@xterm/xterm@6.0.0)
+        specifier: 0.7.8
+        version: 0.7.8(@xterm/xterm@6.0.0)
       '@hono/trpc-server':
         specifier: ^0.4.2
         version: 0.4.2(@trpc/server@11.9.0(typescript@5.9.3))(hono@4.12.2)
@@ -2525,8 +2525,8 @@ packages:
       '@opencode-ai/sdk':
         optional: true
 
-  '@cloudflare/sandbox@0.7.5':
-    resolution: {integrity: sha512-lOegEUL6eDsHrsxEMxqRcftsp46hn+ilQryCLuSDghHvnCdDAenzyN/E3nVjQdYAZnoh5xsLzis/G295LcZr1w==}
+  '@cloudflare/sandbox@0.7.8':
+    resolution: {integrity: sha512-BNiRgHlGWYFYzRDDs+OOy1fEMU+Vr2UsWeTLP1LOQmq1oE2GSc1cWFPOOK4KZXUoxWJurMqZRAG47qa0ipKBCw==}
     peerDependencies:
       '@openai/agents': ^0.3.3
       '@opencode-ai/sdk': ^1.1.40
@@ -13339,7 +13339,7 @@ snapshots:
     dependencies:
       '@cloudflare/containers': 0.0.30
 
-  '@cloudflare/sandbox@0.7.5(@xterm/xterm@6.0.0)':
+  '@cloudflare/sandbox@0.7.8(@xterm/xterm@6.0.0)':
     dependencies:
       '@cloudflare/containers': 0.0.30
       aws4fetch: 1.0.20
