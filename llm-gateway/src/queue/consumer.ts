@@ -67,9 +67,17 @@ function resolveProviderApiKey(secrets: SecretsBundle, providerId: string): stri
   return undefined;
 }
 
-async function processUsageAccounting(msg: UsageAccountingMessage, env: Env): Promise<void> {
-  const secrets = await resolveSecrets(env);
-  const providerApiKey = resolveProviderApiKey(secrets, msg.providerId) ?? '';
+interface ResolvedSecrets {
+  secrets: SecretsBundle;
+  abuse: { url: string; secrets: AbuseServiceSecrets | undefined };
+}
+
+async function processUsageAccounting(
+  msg: UsageAccountingMessage,
+  env: Env,
+  resolved: ResolvedSecrets
+): Promise<void> {
+  const providerApiKey = resolveProviderApiKey(resolved.secrets, msg.providerId) ?? '';
 
   // Re-hydrate the full MicrodollarUsageContext with the provider API key
   const usageContext: MicrodollarUsageContext = {
@@ -84,10 +92,9 @@ async function processUsageAccounting(msg: UsageAccountingMessage, env: Env): Pr
   // Abuse cost reporting chains on the usage accounting result
   if (msg.abuseRequestId && usageStats.messageId) {
     try {
-      const abuse = await resolveAbuseSecrets(env);
       await reportAbuseCost(
-        abuse.url,
-        abuse.secrets,
+        resolved.abuse.url,
+        resolved.abuse.secrets,
         {
           kiloUserId: msg.kiloUserId,
           fraudHeaders: msg.fraudHeaders,
@@ -120,6 +127,8 @@ export async function handleBackgroundTaskQueue(
   batch: MessageBatch<BackgroundTaskMessage>,
   env: Env
 ): Promise<void> {
+  let resolved: ResolvedSecrets | undefined;
+
   for (const message of batch.messages) {
     try {
       const stub = getIdempotencyDO(env, message.body.idempotencyKey);
@@ -134,7 +143,11 @@ export async function handleBackgroundTaskQueue(
 
       switch (message.body.type) {
         case 'usage-accounting':
-          await processUsageAccounting(message.body, env);
+          resolved ??= {
+            secrets: await resolveSecrets(env),
+            abuse: await resolveAbuseSecrets(env),
+          };
+          await processUsageAccounting(message.body, env, resolved);
           break;
         case 'api-metrics':
           await processApiMetrics(message.body, env);
