@@ -2,8 +2,6 @@
 // update balances, and track org per-user daily limits.
 // Port of src/lib/processUsage.ts — simplified:
 //   - No Sentry spans/captures (use console.error/warn)
-//   - No PostHog first-usage events
-//   - No KiloPass threshold check
 //   - Uses crypto.randomUUID() (Web Crypto global) instead of Node `randomUUID`
 //   - Uses scheduler.wait() instead of setTimeout for CF Workers backoff
 
