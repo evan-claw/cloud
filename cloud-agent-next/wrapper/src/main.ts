@@ -73,7 +73,7 @@ function getOptionalEnvBool(name: string, defaultValue: boolean): boolean {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  logToFile('wrapper starting (long-running mode)');
+  logToFile(`wrapper starting (long-running mode) bun=${Bun.version}`);
 
   // Parse environment variables
   const wrapperPort = getOptionalEnvInt('WRAPPER_PORT', 5000);
