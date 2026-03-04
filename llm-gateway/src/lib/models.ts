@@ -201,10 +201,8 @@ function isOpenRouterStealthModel(model: string): boolean {
 }
 
 // Data collection is required for Kilo-hosted free models when prompt training
-// is not explicitly allowed by the provider config.
-export function isDataCollectionRequiredOnKiloCodeOnly(model: string): boolean {
-  return kiloFreeModelMap.get(model)?.is_enabled === true;
-}
+// is not explicitly allowed by the provider config. Same logic as isKiloFreeModel.
+export const isDataCollectionRequiredOnKiloCodeOnly = isKiloFreeModel;
 
 // Returns context_length for a Kilo free model, or undefined for other models.
 export function getKiloFreeModelContextLength(model: string): number | undefined {
