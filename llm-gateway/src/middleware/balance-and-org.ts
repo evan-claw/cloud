@@ -16,6 +16,7 @@ import {
   checkOrganizationModelRestrictions,
 } from '../lib/org-restrictions';
 import { isActiveReviewPromo, isActiveCloudAgentPromo } from '../lib/promotions';
+import { maybePerformOrganizationAutoTopUp } from '../lib/auto-top-up';
 import { getWorkerDb, type WorkerDb } from '@kilocode/db/client';
 import { and, eq, gt, notExists, sql } from 'drizzle-orm';
 import { credit_transactions, kilo_pass_issuance_items } from '@kilocode/db/schema';
@@ -74,7 +75,25 @@ export const balanceAndOrgCheckMiddleware: MiddlewareHandler<HonoContext> = asyn
   }
 
   const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
-  const { balance, settings, plan } = await getBalanceAndOrgSettings(db, organizationId, user);
+  const { balance, settings, plan, autoTopUp } = await getBalanceAndOrgSettings(
+    db,
+    organizationId,
+    user
+  );
+
+  // Trigger org auto-top-up in the background (matches reference after() pattern)
+  if (autoTopUp) {
+    c.executionCtx.waitUntil(
+      maybePerformOrganizationAutoTopUp(db, {
+        id: autoTopUp.organizationId,
+        auto_top_up_enabled: autoTopUp.auto_top_up_enabled,
+        total_microdollars_acquired: autoTopUp.total_microdollars_acquired,
+        microdollars_used: autoTopUp.microdollars_used,
+      }).catch(err => {
+        console.error('[balance-and-org] auto-top-up failed', err);
+      })
+    );
+  }
 
   // Balance check for paid models
   if (
