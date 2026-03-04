@@ -51,11 +51,11 @@ export function getModelVariants(model: string): OpenCodeSettings['variants'] {
     };
   }
   if (isOpenAiModel(model) || isGemini3Model(model)) {
+    const efforts = model.includes('codex')
+      ? ReasoningEffortSchema.options.filter(e => e !== 'none')
+      : ReasoningEffortSchema.options;
     return Object.fromEntries(
-      ReasoningEffortSchema.options.map(effort => [
-        effort,
-        { reasoning: { enabled: effort !== 'none', effort } },
-      ])
+      efforts.map(effort => [effort, { reasoning: { enabled: effort !== 'none', effort } }])
     );
   }
   if (isMoonshotModel(model) || isZaiModel(model)) {
