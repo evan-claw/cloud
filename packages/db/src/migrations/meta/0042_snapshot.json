@@ -1,6 +1,6 @@
 {
-  "id": "5b3a5f3e-08b7-4869-b6c7-4d6ebc12206c",
-  "prevId": "11e3e4ba-5050-4757-bc60-0f808a41e233",
+  "id": "a841e527-6f25-41e1-8395-88bd7c5c60ac",
+  "prevId": "5b3a5f3e-08b7-4869-b6c7-4d6ebc12206c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3077,7 +3077,7 @@
         },
         "cli_session_id": {
           "name": "cli_session_id",
-          "type": "uuid",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3358,19 +3358,6 @@
           ],
           "columnsTo": [
             "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "cloud_agent_code_reviews_cli_session_id_cli_sessions_session_id_fk": {
-          "name": "cloud_agent_code_reviews_cli_session_id_cli_sessions_session_id_fk",
-          "tableFrom": "cloud_agent_code_reviews",
-          "tableTo": "cli_sessions",
-          "columnsFrom": [
-            "cli_session_id"
-          ],
-          "columnsTo": [
-            "session_id"
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
