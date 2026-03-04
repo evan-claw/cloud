@@ -22,9 +22,10 @@ import { useExpiringCredits } from './useExpiringCredits';
 type Props = {
   organizationId: string;
   role: OrganizationRole;
+  isAutoTopUpEnabled: boolean;
 };
 
-export function OrganizationPaymentDetails({ organizationId, role }: Props) {
+export function OrganizationPaymentDetails({ organizationId, role, isAutoTopUpEnabled }: Props) {
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('year');
   const [isSpendingAlertsModalOpen, setIsSpendingAlertsModalOpen] = useState(false);
   const userRole = role;
@@ -34,7 +35,7 @@ export function OrganizationPaymentDetails({ organizationId, role }: Props) {
   const { expiringBlocks, expiring_mUsd, earliestExpiry } = useExpiringCredits(organizationId);
 
   return (
-    <OrganizationContextProvider value={{ userRole, isKiloAdmin }}>
+    <OrganizationContextProvider value={{ userRole, isKiloAdmin, isAutoTopUpEnabled }}>
       <div className="flex w-full flex-col gap-y-8">
         <OrganizationPageHeader
           organizationId={organizationId}
@@ -54,7 +55,7 @@ export function OrganizationPaymentDetails({ organizationId, role }: Props) {
         />
 
         {/* Buy Credits and Auto Top-Up Section */}
-        {isKiloAdmin && (
+        {isAutoTopUpEnabled && (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {/* Buy Credits Card */}
             <Card>
