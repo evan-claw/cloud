@@ -11,9 +11,7 @@
  * What it does:
  *   1. Finds agent_configs with agent_type='code_review' and model_slug=Sonnet 4.6
  *      whose owner has balance < $1
- *   2. Cross-checks that the owner actually used the review agent during the promo
- *      window (via microdollar_usage)
- *   3. Updates each matching config's model_slug to MiniMax M2.5
+ *   2. Updates each matching config's model_slug to MiniMax M2.5
  *
  * Usage:
  *   DRY RUN (default):
@@ -23,19 +21,10 @@
  */
 
 import { db, closeAllDrizzleConnections, type DrizzleTransaction } from '@/lib/drizzle';
-import {
-  agent_configs,
-  kilocode_users,
-  microdollar_usage,
-  organizations,
-} from '@kilocode/db/schema';
-import { sql, and, eq, inArray, lt, isNull, isNotNull } from 'drizzle-orm';
+import { agent_configs, kilocode_users, organizations } from '@kilocode/db/schema';
+import { sql, and, eq, inArray, lt } from 'drizzle-orm';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
-import {
-  REVIEW_PROMO_START,
-  REVIEW_PROMO_END,
-  REVIEW_PROMO_MODEL,
-} from '@/lib/code-reviews/core/constants';
+import { REVIEW_PROMO_MODEL } from '@/lib/code-reviews/core/constants';
 
 const TARGET_MODEL = minimax_m25_free_model.public_id; // 'minimax/minimax-m2.5:free'
 const MIN_BALANCE_MUSD = 1_000_000; // $1 in microdollars
@@ -137,54 +126,6 @@ async function findCandidateConfigs(): Promise<CandidateConfig[]> {
   }
 
   return candidates;
-}
-
-async function filterByPromoUsage(candidates: CandidateConfig[]): Promise<CandidateConfig[]> {
-  const userIds = candidates.filter(c => c.ownerType === 'user').map(c => c.ownerId);
-  const orgIds = candidates.filter(c => c.ownerType === 'org').map(c => c.ownerId);
-
-  const promoUserIds = new Set<string>();
-  const promoOrgIds = new Set<string>();
-
-  if (userIds.length > 0) {
-    const rows = await db
-      .selectDistinct({ userId: microdollar_usage.kilo_user_id })
-      .from(microdollar_usage)
-      .where(
-        and(
-          inArray(microdollar_usage.kilo_user_id, userIds),
-          sql`${microdollar_usage.created_at} >= ${REVIEW_PROMO_START}`,
-          sql`${microdollar_usage.created_at} < ${REVIEW_PROMO_END}`,
-          eq(microdollar_usage.requested_model, REVIEW_PROMO_MODEL),
-          eq(microdollar_usage.cost, 0),
-          isNull(microdollar_usage.organization_id)
-        )
-      );
-    for (const row of rows) promoUserIds.add(row.userId);
-  }
-
-  if (orgIds.length > 0) {
-    const rows = await db
-      .selectDistinct({ orgId: microdollar_usage.organization_id })
-      .from(microdollar_usage)
-      .where(
-        and(
-          inArray(microdollar_usage.organization_id, orgIds),
-          sql`${microdollar_usage.created_at} >= ${REVIEW_PROMO_START}`,
-          sql`${microdollar_usage.created_at} < ${REVIEW_PROMO_END}`,
-          eq(microdollar_usage.requested_model, REVIEW_PROMO_MODEL),
-          eq(microdollar_usage.cost, 0),
-          isNotNull(microdollar_usage.organization_id)
-        )
-      );
-    for (const row of rows) {
-      if (row.orgId) promoOrgIds.add(row.orgId);
-    }
-  }
-
-  return candidates.filter(c =>
-    c.ownerType === 'user' ? promoUserIds.has(c.ownerId) : promoOrgIds.has(c.ownerId)
-  );
 }
 
 // ── Phase 2: Update agent_configs ──────────────────────────────────────────
@@ -300,11 +241,7 @@ async function run() {
 
   // Phase 1
   console.log('Phase 1: Finding candidate configs...');
-  const allCandidates = await findCandidateConfigs();
-  console.log(`Found ${allCandidates.length} configs with Sonnet 4.6 and balance < $1`);
-
-  console.log('Filtering to promo participants...');
-  const candidates = await filterByPromoUsage(allCandidates);
+  const candidates = await findCandidateConfigs();
   const users = candidates.filter(c => c.ownerType === 'user');
   const orgs = candidates.filter(c => c.ownerType === 'org');
   console.log(
