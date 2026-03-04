@@ -12,7 +12,7 @@ import type { EventSourceMessage } from 'eventsource-parser';
 import { sql } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
 import type { WorkerDb } from '@kilocode/db/client';
-import { organizations, organization_user_usage } from '@kilocode/db/schema';
+import { microdollar_usage, organizations, organization_user_usage } from '@kilocode/db/schema';
 import type { FraudDetectionHeaders } from '../lib/extract-headers';
 import type { FeatureValue } from '../lib/feature-detection';
 import type { PromptInfo } from '../lib/prompt-info';
@@ -698,29 +698,27 @@ async function ingestOrganizationTokenUsage(
       })
       .where(eq(organizations.id, orgId));
 
-    await tx.execute(sql`
-      INSERT INTO ${organization_user_usage} (
-        organization_id,
-        kilo_user_id,
-        usage_date,
-        limit_type,
-        microdollar_usage,
-        created_at,
-        updated_at
-      )
-      SELECT
-        ${usage.organization_id},
-        ${usage.kilo_user_id},
-        CURRENT_DATE,
-        ${'daily'},
-        ${usage.cost},
-        NOW(),
-        NOW()
-      ON CONFLICT (organization_id, kilo_user_id, limit_type, usage_date)
-      DO UPDATE SET
-        microdollar_usage = ${organization_user_usage.microdollar_usage} + ${usage.cost},
-        updated_at = NOW()
-    `);
+    await tx
+      .insert(organization_user_usage)
+      .values({
+        organization_id: orgId,
+        kilo_user_id: usage.kilo_user_id,
+        usage_date: sql`CURRENT_DATE`,
+        limit_type: 'daily',
+        microdollar_usage: usage.cost,
+      })
+      .onConflictDoUpdate({
+        target: [
+          organization_user_usage.organization_id,
+          organization_user_usage.kilo_user_id,
+          organization_user_usage.limit_type,
+          organization_user_usage.usage_date,
+        ],
+        set: {
+          microdollar_usage: sql`${organization_user_usage.microdollar_usage} + ${usage.cost}`,
+          updated_at: sql`NOW()`,
+        },
+      });
   });
 }
 
@@ -752,13 +750,12 @@ async function isFirstUsageEver(
   organizationId: string | undefined
 ): Promise<boolean> {
   if (priorMicrodollarUsage > 0 || organizationId) return false;
-  // Check if there are any prior usage records for this user
-  const result = await db.execute<{ exists: boolean }>(sql`
-    SELECT EXISTS (
-      SELECT 1 FROM microdollar_usage WHERE kilo_user_id = ${kiloUserId} LIMIT 1
-    ) AS exists
-  `);
-  return !result.rows[0]?.exists;
+  const rows = await db
+    .select({ id: microdollar_usage.id })
+    .from(microdollar_usage)
+    .where(eq(microdollar_usage.kilo_user_id, kiloUserId))
+    .limit(1);
+  return rows.length === 0;
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
