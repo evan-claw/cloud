@@ -1,15 +1,3 @@
-/**
- * Security Analysis Service
- *
- * Orchestrates LLM-powered analysis of security findings using a three-tier approach:
- * - Tier 1: Quick triage via direct LLM call (always runs first)
- * - Tier 2: Sandbox analysis via cloud-agent-next (only if needed or forced)
- * - Tier 3: Structured extraction via direct LLM call (extracts fields from raw markdown)
- *
- * Tier 2 uses a prepare+initiate+callback pattern via cloud-agent-next.
- * The callback endpoint handles result retrieval and Tier 3 extraction.
- */
-
 import 'server-only';
 import { randomUUID } from 'crypto';
 import {
@@ -18,14 +6,16 @@ import {
 } from '@/lib/cloud-agent-next/cloud-agent-client';
 import { generateApiToken } from '@/lib/tokens';
 import { getSecurityFindingById } from '../db/security-findings';
-import { updateAnalysisStatus } from '../db/security-analysis';
+import { updateAnalysisStatus, tryAcquireAnalysisStartLease } from '../db/security-analysis';
 import type {
   AnalysisMode,
   SecurityFindingAnalysis,
   SecurityFindingTriage,
   SecurityReviewOwner,
 } from '../core/types';
-import type { User, SecurityFinding } from '@/db/schema';
+import type { AnalysisErrorCode } from '../core/error-classification';
+import { classifyAnalysisError, isUserActionableError } from '../core/error-classification';
+import type { User, SecurityFinding } from '@kilocode/db/schema';
 import {
   trackSecurityAgentAnalysisStarted,
   trackSecurityAgentAnalysisCompleted,
@@ -39,7 +29,13 @@ import { APP_URL } from '@/lib/constants';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import type { SessionSnapshot } from '@/lib/session-ingest-client';
 
+import {
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+} from '../core/constants';
+
 const log = sentryLogger('security-agent:analysis', 'info');
+const warn = sentryLogger('security-agent:analysis', 'warning');
 const logError = sentryLogger('security-agent:analysis', 'error');
 
 const ANALYSIS_PROMPT_TEMPLATE = `You are a security analyst reviewing a dependency vulnerability alert for a codebase.
@@ -88,9 +84,6 @@ Provide a detailed markdown analysis covering:
 - **Summary**: Brief 1-2 sentence summary of findings
 `;
 
-/**
- * Build the analysis prompt for a finding
- */
 function buildAnalysisPrompt(finding: SecurityFinding): string {
   const replacements: Record<string, string> = {
     packageName: finding.package_name,
@@ -108,12 +101,7 @@ function buildAnalysisPrompt(finding: SecurityFinding): string {
   return ANALYSIS_PROMPT_TEMPLATE.replace(/\{\{(\w+)\}\}/g, (_, key) => replacements[key] ?? '');
 }
 
-/**
- * Extract the last assistant message text from a session snapshot.
- *
- * Iterates messages in reverse order to find the last assistant message,
- * then concatenates all text-type parts into a single string.
- */
+/** Extract the last assistant message text from a session snapshot. */
 export function extractLastAssistantMessage(snapshot: SessionSnapshot): string | null {
   for (let i = snapshot.messages.length - 1; i >= 0; i--) {
     const msg = snapshot.messages[i];
@@ -132,14 +120,8 @@ export function extractLastAssistantMessage(snapshot: SessionSnapshot): string |
 }
 
 /**
- * Finalize sandbox analysis by extracting structured fields from raw markdown.
- *
- * Tier 3: Uses direct LLM call to extract structured fields from the raw analysis.
- * Preserves existing triage data.
- *
- * After storing the analysis, attempts auto-dismiss if:
- * - Auto-dismiss is enabled in config
- * - sandboxAnalysis.isExploitable === false
+ * Tier 3: Extract structured fields from raw markdown, preserve triage data,
+ * and optionally auto-dismiss if sandboxAnalysis.isExploitable === false.
  */
 export async function finalizeAnalysis(
   findingId: string,
@@ -158,7 +140,6 @@ export async function finalizeAnalysis(
     return;
   }
 
-  // Get existing analysis to preserve triage data
   const finding = await getSecurityFindingById(findingId);
   if (!finding) {
     await updateAnalysisStatus(findingId, 'failed', {
@@ -169,9 +150,6 @@ export async function finalizeAnalysis(
 
   const existingAnalysis = finding.analysis;
 
-  // =========================================================================
-  // Tier 3: Extract structured fields from raw markdown
-  // =========================================================================
   log('Starting Tier 3 extraction', { correlationId, findingId });
 
   const sandboxAnalysis = await extractSandboxAnalysis({
@@ -197,6 +175,8 @@ export async function finalizeAnalysis(
     rawMarkdown: existingAnalysis?.rawMarkdown,
     analyzedAt: new Date().toISOString(),
     modelUsed: model,
+    triageModel: existingAnalysis?.triageModel,
+    analysisModel: existingAnalysis?.analysisModel ?? model,
     triggeredByUserId: existingAnalysis?.triggeredByUserId,
     correlationId,
   };
@@ -210,6 +190,8 @@ export async function finalizeAnalysis(
     organizationId,
     findingId,
     model,
+    triageModel: existingAnalysis?.triageModel,
+    analysisModel: existingAnalysis?.analysisModel ?? model,
     triageOnly: false,
     needsSandboxAnalysis: existingAnalysis?.triage?.needsSandboxAnalysis,
     triageSuggestedAction: existingAnalysis?.triage?.suggestedAction,
@@ -220,7 +202,6 @@ export async function finalizeAnalysis(
       : 0,
   });
 
-  // Attempt auto-dismiss after sandbox analysis if isExploitable === false
   if (sandboxAnalysis.isExploitable === false) {
     void maybeAutoDismissAnalysis({ findingId, analysis, owner, userId, correlationId }).catch(
       (error: unknown) => {
@@ -234,30 +215,30 @@ export async function finalizeAnalysis(
   }
 }
 
-/**
- * Start analysis for a security finding using three-tier approach.
- *
- * Tier 1 (Quick Triage): Always runs first. Direct LLM call to analyze metadata.
- * Tier 2 (Sandbox Analysis): Controlled by analysisMode — always in 'deep', never in 'shallow', triage-driven in 'auto'.
- * Tier 3 (Structured Extraction): Extracts structured fields from raw markdown output.
- */
 export async function startSecurityAnalysis(params: {
   findingId: string;
   user: User;
   githubRepo: string;
   githubToken?: string;
-  model?: string;
+  triageModel?: string;
+  analysisModel?: string;
   analysisMode?: AnalysisMode;
   forceSandbox?: boolean;
   retrySandboxOnly?: boolean;
   organizationId?: string;
-}): Promise<{ started: boolean; error?: string; triageOnly?: boolean }> {
+}): Promise<{
+  started: boolean;
+  error?: string;
+  errorCode?: AnalysisErrorCode;
+  triageOnly?: boolean;
+}> {
   const {
     findingId,
     user,
     githubRepo,
     githubToken,
-    model = 'anthropic/claude-sonnet-4',
+    triageModel = DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+    analysisModel = DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
     analysisMode = 'auto',
     forceSandbox = false,
     retrySandboxOnly = false,
@@ -266,18 +247,22 @@ export async function startSecurityAnalysis(params: {
 
   const correlationId = randomUUID();
 
-  // Get the finding
   const finding = await getSecurityFindingById(findingId);
   if (!finding) {
     return { started: false, error: `Finding not found: ${findingId}` };
   }
 
-  // Check if already running
-  if (finding.analysis_status === 'running') {
+  const leaseAcquired = await tryAcquireAnalysisStartLease(findingId);
+  if (!leaseAcquired) {
+    if (finding.status !== 'open') {
+      return {
+        started: false,
+        error: `Finding status is '${finding.status}', analysis requires 'open' status`,
+      };
+    }
     return { started: false, error: 'Analysis already in progress' };
   }
 
-  // When retrying sandbox only, preserve existing triage data
   const existingTriage = retrySandboxOnly ? finding.analysis?.triage : undefined;
   if (retrySandboxOnly && !existingTriage) {
     log('retrySandboxOnly requested but no existing triage found, falling back to full analysis', {
@@ -287,10 +272,7 @@ export async function startSecurityAnalysis(params: {
   }
   const skipTriage = retrySandboxOnly && !!existingTriage;
 
-  // Mark as pending, preserving existing analysis (with triage) when retrying sandbox only.
-  // Coerce null → undefined so updateAnalysisStatus treats it as "not provided" and
-  // does not overwrite the analysis column with null (its `status === 'pending'` branch
-  // only clears `analysis` when `updates.analysis === undefined`).
+  // Coerce null → undefined so updateAnalysisStatus preserves the existing analysis
   if (skipTriage) {
     await updateAnalysisStatus(findingId, 'pending', { analysis: finding.analysis ?? undefined });
   } else {
@@ -300,15 +282,11 @@ export async function startSecurityAnalysis(params: {
   const analysisStartTime = Date.now();
 
   try {
-    // Generate auth token for LLM calls
     const authToken = generateApiToken(user);
 
     let triage: SecurityFindingTriage;
 
     if (skipTriage) {
-      // =========================================================================
-      // Reuse existing triage (sandbox-only retry)
-      // =========================================================================
       triage = existingTriage;
       log('Skipping Tier 1 triage, reusing existing triage for sandbox retry', {
         correlationId,
@@ -322,21 +300,22 @@ export async function startSecurityAnalysis(params: {
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: analysisModel,
+        triageModel,
+        analysisModel,
         analysisMode,
       });
     } else {
-      // =========================================================================
-      // Tier 1: Quick Triage (always runs)
-      // =========================================================================
-      log('Starting Tier 1 triage', { correlationId, findingId, model });
+      log('Starting Tier 1 triage', { correlationId, findingId, triageModel });
 
       trackSecurityAgentAnalysisStarted({
         distinctId: user.id,
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: analysisModel,
+        triageModel,
+        analysisModel,
         analysisMode,
       });
 
@@ -344,7 +323,7 @@ export async function startSecurityAnalysis(params: {
       triage = await triageSecurityFinding({
         finding,
         authToken,
-        model,
+        model: triageModel,
         correlationId,
         userId: user.id,
         organizationId,
@@ -375,7 +354,6 @@ export async function startSecurityAnalysis(params: {
       });
     }
 
-    // Decide whether to run sandbox analysis based on analysis mode and per-request overrides
     const runSandbox =
       forceSandbox ||
       skipTriage ||
@@ -383,15 +361,14 @@ export async function startSecurityAnalysis(params: {
       (analysisMode === 'auto' && triage.needsSandboxAnalysis);
 
     if (!runSandbox) {
-      // =========================================================================
-      // Triage-only: Save result and potentially auto-dismiss
-      // =========================================================================
       log('Triage-only completion', { correlationId, findingId });
 
       const analysis: SecurityFindingAnalysis = {
         triage,
         analyzedAt: new Date().toISOString(),
-        modelUsed: model,
+        modelUsed: triageModel,
+        triageModel,
+        analysisModel,
         triggeredByUserId: user.id,
         correlationId,
       };
@@ -403,7 +380,9 @@ export async function startSecurityAnalysis(params: {
         userId: user.id,
         organizationId,
         findingId,
-        model,
+        model: triageModel,
+        triageModel,
+        analysisModel,
         triageOnly: true,
         needsSandboxAnalysis: triage.needsSandboxAnalysis,
         triageSuggestedAction: triage.suggestedAction,
@@ -411,10 +390,8 @@ export async function startSecurityAnalysis(params: {
         durationMs: Date.now() - analysisStartTime,
       });
 
-      // Attempt auto-dismiss if configured (off by default)
       const owner: SecurityReviewOwner = organizationId ? { organizationId } : { userId: user.id };
 
-      // Run auto-dismiss in background (don't block response)
       void maybeAutoDismissAnalysis({
         findingId,
         analysis,
@@ -433,16 +410,14 @@ export async function startSecurityAnalysis(params: {
       return { started: true, triageOnly: true };
     }
 
-    // =========================================================================
-    // Tier 2: Sandbox Analysis (cloud-agent-next)
-    // =========================================================================
     log('Starting Tier 2 sandbox analysis', { correlationId, findingId });
 
-    // Store triage + context the callback handler will need to run Tier 3
     const partialAnalysis: SecurityFindingAnalysis = {
       triage,
       analyzedAt: new Date().toISOString(),
-      modelUsed: model,
+      modelUsed: analysisModel,
+      triageModel,
+      analysisModel,
       triggeredByUserId: user.id,
       correlationId,
     };
@@ -456,7 +431,7 @@ export async function startSecurityAnalysis(params: {
     const { cloudAgentSessionId, kiloSessionId } = await client.prepareSession({
       prompt,
       mode: 'code',
-      model,
+      model: analysisModel,
       githubRepo,
       githubToken,
       kilocodeOrganizationId: organizationId,
@@ -467,7 +442,6 @@ export async function startSecurityAnalysis(params: {
       },
     });
 
-    // Store session IDs immediately (before initiation)
     await updateAnalysisStatus(findingId, 'running', {
       sessionId: cloudAgentSessionId,
       cliSessionId: kiloSessionId,
@@ -484,44 +458,72 @@ export async function startSecurityAnalysis(params: {
     try {
       await client.initiateFromPreparedSession({ cloudAgentSessionId });
     } catch (initiateError) {
-      logError('initiateFromPreparedSession failed', {
-        correlationId,
-        findingId,
-        cloudAgentSessionId,
-        error: initiateError,
-      });
-      // Clean up the prepared session
-      void client.deleteSession(cloudAgentSessionId).catch(() => {});
-
-      // Re-throw InsufficientCreditsError so it propagates to the caller
       if (initiateError instanceof InsufficientCreditsError) {
+        warn('Sandbox initiation blocked by insufficient credits', {
+          correlationId,
+          findingId,
+          cloudAgentSessionId,
+        });
+        void client.deleteSession(cloudAgentSessionId).catch(() => {});
         throw initiateError;
       }
 
-      await updateAnalysisStatus(findingId, 'failed', {
-        error: initiateError instanceof Error ? initiateError.message : String(initiateError),
+      void client.deleteSession(cloudAgentSessionId).catch(() => {});
+
+      const classified = classifyAnalysisError(initiateError);
+      const isUnknown = classified.code === 'UNKNOWN';
+      const errorCode: AnalysisErrorCode = isUnknown ? 'SANDBOX_FAILED' : classified.code;
+      const userMessage = isUnknown
+        ? 'Sandbox analysis failed to start. Please try again.'
+        : classified.userMessage;
+
+      const isActionable = isUserActionableError(errorCode);
+      const logFn = isActionable ? warn : logError;
+      logFn('initiateFromPreparedSession failed', {
+        correlationId,
+        findingId,
+        cloudAgentSessionId,
+        errorCode,
+        error: initiateError,
       });
-      return {
-        started: false,
-        error: initiateError instanceof Error ? initiateError.message : String(initiateError),
-      };
+
+      if (!isActionable) {
+        captureException(initiateError, {
+          tags: { operation: 'initiateFromPreparedSession', errorCode },
+          extra: { findingId, cloudAgentSessionId, correlationId },
+        });
+      }
+
+      await updateAnalysisStatus(findingId, 'failed', { error: userMessage });
+      return { started: false, error: userMessage, errorCode };
     }
 
     return { started: true, triageOnly: false };
   } catch (error) {
-    // Propagate InsufficientCreditsError so the caller can show a payment-required error
     if (error instanceof InsufficientCreditsError) {
       await updateAnalysisStatus(findingId, 'failed', { error: error.message });
       throw error;
     }
 
+    const classified = classifyAnalysisError(error);
+
     await updateAnalysisStatus(findingId, 'failed', {
-      error: error instanceof Error ? error.message : String(error),
+      error: classified.userMessage,
     });
-    captureException(error, {
-      tags: { operation: 'startSecurityAnalysis' },
-      extra: { findingId, githubRepo, correlationId },
-    });
-    return { started: false, error: error instanceof Error ? error.message : String(error) };
+    if (isUserActionableError(classified.code)) {
+      warn('Analysis failed (user-actionable)', {
+        correlationId,
+        findingId,
+        githubRepo,
+        errorCode: classified.code,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } else {
+      captureException(error, {
+        tags: { operation: 'startSecurityAnalysis', errorCode: classified.code },
+        extra: { findingId, githubRepo, correlationId },
+      });
+    }
+    return { started: false, error: classified.userMessage, errorCode: classified.code };
   }
 }

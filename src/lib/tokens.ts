@@ -1,4 +1,4 @@
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import type { OrganizationRole } from '@/lib/organizations/organization-types';
 import jwt from 'jsonwebtoken';
 import { logExceptInTest, warnExceptInTest } from '@/lib/utils.server';
@@ -14,6 +14,7 @@ export type JWTTokenExtraPayload = {
   organizationRole?: OrganizationRole;
   internalApiUse?: boolean;
   createdOnPlatform?: string;
+  tokenSource?: string;
 };
 
 const FIVE_YEARS_IN_SECONDS = 5 * 365 * 24 * 60 * 60;
@@ -139,5 +140,10 @@ export function validateAuthorizationHeader(headers: Headers) {
     internalApiUse: payload.internalApiUse,
     createdOnPlatform: payload.createdOnPlatform,
     botId: payload.botId,
+    tokenSource: payload.tokenSource,
   };
+}
+
+export function generateCloudAgentToken(user: User) {
+  return generateApiToken(user, { tokenSource: 'cloud-agent' });
 }

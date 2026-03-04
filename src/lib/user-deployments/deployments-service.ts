@@ -1,13 +1,13 @@
 import 'server-only';
 import { db } from '@/lib/drizzle';
-import type { Deployment } from '@/db/schema';
+import type { Deployment } from '@kilocode/db/schema';
 import {
   deployments,
   deployment_builds,
   deployment_events,
   platform_integrations,
   app_builder_projects,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import { eq, and, desc, gt, inArray, or } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import type { CreateDeploymentResponse } from '@/lib/user-deployments/deployment-builder-client';
@@ -47,11 +47,18 @@ class SlugMappingError extends Error {
   }
 }
 
-/** Detect Postgres unique constraint violations (error code 23505) by constraint name. */
+/** Detect Postgres unique constraint violations (error code 23505) by constraint name.
+ * Drizzle wraps Postgres errors, so code/constraint may be on error.cause. */
 function isUniqueConstraintError(error: unknown, constraintName: string): boolean {
   if (error === null || typeof error !== 'object') return false;
-  const err = error as { code?: string; constraint?: string };
-  return err.code === '23505' && err.constraint === constraintName;
+  const err = error as {
+    code?: string;
+    constraint?: string;
+    cause?: { code?: string; constraint?: string };
+  };
+  const pgCode = err.code ?? err.cause?.code;
+  const pgConstraint = err.constraint ?? err.cause?.constraint;
+  return pgCode === '23505' && pgConstraint === constraintName;
 }
 
 async function checkOwnerHasEverPaid(owner: Owner): Promise<PaymentCheckResult> {

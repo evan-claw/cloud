@@ -18,6 +18,11 @@ const baseStatus: KiloClawDashboardStatus = {
   flyMachineId: null,
   flyVolumeId: null,
   flyRegion: null,
+  machineSize: null,
+  openclawVersion: null,
+  imageVariant: null,
+  trackedImageTag: null,
+  trackedImageDigest: null,
   gatewayToken: 'token',
   workerUrl: 'https://claw.kilo.ai',
 };

@@ -20,7 +20,7 @@ import type { KiloClawEnv } from '../types';
 import * as apps from '../fly/apps';
 import { setAppSecret } from '../fly/secrets';
 import { generateEnvKey } from '../utils/env-encryption';
-import { METADATA_KEY_USER_ID } from './kiloclaw-instance';
+import { METADATA_KEY_USER_ID } from './machine-config';
 
 // -- Persisted state schema --
 

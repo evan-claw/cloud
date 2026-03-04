@@ -4,11 +4,15 @@ import * as z from 'zod';
 import { db } from '@/lib/drizzle';
 import { eq, and, desc, lt, isNull } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
+import { captureException } from '@sentry/nextjs';
 import { TRPCClientError } from '@trpc/client';
-import { cli_sessions_v2 } from '@/db/schema';
+import { cli_sessions_v2 } from '@kilocode/db/schema';
 import { createCloudAgentNextClient } from '@/lib/cloud-agent-next/cloud-agent-client';
 import { generateApiToken } from '@/lib/tokens';
-import { fetchSessionMessages } from '@/lib/session-ingest-client';
+import {
+  fetchSessionMessages,
+  deleteSession as deleteSessionIngest,
+} from '@/lib/session-ingest-client';
 import { baseGetSessionNextOutputSchema } from './cloud-agent-next-schemas';
 import { sanitizeGitUrl } from '@/routers/cli-sessions-router';
 
@@ -86,6 +90,10 @@ const GetSessionInputSchema = z.object({
 
 const GetByCloudAgentSessionIdInputSchema = z.object({
   cloud_agent_session_id: cloudAgentSessionIdField,
+});
+
+const DeleteSessionInputSchema = z.object({
+  session_id: sessionIdField,
 });
 
 /**
@@ -322,4 +330,42 @@ export const cliSessionsV2Router = createTRPCRouter({
         runtimeState,
       };
     }),
+
+  /**
+   * Delete a V2 session.
+   *
+   * Cleans up the cloud-agent-next DO/sandbox if applicable, then delegates
+   * all DB deletion and ingest DO/cache cleanup to the session-ingest worker.
+   */
+  delete: baseProcedure.input(DeleteSessionInputSchema).mutation(async ({ ctx, input }) => {
+    const { session_id } = input;
+    const session = await getSessionWithOwnerCheck(session_id, ctx.user.id);
+
+    if (session.cloud_agent_session_id) {
+      const authToken = generateApiToken(ctx.user);
+      const client = createCloudAgentNextClient(authToken);
+      try {
+        await client.deleteSession(session.cloud_agent_session_id);
+      } catch (err) {
+        if (!isSessionNotFoundError(err)) {
+          captureException(err, {
+            tags: { source: 'cli-sessions-v2-router', endpoint: 'delete' },
+            extra: { session_id, cloud_agent_session_id: session.cloud_agent_session_id },
+          });
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Failed to clean up cloud-agent session',
+            cause: err,
+          });
+        }
+        // Session not found in cloud-agent DO — already gone, continue with DB cleanup.
+      }
+    }
+
+    // Delegate DB deletion (including child sessions) and ingest DO/cache cleanup
+    // to the session-ingest worker.
+    await deleteSessionIngest(session_id, ctx.user.id);
+
+    return { success: true, session_id };
+  }),
 });

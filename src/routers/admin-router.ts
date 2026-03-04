@@ -9,11 +9,15 @@ import {
   user_auth_provider,
   modelStats,
   cliSessions,
+  cli_sessions_v2,
   credit_transactions,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
+import { isNewSession } from '@/lib/cloud-agent/session-type';
+import { fetchSessionSnapshot, type SessionMessage } from '@/lib/session-ingest-client';
 import { adminAppBuilderRouter } from '@/routers/admin-app-builder-router';
 import { adminDeploymentsRouter } from '@/routers/admin-deployments-router';
 import { adminKiloclawInstancesRouter } from '@/routers/admin-kiloclaw-instances-router';
+import { adminKiloclawVersionsRouter } from '@/routers/admin-kiloclaw-versions-router';
 import { adminFeatureInterestRouter } from '@/routers/admin-feature-interest-router';
 import { adminCodeReviewsRouter } from '@/routers/admin-code-reviews-router';
 import { adminAIAttributionRouter } from '@/routers/admin-ai-attribution-router';
@@ -30,7 +34,11 @@ import { TRPCError } from '@trpc/server';
 import { assertNoError, successResult } from '@/lib/maybe-result';
 import { maybeIssueKiloPassBonusFromUsageThreshold } from '@/lib/kilo-pass/usage-triggered-bonus';
 import { getKiloPassStateForUser } from '@/lib/kilo-pass/state';
-import { kilo_pass_issuances, kilo_pass_issuance_items, microdollar_usage } from '@/db/schema';
+import {
+  kilo_pass_issuances,
+  kilo_pass_issuance_items,
+  microdollar_usage,
+} from '@kilocode/db/schema';
 import { KiloPassIssuanceItemKind } from '@/lib/kilo-pass/enums';
 import { fromMicrodollars } from '@/lib/utils';
 import { sum } from 'drizzle-orm';
@@ -41,7 +49,7 @@ import { recomputeUserBalances } from '@/lib/recomputeUserBalances';
 import { getStripeInvoices } from '@/lib/stripe';
 import { client as stripeClient } from '@/lib/stripe-client';
 import { releaseScheduledChangeForSubscription } from '@/lib/kilo-pass/scheduled-change-release';
-import { kilo_pass_scheduled_changes } from '@/db/schema';
+import { kilo_pass_scheduled_changes } from '@kilocode/db/schema';
 import {
   getKilocodeRepoOpenPullRequestCounts,
   getKilocodeRepoOpenPullRequestsSummary,
@@ -68,6 +76,14 @@ const AddNoteSchema = z.object({
 const DeleteNoteSchema = z.object({
   note_id: z.string(),
 });
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const sessionIdSchema = z
+  .string()
+  .min(1)
+  .refine(s => UUID_REGEX.test(s) || s.startsWith('ses_'), {
+    message: 'Must be a UUID or ses_-prefixed session ID',
+  });
 
 const ResetAPIKeySchema = z.object({
   userId: z.string(),
@@ -872,9 +888,74 @@ export const adminRouter = createTRPCRouter({
   codeReviews: adminCodeReviewsRouter,
 
   sessionTraces: createTRPCRouter({
-    get: adminProcedure
-      .input(z.object({ session_id: z.string().uuid() }))
+    resolveCloudAgentSession: adminProcedure
+      .input(z.object({ cloud_agent_session_id: z.string().startsWith('agent_') }))
       .query(async ({ input }) => {
+        // Check v1 first
+        const [v1] = await db
+          .select({ session_id: cliSessions.session_id })
+          .from(cliSessions)
+          .where(eq(cliSessions.cloud_agent_session_id, input.cloud_agent_session_id))
+          .limit(1);
+
+        if (v1) {
+          return { session_id: v1.session_id };
+        }
+
+        // Then check v2
+        const [v2] = await db
+          .select({ session_id: cli_sessions_v2.session_id })
+          .from(cli_sessions_v2)
+          .where(eq(cli_sessions_v2.cloud_agent_session_id, input.cloud_agent_session_id))
+          .limit(1);
+
+        if (v2) {
+          return { session_id: v2.session_id };
+        }
+
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'No CLI session found for this cloud agent session ID',
+        });
+      }),
+
+    get: adminProcedure
+      .input(z.object({ session_id: sessionIdSchema }))
+      .query(async ({ input }) => {
+        if (isNewSession(input.session_id)) {
+          // V2 session — query cli_sessions_v2
+          const [session] = await db
+            .select()
+            .from(cli_sessions_v2)
+            .where(eq(cli_sessions_v2.session_id, input.session_id))
+            .limit(1);
+
+          if (!session) {
+            throw new TRPCError({
+              code: 'NOT_FOUND',
+              message: 'Session not found',
+            });
+          }
+
+          const user = await findUserById(session.kilo_user_id);
+
+          return {
+            ...session,
+            // Fields that don't exist in v2 — null them out so the UI can handle both shapes
+            last_mode: null,
+            last_model: null,
+            user: user
+              ? {
+                  id: user.id,
+                  email: user.google_user_email,
+                  name: user.google_user_name,
+                  image: user.google_user_image_url,
+                }
+              : null,
+          };
+        }
+
+        // V1 session — original logic
         const [session] = await db
           .select()
           .from(cliSessions)
@@ -892,6 +973,8 @@ export const adminRouter = createTRPCRouter({
 
         return {
           ...session,
+          // V1 doesn't have git_branch — null it out for a consistent shape
+          git_branch: null,
           user: user
             ? {
                 id: user.id,
@@ -904,8 +987,40 @@ export const adminRouter = createTRPCRouter({
       }),
 
     getMessages: adminProcedure
-      .input(z.object({ session_id: z.string().uuid() }))
+      .input(z.object({ session_id: sessionIdSchema }))
       .query(async ({ input }) => {
+        if (isNewSession(input.session_id)) {
+          // V2 session — fetch messages from the session-ingest worker.
+          // We need the owner's kilo_user_id to generate a service token.
+          const [session] = await db
+            .select({ kilo_user_id: cli_sessions_v2.kilo_user_id })
+            .from(cli_sessions_v2)
+            .where(eq(cli_sessions_v2.session_id, input.session_id))
+            .limit(1);
+
+          if (!session) {
+            throw new TRPCError({
+              code: 'NOT_FOUND',
+              message: 'Session not found',
+            });
+          }
+
+          try {
+            const snapshot = await fetchSessionSnapshot(input.session_id, session.kilo_user_id);
+            return {
+              messages: snapshot?.messages ?? ([] satisfies SessionMessage[]),
+              format: 'v2' as const,
+            };
+          } catch (error) {
+            console.error('[SessionTraces] Failed to fetch v2 session snapshot', {
+              sessionId: input.session_id,
+              error,
+            });
+            return { messages: [], format: 'v2' as const };
+          }
+        }
+
+        // V1 session — original logic
         const [session] = await db
           .select({
             ui_messages_blob_url: cliSessions.ui_messages_blob_url,
@@ -922,20 +1037,26 @@ export const adminRouter = createTRPCRouter({
         }
 
         if (!session.ui_messages_blob_url) {
-          return { messages: [] };
+          return { messages: [], format: 'v1' as const };
         }
 
         try {
           const messages = await getBlobContent(session.ui_messages_blob_url);
-          return { messages: (messages as unknown[]) ?? [] };
+          return { messages: (messages as unknown[]) ?? [], format: 'v1' as const };
         } catch {
-          return { messages: [] };
+          return { messages: [], format: 'v1' as const };
         }
       }),
 
     getApiConversationHistory: adminProcedure
-      .input(z.object({ session_id: z.string().uuid() }))
+      .input(z.object({ session_id: sessionIdSchema }))
       .query(async ({ input }) => {
+        if (isNewSession(input.session_id)) {
+          // V2 sessions have no separate raw API conversation history
+          return { history: null };
+        }
+
+        // V1 session — original logic
         const [session] = await db
           .select({
             api_conversation_history_blob_url: cliSessions.api_conversation_history_blob_url,
@@ -965,6 +1086,7 @@ export const adminRouter = createTRPCRouter({
   }),
   appBuilder: adminAppBuilderRouter,
   kiloclawInstances: adminKiloclawInstancesRouter,
+  kiloclawVersions: adminKiloclawVersionsRouter,
   aiAttribution: adminAIAttributionRouter,
   ossSponsorship: ossSponsorshipRouter,
   bulkUserCredits: bulkUserCreditsRouter,

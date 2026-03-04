@@ -20,6 +20,8 @@ import { redactSensitiveParams } from './utils/logging';
 import { authMiddleware, internalApiMiddleware } from './auth';
 import { sandboxIdFromUserId } from './auth/sandbox-id';
 import { registerVersionIfNeeded } from './lib/image-version';
+import { startingUpPage } from './pages/starting-up';
+import { buildForwardHeaders } from './utils/proxy-headers';
 
 // Export DOs (match wrangler.jsonc class_name bindings)
 export { KiloClawInstance } from './durable-objects/kiloclaw-instance';
@@ -73,12 +75,8 @@ function isPlatformRoute(c: Context<AppEnv>): boolean {
   return path === '/api/platform' || path.startsWith('/api/platform/');
 }
 
-/** Reject early if required secrets are missing (skip in dev mode). */
+/** Reject early if required secrets are missing. */
 async function requireEnvVars(c: Context<AppEnv>, next: Next) {
-  if (c.env.DEV_MODE === 'true') {
-    return next();
-  }
-
   // Platform routes need infra bindings but not AI provider keys
   if (isPlatformRoute(c)) {
     const missing: string[] = [];
@@ -88,7 +86,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
     if (!c.env.FLY_API_TOKEN) missing.push('FLY_API_TOKEN');
     if (missing.length > 0) {
       console.error('[CONFIG] Platform route missing bindings:', missing.join(', '));
-      return c.json({ error: 'Configuration error', missing }, 503);
+      return c.json({ error: 'Configuration error' }, 503);
     }
     return next();
   }
@@ -96,15 +94,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
   const missingVars = validateRequiredEnv(c.env);
   if (missingVars.length > 0) {
     console.error('[CONFIG] Missing required environment variables:', missingVars.join(', '));
-    return c.json(
-      {
-        error: 'Configuration error',
-        message: 'Required environment variables are not configured',
-        missing: missingVars,
-        hint: 'Set these using: wrangler secret put <VARIABLE_NAME>',
-      },
-      503
-    );
+    return c.json({ error: 'Configuration error' }, 503);
   }
 
   return next();
@@ -124,7 +114,14 @@ async function authGuard(c: Context<AppEnv>, next: Next) {
 async function deriveSandboxId(c: Context<AppEnv>, next: Next) {
   const userId = c.get('userId');
   if (userId) {
-    c.set('sandboxId', sandboxIdFromUserId(userId));
+    try {
+      c.set('sandboxId', sandboxIdFromUserId(userId));
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('userId too long')) {
+        return c.text('Invalid user identifier', 400);
+      }
+      throw err;
+    }
   }
   return next();
 }
@@ -249,11 +246,17 @@ app.all('*', async c => {
 
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
 
-  // Build headers to forward, adding the fly-force-instance-id header
-  const forwardHeaders = new Headers(request.headers);
-  forwardHeaders.set('fly-force-instance-id', machineId);
-  // Remove hop-by-hop headers that shouldn't be forwarded
-  forwardHeaders.delete('host');
+  if (!c.env.GATEWAY_TOKEN_SECRET) {
+    console.error('[CONFIG] Missing required environment variables: GATEWAY_TOKEN_SECRET');
+    return c.json({ error: 'Configuration error' }, 503);
+  }
+
+  const forwardHeaders = await buildForwardHeaders({
+    requestHeaders: request.headers,
+    machineId,
+    sandboxId,
+    gatewayTokenSecret: c.env.GATEWAY_TOKEN_SECRET,
+  });
 
   // WebSocket proxy
   if (isWebSocketRequest) {
@@ -296,6 +299,17 @@ app.all('*', async c => {
     }
     console.log('[WS] Fly Proxy response status:', containerResponse.status);
 
+    // Gateway not ready yet — return a clear JSON error for WebSocket clients
+    if (containerResponse.status === 502) {
+      return c.json(
+        {
+          error: 'Instance is starting up',
+          hint: 'The gateway process is still initializing. Please retry shortly.',
+        },
+        503
+      );
+    }
+
     const containerWs = containerResponse.webSocket;
     if (!containerWs) {
       console.error('[WS] No WebSocket in response - returning direct response');
@@ -310,20 +324,29 @@ app.all('*', async c => {
     // Client -> Container relay
     serverWs.addEventListener('message', event => {
       if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
+        containerWs.send(event.data as string | ArrayBuffer);
       }
     });
 
     // Container -> Client relay with error transformation
     containerWs.addEventListener('message', event => {
-      let data = event.data;
+      let data = event.data as string | ArrayBuffer;
 
       if (typeof data === 'string') {
         try {
-          const parsed = JSON.parse(data);
-          if (parsed.error?.message) {
-            parsed.error.message = transformErrorMessage(parsed.error.message);
-            data = JSON.stringify(parsed);
+          const parsed: unknown = JSON.parse(data);
+          if (
+            typeof parsed === 'object' &&
+            parsed !== null &&
+            'error' in parsed &&
+            typeof (parsed as Record<string, unknown>).error === 'object' &&
+            (parsed as Record<string, unknown>).error !== null
+          ) {
+            const error = (parsed as Record<string, Record<string, unknown>>).error;
+            if (typeof error.message === 'string') {
+              error.message = transformErrorMessage(error.message);
+              data = JSON.stringify(parsed);
+            }
           }
         } catch {
           // Not JSON -- pass through
@@ -409,6 +432,12 @@ app.all('*', async c => {
     }
   }
   console.log('[HTTP] Response status:', httpResponse.status);
+
+  // Gateway not ready yet — show friendly "starting up" page instead of raw 502
+  if (httpResponse.status === 502) {
+    return startingUpPage();
+  }
+
   return httpResponse;
 });
 
@@ -425,7 +454,9 @@ export default {
           env.KV_CLAW_CACHE,
           env.OPENCLAW_VERSION,
           'default', // variant hardcoded day 1
-          env.FLY_IMAGE_TAG
+          env.FLY_IMAGE_TAG,
+          env.FLY_IMAGE_DIGEST ?? null,
+          env.HYPERDRIVE?.connectionString
         )
       );
     }

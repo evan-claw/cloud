@@ -3,11 +3,52 @@ import {
   manageBranch,
   cloneGitHubRepo,
   cloneGitRepo,
+  configureKilocode,
   checkDiskSpace,
   createSandboxUsageEvent,
+  updateGitRemoteToken,
   LOW_DISK_THRESHOLD_MB,
 } from './workspace';
 import type { ExecutionSession } from './types';
+
+describe('configureKilocode', () => {
+  it('applies read-only command policy for code-review sessions', async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const fakeExecutor = {
+      writeFile,
+    } as unknown as ExecutionSession;
+
+    await configureKilocode(
+      fakeExecutor,
+      '/home/session-123',
+      'org-123',
+      'token-123',
+      'anthropic/claude-sonnet-4.6',
+      undefined,
+      undefined,
+      'code-review'
+    );
+
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const configJson = writeFile.mock.calls[0][1] as string;
+    const config = JSON.parse(configJson) as {
+      autoApproval?: {
+        execute?: {
+          denied?: string[];
+        };
+        write?: {
+          enabled?: boolean;
+          protected?: boolean;
+        };
+      };
+    };
+
+    expect(config.autoApproval?.execute?.denied).toContain('git commit');
+    expect(config.autoApproval?.execute?.denied).toContain('gh pr merge');
+    expect(config.autoApproval?.write?.enabled).toBe(false);
+    expect(config.autoApproval?.write?.protected).toBe(true);
+  });
+});
 
 describe('manageBranch', () => {
   let fakeSession: ExecutionSession;
@@ -441,6 +482,121 @@ describe('disk space checking', () => {
         expect.any(Object)
       );
     });
+
+    it('should use oauth2 username for gitlab platform', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(
+        fakeSession,
+        '/workspace',
+        'https://gitlab.com/repo.git',
+        'test-token',
+        undefined,
+        {
+          platform: 'gitlab',
+        }
+      );
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('oauth2:test-token'),
+        expect.any(Object)
+      );
+    });
+
+    it('should use x-access-token username for github platform', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'test-token',
+        undefined,
+        {
+          platform: 'github',
+        }
+      );
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('x-access-token:test-token'),
+        expect.any(Object)
+      );
+    });
+
+    it('should use x-access-token username when platform is undefined', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(fakeSession, '/workspace', 'https://example.com/repo.git', 'test-token');
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('x-access-token:test-token'),
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe('updateGitRemoteToken', () => {
+    it('should use oauth2 username for gitlab platform', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://gitlab.com/repo.git',
+        'new-token',
+        'gitlab'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('oauth2:new-token'));
+    });
+
+    it('should use x-access-token username for github platform', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'new-token',
+        'github'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('x-access-token:new-token'));
+    });
+
+    it('should use x-access-token username when platform is undefined', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'new-token'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('x-access-token:new-token'));
+    });
   });
 
   describe('LOW_DISK_THRESHOLD_MB export', () => {
@@ -489,11 +645,11 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to main branch'),
+        message: expect.stringContaining('cannot auto-commit directly to main branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -522,7 +678,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to master branch'),
+        message: expect.stringContaining('cannot auto-commit directly to master branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -551,7 +707,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('detached HEAD state'),
+        message: expect.stringContaining('detached HEAD state') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -580,7 +736,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('unable to determine current branch'),
+        message: expect.stringContaining('unable to determine current branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -624,17 +780,17 @@ describe('autoCommitChangesStream', () => {
       expect(events.length).toBeGreaterThan(3);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking for uncommitted changes'),
+        message: expect.stringContaining('Checking for uncommitted changes') as unknown,
       });
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Auto-committing changes'),
+        message: expect.stringContaining('Auto-committing changes') as unknown,
       });
-      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String), {
+      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String) as unknown, {
         sessionId: 'session-123',
       });
     });
@@ -670,7 +826,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(3);
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('No uncommitted changes to commit'),
+        message: expect.stringContaining('No uncommitted changes to commit') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });

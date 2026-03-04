@@ -11,87 +11,13 @@
 
 import type { WrapperState } from './state.js';
 import type { IngestEvent, WrapperCommand } from '../../src/shared/protocol.js';
+import { trimPayload } from '../../src/shared/trim-payload.js';
 import { createSSEConsumer, isTerminalErrorEvent, type SSEConsumer } from './sse-consumer.js';
 import { logToFile } from './utils.js';
-
-// ---------------------------------------------------------------------------
-// Kilo Event Types (from kilo-cli SDK)
-// ---------------------------------------------------------------------------
-
-/**
- * Time information for messages.
- */
-type MessageTime = {
-  created: number;
-  completed?: number;
-};
-
-/**
- * Assistant message info from message.updated event.
- * Mirrors AssistantMessage from kilo-cli SDK.
- */
-type AssistantMessageInfo = {
-  id: string;
-  sessionID: string;
-  role: 'assistant';
-  time: MessageTime;
-  parentID: string;
-  modelID: string;
-  providerID: string;
-  mode: string;
-  agent: string;
-  path: { cwd: string; root: string };
-  cost: number;
-  tokens: {
-    input: number;
-    output: number;
-    reasoning: number;
-    cache: { read: number; write: number };
-  };
-  error?: unknown;
-  summary?: boolean;
-  finish?: string;
-};
-
-/**
- * User message info from message.updated event.
- */
-type UserMessageInfo = {
-  id: string;
-  sessionID: string;
-  role: 'user';
-  time: MessageTime;
-  agent: string;
-  model: { providerID: string; modelID: string };
-  summary?: { title?: string; body?: string };
-  system?: string;
-  tools?: Record<string, boolean>;
-  variant?: string;
-};
-
-/**
- * Message info can be either user or assistant message.
- */
-type MessageInfo = UserMessageInfo | AssistantMessageInfo;
+import type { KiloClient } from './kilo-client.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-/**
- * Type guard for message.updated kilocode event data.
- * Kilo server sends: {type: "message.updated", properties: {info: {...}}}
- * After mapping: {type: "message.updated", properties: {info: {...}}, event: "message.updated"}
- */
-function isMessageUpdatedEvent(
-  data: unknown
-): data is { event: 'message.updated'; properties: { info: MessageInfo } } {
-  if (!isRecord(data)) return false;
-  if (data.event !== 'message.updated') return false;
-  const props = data.properties;
-  if (!isRecord(props)) return false;
-  const info = props.info;
-  return isRecord(info) && typeof info.role === 'string' && isRecord(info.time);
 }
 
 /**
@@ -108,21 +34,13 @@ export function isSessionIdleEvent(
   return isRecord(props) && typeof props.sessionID === 'string';
 }
 
-/**
- * Type guard for completed assistant message.
- */
-function isCompletedAssistantMessage(
-  info: MessageInfo
-): info is AssistantMessageInfo & { time: { completed: number } } {
-  return info.role === 'assistant' && typeof info.time.completed === 'number';
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type ConnectionConfig = {
   kiloServerPort: number;
+  kiloClient: KiloClient;
 };
 
 export type ConnectionCallbacks = {
@@ -302,39 +220,55 @@ export function createConnectionManager(
         state.recordSseEvent();
       },
       onEvent: (event: IngestEvent) => {
-        // Forward to ingest (heartbeats already filtered out)
-        sendToIngest(event);
+        // Trim large payloads before forwarding to reduce DO storage pressure
+        const trimmed: IngestEvent = {
+          ...event,
+          data: trimPayload(event.streamEventType, event.data),
+        };
+        sendToIngest(trimmed);
 
         // Check for terminal errors
         if (event.streamEventType === 'kilocode') {
           const data = event.data as Record<string, unknown>;
-          const terminal = isTerminalErrorEvent({ event: String(data.event ?? ''), data });
+          const eventName = typeof data.event === 'string' ? data.event : '';
+
+          // Track the last root-session assistant message ID for autocommit association.
+          // message.updated events carry { event, properties: { info: { id, role, sessionID } } }
+          if (eventName === 'message.updated') {
+            const props = data.properties;
+            if (isRecord(props)) {
+              const info = props.info;
+              if (isRecord(info) && info.role === 'assistant' && typeof info.id === 'string') {
+                const msgSessionId = info.sessionID;
+                const currentSessionId = state.currentJob?.kiloSessionId;
+                if (!currentSessionId || msgSessionId === currentSessionId) {
+                  state.setLastAssistantMessageId(info.id);
+                }
+              }
+            }
+          }
+
+          const terminal = isTerminalErrorEvent({ event: eventName, data });
           if (terminal.isTerminal) {
             callbacks.onTerminalError(terminal.reason ?? 'terminal error');
             return;
           }
 
-          // Check for completion events using typed event guards
-          if (isMessageUpdatedEvent(data)) {
-            const { info } = data.properties;
-            logToFile(
-              `message.updated: role=${info.role} hasCompleted=${typeof info.time?.completed === 'number'} msgId=${info.id}`
-            );
-            if (isCompletedAssistantMessage(info)) {
-              // Guard: only process completions for our current session
-              const currentSessionId = state.currentJob?.kiloSessionId;
-              if (currentSessionId && info.sessionID !== currentSessionId) {
-                logToFile(
-                  `ignoring completion for different session: event=${info.sessionID} current=${currentSessionId}`
+          // Auto-reject permission requests — Cloud Agent has no UI to answer them,
+          // so unanswered permissions would block the session indefinitely.
+          if (data.event === 'permission.asked') {
+            const props = data.properties;
+            if (isRecord(props) && typeof props.id === 'string') {
+              const permission =
+                typeof props.permission === 'string' ? props.permission : 'unknown';
+              logToFile(`auto-rejecting permission: id=${props.id} permission=${permission}`);
+              config.kiloClient
+                .answerPermission(props.id, 'reject')
+                .catch((err: unknown) =>
+                  logToFile(
+                    `failed to auto-reject permission ${String(props.id)}: ${err instanceof Error ? err.message : String(err)}`
+                  )
                 );
-                return;
-              }
-
-              logToFile(`assistant message completed: ${info.id}`);
-              // Signal completion for post-processing waiters
-              callbacks.onCompletionSignal();
-              // Note: We don't call onMessageComplete here because kilo's assistant message ID
-              // differs from our tracked user message ID. session.idle handles inflight cleanup.
             }
           }
 

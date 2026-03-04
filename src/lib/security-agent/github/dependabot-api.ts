@@ -108,7 +108,51 @@ function toInternalAlert(alert: GitHubDependabotAlert): DependabotAlertRaw {
 export type FetchAlertsResult =
   | { status: 'success'; alerts: DependabotAlertRaw[] }
   | { status: 'repo_not_found' }
-  | { status: 'alerts_disabled' };
+  | { status: 'alerts_unavailable' };
+
+type FetchAlertsSkipStatus = 'repo_not_found' | 'alerts_unavailable';
+
+const DEPENDABOT_NOT_ACTIONABLE_MESSAGE_HINTS = [
+  'dependabot alerts are disabled',
+  'dependabot alerts are not available',
+  'repository access blocked',
+  'archived repositories',
+  'archived repository',
+] as const;
+
+function normalizeErrorMessage(message?: string): string {
+  return (message ?? '').toLowerCase();
+}
+
+function isDependabotNotActionableMessage(message?: string): boolean {
+  const normalized = normalizeErrorMessage(message);
+  return DEPENDABOT_NOT_ACTIONABLE_MESSAGE_HINTS.some(hint => normalized.includes(hint));
+}
+
+function isDependabotUnavailableStatus(httpStatus?: number): boolean {
+  return (
+    httpStatus === 451 || (typeof httpStatus === 'number' && httpStatus >= 500 && httpStatus < 600)
+  );
+}
+
+function classifyFetchAlertsError(
+  httpStatus?: number,
+  message?: string
+): FetchAlertsSkipStatus | null {
+  if (httpStatus === 404) {
+    return 'repo_not_found';
+  }
+
+  if (isDependabotUnavailableStatus(httpStatus)) {
+    return 'alerts_unavailable';
+  }
+
+  if ((httpStatus === 403 || httpStatus === 422) && isDependabotNotActionableMessage(message)) {
+    return 'alerts_unavailable';
+  }
+
+  return null;
+}
 
 /**
  * Fetch ALL Dependabot alerts for a repository (including fixed/dismissed)
@@ -164,15 +208,17 @@ export async function fetchAllDependabotAlerts(
     const apiDurationMs = Math.round(performance.now() - apiStartTime);
     const httpStatus = (error as { status?: number }).status;
     const message = (error as { message?: string }).message;
+    const skipStatus = classifyFetchAlertsError(httpStatus, message);
 
-    // Handle case where Dependabot alerts are disabled for the repository
-    if (httpStatus === 403 && message?.includes('Dependabot alerts are disabled')) {
-      log(`Dependabot alerts are disabled for ${owner}/${repo}, skipping`);
-      return { status: 'alerts_disabled' };
+    if (skipStatus === 'alerts_unavailable') {
+      warn(`Dependabot alerts are unavailable for ${owner}/${repo}, skipping`, {
+        status: httpStatus,
+        message,
+      });
+      return { status: 'alerts_unavailable' };
     }
 
-    // Handle case where repository no longer exists or is inaccessible
-    if (httpStatus === 404) {
+    if (skipStatus === 'repo_not_found') {
       warn(
         `Repository ${owner}/${repo} not found (may have been deleted or transferred), skipping`
       );
@@ -266,13 +312,20 @@ export async function dismissDependabotAlert(
   const tokenData = await generateGitHubInstallationToken(installationId);
   const octokit = new Octokit({ auth: tokenData.token });
 
+  // GitHub API limits dismissed_comment to 280 characters
+  const MAX_COMMENT_LENGTH = 280;
+  const truncatedComment =
+    dismissedComment && dismissedComment.length > MAX_COMMENT_LENGTH
+      ? dismissedComment.slice(0, MAX_COMMENT_LENGTH - 1) + '\u2026'
+      : dismissedComment;
+
   await octokit.rest.dependabot.updateAlert({
     owner,
     repo,
     alert_number: alertNumber,
     state: 'dismissed',
     dismissed_reason: dismissedReason,
-    dismissed_comment: dismissedComment,
+    dismissed_comment: truncatedComment,
   });
 }
 

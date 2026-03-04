@@ -6,7 +6,8 @@ import { captureException, captureMessage } from '@sentry/nextjs';
 import { db } from '@/lib/drizzle';
 import { WORKOS_API_KEY } from '@/lib/config.server';
 import { WorkOS } from '@workos-inc/node';
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
+import { reportAuthEvent } from '@/lib/abuse-service';
 import {
   payment_methods,
   kilocode_users,
@@ -40,13 +41,16 @@ import {
   cloud_agent_code_reviews,
   kiloclaw_instances,
   kiloclaw_access_codes,
+  kiloclaw_version_pins,
+  kiloclaw_earlybird_purchases,
   user_period_cache,
   user_feedback,
   app_builder_feedback,
   cloud_agent_feedback,
   free_model_usage,
   kilo_pass_scheduled_changes,
-} from '@/db/schema';
+  security_analysis_owner_state,
+} from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
 import type { AuthErrorType } from '@/lib/auth/constants';
@@ -57,6 +61,7 @@ import { failureResult, successResult, trpcFailure } from '@/lib/maybe-result';
 import type { TRPCError } from '@trpc/server';
 import type { UUID } from 'node:crypto';
 import type { AuthProviderId } from '@/lib/auth/provider-metadata';
+import { generateOpenRouterUpstreamSafetyIdentifier } from '@/lib/providerHash';
 
 const workos = new WorkOS(WORKOS_API_KEY);
 
@@ -153,13 +158,37 @@ export async function findUserByEmail(email: string): Promise<User | undefined> 
   });
 }
 
+function fireAuthEvent(
+  user: Pick<User, 'id' | 'google_user_email' | 'created_at'>,
+  eventType: 'signup' | 'signin',
+  provider: AuthProviderId,
+  requestHeaders?: Headers
+) {
+  if (!requestHeaders) return;
+  void reportAuthEvent({
+    kilo_user_id: user.id,
+    event_type: eventType,
+    email: user.google_user_email,
+    account_created_at: user.created_at,
+    ip_address: requestHeaders.get('x-forwarded-for'),
+    geo_city: requestHeaders.get('x-vercel-ip-city'),
+    geo_country: requestHeaders.get('x-vercel-ip-country'),
+    ja4_digest: requestHeaders.get('x-vercel-ja4-digest'),
+    user_agent: requestHeaders.get('user-agent'),
+    auth_method: provider,
+  });
+}
+
 export async function createOrUpdateUser(
   args: CreateOrUpdateUserArgs,
   turnstile_guid: UUID | undefined,
-  autoLinkToExistingUser: boolean = false
+  autoLinkToExistingUser: boolean = false,
+  requestHeaders?: Headers
 ): Promise<Result<{ user: User; isNew: boolean }, AuthErrorType>> {
   const existingUser = await findAndSyncExistingUser(args);
   if (existingUser) {
+    fireAuthEvent(existingUser, 'signin', args.provider, requestHeaders);
+
     // User signed in or is being updated
     posthogClient.capture({
       distinctId: existingUser.google_user_email,
@@ -205,6 +234,7 @@ export async function createOrUpdateUser(
       if (!linkResult.success) {
         return { success: false, error: linkResult.error };
       }
+      fireAuthEvent(userByEmail, 'signin', args.provider, requestHeaders);
       // Successfully linked account, return the existing user
       posthogClient.capture({
         distinctId: userByEmail.google_user_email,
@@ -263,6 +293,7 @@ export async function createOrUpdateUser(
     hosted_domain: args.hosted_domain,
     is_admin: shouldBeAdmin(args.google_user_email, args.hosted_domain),
     stripe_customer_id: stripeCustomer.id,
+    openrouter_upstream_safety_identifier: generateOpenRouterUpstreamSafetyIdentifier(newUserId),
   } satisfies typeof kilocode_users.$inferInsert;
 
   const savedUser = await db.transaction(async tx => {
@@ -280,6 +311,8 @@ export async function createOrUpdateUser(
 
     return savedUser;
   });
+
+  fireAuthEvent(savedUser, 'signup', args.provider, requestHeaders);
 
   // User created event in PostHog
   posthogClient.capture({
@@ -403,7 +436,9 @@ export class SoftDeletePreconditionError extends Error {
  * - Various user-owned resources (platform_integrations, byok_api_keys,
  *   agent_configs, webhook_events, code_indexing_*, source_embeddings,
  *   cloud_agent_webhook_triggers, agent_environment_profiles,
- *   security_findings, auto_triage/fix_tickets, slack_bot_requests,
+ *   security_findings, security_analysis_owner_state,
+ *   security_analysis_queue (via cascade when security_findings are deleted),
+ *   auto_triage/fix_tickets, slack_bot_requests,
  *   cloud_agent_code_reviews, device_auth_requests, auto_top_up_configs,
  *   kiloclaw_instances/access_codes, user_period_cache,
  *   kilo_pass_scheduled_changes)
@@ -452,6 +487,7 @@ export async function softDeleteUser(userId: string) {
         completed_welcome_form: false,
         cohorts: {},
         is_admin: false,
+        openrouter_upstream_safety_identifier: null,
       })
       .where(eq(kilocode_users.id, userId));
 
@@ -498,6 +534,9 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(byok_api_keys).where(eq(byok_api_keys.kilo_user_id, userId));
     await tx.delete(agent_configs).where(eq(agent_configs.owned_by_user_id, userId));
     await tx.delete(webhook_events).where(eq(webhook_events.owned_by_user_id, userId));
+    await tx
+      .delete(security_analysis_owner_state)
+      .where(eq(security_analysis_owner_state.owned_by_user_id, userId));
     await tx.delete(security_findings).where(eq(security_findings.owned_by_user_id, userId));
     await tx.delete(auto_fix_tickets).where(eq(auto_fix_tickets.owned_by_user_id, userId));
     await tx.delete(auto_triage_tickets).where(eq(auto_triage_tickets.owned_by_user_id, userId));
@@ -509,6 +548,10 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(auto_top_up_configs).where(eq(auto_top_up_configs.owned_by_user_id, userId));
     await tx.delete(kiloclaw_access_codes).where(eq(kiloclaw_access_codes.kilo_user_id, userId));
     await tx.delete(kiloclaw_instances).where(eq(kiloclaw_instances.user_id, userId));
+    await tx.delete(kiloclaw_version_pins).where(eq(kiloclaw_version_pins.user_id, userId));
+    await tx
+      .delete(kiloclaw_earlybird_purchases)
+      .where(eq(kiloclaw_earlybird_purchases.user_id, userId));
     await tx.delete(user_period_cache).where(eq(user_period_cache.kilo_user_id, userId));
     await tx
       .delete(kilo_pass_scheduled_changes)

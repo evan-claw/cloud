@@ -40,6 +40,7 @@ import { InsufficientBalanceBanner } from '@/components/shared/InsufficientBalan
 import { AdvancedConfig } from '@/components/shared/AdvancedConfig';
 import { cn } from '@/lib/utils';
 import type { AgentMode } from './types';
+import { applyCloudAgentPromoLabel } from '@/lib/promotions/cloud-agent-promo';
 
 type CloudNextSessionsPageProps = {
   organizationId?: string;
@@ -88,6 +89,8 @@ export function CloudNextSessionsPage({ organizationId }: CloudNextSessionsPageP
     () => allModels.map(model => ({ id: model.id, name: model.name })),
     [allModels]
   );
+
+  const promoModelOptions = useMemo(() => applyCloudAgentPromoLabel(modelOptions), [modelOptions]);
 
   // Form state
   const [prompt, setPrompt] = useState('');
@@ -468,16 +471,18 @@ export function CloudNextSessionsPage({ organizationId }: CloudNextSessionsPageP
   );
 
   const subtitleContent = (
-    <p className="text-muted-foreground">
-      Start a new cloud agent session{' '}
+    <>
+      <p className="text-muted-foreground">Start a new cloud agent session</p>
       <a
         href="https://kilo.ai/docs/advanced-usage/cloud-agent"
-        className="inline-flex items-center gap-1 text-blue-400 underline hover:text-blue-300"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
       >
-        Learn more
-        <ExternalLink className="h-3 w-3" />
+        Learn how to use it
+        <ExternalLink className="size-4" />
       </a>
-    </p>
+    </>
   );
 
   // Check if NEITHER platform has an integration installed
@@ -536,7 +541,7 @@ export function CloudNextSessionsPage({ organizationId }: CloudNextSessionsPageP
               setModel(newModel);
               setIsModelUserSelected(true);
             }}
-            modelOptions={modelOptions}
+            modelOptions={promoModelOptions}
             isLoadingModels={!modelsData}
           />
 

@@ -21,7 +21,8 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { User, ArrowDown, ChevronRight, ChevronDown } from 'lucide-react';
-import { formatDistanceToNow, format } from 'date-fns';
+import { format } from 'date-fns';
+import { TimeAgo } from '@/components/shared/TimeAgo';
 import AssistantLogo from '@/components/AssistantLogo';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ import { TypingIndicator } from '@/components/cloud-agent/TypingIndicator';
 import type { CloudMessage } from '@/components/cloud-agent/types';
 import type { StoredMessage } from '@/components/cloud-agent-next/types';
 import { isMessageStreaming } from '@/components/cloud-agent-next/types';
+import { splitByContiguousPrefix } from '@/lib/utils/splitByContiguousPrefix';
 import { MessageBubble as V2MessageBubble } from '@/components/cloud-agent-next/MessageBubble';
 import { QuestionContextProvider } from '@/components/cloud-agent-next/QuestionContext';
 import type { AppBuilderSession, V1Session, V2Session } from './project-manager/types';
@@ -61,14 +63,12 @@ const isDev = process.env.NODE_ENV === 'development';
  * Timestamp display with optional tooltip showing full time in dev mode
  */
 function TimestampDisplay({ ts }: { ts: number }) {
-  const timeAgo = formatDistanceToNow(new Date(ts), { addSuffix: true });
-
   if (isDev) {
     const fullTime = format(new Date(ts), 'yyyy-MM-dd HH:mm:ss.SSS');
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="text-muted-foreground text-xs">{timeAgo}</span>
+          <TimeAgo timestamp={ts} className="text-muted-foreground text-xs" />
         </TooltipTrigger>
         <TooltipContent>
           <span className="font-mono">{fullTime}</span>
@@ -77,7 +77,7 @@ function TimestampDisplay({ ts }: { ts: number }) {
     );
   }
 
-  return <span className="text-muted-foreground text-xs">{timeAgo}</span>;
+  return <TimeAgo timestamp={ts} className="text-muted-foreground text-xs" />;
 }
 
 /**
@@ -238,7 +238,7 @@ function ExpandableSessionBlock({
           {endedDate && (
             <div className="text-muted-foreground mt-0.5 text-xs">
               Chat session ended {format(endedDate, 'MMM d, yyyy')} (
-              {formatDistanceToNow(endedDate, { addSuffix: true })})
+              <TimeAgo timestamp={endedDate.getTime()} />)
             </div>
           )}
         </div>
@@ -328,16 +328,11 @@ function V1SessionMessages({
   );
 
   const { staticMessages, dynamicMessages } = useMemo(() => {
-    const staticMsgs: CloudMessage[] = [];
-    const dynamicMsgs: CloudMessage[] = [];
-    for (const msg of visibleMessages) {
-      if (msg.partial) {
-        dynamicMsgs.push(msg);
-      } else {
-        staticMsgs.push(msg);
-      }
-    }
-    return { staticMessages: staticMsgs, dynamicMessages: dynamicMsgs };
+    const { staticItems, dynamicItems } = splitByContiguousPrefix(
+      visibleMessages,
+      msg => !msg.partial
+    );
+    return { staticMessages: staticItems, dynamicMessages: dynamicItems };
   }, [visibleMessages]);
 
   if (visibleMessages.length === 0) {
@@ -372,17 +367,14 @@ function V2SessionMessages({
 }) {
   const sessionState = useSyncExternalStore(session.subscribe, session.getState);
 
+  // Contiguous-prefix split: prevents stale streaming messages from old
+  // executions from being reordered below newer complete messages.
   const { v2Static, v2Dynamic } = useMemo(() => {
-    const staticMsgs: StoredMessage[] = [];
-    const dynamicMsgs: StoredMessage[] = [];
-    for (const msg of sessionState.messages) {
-      if (isMessageStreaming(msg)) {
-        dynamicMsgs.push(msg);
-      } else {
-        staticMsgs.push(msg);
-      }
-    }
-    return { v2Static: staticMsgs, v2Dynamic: dynamicMsgs };
+    const { staticItems, dynamicItems } = splitByContiguousPrefix(
+      sessionState.messages,
+      msg => !isMessageStreaming(msg)
+    );
+    return { v2Static: staticItems, v2Dynamic: dynamicItems };
   }, [sessionState.messages]);
 
   // Identity changes when childSessionMessages changes, which forces memo'd
@@ -391,7 +383,7 @@ function V2SessionMessages({
   // whose child sessions are still streaming.
   const getChildMessages = useCallback(
     (childSessionId: string) => session.getChildSessionMessages(childSessionId),
-    [session, sessionState.childSessionMessages] // eslint-disable-line react-hooks/exhaustive-deps -- childSessionMessages triggers re-render
+    [session, sessionState.childSessionMessages]
   );
 
   if (sessionState.messages.length === 0 && !sessionState.isStreaming) {

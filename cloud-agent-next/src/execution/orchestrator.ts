@@ -138,7 +138,13 @@ export class ExecutionOrchestrator {
         prepared.session,
         sessionId,
         kiloServerPort,
-        prepared.context.workspacePath
+        prepared.context.workspacePath,
+        {
+          autoCommit: wrapper.autoCommit,
+          condenseOnComplete: wrapper.condenseOnComplete,
+          upstreamBranch: prepared.context.upstreamBranch,
+          model: wrapper.model?.modelID,
+        }
       );
     } catch (error) {
       throw ExecutionError.wrapperStartFailed(
@@ -183,6 +189,7 @@ export class ExecutionOrchestrator {
       const result = await wrapperClient.prompt({
         prompt,
         model: wrapper.model,
+        variant: wrapper.variant,
         agent: normalizedMode,
       });
       logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
@@ -285,10 +292,6 @@ export class ExecutionOrchestrator {
         return {
           context,
           session,
-          // eslint-disable-next-line require-yield
-          streamKilocodeExec: async function* (): AsyncGenerator<never, void, unknown> {
-            throw new Error('streamKilocodeExec not available for fast path');
-          },
         };
       }
 
@@ -399,7 +402,8 @@ export class ExecutionOrchestrator {
           prepared.session,
           prepared.context.workspacePath,
           existingMetadata.gitUrl,
-          resumeContext.gitToken
+          resumeContext.gitToken,
+          prepared.context.platform
         );
       }
     } catch (error) {

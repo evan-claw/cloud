@@ -3,6 +3,7 @@ import 'server-only';
 import { validateAuthorizationHeader, JWT_TOKEN_VERSION } from './tokens';
 import { NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
+
 import type { CreateOrUpdateUserArgs } from './user';
 import { findUserById, createOrUpdateUser, findAndSyncExistingUser } from './user';
 import { db, readDb } from '@/lib/drizzle';
@@ -30,7 +31,7 @@ import { isOrganizationHardLocked } from '@/lib/organizations/trial-utils';
 import { secondsInDay } from 'date-fns/constants';
 import type { AdapterUser } from 'next-auth/adapters';
 import assert from 'node:assert';
-import type { Organization, User } from '@/db/schema';
+import type { Organization, User } from '@kilocode/db/schema';
 import PostHogClient from '@/lib/posthog';
 import { captureException } from '@sentry/nextjs';
 import {
@@ -57,6 +58,7 @@ import {
   NEXTAUTH_SECRET,
   GITLAB_CLIENT_ID,
   GITLAB_CLIENT_SECRET,
+  BLACKLIST_TLDS,
 } from '@/lib/config.server';
 import jwt from 'jsonwebtoken';
 import type { UUID } from 'node:crypto';
@@ -436,6 +438,12 @@ const authOptions: NextAuthOptions = {
 
         // Check if this is an existing user with a different primary email
         const existingUser = await findAndSyncExistingUser(accountInfo);
+
+        // Block new signups from blocked TLDs (existing users can still sign in)
+        if (!existingUser && isBlockedTLD(accountInfo.google_user_email)) {
+          return redirectUrlForCode(`BLOCKED`, accountInfo.google_user_email);
+        }
+
         if (existingUser) {
           const primaryEmailDomain = getLowerDomainFromEmail(existingUser.google_user_email);
           if (primaryEmailDomain) {
@@ -462,8 +470,10 @@ const authOptions: NextAuthOptions = {
           }
         }
 
+        const requestHeaders = await headers();
+
         if (accountInfo.provider === 'workos') {
-          return processSSOUserLogin(accountInfo);
+          return processSSOUserLogin(accountInfo, requestHeaders);
         }
 
         // Validate Turnstile JWT for real OAuth logins (not fake logins or email auth)
@@ -491,7 +501,7 @@ const authOptions: NextAuthOptions = {
             return redirectUrlForCode('INVALID_VERIFICATION');
           }
 
-          const currentIP = (await headers()).get('x-forwarded-for');
+          const currentIP = requestHeaders.get('x-forwarded-for');
           if (verifiedToken.ip !== currentIP) {
             sentryLogger('turnstile-auth')(
               `SECURITY: IP mismatch - JWT: ${verifiedToken.ip}, Current: ${currentIP}`,
@@ -513,7 +523,12 @@ const authOptions: NextAuthOptions = {
                 await linkAccountToExistingUser(linkingSession.existingUserId, accountInfo),
                 v => ({ ...v, isNew: false })
               )
-            : await createOrUpdateUser(accountInfo, verifiedToken?.guid, autoLinkToExistingUser);
+            : await createOrUpdateUser(
+                accountInfo,
+                verifiedToken?.guid,
+                autoLinkToExistingUser,
+                requestHeaders
+              );
 
         if (result.success === false) {
           // Expected user errors that shouldn't be logged to Sentry
@@ -644,6 +659,7 @@ type GetAuthResponse =
       organizationId?: undefined;
       internalApiUse?: undefined;
       botId?: undefined;
+      tokenSource?: undefined;
     }
   | {
       user: User;
@@ -652,6 +668,7 @@ type GetAuthResponse =
       organizationId?: Organization['id'];
       internalApiUse?: boolean;
       botId?: string;
+      tokenSource?: string;
     };
 
 export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAuthResponse> {
@@ -678,6 +695,7 @@ export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAut
     const organizationId = headersList.get(ORGANIZATION_ID_HEADER) || undefined;
     const internalApiUse = authorizationValidationResult.internalApiUse;
     const botId = authorizationValidationResult.botId;
+    const tokenSource = authorizationValidationResult.tokenSource;
 
     return await validateUserAuthorization(
       authorizationValidationResult.kiloUserId,
@@ -687,7 +705,8 @@ export async function getUserFromAuth(opts: RequiredPermissions): Promise<GetAut
       organizationId,
       internalApiUse,
       readDb,
-      botId
+      botId,
+      tokenSource
     );
   }
 
@@ -755,7 +774,8 @@ async function validateUserAuthorization(
   organizationId?: Organization['id'],
   internalApiUse?: boolean,
   fromDb: typeof db = db,
-  botId?: string
+  botId?: string,
+  tokenSource?: string
 ): Promise<GetAuthResponse> {
   if (!user) {
     return authError(401, 'User not found', kiloUserId);
@@ -778,7 +798,15 @@ async function validateUserAuthorization(
     }
   }
 
-  return { user, authFailedResponse: null, isNewUser, organizationId, internalApiUse, botId };
+  return {
+    user,
+    authFailedResponse: null,
+    isNewUser,
+    organizationId,
+    internalApiUse,
+    botId,
+    tokenSource,
+  };
 }
 
 export const isUserBlacklistedByDomain = (existingUser: Pick<User, 'google_user_email'>) =>
@@ -793,6 +821,9 @@ export const isEmailBlacklistedByDomain = (
       email.toLowerCase().endsWith('@' + domain.toLowerCase()) ||
       email.toLowerCase().endsWith('.' + domain.toLowerCase())
   );
+
+export const isBlockedTLD = (email: string, blacklisted_tlds = BLACKLIST_TLDS) =>
+  blacklisted_tlds.some(tld => email.toLowerCase().endsWith(tld));
 
 export function report_blocked_user(kiloUserId: string) {
   return authError(403, 'Access denied (R1)', kiloUserId);

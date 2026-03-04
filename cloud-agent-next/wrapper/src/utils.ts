@@ -7,22 +7,53 @@ export type ExecResult = {
   exitCode: number;
 };
 
-export function exec(command: string): Promise<ExecResult> {
+/** Spawn a git command with an argv array (no shell interpolation). */
+export function git(
+  args: string[],
+  opts?: { cwd?: string; timeoutMs?: number }
+): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn('git', args, {
+      cwd: opts?.cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    const timer =
+      opts?.timeoutMs !== undefined
+        ? setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              proc.kill('SIGTERM');
+              resolve({ stdout, stderr: stderr + '\nexec timeout reached', exitCode: 124 });
+            }
+          }, opts.timeoutMs)
+        : undefined;
 
     proc.stdout.on('data', d => (stdout += d));
     proc.stderr.on('data', d => (stderr += d));
-    proc.on('exit', code => resolve({ stdout, stderr, exitCode: code ?? 0 }));
-    proc.on('error', reject);
+    proc.on('exit', code => {
+      if (!settled) {
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve({ stdout, stderr, exitCode: code ?? 0 });
+      }
+    });
+    proc.on('error', err => {
+      if (!settled) {
+        settled = true;
+        if (timer) clearTimeout(timer);
+        reject(err);
+      }
+    });
   });
 }
 
 export async function getCurrentBranch(workspacePath: string): Promise<string> {
   try {
-    const result = await exec(`cd ${workspacePath} && git branch --show-current`);
+    const result = await git(['branch', '--show-current'], { cwd: workspacePath });
     return result.stdout.trim();
   } catch {
     return '';

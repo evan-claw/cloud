@@ -10,7 +10,7 @@ import {
 import { startInactiveSpan, captureException, captureMessage } from '@sentry/nextjs';
 import { APP_URL, FIRST_TOPUP_BONUS_AMOUNT } from '@/lib/constants';
 import { summarizeUserPayments } from '@/lib/creditTransactions';
-import { type User } from '@/db/schema';
+import { type User } from '@kilocode/db/schema';
 import { errorExceptInTest, warnExceptInTest } from '@/lib/utils.server';
 
 import type { Span } from '@sentry/nextjs';
@@ -376,7 +376,7 @@ export function extractFimPromptInfo(body: { prompt: string; suffix?: string | n
   };
 }
 
-export function estimateChatTokens(body: OpenRouterChatCompletionRequest): {
+export function estimateChatTokens_ignoringToolDefinitions(body: OpenRouterChatCompletionRequest): {
   estimatedInputTokens: number;
   estimatedOutputTokens: number;
 } {
@@ -391,7 +391,7 @@ export function estimateChatTokens(body: OpenRouterChatCompletionRequest): {
         : Array.isArray(m.content)
           ? m.content
               .filter(c => c.type === 'text')
-              .map(c => c.text.length)
+              .map(c => (c.text ?? '').length)
               .reduce((l, str) => str + 1 + l, 0)
           : 0),
     0

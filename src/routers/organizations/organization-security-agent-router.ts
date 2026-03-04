@@ -38,6 +38,7 @@ import {
   syncAllReposForOwner,
 } from '@/lib/security-agent/services/sync-service';
 import { startSecurityAnalysis } from '@/lib/security-agent/services/analysis-service';
+import { trpcCodeForAnalysisError } from '@/lib/security-agent/core/error-classification';
 import {
   autoDismissEligibleFindings,
   countEligibleForAutoDismiss,
@@ -58,7 +59,11 @@ import {
   ListAnalysisJobsInputSchema,
   DeleteFindingsByRepoInputSchema,
 } from '@/lib/security-agent/core/schemas';
-import { DEFAULT_SECURITY_AGENT_MODEL } from '@/lib/security-agent/core/constants';
+import {
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  SECURITY_ANALYSIS_OWNER_CAP,
+} from '@/lib/security-agent/core/constants';
 import {
   trackSecurityAgentEnabled,
   trackSecurityAgentConfigSaved,
@@ -134,14 +139,28 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
         autoSyncEnabled: true,
         repositorySelectionMode: 'selected' as const,
         selectedRepositoryIds: [] as number[],
-        modelSlug: DEFAULT_SECURITY_AGENT_MODEL,
-        // Analysis mode default
+        modelSlug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+        triageModelSlug: DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+        analysisModelSlug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
         analysisMode: 'auto' as const,
-        // Auto-dismiss defaults (off by default)
         autoDismissEnabled: false,
         autoDismissConfidenceThreshold: 'high' as const,
+        autoAnalysisEnabled: false,
+        autoAnalysisMinSeverity: 'high' as const,
+        autoAnalysisIncludeExisting: false,
       };
     }
+
+    const triageModelSlug =
+      result.storedConfig.triage_model_slug ||
+      result.storedConfig.model_slug ||
+      result.config.triage_model_slug ||
+      DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+    const analysisModelSlug =
+      result.storedConfig.analysis_model_slug ||
+      result.storedConfig.model_slug ||
+      result.config.analysis_model_slug ||
+      DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
 
     return {
       isEnabled: result.isEnabled,
@@ -152,12 +171,15 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
       autoSyncEnabled: result.config.auto_sync_enabled,
       repositorySelectionMode: result.config.repository_selection_mode || 'selected',
       selectedRepositoryIds: result.config.selected_repository_ids || [],
-      modelSlug: result.config.model_slug || DEFAULT_SECURITY_AGENT_MODEL,
-      // Analysis mode configuration
+      modelSlug: result.config.model_slug || analysisModelSlug,
+      triageModelSlug,
+      analysisModelSlug,
       analysisMode: result.config.analysis_mode ?? 'auto',
-      // Auto-dismiss configuration
       autoDismissEnabled: result.config.auto_dismiss_enabled ?? false,
       autoDismissConfidenceThreshold: result.config.auto_dismiss_confidence_threshold ?? 'high',
+      autoAnalysisEnabled: result.config.auto_analysis_enabled ?? false,
+      autoAnalysisMinSeverity: result.config.auto_analysis_min_severity ?? 'high',
+      autoAnalysisIncludeExisting: result.config.auto_analysis_include_existing ?? false,
     };
   }),
 
@@ -170,13 +192,28 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
       const owner = { type: 'org' as const, id: input.organizationId, userId: ctx.user.id };
 
       const existingConfig = await getSecurityAgentConfigWithStatus(owner);
+      const existingTriageModelSlug =
+        existingConfig?.storedConfig.triage_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
+        existingConfig?.config.triage_model_slug ??
+        DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+      const existingAnalysisModelSlug =
+        existingConfig?.storedConfig.analysis_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
+        existingConfig?.config.analysis_model_slug ??
+        DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
       const beforeState = existingConfig
         ? {
             autoSyncEnabled: existingConfig.config.auto_sync_enabled,
             analysisMode: existingConfig.config.analysis_mode,
             autoDismissEnabled: existingConfig.config.auto_dismiss_enabled,
             autoDismissConfidenceThreshold: existingConfig.config.auto_dismiss_confidence_threshold,
+            autoAnalysisEnabled: existingConfig.config.auto_analysis_enabled,
+            autoAnalysisMinSeverity: existingConfig.config.auto_analysis_min_severity,
+            autoAnalysisIncludeExisting: existingConfig.config.auto_analysis_include_existing,
             modelSlug: existingConfig.config.model_slug,
+            triageModelSlug: existingTriageModelSlug,
+            analysisModelSlug: existingAnalysisModelSlug,
             repositorySelectionMode: existingConfig.config.repository_selection_mode,
             selectedRepositoryIds: existingConfig.config.selected_repository_ids,
             slaCriticalDays: existingConfig.config.sla_critical_days,
@@ -185,6 +222,20 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
             slaLowDays: existingConfig.config.sla_low_days,
           }
         : undefined;
+
+      const triageModelSlug =
+        input.triageModelSlug ??
+        (input.modelSlug ? input.modelSlug : undefined) ??
+        existingTriageModelSlug;
+      const analysisModelSlug =
+        input.analysisModelSlug ??
+        (input.modelSlug ? input.modelSlug : undefined) ??
+        existingAnalysisModelSlug;
+      const modelSlug =
+        input.modelSlug ??
+        existingConfig?.storedConfig.model_slug ??
+        analysisModelSlug ??
+        triageModelSlug;
 
       await upsertSecurityAgentConfig(
         owner,
@@ -196,12 +247,15 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
           auto_sync_enabled: input.autoSyncEnabled,
           repository_selection_mode: input.repositorySelectionMode,
           selected_repository_ids: input.selectedRepositoryIds,
-          model_slug: input.modelSlug,
-          // Analysis mode configuration
+          model_slug: modelSlug,
+          triage_model_slug: triageModelSlug,
+          analysis_model_slug: analysisModelSlug,
           analysis_mode: input.analysisMode,
-          // Auto-dismiss configuration
           auto_dismiss_enabled: input.autoDismissEnabled,
           auto_dismiss_confidence_threshold: input.autoDismissConfidenceThreshold,
+          auto_analysis_enabled: input.autoAnalysisEnabled,
+          auto_analysis_min_severity: input.autoAnalysisMinSeverity,
+          auto_analysis_include_existing: input.autoAnalysisIncludeExisting,
         },
         ctx.user.id
       );
@@ -214,7 +268,9 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
         analysisMode: input.analysisMode,
         autoDismissEnabled: input.autoDismissEnabled,
         autoDismissConfidenceThreshold: input.autoDismissConfidenceThreshold,
-        modelSlug: input.modelSlug,
+        modelSlug,
+        triageModelSlug,
+        analysisModelSlug,
         repositorySelectionMode: input.repositorySelectionMode,
         selectedRepoCount: input.selectedRepositoryIds?.length,
       });
@@ -233,7 +289,12 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
           analysisMode: input.analysisMode,
           autoDismissEnabled: input.autoDismissEnabled,
           autoDismissConfidenceThreshold: input.autoDismissConfidenceThreshold,
-          modelSlug: input.modelSlug,
+          autoAnalysisEnabled: input.autoAnalysisEnabled,
+          autoAnalysisMinSeverity: input.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: input.autoAnalysisIncludeExisting,
+          modelSlug,
+          triageModelSlug,
+          analysisModelSlug,
           repositorySelectionMode: input.repositorySelectionMode,
           selectedRepositoryIds: input.selectedRepositoryIds,
           slaCriticalDays: input.slaCriticalDays,
@@ -790,7 +851,7 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
 
       // Check concurrency limit
       const securityOwner: SecurityReviewOwner = { organizationId: input.organizationId };
-      const concurrencyCheck = await canStartAnalysis(securityOwner);
+      const concurrencyCheck = await canStartAnalysis(securityOwner, SECURITY_ANALYSIS_OWNER_CAP);
 
       if (!concurrencyCheck.allowed) {
         throw new TRPCError({
@@ -809,9 +870,22 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
         });
       }
 
-      // Get model and analysis mode from input or fall back to configured values
+      // Resolve triage/analysis models with legacy fallbacks
       const config = await getSecurityAgentConfigWithStatus(owner);
-      const model = input.model || config?.config.model_slug || DEFAULT_SECURITY_AGENT_MODEL;
+      const triageModel =
+        input.triageModel ||
+        input.model ||
+        config?.storedConfig.triage_model_slug ||
+        config?.storedConfig.model_slug ||
+        config?.config.triage_model_slug ||
+        DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+      const analysisModel =
+        input.analysisModel ||
+        input.model ||
+        config?.storedConfig.analysis_model_slug ||
+        config?.storedConfig.model_slug ||
+        config?.config.analysis_model_slug ||
+        DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
       const analysisMode = config?.config.analysis_mode ?? 'auto';
 
       try {
@@ -820,7 +894,8 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
           user: ctx.user,
           githubRepo: finding.repo_full_name,
           githubToken,
-          model,
+          triageModel,
+          analysisModel,
           analysisMode,
           retrySandboxOnly: input.retrySandboxOnly,
           organizationId: input.organizationId,
@@ -828,7 +903,7 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
 
         if (!result.started) {
           throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
+            code: trpcCodeForAnalysisError(result.errorCode),
             message: result.error || 'Failed to start analysis',
           });
         }
@@ -841,7 +916,13 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
           action: SecurityAuditLogAction.FindingAnalysisStarted,
           resource_type: 'security_finding',
           resource_id: input.findingId,
-          metadata: { model, analysisMode, triageOnly: result.triageOnly },
+          metadata: {
+            model: analysisModel,
+            triageModel,
+            analysisModel,
+            analysisMode,
+            triageOnly: result.triageOnly,
+          },
         });
 
         return { success: true, triageOnly: result.triageOnly };
@@ -903,7 +984,7 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
       const total = await countSecurityFindingsWithAnalysis(securityOwner);
 
       // Get concurrency info
-      const concurrencyCheck = await canStartAnalysis(securityOwner);
+      const concurrencyCheck = await canStartAnalysis(securityOwner, SECURITY_ANALYSIS_OWNER_CAP);
 
       return {
         jobs,

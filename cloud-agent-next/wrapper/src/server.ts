@@ -15,6 +15,8 @@
 
 import type { WrapperState, JobContext } from './state.js';
 import type { KiloClient } from './kilo-client.js';
+import { createLogUploader } from './log-uploader.js';
+import { SESSION_ID_RE } from '../../src/shared/protocol.js';
 import { logToFile } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +37,8 @@ export type ServerDependencies = {
   getMaxRuntimeMs: () => number;
   /** Set the aborted flag to skip post-completion tasks */
   setAborted: () => void;
+  /** Reset lifecycle state for a new execution */
+  resetLifecycle: () => void;
 };
 
 // Request body types
@@ -54,6 +58,7 @@ type PromptBody = {
   /** Message parts - only text parts are supported (file parts require URL upload which isn't implemented) */
   parts?: Array<{ type: 'text'; text: string }>;
   model?: { providerID?: string; modelID: string };
+  variant?: string;
   agent?: string;
   messageId?: string;
   system?: string;
@@ -177,6 +182,22 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
       );
     }
 
+    // Validate sessionId format before using in filesystem path (defense-in-depth)
+    if (!SESSION_ID_RE.test(body.sessionId)) {
+      return errorResponse('INVALID_REQUEST', 'Invalid sessionId format', 400);
+    }
+
+    // Parse ingest URL to derive worker base URL for log uploads
+    let workerBaseUrl: string;
+    try {
+      const ingestOrigin = new URL(body.ingestUrl);
+      ingestOrigin.protocol =
+        ingestOrigin.protocol === 'wss:' || ingestOrigin.protocol === 'https:' ? 'https:' : 'http:';
+      workerBaseUrl = ingestOrigin.origin;
+    } catch {
+      return errorResponse('INVALID_REQUEST', 'Invalid ingestUrl', 400);
+    }
+
     // Create or resume kilo session
     let kiloSessionId: string;
     try {
@@ -210,6 +231,9 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
       kilocodeToken: body.kilocodeToken,
     };
 
+    // Reset lifecycle state from previous execution (clears stale isAborted, isDraining, etc.)
+    deps.resetLifecycle();
+
     // Start the job (this stores context but doesn't connect yet)
     try {
       state.startJob(jobContext);
@@ -218,6 +242,22 @@ function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient)
       logToFile(`job/start: state.startJob failed: ${msg}`);
       return errorResponse('JOB_CONFLICT', msg, 409);
     }
+
+    // Create and start log uploader for this job
+    const cliLogDir = `/home/${body.sessionId}/.local/share/kilo/log`;
+    const wrapperLogPath = process.env.WRAPPER_LOG_PATH ?? '/tmp/kilocode-wrapper.log';
+    const logUploader = createLogUploader({
+      workerBaseUrl,
+      sessionId: body.sessionId,
+      executionId: body.executionId,
+      userId: body.userId,
+      kilocodeToken: body.kilocodeToken,
+      cliLogDir,
+      wrapperLogPath,
+    });
+    state.setLogUploader(logUploader);
+    logUploader.start();
+    logToFile(`job/start: log uploader started (url=${workerBaseUrl})`);
 
     logToFile(
       `job/start: job started executionId=${body.executionId} kiloSessionId=${kiloSessionId}`
@@ -272,6 +312,7 @@ function createPromptHandler(deps: ServerDependencies) {
         sessionId: job.kiloSessionId,
         parts: body.parts,
         prompt: body.prompt,
+        variant: body.variant,
         agent: body.agent,
         model: body.model,
         system: body.system,

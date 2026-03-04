@@ -3,21 +3,11 @@
  */
 
 import type { CodeReviewOrchestrator } from './code-review-orchestrator';
+import type { Owner, MCPServerConfig } from '@kilocode/worker-utils';
+
+export type { Owner, MCPServerConfig };
 
 export type CodeReviewStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-export interface Owner {
-  type: 'user' | 'org';
-  id: string;
-  userId: string;
-}
-
-export interface MCPServerConfig {
-  type: string;
-  url: string;
-  headers: Record<string, string>;
-  timeout: number;
-}
 
 export interface SessionInput {
   /** GitHub repo in format "owner/repo" (for GitHub platform) */
@@ -28,11 +18,15 @@ export interface SessionInput {
   prompt: string;
   mode: 'code';
   model: string;
+  /** Thinking effort variant name (e.g. "high", "max") — undefined means model default */
+  variant?: string;
   upstreamBranch: string;
   /** GitHub installation token (for GitHub platform) */
   githubToken?: string;
   /** Generic git token for authentication (for GitLab and other platforms) */
   gitToken?: string;
+  /** Git platform type for correct token/env var handling */
+  platform?: 'github' | 'gitlab';
   envVars?: Record<string, string>;
   mcpServers?: Record<string, MCPServerConfig>;
 }

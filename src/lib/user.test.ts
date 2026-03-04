@@ -24,7 +24,13 @@ import {
   user_admin_notes,
   magic_link_tokens,
   stytch_fingerprints,
-} from '@/db/schema';
+  kiloclaw_version_pins,
+  kiloclaw_image_catalog,
+  security_findings,
+  security_analysis_queue,
+  security_analysis_owner_state,
+  kiloclaw_earlybird_purchases,
+} from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
 import { createTestPaymentMethod } from '@/tests/helpers/payment-method.helper';
@@ -53,6 +59,9 @@ describe('User', () => {
     await db.delete(referral_codes);
     await db.delete(organization_audit_logs);
     await db.delete(security_audit_log);
+    await db.delete(security_analysis_queue);
+    await db.delete(security_findings);
+    await db.delete(security_analysis_owner_state);
     await db.delete(organization_invitations);
     await db.delete(organization_user_usage);
     await db.delete(organization_user_limits);
@@ -75,6 +84,7 @@ describe('User', () => {
         google_user_image_url: 'https://example.com/avatar.png',
         linkedin_url: 'https://linkedin.com/in/testuser',
         github_url: 'https://github.com/testuser',
+        openrouter_upstream_safety_identifier: 'openrouter_upstream_safety_identifier',
         is_admin: true,
       });
 
@@ -88,6 +98,7 @@ describe('User', () => {
       expect(softDeleted!.hosted_domain).toBeNull();
       expect(softDeleted!.linkedin_url).toBeNull();
       expect(softDeleted!.github_url).toBeNull();
+      expect(softDeleted!.openrouter_upstream_safety_identifier).toBeNull();
       expect(softDeleted!.api_token_pepper).toBeNull();
       expect(softDeleted!.default_model).toBeNull();
       expect(softDeleted!.blocked_reason).toMatch(/^soft-deleted at \d{4}-\d{2}-\d{2}T/);
@@ -389,6 +400,121 @@ describe('User', () => {
       expect(logs[0].action).toBe(SecurityAuditLogAction.FindingDismissed); // action preserved
     });
 
+    it('should delete security_analysis_owner_state rows for the user', async () => {
+      const user1 = await insertTestUser();
+      const user2 = await insertTestUser();
+
+      await db.insert(security_analysis_owner_state).values([
+        {
+          owned_by_user_id: user1.id,
+          auto_analysis_enabled_at: new Date().toISOString(),
+        },
+        {
+          owned_by_user_id: user2.id,
+          auto_analysis_enabled_at: new Date().toISOString(),
+        },
+      ]);
+
+      await softDeleteUser(user1.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_analysis_owner_state)
+          .where(eq(security_analysis_owner_state.owned_by_user_id, user1.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_analysis_owner_state)
+          .where(eq(security_analysis_owner_state.owned_by_user_id, user2.id))
+          .then(r => r[0].count)
+      ).toBe(1);
+    });
+
+    it('should remove security_analysis_queue rows via security_findings cascade', async () => {
+      const user1 = await insertTestUser();
+      const user2 = await insertTestUser();
+
+      const [finding1] = await db
+        .insert(security_findings)
+        .values({
+          owned_by_user_id: user1.id,
+          repo_full_name: 'kilo-org/cloud-user-1',
+          source: 'dependabot',
+          source_id: `source-${randomUUID()}`,
+          severity: 'high',
+          package_name: 'zod',
+          package_ecosystem: 'npm',
+          title: 'User1 finding',
+        })
+        .returning();
+
+      const [finding2] = await db
+        .insert(security_findings)
+        .values({
+          owned_by_user_id: user2.id,
+          repo_full_name: 'kilo-org/cloud-user-2',
+          source: 'dependabot',
+          source_id: `source-${randomUUID()}`,
+          severity: 'medium',
+          package_name: 'drizzle-orm',
+          package_ecosystem: 'npm',
+          title: 'User2 finding',
+        })
+        .returning();
+
+      await db.insert(security_analysis_queue).values([
+        {
+          finding_id: finding1.id,
+          owned_by_user_id: user1.id,
+          queue_status: 'queued',
+          severity_rank: 1,
+          queued_at: new Date().toISOString(),
+        },
+        {
+          finding_id: finding2.id,
+          owned_by_user_id: user2.id,
+          queue_status: 'queued',
+          severity_rank: 2,
+          queued_at: new Date().toISOString(),
+        },
+      ]);
+
+      await softDeleteUser(user1.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_findings)
+          .where(eq(security_findings.owned_by_user_id, user1.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_analysis_queue)
+          .where(eq(security_analysis_queue.finding_id, finding1.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_findings)
+          .where(eq(security_findings.owned_by_user_id, user2.id))
+          .then(r => r[0].count)
+      ).toBe(1);
+      expect(
+        await db
+          .select({ count: count() })
+          .from(security_analysis_queue)
+          .where(eq(security_analysis_queue.finding_id, finding2.id))
+          .then(r => r[0].count)
+      ).toBe(1);
+    });
+
     it('should soft-delete and anonymize payment methods', async () => {
       const user = await insertTestUser();
       const pm = createTestPaymentMethod(user.id);
@@ -626,6 +752,61 @@ describe('User', () => {
       await softDeleteUser(user.id);
 
       expect((await db.select({ count: count() }).from(magic_link_tokens))[0].count).toBe(0);
+    });
+
+    it('should delete kiloclaw_version_pins for the user', async () => {
+      const user = await insertTestUser();
+      const adminUser = await insertTestUser({ is_admin: true });
+
+      // Create a catalog entry for the FK
+      const testTag = `test-gdpr-${Date.now()}`;
+      await db.insert(kiloclaw_image_catalog).values({
+        openclaw_version: '2026.1.1',
+        variant: 'default',
+        image_tag: testTag,
+        status: 'available',
+        published_at: new Date().toISOString(),
+      });
+
+      await db.insert(kiloclaw_version_pins).values({
+        user_id: user.id,
+        image_tag: testTag,
+        pinned_by: adminUser.id,
+        reason: 'test pin',
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_version_pins)
+          .where(eq(kiloclaw_version_pins.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+
+      // Cleanup catalog entry
+      await db.delete(kiloclaw_image_catalog).where(eq(kiloclaw_image_catalog.image_tag, testTag));
+    });
+
+    it('should delete kiloclaw_earlybird_purchases for the user', async () => {
+      const user = await insertTestUser();
+
+      await db.insert(kiloclaw_earlybird_purchases).values({
+        user_id: user.id,
+        stripe_charge_id: `ch_test_gdpr_${Date.now()}`,
+        amount_cents: 2500,
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_earlybird_purchases)
+          .where(eq(kiloclaw_earlybird_purchases.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
     });
   });
 

@@ -114,6 +114,7 @@ type InitiateExecutionRequest = BaseExecutionRequest & {
   prompt: string;
   mode: ExecutionMode;
   model: string;
+  variant?: string;
   githubRepo?: string;
   githubToken?: string;
   gitUrl?: string;
@@ -147,6 +148,7 @@ type FollowupExecutionRequest = BaseExecutionRequest & {
   prompt: string;
   mode?: ExecutionMode;
   model?: string;
+  variant?: string;
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
   tokenOverrides?: {
@@ -306,6 +308,7 @@ export type WrapperPlan = {
   kiloSessionId?: string;
   kiloSessionTitle?: string;
   model?: ModelConfig;
+  variant?: string;
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
 };

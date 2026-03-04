@@ -133,7 +133,6 @@ The alarm runs for ALL statuses (not just `running`). `destroying` short-circuit
 | `TELEGRAM_DM_POLICY`         | Telegram DM policy (passed through to machine)                                                                                                                          |
 | `DISCORD_DM_POLICY`          | Discord DM policy (passed through to machine)                                                                                                                           |
 | `OPENCLAW_ALLOWED_ORIGINS`   | Comma-separated origins for Control UI WebSocket (e.g., `http://localhost:3000,http://localhost:8795`). Production: `https://claw.kilo.ai,https://claw.kilosessions.ai` |
-| `DEV_MODE`                   | Enable dev mode features                                                                                                                                                |
 
 ### Fly.io Regions
 
@@ -245,7 +244,6 @@ User config is transported to the machine via environment variables set in the F
 | `KILOCODE_MODELS_JSON`     | User config (DO), JSON-serialized | Available model list                 |
 | `KILOCODE_API_BASE_URL`    | Worker env                        | API base URL override                |
 | `AUTO_APPROVE_DEVICES`     | Hardcoded `true`                  | Skip device pairing                  |
-| `OPENCLAW_DEV_MODE`        | Worker env (`DEV_MODE`)           | Dev mode features                    |
 | `TELEGRAM_DM_POLICY`       | Worker env                        | Telegram DM policy                   |
 | `DISCORD_DM_POLICY`        | Worker env                        | Discord DM policy                    |
 | `OPENCLAW_ALLOWED_ORIGINS` | Worker env                        | Control UI WebSocket allowed origins |

@@ -17,9 +17,9 @@ export function isHaikuModel(requestedModel: string) {
 }
 
 function appendAnthropicBetaHeader(extraHeaders: Record<string, string>, betaFlag: string) {
-  extraHeaders['x-anthropic-beta'] = [extraHeaders['x-anthropic-beta'], betaFlag]
-    .filter(Boolean)
-    .join(',');
+  for (const header of ['anthropic-beta', 'x-anthropic-beta']) {
+    extraHeaders[header] = [extraHeaders[header], betaFlag].filter(Boolean).join(',');
+  }
 }
 
 function hasCacheControl(message: OpenAI.ChatCompletionMessageParam) {
@@ -73,19 +73,6 @@ export function addCacheBreakpoints(messages: OpenAI.Chat.ChatCompletionMessageP
       `[addCacheBreakpoints] setting cache breakpoint on last ${lastUserMessage.role} message`
     );
     setCacheControl(lastUserMessage);
-  }
-
-  const lastAssistantIndex = messages.findLastIndex(msg => msg.role === 'assistant');
-  if (lastAssistantIndex >= 0) {
-    const previousUserMessage = messages
-      .slice(0, lastAssistantIndex)
-      .findLast(msg => msg.role === 'user' || msg.role === 'tool');
-    if (previousUserMessage) {
-      console.debug(
-        `[addCacheBreakpoints] setting cache breakpoint on second-to-last ${previousUserMessage.role} message`
-      );
-      setCacheControl(previousUserMessage);
-    }
   }
 }
 

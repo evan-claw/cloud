@@ -24,6 +24,14 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import {
   User,
   Calendar,
   Loader2,
@@ -39,6 +47,7 @@ import {
   Square,
   RotateCcw,
   RefreshCw,
+  Pin,
 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
@@ -83,7 +92,7 @@ function DetailPageWrapper({ children, subtitle }: DetailPageWrapperProps) {
   const breadcrumbs = (
     <>
       <BreadcrumbItem>
-        <BreadcrumbLink href="/admin/kiloclaw-instances">KiloClaw Instances</BreadcrumbLink>
+        <BreadcrumbLink href="/admin/kiloclaw">KiloClaw</BreadcrumbLink>
       </BreadcrumbItem>
       <BreadcrumbSeparator />
       <BreadcrumbItem>
@@ -116,6 +125,178 @@ function DetailField({ label, children }: { label: string; children: React.React
       <div className="text-muted-foreground text-xs">{label}</div>
       <div className="text-sm">{children}</div>
     </div>
+  );
+}
+
+function VersionPinCard({ userId }: { userId: string }) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const [selectedTag, setSelectedTag] = useState<string>('');
+  const [reason, setReason] = useState('');
+
+  const { data: pinData, isLoading: pinLoading } = useQuery(
+    trpc.admin.kiloclawVersions.getUserPin.queryOptions({ userId })
+  );
+
+  const { data: versionsData } = useQuery(
+    trpc.admin.kiloclawVersions.listVersions.queryOptions({
+      status: 'available',
+      limit: 100,
+    })
+  );
+
+  const { mutateAsync: setPin, isPending: isPinning } = useMutation(
+    trpc.admin.kiloclawVersions.setPin.mutationOptions({
+      onSuccess: () => {
+        toast.success('Version pin set');
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawVersions.getUserPin.queryKey(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawVersions.listPins.queryKey(),
+        });
+        setSelectedTag('');
+        setReason('');
+      },
+      onError: err => {
+        toast.error(`Failed to set pin: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: removePin, isPending: isUnpinning } = useMutation(
+    trpc.admin.kiloclawVersions.removePin.mutationOptions({
+      onSuccess: () => {
+        toast.success('Version pin removed');
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawVersions.getUserPin.queryKey(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawVersions.listPins.queryKey(),
+        });
+      },
+      onError: err => {
+        toast.error(`Failed to remove pin: ${err.message}`);
+      },
+    })
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Pin className="h-5 w-5" />
+          <CardTitle>Version Pin</CardTitle>
+        </div>
+        <CardDescription>Pin this user to a specific KiloClaw image tag</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {pinLoading ? (
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-muted-foreground text-sm">Loading pin status...</span>
+          </div>
+        ) : pinData ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <DetailField label="Pinned Image Tag">
+                <Badge className="bg-blue-600 font-mono text-xs">{pinData.image_tag}</Badge>
+              </DetailField>
+              <DetailField label="OpenClaw Version">{pinData.openclaw_version ?? '—'}</DetailField>
+              <DetailField label="Variant">{pinData.variant ?? 'default'}</DetailField>
+              <DetailField label="Pinned By">
+                {pinData.pinned_by_email ?? pinData.pinned_by}
+              </DetailField>
+              {pinData.reason && <DetailField label="Reason">{pinData.reason}</DetailField>}
+            </div>
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center gap-2">
+                <Select value={selectedTag} onValueChange={setSelectedTag}>
+                  <SelectTrigger className="w-[250px]">
+                    <SelectValue placeholder="Change image tag..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {versionsData?.items.map(v => (
+                      <SelectItem key={v.image_tag} value={v.image_tag}>
+                        {v.image_tag} (OpenClaw {v.openclaw_version})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Reason (optional)"
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="w-[200px]"
+                />
+                {selectedTag && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
+                    }
+                    disabled={isPinning}
+                  >
+                    {isPinning ? 'Updating...' : 'Update Pin'}
+                  </Button>
+                )}
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => void removePin({ userId })}
+                  disabled={isUnpinning}
+                >
+                  {isUnpinning ? 'Unpinning...' : 'Unpin'}
+                </Button>
+              </div>
+              <p className="flex items-center gap-1 text-xs text-red-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Reason is visible to the end user.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-sm">Following latest available version</p>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Select value={selectedTag} onValueChange={setSelectedTag}>
+                  <SelectTrigger className="w-[250px]">
+                    <SelectValue placeholder="Select image tag to pin..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {versionsData?.items.map(v => (
+                      <SelectItem key={v.image_tag} value={v.image_tag}>
+                        {v.image_tag} (OpenClaw {v.openclaw_version})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  placeholder="Reason (optional)"
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="w-[200px]"
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    void setPin({ userId, imageTag: selectedTag, reason: reason || undefined })
+                  }
+                  disabled={!selectedTag || isPinning}
+                >
+                  {isPinning ? 'Pinning...' : 'Pin Version'}
+                </Button>
+              </div>
+              <p className="flex items-center gap-1 text-xs text-red-400">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                Reason is visible to the end user.
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -346,122 +527,207 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
             <DetailField label="User ID">
               <code className="text-sm">{data.user_id}</code>
             </DetailField>
+            <DetailField label="Derived Fly App">
+              <a
+                href={`https://fly.io/apps/${data.derived_fly_app_name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+              >
+                <code className="text-sm">{data.derived_fly_app_name}</code>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </DetailField>
           </CardContent>
         </Card>
 
-        {/* Worker Status (active instances only) */}
-        {isActive && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Live Worker Status</CardTitle>
-              <CardDescription>Real-time status from the KiloClaw Durable Object</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {data.workerStatusError && (
-                <Alert className="mb-4">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>{data.workerStatusError}</AlertDescription>
-                </Alert>
-              )}
-              {data.workerStatus ? (
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  <DetailField label="DO Status">
-                    <StatusBadge status={data.workerStatus.status} />
+        <Card>
+          <CardHeader>
+            <CardTitle>Live Worker Status</CardTitle>
+            <CardDescription>Real-time status from the KiloClaw Durable Object</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {data.workerStatusError && (
+              <Alert className="mb-4">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{data.workerStatusError}</AlertDescription>
+              </Alert>
+            )}
+            {data.workerStatus ? (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <DetailField label="DO Status">
+                  <StatusBadge status={data.workerStatus.status} />
+                </DetailField>
+
+                <DetailField label="DO User ID">
+                  <code className="text-xs">{data.workerStatus.userId ?? '—'}</code>
+                </DetailField>
+
+                <DetailField label="DO Sandbox ID">
+                  <code className="text-xs">{data.workerStatus.sandboxId ?? '—'}</code>
+                </DetailField>
+
+                <div className="flex items-center gap-2">
+                  <Server className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <DetailField label="Fly Machine ID">
+                    {data.workerStatus.flyMachineId && data.workerStatus.flyAppName ? (
+                      <a
+                        href={`https://fly.io/apps/${data.workerStatus.flyAppName}/machines/${data.workerStatus.flyMachineId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                      >
+                        <code className="text-sm">{data.workerStatus.flyMachineId}</code>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <code className="text-sm">{data.workerStatus.flyMachineId ?? '—'}</code>
+                    )}
                   </DetailField>
-
-                  <div className="flex items-center gap-2">
-                    <Server className="text-muted-foreground h-4 w-4 shrink-0" />
-                    <DetailField label="Fly Machine ID">
-                      {data.workerStatus.flyMachineId && data.workerStatus.flyAppName ? (
-                        <a
-                          href={`https://fly.io/apps/${data.workerStatus.flyAppName}/machines/${data.workerStatus.flyMachineId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                        >
-                          <code className="text-sm">{data.workerStatus.flyMachineId}</code>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : (
-                        <code className="text-sm">{data.workerStatus.flyMachineId ?? '—'}</code>
-                      )}
-                    </DetailField>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Globe className="text-muted-foreground h-4 w-4 shrink-0" />
-                    <DetailField label="Fly Region">
-                      {data.workerStatus.flyRegion ?? '—'}
-                    </DetailField>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="text-muted-foreground h-4 w-4 shrink-0" />
-                    <DetailField label="Fly Volume ID">
-                      <code className="text-sm">{data.workerStatus.flyVolumeId ?? '—'}</code>
-                    </DetailField>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Server className="text-muted-foreground h-4 w-4 shrink-0" />
-                    <DetailField label="Fly App">
-                      {data.workerStatus.flyAppName ? (
-                        <a
-                          href={`https://fly.io/apps/${data.workerStatus.flyAppName}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                        >
-                          <code className="text-sm">{data.workerStatus.flyAppName}</code>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : (
-                        '—'
-                      )}
-                    </DetailField>
-                  </div>
-
-                  {data.workerStatus.flyAppName && data.workerStatus.flyMachineId && (
-                    <div className="flex items-center gap-2">
-                      <BarChart className="text-muted-foreground h-4 w-4 shrink-0" />
-                      <DetailField label="Metrics">
-                        <a
-                          href={`https://fly-metrics.net/d/fly-instance/fly-instance?from=now-1h&orgId=1480569&to=now&var-app=${data.workerStatus.flyAppName}&var-instance=${data.workerStatus.flyMachineId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-blue-600 hover:underline"
-                        >
-                          <span className="text-sm">View Grafana Dashboard</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </DetailField>
-                    </div>
-                  )}
-
-                  <DetailField label="Provisioned At">
-                    {formatEpochTime(data.workerStatus.provisionedAt)}
-                  </DetailField>
-
-                  <DetailField label="Last Started At">
-                    {formatEpochTime(data.workerStatus.lastStartedAt)}
-                  </DetailField>
-
-                  <DetailField label="Last Stopped At">
-                    {formatEpochTime(data.workerStatus.lastStoppedAt)}
-                  </DetailField>
-
-                  <DetailField label="Env Vars">{data.workerStatus.envVarCount}</DetailField>
-
-                  <DetailField label="Secrets">{data.workerStatus.secretCount}</DetailField>
-
-                  <DetailField label="Channels">{data.workerStatus.channelCount}</DetailField>
                 </div>
-              ) : !data.workerStatusError ? (
-                <p className="text-muted-foreground text-sm">No worker status available</p>
-              ) : null}
-            </CardContent>
-          </Card>
-        )}
+
+                <div className="flex items-center gap-2">
+                  <Globe className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <DetailField label="Fly Region">{data.workerStatus.flyRegion ?? '—'}</DetailField>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <HardDrive className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <DetailField label="Fly Volume ID">
+                    <code className="text-sm">{data.workerStatus.flyVolumeId ?? '—'}</code>
+                  </DetailField>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Server className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <DetailField label="Fly App">
+                    {data.workerStatus.flyAppName ? (
+                      <a
+                        href={`https://fly.io/apps/${data.workerStatus.flyAppName}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                      >
+                        <code className="text-sm">{data.workerStatus.flyAppName}</code>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      '—'
+                    )}
+                  </DetailField>
+                </div>
+
+                {data.workerStatus.flyAppName && data.workerStatus.flyMachineId && (
+                  <div className="flex items-center gap-2">
+                    <BarChart className="text-muted-foreground h-4 w-4 shrink-0" />
+                    <DetailField label="Metrics">
+                      <a
+                        href={`https://fly-metrics.net/d/fly-instance/fly-instance?from=now-1h&orgId=1480569&to=now&var-app=${data.workerStatus.flyAppName}&var-instance=${data.workerStatus.flyMachineId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline"
+                      >
+                        <span className="text-sm">View Grafana Dashboard</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </DetailField>
+                  </div>
+                )}
+
+                <DetailField label="Provisioned At">
+                  {formatEpochTime(data.workerStatus.provisionedAt)}
+                </DetailField>
+
+                <DetailField label="Last Started At">
+                  {formatEpochTime(data.workerStatus.lastStartedAt)}
+                </DetailField>
+
+                <DetailField label="Last Stopped At">
+                  {formatEpochTime(data.workerStatus.lastStoppedAt)}
+                </DetailField>
+
+                <DetailField label="Env Vars">{data.workerStatus.envVarCount}</DetailField>
+
+                <DetailField label="Secrets">{data.workerStatus.secretCount}</DetailField>
+
+                <DetailField label="Channels">{data.workerStatus.channelCount}</DetailField>
+
+                <DetailField label="OpenClaw Version">
+                  {data.workerStatus.openclawVersion ?? '—'}
+                </DetailField>
+
+                <DetailField label="Image Variant">
+                  {data.workerStatus.imageVariant ?? '—'}
+                </DetailField>
+
+                <DetailField label="Image Tag">
+                  {data.workerStatus.trackedImageTag ? (
+                    <code className="text-xs">{data.workerStatus.trackedImageTag}</code>
+                  ) : (
+                    '—'
+                  )}
+                </DetailField>
+
+                <DetailField label="Image Digest">
+                  {data.workerStatus.trackedImageDigest ? (
+                    <code className="text-xs">{data.workerStatus.trackedImageDigest}</code>
+                  ) : (
+                    '—'
+                  )}
+                </DetailField>
+
+                <DetailField label="Pending Machine Destroy ID">
+                  <code className="text-xs">
+                    {data.workerStatus.pendingDestroyMachineId ?? '—'}
+                  </code>
+                </DetailField>
+
+                <DetailField label="Pending Volume Destroy ID">
+                  <code className="text-xs">{data.workerStatus.pendingDestroyVolumeId ?? '—'}</code>
+                </DetailField>
+
+                <DetailField label="Pending Postgres Finalize Mark">
+                  {data.workerStatus.pendingPostgresMarkOnFinalize ? 'true' : 'false'}
+                </DetailField>
+
+                <DetailField label="Last Destroy Error">
+                  {data.workerStatus.lastDestroyErrorOp ? (
+                    <span className="text-destructive text-xs">
+                      <code>
+                        {data.workerStatus.lastDestroyErrorOp}
+                        {data.workerStatus.lastDestroyErrorStatus
+                          ? ` ${data.workerStatus.lastDestroyErrorStatus}`
+                          : ''}
+                        {' — '}
+                        {data.workerStatus.lastDestroyErrorMessage ?? 'unknown'}
+                      </code>
+                      <br />
+                      <span className="text-muted-foreground">
+                        {formatEpochTime(data.workerStatus.lastDestroyErrorAt)}
+                      </span>
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </DetailField>
+
+                <DetailField label="Last Metadata Recovery Attempt">
+                  {formatEpochTime(data.workerStatus.lastMetadataRecoveryAt)}
+                </DetailField>
+
+                <DetailField label="Last Live Check Dispatch">
+                  {formatEpochTime(data.workerStatus.lastLiveCheckAt)}
+                </DetailField>
+
+                <DetailField label="Next Alarm">
+                  {formatEpochTime(data.workerStatus.alarmScheduledAt)}
+                </DetailField>
+              </div>
+            ) : !data.workerStatusError ? (
+              <p className="text-muted-foreground text-sm">No worker status available</p>
+            ) : null}
+          </CardContent>
+        </Card>
 
         {/* Gateway Process (controller) */}
         {isActive && (
@@ -507,8 +773,9 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription>
-                    {gatewayStatusError instanceof Error
-                      ? gatewayStatusError.message
+                    {'data' in gatewayStatusError &&
+                    (gatewayStatusError as { data?: { code?: string } }).data?.code === 'NOT_FOUND'
+                      ? 'Gateway control unavailable. Redeploy to update instance to use this feature.'
                       : 'Failed to load gateway status'}
                   </AlertDescription>
                 </Alert>
@@ -677,20 +944,9 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
           </Card>
         )}
 
-        {/* Destroyed notice */}
-        {!isActive && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Live Worker Status</CardTitle>
-              <CardDescription>Real-time status from the KiloClaw Durable Object</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">
-                Worker status is not available for destroyed instances.
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        {/* Version Pin Card */}
+        {data.user_id && <VersionPinCard userId={data.user_id} />}
+
         {/* Destroy Confirmation Dialog */}
         <Dialog open={destroyDialogOpen} onOpenChange={setDestroyDialogOpen}>
           <DialogContent className="sm:max-w-[425px]">

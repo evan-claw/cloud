@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { ChannelTokenInput } from './ChannelTokenInput';
 import { CHANNELS, CHANNEL_TYPES, type ChannelType } from './channel-config';
+import { KILOCODE_CATALOG_IDS } from './SettingsTab';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -23,7 +24,10 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
   const [tokens, setTokens] = useState<Record<string, string>>({});
 
   const modelOptions = useMemo<ModelOption[]>(
-    () => (modelsData?.data || []).map(model => ({ id: model.id, name: model.name })),
+    () =>
+      (modelsData?.data || [])
+        .filter(model => KILOCODE_CATALOG_IDS.has(model.id))
+        .map(model => ({ id: model.id, name: model.name })),
     [modelsData]
   );
 
@@ -66,15 +70,20 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
   }
 
   function handleCreate() {
-    posthog?.capture('claw_create_instance_clicked', {
-      selected_model: selectedModel || null,
-      channels: [...addedChannels],
-    });
-
     if (isLoadingModels) {
       toast.error('Models are still loading; try again in a moment.');
       return;
     }
+
+    if (!selectedModel) {
+      toast.error('Please select a default model before creating an instance.');
+      return;
+    }
+
+    posthog?.capture('claw_create_instance_clicked', {
+      selected_model: selectedModel,
+      channels: [...addedChannels],
+    });
 
     // Validate Slack requires both tokens
     if (addedChannels.has('slack')) {
@@ -86,15 +95,13 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
       }
     }
 
-    const modelsPayload = modelOptions.map(({ id, name }) => ({ id, name }));
     mutations.provision.mutate(
       {
-        kilocodeDefaultModel: selectedModel ? `kilocode/${selectedModel}` : null,
-        kilocodeModels: modelsPayload.length > 0 ? modelsPayload : null,
+        kilocodeDefaultModel: `kilocode/${selectedModel}`,
         channels: buildChannelsPayload(),
       },
       {
-        onSuccess: () => toast.success('Instance created'),
+        onSuccess: () => toast.success('Instance created and starting'),
         onError: err => toast.error(`Failed to create: ${err.message}`),
       }
     );
@@ -112,12 +119,13 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
       </CardHeader>
       <CardContent className="space-y-4">
         <ModelCombobox
-          label=""
+          label="Default Model"
           models={modelOptions}
           value={selectedModel}
           onValueChange={setSelectedModel}
           isLoading={isLoadingModels}
           disabled={mutations.provision.isPending || isLoadingModels}
+          required
         />
 
         <div className="space-y-3">
@@ -185,7 +193,7 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
         </div>
 
         <div className="flex justify-end">
-          <Button onClick={handleCreate} disabled={mutations.provision.isPending}>
+          <Button onClick={handleCreate} disabled={mutations.provision.isPending || !selectedModel}>
             <Plus className="mr-2 h-4 w-4" />
             {mutations.provision.isPending ? 'Creating...' : 'Create & Provision'}
           </Button>

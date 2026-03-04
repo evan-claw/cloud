@@ -7,7 +7,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2, XCircle, GitBranch, Settings, ExternalLink, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useMemo } from 'react';
-import { useGitHubAppsQueries } from './GitHubAppsContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc/utils';
 import { useUser } from '@/hooks/useUser';
 import { DevAddGitHubInstallationCard } from './DevAddGitHubInstallationCard';
 import { useOrganizationWithMembers } from '@/app/api/organizations/hooks';
@@ -28,7 +29,9 @@ export function GitHubIntegrationDetails({
   pendingApproval,
   existingPendingOrg,
 }: GitHubIntegrationDetailsProps) {
-  const { queries, mutations } = useGitHubAppsQueries();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const input = organizationId ? { organizationId } : undefined;
 
   // Fetch organization data to check GitHub app type
   const { data: organizationData } = useOrganizationWithMembers(organizationId ?? '', {
@@ -45,10 +48,55 @@ export function GitHubIntegrationDetails({
   }, [organizationData?.settings?.github_app_type]);
 
   // Fetch GitHub App installation status
-  const { data: installationData, isLoading, refetch } = queries.getInstallation();
+  const {
+    data: installationData,
+    isLoading,
+    refetch,
+  } = useQuery(trpc.githubApps.getInstallation.queryOptions(input));
 
   // Check if user has pending installation in another org
-  const { data: pendingCheck } = queries.checkUserPendingInstallation();
+  const { data: pendingCheck } = useQuery(
+    trpc.githubApps.checkUserPendingInstallation.queryOptions(input)
+  );
+
+  const uninstallApp = useMutation(
+    trpc.githubApps.uninstallApp.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.getInstallation.queryKey(input),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.listIntegrations.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const cancelPendingInstallation = useMutation(
+    trpc.githubApps.cancelPendingInstallation.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.getInstallation.queryKey(input),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.checkUserPendingInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const refreshInstallation = useMutation(
+    trpc.githubApps.refreshInstallation.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.getInstallation.queryKey(input),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.githubApps.listIntegrations.queryKey(input),
+        });
+      },
+    })
+  );
 
   // Show success/error/pending toasts
   useEffect(() => {
@@ -71,18 +119,14 @@ export function GitHubIntegrationDetails({
   const { data: user } = useUser();
 
   const handleInstall = () => {
-    // Construct the GitHub App installation URL with state parameter
     const state = organizationId ? `org_${organizationId}` : `user_${user?.id}`;
-
     const installUrl = `https://github.com/apps/${githubAppName}/installations/new?state=${state}`;
-
-    // Redirect to GitHub App installation page
     window.location.href = installUrl;
   };
 
   const handleUninstall = () => {
     if (confirm('Are you sure you want to uninstall the Kilo GitHub App?')) {
-      mutations.uninstallApp.mutate(undefined, {
+      uninstallApp.mutate(input, {
         onSuccess: async () => {
           toast.success('GitHub App uninstalled');
           await refetch();
@@ -98,7 +142,7 @@ export function GitHubIntegrationDetails({
 
   const handleCancelPending = () => {
     if (confirm('Are you sure you want to cancel this installation request?')) {
-      mutations.cancelPendingInstallation.mutate(undefined, {
+      cancelPendingInstallation.mutate(input, {
         onSuccess: async () => {
           toast.success('Installation request cancelled');
           await refetch();
@@ -113,7 +157,7 @@ export function GitHubIntegrationDetails({
   };
 
   const handleRefresh = () => {
-    mutations.refreshInstallation.mutate(undefined, {
+    refreshInstallation.mutate(input, {
       onSuccess: async () => {
         toast.success('Installation details refreshed', {
           description: 'Permissions and repositories have been updated from GitHub.',
@@ -169,10 +213,10 @@ export function GitHubIntegrationDetails({
                 variant="outline"
                 size="sm"
                 onClick={handleCancelPending}
-                disabled={mutations.cancelPendingInstallation.isPending}
+                disabled={cancelPendingInstallation.isPending}
                 className="shrink-0"
               >
-                {mutations.cancelPendingInstallation.isPending ? 'Cancelling...' : 'Cancel Request'}
+                {cancelPendingInstallation.isPending ? 'Cancelling...' : 'Cancel Request'}
               </Button>
             </div>
           </AlertDescription>
@@ -273,21 +317,19 @@ export function GitHubIntegrationDetails({
                 <Button
                   variant="outline"
                   onClick={handleRefresh}
-                  disabled={mutations.refreshInstallation.isPending}
+                  disabled={refreshInstallation.isPending}
                 >
                   <RefreshCw
-                    className={`mr-2 h-4 w-4 ${mutations.refreshInstallation.isPending ? 'animate-spin' : ''}`}
+                    className={`mr-2 h-4 w-4 ${refreshInstallation.isPending ? 'animate-spin' : ''}`}
                   />
-                  {mutations.refreshInstallation.isPending
-                    ? 'Refreshing...'
-                    : 'Refresh Permissions'}
+                  {refreshInstallation.isPending ? 'Refreshing...' : 'Refresh Permissions'}
                 </Button>
                 <Button
                   variant="destructive"
                   onClick={handleUninstall}
-                  disabled={mutations.uninstallApp.isPending}
+                  disabled={uninstallApp.isPending}
                 >
-                  {mutations.uninstallApp.isPending ? 'Uninstalling...' : 'Uninstall App'}
+                  {uninstallApp.isPending ? 'Uninstalling...' : 'Uninstall App'}
                 </Button>
               </div>
             </>

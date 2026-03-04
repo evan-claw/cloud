@@ -20,8 +20,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEffect, useState, useRef } from 'react';
-import { useGitLabQueries } from './GitLabContext';
-import { useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
 
 type GitLabIntegrationDetailsProps = {
@@ -82,6 +81,7 @@ export function GitLabIntegrationDetails({
   });
 
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const patValidationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -89,7 +89,7 @@ export function GitLabIntegrationDetails({
     showSelfHosted && instanceUrl && instanceUrl !== 'https://gitlab.com' && instanceUrl !== ''
   );
 
-  const { queries, mutations } = useGitLabQueries();
+  const input = organizationId ? { organizationId } : undefined;
 
   // Instance validation mutation (shared between OAuth and PAT)
   const { mutate: validateInstanceMutate } = useMutation(
@@ -233,9 +233,31 @@ export function GitLabIntegrationDetails({
     };
   }, [instanceUrl, isSelfHostedInput, validateInstanceMutate]);
 
-  const { data: installationData, isLoading } = queries.getInstallation();
+  const { data: installationData, isLoading } = useQuery(
+    trpc.gitlab.getInstallation.queryOptions(input)
+  );
 
-  const isDisconnecting = mutations.disconnect.isPending;
+  const disconnectMutation = useMutation(
+    trpc.gitlab.disconnect.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.gitlab.getInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const refreshRepositoriesMutation = useMutation(
+    trpc.gitlab.refreshRepositories.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.gitlab.getInstallation.queryKey(input),
+        });
+      },
+    })
+  );
+
+  const isDisconnecting = disconnectMutation.isPending;
 
   useEffect(() => {
     if (success) {
@@ -274,7 +296,7 @@ export function GitLabIntegrationDetails({
 
   const handleDisconnect = () => {
     if (confirm('Are you sure you want to disconnect GitLab?')) {
-      mutations.disconnect.mutate(undefined, {
+      disconnectMutation.mutate(input, {
         onSuccess: () => {
           toast.success('GitLab disconnected');
         },
@@ -290,8 +312,8 @@ export function GitLabIntegrationDetails({
   const handleRefresh = () => {
     if (!installationData?.installation?.id) return;
 
-    mutations.refreshRepositories.mutate(
-      { integrationId: installationData.installation.id },
+    refreshRepositoriesMutation.mutate(
+      { integrationId: installationData.installation.id, organizationId },
       {
         onSuccess: () => {
           toast.success('Repositories refreshed');
@@ -426,14 +448,10 @@ export function GitLabIntegrationDetails({
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3">
-                {/* Show "Manage Access Token" for PAT connections, or "Manage on GitLab" for self-hosted OAuth
-                    (where user created their own OAuth app). Don't show for gitlab.com OAuth since
-                    Kilo Code provides the global OAuth app and users can't manage it. */}
                 {(authType === 'pat' || isSelfHosted) && (
                   <Button
                     variant="outline"
                     onClick={() => {
-                      // For PAT connections, link to Access Tokens page; for OAuth, link to Applications
                       const targetUrl =
                         authType === 'pat'
                           ? `${gitlabInstanceUrl}/-/user_settings/personal_access_tokens`
@@ -453,12 +471,12 @@ export function GitLabIntegrationDetails({
                 <Button
                   variant="outline"
                   onClick={handleRefresh}
-                  disabled={mutations.refreshRepositories.isPending}
+                  disabled={refreshRepositoriesMutation.isPending}
                 >
                   <RefreshCw
-                    className={`mr-2 h-4 w-4 ${mutations.refreshRepositories.isPending ? 'animate-spin' : ''}`}
+                    className={`mr-2 h-4 w-4 ${refreshRepositoriesMutation.isPending ? 'animate-spin' : ''}`}
                   />
-                  {mutations.refreshRepositories.isPending ? 'Refreshing...' : 'Refresh Projects'}
+                  {refreshRepositoriesMutation.isPending ? 'Refreshing...' : 'Refresh Projects'}
                 </Button>
                 <Button variant="destructive" onClick={handleDisconnect} disabled={isDisconnecting}>
                   {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
@@ -515,7 +533,6 @@ export function GitLabIntegrationDetails({
                     onClick={() => {
                       setShowSelfHosted(!showSelfHosted);
                       if (showSelfHosted) {
-                        // Reset to gitlab.com when hiding
                         setInstanceUrl('https://gitlab.com');
                         setInstanceValidation({ status: 'idle' });
                       }

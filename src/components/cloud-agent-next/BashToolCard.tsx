@@ -90,11 +90,11 @@ export function BashToolCard({ toolPart }: BashToolCardProps) {
           )}
 
           {/* Output */}
-          {output !== undefined && (
+          {output != null && output !== '' && (
             <div>
               <div className="text-muted-foreground mb-1 text-xs">Output:</div>
               <pre className="bg-background max-h-80 overflow-auto rounded-md p-2 text-xs">
-                <code>{output || '(no output)'}</code>
+                <code>{output}</code>
               </pre>
             </div>
           )}

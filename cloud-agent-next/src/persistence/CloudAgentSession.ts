@@ -10,9 +10,11 @@ import type { CloudAgentSessionState, OperationResult, MCPServerConfig } from '.
 import { MetadataSchema, type Images } from './schemas.js';
 import type { EncryptedSecrets } from '../router/schemas.js';
 import type { CallbackJob, CallbackTarget } from '../callbacks/index.js';
+import { drizzle } from 'drizzle-orm/durable-sqlite';
 import { logger } from '../logger.js';
 import { Limits } from '../schema.js';
-import { runMigrations } from './migrations.js';
+import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+import migrations from '../../drizzle/migrations';
 import { normalizeKilocodeModel } from './model-utils.js';
 import {
   createExecutionQueries,
@@ -70,6 +72,8 @@ import { stopKiloServer } from '../kilo/server-manager.js';
 
 /** Reaper alarm interval: 5 minutes */
 const REAPER_INTERVAL_MS_DEFAULT = 5 * 60 * 1000;
+/** Shorter reaper interval while execution is active: 2 minutes */
+const REAPER_ACTIVE_INTERVAL_MS = 2 * 60 * 1000;
 const PENDING_START_TIMEOUT_MS_DEFAULT = 5 * 60 * 1000;
 
 /** Event retention period: 90 days (aligns with session TTL) */
@@ -154,17 +158,15 @@ export class CloudAgentSession extends DurableObject {
     const sessionIdPart = doName?.split(':')[1];
     this.sessionId = sessionIdPart ? (sessionIdPart as SessionId) : undefined;
 
-    // Initialize query modules with storage
-    this.executionQueries = createExecutionQueries(ctx.storage);
-    this.eventQueries = createEventQueries(ctx.storage.sql);
-    this.leaseQueries = createLeaseQueries(ctx.storage.sql);
+    const db = drizzle(ctx.storage, { logger: false });
+    const rawSql = ctx.storage.sql;
 
-    // Run schema migrations on first access to this DO instance.
-    // blockConcurrencyWhile blocks all concurrent requests until completed,
-    // ensuring migrations complete before any handlers execute.
-    // Also ensures reaper alarm is scheduled.
+    this.executionQueries = createExecutionQueries(ctx.storage);
+    this.eventQueries = createEventQueries(db, rawSql);
+    this.leaseQueries = createLeaseQueries(db, rawSql);
+
     void ctx.blockConcurrencyWhile(async () => {
-      await runMigrations(ctx);
+      await migrate(db, migrations);
       await this.ensureAlarmScheduled();
     });
   }
@@ -367,7 +369,64 @@ export class CloudAgentSession extends DurableObject {
     // Clean up ingest connection tracking
     if (tags.some(tag => tag.startsWith('ingest:'))) {
       const ingestHandler = await this.getIngestHandler();
-      ingestHandler.handleIngestClose(ws);
+      const disconnectedExecutionId = ingestHandler.handleIngestClose(ws);
+
+      // If the wrapper disconnected while its execution was still active, fail it immediately
+      if (disconnectedExecutionId) {
+        const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+        if (activeExecutionId === disconnectedExecutionId) {
+          const execution = await this.executionQueries.get(activeExecutionId);
+          // Only act if execution is still running or pending (not already terminal)
+          if (execution && (execution.status === 'running' || execution.status === 'pending')) {
+            logger
+              .withFields({
+                sessionId: this.sessionId,
+                executionId: activeExecutionId,
+                wsCloseCode: code,
+                wsCloseReason: reason,
+              })
+              .warn('Wrapper disconnected while execution active - marking as failed');
+
+            const now = Date.now();
+
+            // Mark execution as failed — if another codepath already moved it
+            // to a terminal state, skip the broadcast and cleanup.
+            const statusResult = await this.updateExecutionStatus({
+              executionId: activeExecutionId,
+              status: 'failed',
+              error: 'Wrapper disconnected',
+              completedAt: now,
+            });
+
+            if (!statusResult.ok) {
+              logger
+                .withFields({ executionId: activeExecutionId, error: statusResult.error })
+                .info('Skipping disconnect cleanup - status transition failed');
+              return;
+            }
+
+            // Clear active execution (updateStatus should do this, but ensure it)
+            await this.executionQueries.clearActiveExecution();
+
+            // Clear interrupt flag if set
+            await this.executionQueries.clearInterrupt();
+
+            // Insert a synthetic wrapper_disconnected event so /stream clients are notified
+            const sessionId = await this.requireSessionId();
+            this.insertAndBroadcastEvent({
+              executionId: activeExecutionId,
+              sessionId,
+              streamEventType: 'wrapper_disconnected',
+              payload: JSON.stringify({
+                reason: 'Wrapper disconnected',
+                wsCloseCode: code,
+                wsCloseReason: reason,
+              }),
+              timestamp: now,
+            });
+          }
+        }
+      }
     }
 
     logger.debug(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
@@ -413,6 +472,30 @@ export class CloudAgentSession extends DurableObject {
           })
           .warn('Failed to broadcast event - stream handler unavailable');
       });
+  }
+
+  private insertAndBroadcastEvent(params: {
+    executionId: ExecutionId;
+    sessionId: string;
+    streamEventType: string;
+    payload: string;
+    timestamp: number;
+  }): void {
+    const eventId = this.eventQueries.insert({
+      executionId: params.executionId,
+      sessionId: params.sessionId,
+      streamEventType: params.streamEventType,
+      payload: params.payload,
+      timestamp: params.timestamp,
+    });
+    this.broadcastEvent({
+      id: eventId,
+      execution_id: params.executionId,
+      session_id: params.sessionId,
+      stream_event_type: params.streamEventType,
+      payload: params.payload,
+      timestamp: params.timestamp,
+    });
   }
 
   /**
@@ -635,6 +718,7 @@ export class CloudAgentSession extends DurableObject {
     prompt: string;
     mode: string;
     model: string;
+    variant?: string;
     kilocodeToken?: string;
     githubRepo?: string;
     githubToken?: string;
@@ -701,6 +785,7 @@ export class CloudAgentSession extends DurableObject {
   async tryUpdate(updates: {
     mode?: string | null;
     model?: string | null;
+    variant?: string | null;
     githubToken?: string | null;
     gitToken?: string | null;
     autoCommit?: boolean | null;
@@ -830,8 +915,18 @@ export class CloudAgentSession extends DurableObject {
         .error('Error during alarm reaper');
     }
 
-    // Schedule next alarm run
-    await this.ctx.storage.setAlarm(now + this.getReaperIntervalMs());
+    // Schedule next alarm run — use shorter interval while an execution is active.
+    // Wrapped in try/catch so a failure here never prevents rescheduling the alarm.
+    let nextInterval = this.getReaperIntervalMs();
+    try {
+      const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+      if (activeExecutionId) {
+        nextInterval = REAPER_ACTIVE_INTERVAL_MS;
+      }
+    } catch {
+      // Fall through with default interval
+    }
+    await this.ctx.storage.setAlarm(now + nextInterval);
   }
 
   /**
@@ -890,19 +985,41 @@ export class CloudAgentSession extends DurableObject {
           })
           .info('Marking stale execution as failed');
 
-        // Mark as failed
-        await this.updateExecutionStatus({
+        // Mark as failed — if another codepath already moved it to a terminal
+        // state (e.g. webSocketClose), skip cleanup and broadcast.
+        const statusResult = await this.updateExecutionStatus({
           executionId: activeExecutionId,
           status: 'failed',
           error: 'Execution timeout - no heartbeat received',
           completedAt: now,
         });
 
+        if (!statusResult.ok) {
+          logger
+            .withFields({ executionId: activeExecutionId, error: statusResult.error })
+            .info('Skipping reaper cleanup - status transition failed');
+          return;
+        }
+
         // Clear active execution (updateStatus should do this, but ensure it)
         await this.executionQueries.clearActiveExecution();
 
         // Clear interrupt flag if set
         await this.executionQueries.clearInterrupt();
+
+        // Notify /stream clients that the execution was reaped
+        const sessionId = await this.requireSessionId();
+        const errorPayload = JSON.stringify({
+          error: 'Execution timeout - no heartbeat received',
+          fatal: true,
+        });
+        this.insertAndBroadcastEvent({
+          executionId: activeExecutionId,
+          sessionId,
+          streamEventType: 'error',
+          payload: errorPayload,
+          timestamp: now,
+        });
       }
     }
 
@@ -920,15 +1037,38 @@ export class CloudAgentSession extends DurableObject {
           })
           .info('Marking stuck pending execution as failed');
 
-        await this.updateExecutionStatus({
+        // Mark as failed — if another codepath already moved it to a terminal
+        // state, skip cleanup and broadcast.
+        const statusResult = await this.updateExecutionStatus({
           executionId: activeExecutionId,
           status: 'failed',
           error: 'Execution timeout - wrapper never connected',
           completedAt: now,
         });
 
+        if (!statusResult.ok) {
+          logger
+            .withFields({ executionId: activeExecutionId, error: statusResult.error })
+            .info('Skipping pending timeout cleanup - status transition failed');
+          return;
+        }
+
         await this.executionQueries.clearActiveExecution();
         await this.executionQueries.clearInterrupt();
+
+        // Notify /stream clients that the pending execution timed out
+        const sessionId = await this.requireSessionId();
+        const errorPayload = JSON.stringify({
+          error: 'Execution timeout - wrapper never connected',
+          fatal: true,
+        });
+        this.insertAndBroadcastEvent({
+          executionId: activeExecutionId,
+          sessionId,
+          streamEventType: 'error',
+          payload: errorPayload,
+          timestamp: now,
+        });
       }
     }
   }
@@ -1111,6 +1251,25 @@ export class CloudAgentSession extends DurableObject {
   }
 
   /**
+   * Insert and broadcast an error event for an execution.
+   * Used by external callers (e.g. interrupt handler) to notify /stream clients.
+   */
+  async emitExecutionError(executionId: ExecutionId, errorMessage: string): Promise<void> {
+    const sessionId = await this.requireSessionId();
+    const payload = JSON.stringify({
+      error: errorMessage,
+      fatal: true,
+    });
+    this.insertAndBroadcastEvent({
+      executionId,
+      sessionId,
+      streamEventType: 'error',
+      payload,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
    * Get a specific execution by ID.
    */
   async getExecution(executionId: ExecutionId): Promise<ExecutionMetadata | null> {
@@ -1215,6 +1374,7 @@ export class CloudAgentSession extends DurableObject {
     mode: ExecutionMode;
     prompt: string;
     model?: string;
+    variant?: string;
     autoCommit?: boolean;
     condenseOnComplete?: boolean;
     initContext?: InitializeContext;
@@ -1279,6 +1439,7 @@ export class CloudAgentSession extends DurableObject {
       wrapper: {
         kiloSessionId: params.kiloSessionId,
         model: params.model ? { modelID: params.model.replace(/^kilo\//, '') } : undefined,
+        variant: params.variant,
         autoCommit: params.autoCommit,
         condenseOnComplete: params.condenseOnComplete,
       },
@@ -1333,12 +1494,13 @@ export class CloudAgentSession extends DurableObject {
   }
 
   private getGitHubTokenService(): GitHubTokenService {
+    const env = this.env as unknown as WorkerEnv;
     return new GitHubTokenService({
-      GITHUB_TOKEN_CACHE: Reflect.get(this.env, 'GITHUB_TOKEN_CACHE'),
-      GITHUB_APP_ID: Reflect.get(this.env, 'GITHUB_APP_ID'),
-      GITHUB_APP_PRIVATE_KEY: Reflect.get(this.env, 'GITHUB_APP_PRIVATE_KEY'),
-      GITHUB_LITE_APP_ID: Reflect.get(this.env, 'GITHUB_LITE_APP_ID'),
-      GITHUB_LITE_APP_PRIVATE_KEY: Reflect.get(this.env, 'GITHUB_LITE_APP_PRIVATE_KEY'),
+      GITHUB_TOKEN_CACHE: env.GITHUB_TOKEN_CACHE,
+      GITHUB_APP_ID: env.GITHUB_APP_ID,
+      GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY,
+      GITHUB_LITE_APP_ID: env.GITHUB_LITE_APP_ID,
+      GITHUB_LITE_APP_PRIVATE_KEY: env.GITHUB_LITE_APP_PRIVATE_KEY,
     });
   }
 
@@ -1400,6 +1562,7 @@ export class CloudAgentSession extends DurableObject {
           prompt: request.prompt,
           mode: request.mode,
           model: normalizedModel,
+          variant: request.variant,
           kilocodeToken: request.authToken,
           githubRepo: request.githubRepo,
           githubToken: request.githubToken,
@@ -1459,6 +1622,7 @@ export class CloudAgentSession extends DurableObject {
           mode: request.mode,
           prompt: request.prompt,
           model: normalizedModel,
+          variant: request.variant,
           autoCommit: request.autoCommit,
           condenseOnComplete: request.condenseOnComplete,
           initContext,
@@ -1544,6 +1708,7 @@ export class CloudAgentSession extends DurableObject {
           mode: metadata.mode as ExecutionMode,
           prompt: metadata.prompt,
           model: metadata.model,
+          variant: metadata.variant,
           autoCommit: metadata.autoCommit,
           condenseOnComplete: metadata.condenseOnComplete,
           initContext,
@@ -1574,6 +1739,7 @@ export class CloudAgentSession extends DurableObject {
 
       const mode = (request.mode ?? metadata.mode ?? 'code') as ExecutionMode;
       const model = normalizeKilocodeModel(request.model ?? metadata.model);
+      const variant = request.variant ?? metadata.variant;
       if (!model) {
         return this.buildStartError(
           'BAD_REQUEST',
@@ -1614,6 +1780,7 @@ export class CloudAgentSession extends DurableObject {
         mode,
         prompt: request.prompt,
         model,
+        variant,
         autoCommit: request.autoCommit ?? metadata.autoCommit,
         condenseOnComplete: request.condenseOnComplete ?? metadata.condenseOnComplete,
         resumeContext,

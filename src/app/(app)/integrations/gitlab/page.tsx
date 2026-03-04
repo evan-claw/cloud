@@ -1,7 +1,6 @@
 import { Suspense } from 'react';
 import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { GitLabIntegrationDetails } from '@/components/integrations/GitLabIntegrationDetails';
-import { UserGitLabProvider } from '@/components/integrations/UserGitLabProvider';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -32,22 +31,20 @@ export default async function UserGitLabIntegrationPage({
         </Link>
       }
     >
-      <UserGitLabProvider>
-        <Suspense
-          fallback={
-            <Card>
-              <CardContent className="pt-6">
-                <div className="animate-pulse space-y-4">
-                  <div className="bg-muted h-20 rounded" />
-                  <div className="bg-muted h-32 rounded" />
-                </div>
-              </CardContent>
-            </Card>
-          }
-        >
-          <GitLabIntegrationDetails success={search.success === 'connected'} error={search.error} />
-        </Suspense>
-      </UserGitLabProvider>
+      <Suspense
+        fallback={
+          <Card>
+            <CardContent className="pt-6">
+              <div className="animate-pulse space-y-4">
+                <div className="bg-muted h-20 rounded" />
+                <div className="bg-muted h-32 rounded" />
+              </div>
+            </CardContent>
+          </Card>
+        }
+      >
+        <GitLabIntegrationDetails success={search.success === 'connected'} error={search.error} />
+      </Suspense>
     </PageLayout>
   );
 }

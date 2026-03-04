@@ -36,6 +36,8 @@ export type SendPromptOptions = {
   prompt?: string;
   /** Full parts array (takes precedence over prompt) */
   parts?: MessagePart[];
+  /** Thinking effort variant name (e.g. "high", "max") */
+  variant?: string;
   /** Agent mode (e.g., 'code', 'architect', 'ask') */
   agent?: string;
   /** Model configuration */
@@ -93,6 +95,8 @@ export type KiloClient = {
   answerQuestion: (questionId: string, answers: string[][]) => Promise<boolean>;
   /** Reject a question */
   rejectQuestion: (questionId: string) => Promise<boolean>;
+  /** Generate a commit message for staged/unstaged changes */
+  generateCommitMessage: (opts: { path: string }) => Promise<{ message: string }>;
 };
 
 /**
@@ -161,6 +165,7 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/session/${opts.sessionId}/prompt_async`, {
         parts,
         messageID: opts.messageId,
+        variant: opts.variant,
         agent: opts.agent,
         model: opts.model
           ? {
@@ -202,5 +207,8 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/question/${questionId}/reject`, {});
       return true;
     },
+
+    generateCommitMessage: (opts: { path: string }) =>
+      requestJson<{ message: string }>('POST', '/commit-message', { path: opts.path }),
   };
 }

@@ -14,7 +14,7 @@ import {
   isFreeModel,
   isDataCollectionRequiredOnKiloCodeOnly,
   isDeadFreeModel,
-  isRateLimitedModel,
+  isKiloFreeModel,
 } from '@/lib/models';
 import {
   accountForMicrodollarUsage,
@@ -22,7 +22,7 @@ import {
   captureProxyError,
   checkOrganizationModelRestrictions,
   dataCollectionRequiredResponse,
-  estimateChatTokens,
+  estimateChatTokens_ignoringToolDefinitions,
   extractFraudAndProjectHeaders,
   invalidPathResponse,
   invalidRequestResponse,
@@ -36,7 +36,7 @@ import {
 import { getBalanceAndOrgSettings } from '@/lib/organizations/organization-usage';
 import { ENABLE_TOOL_REPAIR, repairTools } from '@/lib/tool-calling';
 import { isFreePromptTrainingAllowed } from '@/lib/providers/openrouter/types';
-import { rewriteModelResponse } from '@/lib/rewriteModelResponse';
+import { rewriteFreeModelResponse } from '@/lib/rewriteModelResponse';
 import {
   createAnonymousContext,
   isAnonymousContext,
@@ -49,49 +49,25 @@ import {
 } from '@/lib/free-model-rate-limiter';
 import { PROMOTION_MAX_REQUESTS, PROMOTION_WINDOW_HOURS } from '@/lib/constants';
 import { classifyAbuse } from '@/lib/abuse-service';
-import { KILO_AUTO_MODEL_ID } from '@/lib/kilo-auto-model';
 import {
   emitApiMetricsForResponse,
   getToolsAvailable,
   getToolsUsed,
 } from '@/lib/o11y/api-metrics.server';
 import { handleRequestLogging } from '@/lib/handleRequestLogging';
-import {
-  CLAUDE_OPUS_CURRENT_MODEL_ID,
-  CLAUDE_SONNET_CURRENT_MODEL_ID,
-} from '@/lib/providers/anthropic';
 import { customLlmRequest } from '@/lib/custom-llm/customLlmRequest';
 import { normalizeModelId } from '@/lib/model-utils';
 import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
+import { isActiveCloudAgentPromo } from '@/lib/promotions/cloud-agent-promo';
+import { isKiloAutoModel, resolveAutoModel } from '@/lib/kilo-auto-model';
+
+export const maxDuration = 800;
 
 const MAX_TOKENS_LIMIT = 99999999999; // GPT4.1 default is ~32k
 
 const PAID_MODEL_AUTH_REQUIRED = 'PAID_MODEL_AUTH_REQUIRED';
 const PROMOTION_MODEL_LIMIT_REACHED = 'PROMOTION_MODEL_LIMIT_REACHED';
-
-// Mode → model mappings for kilo/auto routing.
-// Add/remove/modify entries here to change routing behavior.
-const MODE_TO_MODEL = new Map<string, string>([
-  // Opus modes (planning, reasoning, orchestration, debugging)
-  ['plan', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  ['general', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  ['architect', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  ['orchestrator', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  ['ask', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  ['debug', CLAUDE_OPUS_CURRENT_MODEL_ID],
-  // Sonnet modes (implementation, exploration)
-  ['build', CLAUDE_SONNET_CURRENT_MODEL_ID],
-  ['explore', CLAUDE_SONNET_CURRENT_MODEL_ID],
-  ['code', CLAUDE_SONNET_CURRENT_MODEL_ID],
-]);
-
-const DEFAULT_AUTO_MODEL = CLAUDE_SONNET_CURRENT_MODEL_ID;
-
-function resolveAutoModel(modeHeader: string | null) {
-  const mode = modeHeader?.trim().toLowerCase() ?? 'code';
-  return MODE_TO_MODEL.get(mode) ?? DEFAULT_AUTO_MODEL;
-}
 
 function validatePath(url: URL) {
   const path =
@@ -138,14 +114,14 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   const requestedModel = requestBodyParsed.model.trim();
   const requestedModelLowerCased = requestedModel.toLowerCase();
 
-  const requestedAutoModel = requestedModelLowerCased === KILO_AUTO_MODEL_ID;
-
   // "kilo/auto" is a quasi-model id that resolves to a real model based on x-kilocode-mode.
   // After this resolution, the rest of the proxy flow behaves as if the client requested
   // the resolved model directly.
-  if (requestedAutoModel) {
-    const modeHeader = request.headers.get('x-kilocode-mode');
-    requestBodyParsed.model = resolveAutoModel(modeHeader);
+  const modeHeader = extractHeaderAndLimitLength(request, 'x-kilocode-mode');
+  let autoModel: string | null = null;
+  if (isKiloAutoModel(requestedModelLowerCased)) {
+    autoModel = requestedModelLowerCased;
+    Object.assign(requestBodyParsed, resolveAutoModel(requestedModelLowerCased, modeHeader));
   }
 
   const originalModelIdLowerCased = requestBodyParsed.model.toLowerCase();
@@ -159,7 +135,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   // For FREE models: check IP rate limit BEFORE auth, log at start
   // Slackbot-only models are exempt from free model rate limits since they're
   // already gated behind the Slack integration (internalApiUse auth).
-  if (isRateLimitedModel(originalModelIdLowerCased)) {
+  if (isKiloFreeModel(originalModelIdLowerCased)) {
     const rateLimitResult = await checkFreeModelRateLimit(ipAddress);
     if (!rateLimitResult.allowed) {
       console.warn(
@@ -183,12 +159,14 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     authFailedResponse,
     organizationId: authOrganizationId,
     botId: authBotId,
+    tokenSource: authTokenSource,
   } = await getUserFromAuth({ adminOnly: false });
   authSpan.end();
 
   let user: typeof maybeUser | AnonymousUserContext;
   let organizationId: string | undefined = authOrganizationId;
   let botId: string | undefined = authBotId;
+  let tokenSource: string | undefined = authTokenSource;
 
   if (authFailedResponse) {
     // No valid auth
@@ -220,8 +198,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
           error: {
             code: PROMOTION_MODEL_LIMIT_REACHED,
             message:
-              'Sign up to receive $5 in credits for paid models and ' +
-              'to continue using free models. No credit card or purchase required.',
+              'Sign up for free to continue and explore 500 other models. ' +
+              'Takes 2 minutes, no credit card required. Or come back later.',
           },
         },
         { status: 401 } // TODO: Change to 429 once the extension supports it (see kilocode errorUtils.ts)
@@ -232,12 +210,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     user = createAnonymousContext(ipAddress);
     organizationId = undefined;
     botId = undefined;
+    tokenSource = undefined;
   } else {
     user = maybeUser;
   }
 
   // Log to free_model_usage for rate limiting (at request start, before processing)
-  if (isRateLimitedModel(originalModelIdLowerCased)) {
+  if (isKiloFreeModel(originalModelIdLowerCased)) {
     await logFreeModelRequest(
       ipAddress,
       originalModelIdLowerCased,
@@ -277,6 +256,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   }
 
   if (isDeadFreeModel(originalModelIdLowerCased)) {
+    console.warn(`User requested discontinued free model ${originalModelIdLowerCased}; rejecting.`);
     return alphaPeriodEndedResponse();
   }
 
@@ -285,8 +265,9 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   }
 
   // Extract properties for usage context
-  const tokenEstimates = estimateChatTokens(requestBodyParsed);
+  const tokenEstimates = estimateChatTokens_ignoringToolDefinitions(requestBodyParsed);
   const promptInfo = extractPromptInfo(requestBodyParsed);
+  const isLegacyOpenRouterPath = url.pathname.includes('/openrouter');
 
   const usageContext: MicrodollarUsageContext = {
     kiloUserId: user.id,
@@ -309,8 +290,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     user_byok: !!userByok,
     has_tools: (requestBodyParsed.tools?.length ?? 0) > 0,
     botId,
-    feature: validateFeatureHeader(request.headers.get(FEATURE_HEADER)),
+    tokenSource,
+    feature: validateFeatureHeader(
+      request.headers.get(FEATURE_HEADER) || (isLegacyOpenRouterPath ? '' : 'direct-gateway')
+    ),
     session_id: taskId ?? null,
+    mode: modeHeader,
+    auto_model: autoModel,
   };
 
   setTag('ui.ai_model', requestBodyParsed.model);
@@ -325,7 +311,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       balance <= 0 &&
       !isFreeModel(originalModelIdLowerCased) &&
       !userByok &&
-      !isActiveReviewPromo(botId, originalModelIdLowerCased)
+      !isActiveReviewPromo(botId, originalModelIdLowerCased) &&
+      !isActiveCloudAgentPromo(tokenSource, originalModelIdLowerCased)
     ) {
       return await usageLimitExceededResponse(user, balance);
     }
@@ -389,6 +376,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     ? await customLlmRequest(
         customLlm,
         requestBodyParsed,
+        user.id,
+        taskId,
         !!fraudHeaders.http_user_agent?.startsWith('Kilo-Code/')
       )
     : await openRouterRequest({
@@ -409,7 +398,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       isAnonymous: isAnonymousContext(user),
       isStreaming: requestBodyParsed.stream === true,
       userByok: !!userByok,
-      mode: request.headers.get('x-kilocode-mode')?.trim() || undefined,
+      mode: modeHeader || undefined,
       provider: provider.id,
       requestedModel: requestedModelLowerCased,
       resolvedModel: normalizeModelId(originalModelIdLowerCased),
@@ -499,8 +488,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     }
   }
 
-  if (provider.requiresResponseRewrite) {
-    return rewriteModelResponse(response, originalModelIdLowerCased);
+  if (
+    provider.id !== 'custom' &&
+    (isKiloFreeModel(originalModelIdLowerCased) ||
+      isActiveReviewPromo(botId, originalModelIdLowerCased) ||
+      isActiveCloudAgentPromo(tokenSource, originalModelIdLowerCased))
+  ) {
+    return rewriteFreeModelResponse(response, originalModelIdLowerCased);
   }
 
   return wrapInSafeNextResponse(response);

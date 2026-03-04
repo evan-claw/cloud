@@ -5,6 +5,7 @@ export type BYOKApiKeyResponse = {
   id: string;
   provider_id: string;
   provider_name: string;
+  is_enabled: boolean;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -32,13 +33,23 @@ export const DeleteBYOKKeyInputSchema = OptionalOrganizationIdSchema.extend({
   id: z.string().uuid(),
 });
 
+export const SetBYOKKeyEnabledInputSchema = OptionalOrganizationIdSchema.extend({
+  id: z.string().uuid(),
+  is_enabled: z.boolean(),
+});
+
 // List schema with optional organizationId
 export const ListBYOKKeysInputSchema = OptionalOrganizationIdSchema;
+
+export const TestBYOKKeyInputSchema = OptionalOrganizationIdSchema.extend({
+  id: z.string().uuid(),
+});
 
 export const BYOKApiKeyResponseSchema = z.object({
   id: z.string().uuid(),
   provider_id: z.string(),
   provider_name: z.string(),
+  is_enabled: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
   created_by: z.string(),

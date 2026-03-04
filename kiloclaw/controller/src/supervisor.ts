@@ -33,6 +33,8 @@ export type Supervisor = {
   stop: () => Promise<boolean>;
   restart: () => Promise<boolean>;
   shutdown: (signal?: NodeJS.Signals) => Promise<void>;
+  /** Fire-and-forget signal to the child process. Returns false if no child is running. */
+  signal: (sig: NodeJS.Signals) => boolean;
   getState: () => SupervisorState;
   getStats: () => SupervisorStats;
 };
@@ -155,8 +157,18 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       return;
     }
 
-    state = 'crashed';
     restarts += 1;
+
+    // Clean exit (code 0, no signal) indicates an intentional restart
+    // (e.g., SIGUSR1 supervised restart after update.run). Respawn
+    // immediately without backoff.
+    if (code === 0 && signal === null) {
+      resetBackoff();
+      void spawnGateway();
+      return;
+    }
+
+    state = 'crashed';
     scheduleRestart();
   };
 
@@ -292,6 +304,10 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     stop: () => runExclusive(() => stopInternal(true)),
     restart: () => runExclusive(restartInternal),
     shutdown: (signal = 'SIGTERM') => runExclusive(() => shutdownInternal(signal)),
+    signal: (sig: NodeJS.Signals) => {
+      if (!child || !child.pid) return false;
+      return child.kill(sig);
+    },
     getState: () => state,
     getStats: () => ({
       state,

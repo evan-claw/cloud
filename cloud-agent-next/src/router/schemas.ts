@@ -3,6 +3,7 @@ import { sessionIdSchema, githubRepoSchema, gitUrlSchema, envVarsSchema } from '
 import {
   MCPServerConfigSchema,
   branchNameSchema,
+  modelIdSchema,
   EncryptedSecretEnvelopeSchema,
   EncryptedSecretsSchema,
   CallbackTargetSchema,
@@ -11,7 +12,7 @@ import { AgentModeSchema, Limits } from '../schema.js';
 
 // Re-export schemas from types.ts and persistence/schemas.ts for convenience
 export { sessionIdSchema, githubRepoSchema, gitUrlSchema, envVarsSchema };
-export { MCPServerConfigSchema, branchNameSchema };
+export { MCPServerConfigSchema, branchNameSchema, modelIdSchema };
 export { AgentModeSchema, Limits };
 export { EncryptedSecretEnvelopeSchema, EncryptedSecretsSchema, CallbackTargetSchema };
 
@@ -41,7 +42,12 @@ export type Images = z.infer<typeof ImagesSchema>;
 export const PromptPayload = z.object({
   prompt: z.string().min(1, 'Prompt is required').describe('The task prompt for Kilo Code'),
   mode: AgentModeSchema.describe('Kilo Code execution mode (required)'),
-  model: z.string().min(1, 'Model is required').describe('AI model to use (required)'),
+  model: modelIdSchema.describe('AI model to use (required)'),
+  variant: z
+    .string()
+    .max(50)
+    .regex(/^[a-zA-Z]+$/)
+    .optional(),
 });
 
 /**
@@ -83,12 +89,10 @@ export const SendMessageV2Input = z
     autoCommit: z
       .boolean()
       .optional()
-      .default(false)
       .describe('Automatically commit and push changes after execution'),
     condenseOnComplete: z
       .boolean()
       .optional()
-      .default(false)
       .describe('Automatically condense context after execution completes'),
     githubToken: z
       .string()
@@ -125,7 +129,12 @@ export const PrepareSessionInput = z
       .max(Limits.MAX_PROMPT_LENGTH)
       .describe('The task prompt for Kilo Code'),
     mode: AgentModeSchema.describe('Kilo Code execution mode'),
-    model: z.string().min(1).describe('AI model to use'),
+    model: modelIdSchema.describe('AI model to use'),
+    variant: z
+      .string()
+      .max(50)
+      .regex(/^[a-zA-Z]+$/)
+      .optional(),
 
     // Repository - one of these pairs required
     githubRepo: githubRepoSchema
@@ -199,6 +208,13 @@ export const PrepareSessionInput = z
       .max(100)
       .optional()
       .describe('Platform that created this session (e.g. slack, app-builder)'),
+    shallow: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        'Perform a shallow clone (depth: 1) for faster checkout and reduced disk usage. Useful when full git history is not needed.'
+      ),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',
@@ -229,7 +245,13 @@ export const UpdateSessionInput = z
 
     // Scalar fields - null to clear, value to set, undefined to skip
     mode: AgentModeSchema.nullable().optional().describe('Mode to set (null to clear)'),
-    model: z.string().min(1).nullable().optional().describe('Model to set (null to clear)'),
+    model: modelIdSchema.nullable().optional().describe('Model to set (null to clear)'),
+    variant: z
+      .string()
+      .max(50)
+      .regex(/^[a-zA-Z]+$/)
+      .nullable()
+      .optional(),
     githubToken: z.string().nullable().optional().describe('GitHub token to set (null to clear)'),
     gitToken: z.string().nullable().optional().describe('Git token to set (null to clear)'),
     upstreamBranch: branchNameSchema

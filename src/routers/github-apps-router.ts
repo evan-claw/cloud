@@ -12,22 +12,31 @@ import {
   fetchGitHubRepositories,
 } from '@/lib/integrations/platforms/github/adapter';
 import { TRPCError } from '@trpc/server';
+import {
+  resolveOwner,
+  resolveAuthorizedOwner,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
+import { ensureOrganizationAccess } from '@/routers/organizations/utils';
+import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
 
 export const githubAppsRouter = createTRPCRouter({
-  // List all integrations for the current user
-  listIntegrations: baseProcedure.query(async ({ ctx }) => {
-    return githubAppsService.listIntegrations({
-      type: 'user',
-      id: ctx.user.id,
-    });
+  // List all integrations
+  listIntegrations: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
+    return githubAppsService.listIntegrations(owner);
   }),
 
-  // Get GitHub App installation status for the current user
-  getInstallation: baseProcedure.query(async ({ ctx }) => {
-    const integration = await githubAppsService.getInstallation({
-      type: 'user',
-      id: ctx.user.id,
-    });
+  // Get GitHub App installation status
+  getInstallation: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
+    const integration = await githubAppsService.getInstallation(owner);
 
     if (!integration) {
       return {
@@ -36,12 +45,9 @@ export const githubAppsRouter = createTRPCRouter({
       };
     }
 
-    // Extract metadata status
     const metadata = integration.metadata as Record<string, unknown> | null;
     const pendingApproval = metadata?.pending_approval as Record<string, unknown> | undefined;
     const status = (pendingApproval?.status as string) || null;
-
-    // Only return installed: true if the integration status is 'active'
     const isInstalled = integration.integration_status === 'active';
 
     return {
@@ -67,75 +73,120 @@ export const githubAppsRouter = createTRPCRouter({
     };
   }),
 
-  // Check if current user has a pending installation
-  checkUserPendingInstallation: baseProcedure.query(async ({ ctx }) => {
-    const pendingInstallation = await githubAppsService.checkUserPendingInstallation(ctx.user.id);
+  // Check if current user has a pending installation.
+  // Note: This is intentionally user-scoped (ctx.user.id) even when an organizationId is
+  // provided, because GitHub App installations are initiated per-user. The org access
+  // check only gates visibility — the pending state itself is always user-global.
+  checkUserPendingInstallation: baseProcedure
+    .input(optionalOrgInput)
+    .query(async ({ ctx, input }) => {
+      if (input?.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const pendingInstallation = await githubAppsService.checkUserPendingInstallation(ctx.user.id);
 
-    if (!pendingInstallation) {
+      if (!pendingInstallation) {
+        return {
+          hasPending: false,
+          pendingOrganizationId: null,
+        };
+      }
+
       return {
-        hasPending: false,
-        pendingOrganizationId: null,
+        hasPending: true,
+        pendingOrganizationId: pendingInstallation.owned_by_organization_id,
       };
-    }
+    }),
 
-    return {
-      hasPending: true,
-      pendingOrganizationId: pendingInstallation.owned_by_organization_id,
-    };
-  }),
-
-  // Uninstall GitHub App for the current user
-  uninstallApp: baseProcedure.mutation(async ({ ctx }) => {
-    return githubAppsService.uninstallApp(
-      { type: 'user', id: ctx.user.id },
+  // Uninstall GitHub App
+  uninstallApp: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
+    const result = await githubAppsService.uninstallApp(
+      owner,
       ctx.user.id,
       ctx.user.google_user_email,
       ctx.user.google_user_name
     );
+
+    if (input?.organizationId) {
+      await createAuditLog({
+        organization_id: input.organizationId,
+        action: 'organization.settings.change',
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        message: 'Uninstalled Kilo GitHub App',
+      });
+    }
+
+    return result;
   }),
 
   // List repositories accessible by an integration
   listRepositories: baseProcedure
     .input(
       z.object({
+        organizationId: z.string().uuid().optional(),
         integrationId: z.string().uuid(),
         forceRefresh: z.boolean().optional().default(false),
       })
     )
     .query(async ({ ctx, input }) => {
-      return githubAppsService.listRepositories(
-        { type: 'user', id: ctx.user.id },
-        input.integrationId,
-        input.forceRefresh
-      );
+      if (input.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input.organizationId);
+      return githubAppsService.listRepositories(owner, input.integrationId, input.forceRefresh);
     }),
 
   // List branches for a repository
   listBranches: baseProcedure
     .input(
       z.object({
+        organizationId: z.string().uuid().optional(),
         integrationId: z.string().uuid(),
         repositoryFullName: z.string(),
       })
     )
     .query(async ({ ctx, input }) => {
-      return githubAppsService.listBranches(
-        { type: 'user', id: ctx.user.id },
-        input.integrationId,
-        input.repositoryFullName
-      );
+      if (input.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input.organizationId);
+      return githubAppsService.listBranches(owner, input.integrationId, input.repositoryFullName);
     }),
 
   // Cancel pending installation
-  cancelPendingInstallation: baseProcedure.mutation(async ({ ctx }) => {
-    return githubAppsService.cancelPendingInstallation({ type: 'user', id: ctx.user.id });
-  }),
+  cancelPendingInstallation: baseProcedure
+    .input(optionalOrgInput)
+    .mutation(async ({ ctx, input }) => {
+      if (input?.organizationId) {
+        await ensureOrganizationAccess(ctx, input.organizationId);
+      }
+      const owner = resolveOwner(ctx, input?.organizationId);
+      const result = await githubAppsService.cancelPendingInstallation(owner);
+
+      if (input?.organizationId) {
+        await createAuditLog({
+          organization_id: input.organizationId,
+          action: 'organization.settings.change',
+          actor_id: ctx.user.id,
+          actor_email: ctx.user.google_user_email,
+          actor_name: ctx.user.google_user_name,
+          message: 'Cancelled pending GitHub App installation request',
+        });
+      }
+
+      return result;
+    }),
 
   // Refresh installation details from GitHub (permissions, events, repositories)
-  refreshInstallation: baseProcedure.mutation(async ({ ctx }) => {
-    const owner = { type: 'user' as const, id: ctx.user.id };
+  refreshInstallation: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
 
-    // Get the existing integration
     const integration = await getIntegrationForOwner(owner, 'github');
     if (!integration || !integration.platform_installation_id) {
       throw new TRPCError({
@@ -147,10 +198,8 @@ export const githubAppsRouter = createTRPCRouter({
     const installationId = integration.platform_installation_id;
     const appType = integration.github_app_type || 'standard';
 
-    // Fetch updated installation details from GitHub
     const installationDetails = await fetchGitHubInstallationDetails(installationId, appType);
 
-    // Update the integration with fresh data
     await upsertPlatformIntegrationForOwner(owner, {
       platform: 'github',
       integrationType: 'app',
@@ -163,9 +212,19 @@ export const githubAppsRouter = createTRPCRouter({
       installedAt: installationDetails.created_at,
     });
 
-    // Refresh repositories
     const repositories = await fetchGitHubRepositories(installationId, appType);
     await updateRepositoriesForIntegration(integration.id, repositories);
+
+    if (input?.organizationId) {
+      await createAuditLog({
+        organization_id: input.organizationId,
+        action: 'organization.settings.change',
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        message: 'Refreshed GitHub App installation details',
+      });
+    }
 
     return { success: true };
   }),
@@ -181,8 +240,6 @@ export const githubAppsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Only allow in development mode
-
       if (process.env.NODE_ENV !== 'development') {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -191,16 +248,12 @@ export const githubAppsRouter = createTRPCRouter({
       }
 
       const appType = input.appType;
-
-      // Fetch installation details from GitHub to get permissions
       const installationDetails = await fetchGitHubInstallationDetails(
         input.installationId,
         appType
       );
 
-      const owner = input.organizationId
-        ? { type: 'org' as const, id: input.organizationId }
-        : { type: 'user' as const, id: ctx.user.id };
+      const owner = resolveOwner(ctx, input.organizationId);
 
       await upsertPlatformIntegrationForOwner(owner, {
         platform: 'github',
@@ -215,7 +268,6 @@ export const githubAppsRouter = createTRPCRouter({
         githubAppType: appType,
       });
 
-      // Fetch and cache repositories immediately so features like Security Reviews work
       const integration = await getIntegrationForOwner(owner, 'github');
       if (integration) {
         const repositories = await fetchGitHubRepositories(input.installationId, appType);

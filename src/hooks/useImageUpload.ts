@@ -63,8 +63,7 @@ function getCompletedImageFilenames(images: ImageFile[]): string[] {
   return images
     .filter((img): img is ImageFile & { r2Key: string } => img.status === 'complete' && !!img.r2Key)
     .map(img => {
-      // r2Key format is like "userId/app-builder/messageUuid/filename.ext"
-      // We only need the filename part (last segment)
+      // r2Key is like "userId/app-builder/messageUuid/filename.ext" — extract the filename
       const parts = img.r2Key.split('/');
       return parts[parts.length - 1];
     });
@@ -316,7 +315,7 @@ export function useImageUpload(options: UseImageUploadOptions): UseImageUploadRe
     if (completedFilenames.length === 0) return undefined;
 
     return {
-      path: `app-builder/${messageUuid}`,
+      path: messageUuid,
       files: completedFilenames,
     };
   }, [messageUuid]);

@@ -31,6 +31,8 @@ type SecurityAgentConfigSavedEvent = BaseSecurityAgentEvent & {
   autoDismissEnabled?: boolean;
   autoDismissConfidenceThreshold?: string;
   modelSlug?: string;
+  triageModelSlug?: string;
+  analysisModelSlug?: string;
   repositorySelectionMode?: string;
   selectedRepoCount?: number;
 };
@@ -45,12 +47,16 @@ type SecurityAgentSyncEvent = BaseSecurityAgentEvent & {
 type SecurityAgentAnalysisStartedEvent = BaseSecurityAgentEvent & {
   findingId: string;
   model: string;
+  triageModel?: string;
+  analysisModel?: string;
   analysisMode?: string;
 };
 
 type SecurityAgentAnalysisCompletedEvent = BaseSecurityAgentEvent & {
   findingId: string;
   model: string;
+  triageModel?: string;
+  analysisModel?: string;
   triageOnly: boolean;
   needsSandboxAnalysis?: boolean;
   triageSuggestedAction?: string;

@@ -7,27 +7,52 @@ import { toast } from 'sonner';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
-import { DEFAULT_CLAW_INSTANCE_TYPE } from './claw.types';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { RunDoctorDialog } from './RunDoctorDialog';
+import { AnimatedDots } from './AnimatedDots';
+
+const VOLUME_SIZE_GB = 10;
+// Default machine spec fallback (matches kiloclaw DEFAULT_MACHINE_GUEST)
+const DEFAULT_CPUS = 2;
+const DEFAULT_MEMORY_MB = 3072;
+
+function formatMemory(mb: number): string {
+  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
+}
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
 export function InstanceControls({
   status,
   mutations,
+  onRedeploySuccess,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
+  onRedeploySuccess?: () => void;
 }) {
   const posthog = usePostHog();
   const isRunning = status.status === 'running';
-  const isStopped = status.status === 'stopped' || status.status === 'provisioned';
+  const isProvisioned = status.status === 'provisioned';
+  const isStopped = status.status === 'stopped' || isProvisioned;
   const isDestroying = status.status === 'destroying';
+  // Auto-start runs only on fresh provision (status=provisioned), not re-provision
+  const isAutoStarting = isProvisioned && mutations.provision.isPending;
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmRedeploy, setConfirmRedeploy] = useState(false);
+  const [redeployMode, setRedeployMode] = useState<'redeploy' | 'upgrade'>('redeploy');
 
   return (
     <div>
@@ -39,11 +64,12 @@ export function InstanceControls({
         <div className="flex flex-wrap justify-end gap-2">
           <Badge variant="outline" className="text-muted-foreground gap-1.5 font-normal">
             <Cpu className="h-3.5 w-3.5" />
-            {DEFAULT_CLAW_INSTANCE_TYPE.name} ({DEFAULT_CLAW_INSTANCE_TYPE.description})
+            {status.machineSize?.cpus ?? DEFAULT_CPUS} vCPU,{' '}
+            {formatMemory(status.machineSize?.memory_mb ?? DEFAULT_MEMORY_MB)} RAM
           </Badge>
           <Badge variant="outline" className="text-muted-foreground gap-1.5 font-normal">
             <HardDrive className="h-3.5 w-3.5" />
-            20 GB SSD
+            {VOLUME_SIZE_GB} GB SSD
           </Badge>
         </div>
       </div>
@@ -52,14 +78,21 @@ export function InstanceControls({
           size="sm"
           variant="outline"
           className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-          disabled={!isStopped || mutations.start.isPending || isDestroying}
+          disabled={!isStopped || mutations.start.isPending || isAutoStarting || isDestroying}
           onClick={() => {
             posthog?.capture('claw_start_instance_clicked', { instance_status: status.status });
             mutations.start.mutate();
           }}
         >
           <Play className="h-4 w-4" />
-          {mutations.start.isPending ? 'Starting...' : 'Start Machine'}
+          {mutations.start.isPending || isAutoStarting ? (
+            <>
+              Starting
+              <AnimatedDots />
+            </>
+          ) : (
+            'Start Machine'
+          )}
         </Button>
         <Button
           size="sm"
@@ -83,11 +116,12 @@ export function InstanceControls({
           disabled={!isRunning || mutations.restartGateway.isPending || isDestroying}
           onClick={() => {
             posthog?.capture('claw_redeploy_prompted', { instance_status: status.status });
+            setRedeployMode('redeploy');
             setConfirmRedeploy(true);
           }}
         >
           <RotateCw className="h-4 w-4" />
-          Redeploy
+          Redeploy or Upgrade
         </Button>
         <Button
           size="sm"
@@ -114,7 +148,7 @@ export function InstanceControls({
         confirmLabel="Restart"
         confirmIcon={<RefreshCw className="h-4 w-4" />}
         isPending={mutations.restartOpenClaw.isPending}
-        pendingLabel="Restarting..."
+        pendingLabel="Restarting"
         className="border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 hover:text-violet-300"
         onConfirm={() => {
           posthog?.capture('claw_restart_openclaw_clicked', {
@@ -129,30 +163,94 @@ export function InstanceControls({
           });
         }}
       />
-      <ConfirmActionDialog
+      <Dialog
         open={confirmRedeploy}
         onOpenChange={open => {
+          if (mutations.restartGateway.isPending) return;
           if (!open) posthog?.capture('claw_redeploy_cancelled');
           setConfirmRedeploy(open);
         }}
-        title="Redeploy Gateway"
-        description="This will stop the machine, rebuild environment variables and secrets, apply any pending image updates, and restart it. The machine will be briefly offline."
-        confirmLabel="Redeploy"
-        confirmIcon={<RotateCw className="h-4 w-4" />}
-        isPending={mutations.restartGateway.isPending}
-        pendingLabel="Redeploying..."
-        className="border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
-        onConfirm={() => {
-          posthog?.capture('claw_redeploy_clicked', { instance_status: status.status });
-          mutations.restartGateway.mutate(undefined, {
-            onSuccess: () => {
-              toast.success('Gateway restarting');
-              setConfirmRedeploy(false);
-            },
-            onError: err => toast.error(err.message),
-          });
-        }}
-      />
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Redeploy or Upgrade</DialogTitle>
+            <DialogDescription>
+              This will stop the machine, rebuild environment variables and secrets, and restart it.
+              The machine will be briefly offline.
+            </DialogDescription>
+          </DialogHeader>
+          <RadioGroup
+            value={redeployMode}
+            onValueChange={v => {
+              if (v === 'redeploy' || v === 'upgrade') setRedeployMode(v);
+            }}
+            className="gap-3 py-2"
+          >
+            <div className="flex items-start gap-3">
+              <RadioGroupItem value="redeploy" id="redeploy" className="mt-0.5" />
+              <Label htmlFor="redeploy" className="block cursor-pointer leading-tight">
+                <span className="text-foreground text-sm font-medium">Redeploy</span>
+                <span className="text-muted-foreground mt-0.5 block text-xs">
+                  Restart with your current version of KiloClaw and apply pending config changes.
+                </span>
+              </Label>
+            </div>
+            <div className="flex items-start gap-3">
+              <RadioGroupItem value="upgrade" id="upgrade" className="mt-0.5" />
+              <Label htmlFor="upgrade" className="block cursor-pointer leading-tight">
+                <span className="text-foreground text-sm font-medium">Upgrade to latest</span>
+                <span className="text-muted-foreground mt-0.5 block text-xs">
+                  Upgrade to the latest KiloClaw version, redeploy and apply pending config changes.
+                </span>
+              </Label>
+            </div>
+          </RadioGroup>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmRedeploy(false)}
+              disabled={mutations.restartGateway.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
+              onClick={() => {
+                const imageTag = redeployMode === 'upgrade' ? 'latest' : undefined;
+                posthog?.capture('claw_redeploy_clicked', {
+                  instance_status: status.status,
+                  redeploy_mode: redeployMode,
+                });
+                mutations.restartGateway.mutate(imageTag ? { imageTag } : undefined, {
+                  onSuccess: () => {
+                    toast.success(
+                      redeployMode === 'upgrade'
+                        ? 'Upgrading to latest image'
+                        : 'Gateway restarting'
+                    );
+                    setConfirmRedeploy(false);
+                    onRedeploySuccess?.();
+                  },
+                  onError: err => toast.error(err.message),
+                });
+              }}
+              disabled={mutations.restartGateway.isPending}
+            >
+              {mutations.restartGateway.isPending ? (
+                <>
+                  {redeployMode === 'redeploy' ? 'Redeploying' : 'Upgrading'}
+                  <AnimatedDots />
+                </>
+              ) : (
+                <>
+                  <RotateCw className="h-4 w-4" />
+                  {redeployMode === 'redeploy' ? 'Redeploy' : 'Upgrade & Redeploy'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <RunDoctorDialog
         open={doctorOpen}
         onOpenChange={setDoctorOpen}

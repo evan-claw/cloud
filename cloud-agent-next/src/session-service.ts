@@ -4,7 +4,6 @@ import type {
   SandboxId,
   SessionContext,
   SessionId,
-  StreamEvent,
   InterruptResult,
 } from './types.js';
 import type { ExecutionParams as _ExecutionParams } from './schema.js';
@@ -21,7 +20,6 @@ import {
   setupWorkspace,
 } from './workspace.js';
 import { logger, WithLogTags } from './logger.js';
-import { streamKilocodeExecution } from './streaming.js';
 import type {
   PersistenceEnv,
   CloudAgentSessionState,
@@ -30,7 +28,7 @@ import type {
 import { MetadataSchema } from './persistence/schemas.js';
 import { withDORetry } from './utils/do-retry.js';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
-import type { EncryptedSecrets, Images } from './router/schemas.js';
+import type { EncryptedSecrets } from './router/schemas.js';
 
 const SETUP_COMMAND_TIMEOUT_SECONDS = 120; // 2 minutes
 const SANDBOX_RETRY_DEFAULTS = {
@@ -38,6 +36,78 @@ const SANDBOX_RETRY_DEFAULTS = {
   baseBackoffMs: 100,
   maxBackoffMs: 5000,
 };
+
+const DEFAULT_DENIED_COMMAND_PATTERNS = ['rm -rf', 'sudo rm', 'mkfs', 'dd if='];
+
+// Keep in sync with: cloud-agent/src/workspace.ts, cloudflare-code-review-infra/src/code-review-orchestrator.ts
+// mkdir and touch are intentionally allowed for agent scratch space during analysis
+const CODE_REVIEW_ALLOWED_COMMANDS = [
+  'ls',
+  'cat',
+  'echo',
+  'pwd',
+  'find',
+  'grep',
+  'git',
+  'gh',
+  'whoami',
+  'date',
+  'head',
+  'tail',
+  'cd',
+  'mkdir',
+  'touch',
+];
+
+const CODE_REVIEW_DENIED_COMMAND_PATTERNS = [
+  'git add',
+  'git commit',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git cherry-pick',
+  'git reset',
+  'git checkout',
+  'git switch',
+  'git stash',
+  'git tag',
+  'git am',
+  'git apply',
+  'git remote set-url',
+  'gh pr merge',
+  'gh pr review',
+  'gh pr create',
+  'gh pr close',
+  'gh pr edit',
+  'gh issue',
+  'gh repo create',
+  'gh repo fork',
+  'npm test',
+  'pnpm test',
+  'bun test',
+  'yarn test',
+  'pytest',
+  'vitest',
+];
+
+type CommandGuardPolicy = {
+  policyName: string;
+  allowed: string[];
+  denied: string[];
+};
+
+function getCommandGuardPolicy(createdOnPlatform?: string): CommandGuardPolicy | null {
+  if (createdOnPlatform !== 'code-review') {
+    return null;
+  }
+
+  return {
+    policyName: 'code-review-read-only',
+    allowed: CODE_REVIEW_ALLOWED_COMMANDS,
+    denied: [...DEFAULT_DENIED_COMMAND_PATTERNS, ...CODE_REVIEW_DENIED_COMMAND_PATTERNS],
+  };
+}
+
 class SessionSnapshotRestoreError extends Error {
   constructor(
     message: string,
@@ -257,37 +327,6 @@ export async function runSetupCommands(
   logger.info('Setup commands completed');
 }
 
-// Write MCP server config to global settings file in the session home.
-export async function writeMCPSettings(
-  sandbox: SandboxInstance,
-  sessionHome: string,
-  mcpServers: Record<string, MCPServerConfig>
-): Promise<void> {
-  if (!mcpServers || Object.keys(mcpServers).length === 0) {
-    return;
-  }
-
-  const settingsDir = `${sessionHome}/.kilocode/cli/global/settings`;
-  const settingsPath = `${settingsDir}/mcp_settings.json`;
-
-  // Ensure directory exists
-  await sandbox.exec(`mkdir -p ${settingsDir}`);
-
-  // Generate settings JSON inline (no need for separate function)
-  const settingsJSON = JSON.stringify({ mcpServers }, null, 2);
-
-  // Write settings file
-  await sandbox.writeFile(settingsPath, settingsJSON);
-
-  const serverNames = Object.keys(mcpServers);
-  logger
-    .withTags({
-      serverCount: serverNames.length,
-      serverNames: serverNames.join(', '),
-    })
-    .info('Configured MCP servers');
-}
-
 // Write Kilo auth file so the CLI's KiloSessions can call session ingest.
 // The CLI reads ~/.local/share/kilo/auth.json via Auth.get("kilo") but we
 // never run `kilo auth login` — credentials are injected purely via env vars
@@ -448,6 +487,7 @@ export class SessionService {
     userEnvVars: Record<string, string> | undefined,
     sessionHome: string,
     sessionId: string,
+    workspacePath: string,
     env: PersistenceEnv,
     originalToken: string,
     kilocodeModel: string | undefined,
@@ -459,7 +499,8 @@ export class SessionService {
     appendSystemPrompt?: string,
     gitUrl?: string,
     gitToken?: string,
-    platform?: 'github' | 'gitlab'
+    platform?: 'github' | 'gitlab',
+    mcpServers?: Record<string, MCPServerConfig>
   ): Record<string, string> {
     // Use override if available, otherwise use original values from API
     const kilocodeToken = env.KILOCODE_TOKEN_OVERRIDE ?? originalToken;
@@ -507,18 +548,75 @@ export class SessionService {
     if (env.KILO_OPENROUTER_BASE) {
       providerOptions.baseURL = env.KILO_OPENROUTER_BASE;
     }
-    const configContent: Record<string, unknown> = {
-      permission: {
-        external_directory: {
-          [`/tmp/attachments/${sessionId}/**`]: 'allow',
-        },
+    const isInteractive =
+      !createdOnPlatform ||
+      createdOnPlatform === 'cloud-agent' ||
+      createdOnPlatform === 'app-builder';
+    const commandGuardPolicy = getCommandGuardPolicy(createdOnPlatform);
+
+    const permission: Record<string, unknown> = {
+      external_directory: {
+        [`/tmp/attachments/${sessionId}/**`]: 'allow',
+        [`${workspacePath}/**`]: 'allow',
       },
+      ...(!isInteractive && { question: 'deny' }),
+    };
+
+    if (commandGuardPolicy) {
+      // Build bash permission rules from guard policy.
+      // Denied patterns (e.g. "git add *") are more specific than allowed patterns
+      // (e.g. "git *"); the CLI resolves overlapping globs most-specific-first,
+      // so denied sub-commands correctly override broader allows.
+      const bashPermissions: Record<string, string> = {};
+      for (const cmd of commandGuardPolicy.denied) {
+        bashPermissions[`${cmd} *`] = 'deny';
+      }
+      for (const cmd of commandGuardPolicy.allowed) {
+        bashPermissions[`${cmd} *`] = 'allow';
+      }
+
+      // Parity with old autoApproval config:
+      //   read: allow  (was read.enabled: true)
+      //   edit: deny   (was write.enabled: false)
+      //   webfetch/websearch/codesearch: deny  (was browser.enabled: false)
+      //   MCP: allowed by default (was mcp.enabled: true)
+      //   question: handled above (line 564) for non-interactive sessions
+      Object.assign(permission, {
+        read: 'allow',
+        edit: 'deny',
+        bash: bashPermissions,
+        webfetch: 'deny',
+        websearch: 'deny',
+        codesearch: 'deny',
+        todowrite: 'allow',
+        todoread: 'allow',
+      });
+
+      logger
+        .withFields({
+          createdOnPlatform,
+          commandPolicy: commandGuardPolicy.policyName,
+          deniedCommandPatterns: commandGuardPolicy.denied.length,
+        })
+        .info('Enabled read-only command guard policy');
+    }
+
+    const configContent: Record<string, unknown> = {
+      permission,
       provider: {
         kilo: {
           options: providerOptions,
         },
       },
     };
+    // MCP configs are already in CLI-native format — pass through directly
+    if (mcpServers && Object.keys(mcpServers).length > 0) {
+      configContent.mcp = mcpServers;
+      logger.info('MCP config merged into KILO_CONFIG_CONTENT', {
+        mcpServerNames: Object.keys(mcpServers),
+        mcpServerCount: Object.keys(mcpServers).length,
+      });
+    }
     if (kilocodeModel && kilocodeModel.trim()) {
       const normalizedModel = kilocodeModel.startsWith('kilo/')
         ? kilocodeModel
@@ -601,7 +699,8 @@ export class SessionService {
     originalOrgId?: string,
     encryptedSecrets?: EncryptedSecrets,
     createdOnPlatform?: string,
-    appendSystemPrompt?: string
+    appendSystemPrompt?: string,
+    mcpServers?: Record<string, MCPServerConfig>
   ) {
     const { sessionId, sessionHome, workspacePath, envVars } = context;
 
@@ -610,6 +709,7 @@ export class SessionService {
       envVars,
       sessionHome,
       sessionId,
+      workspacePath,
       env,
       originalToken,
       kilocodeModel,
@@ -621,7 +721,8 @@ export class SessionService {
       appendSystemPrompt,
       context.gitUrl,
       context.gitToken,
-      context.platform
+      context.platform,
+      mcpServers
     );
 
     const session = await sandbox.createSession({
@@ -721,7 +822,9 @@ export class SessionService {
       kilocodeModel,
       orgId,
       encryptedSecrets,
-      createdOnPlatform
+      createdOnPlatform,
+      undefined, // appendSystemPrompt
+      mcpServers
     );
 
     // Check disk space before clone for observability (logs warning if low)
@@ -731,7 +834,10 @@ export class SessionService {
     // Shallow clone (depth: 1) can be enabled for faster checkout and reduced disk usage
     const cloneOptions = shallow ? { shallow: true } : undefined;
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, cloneOptions);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        ...cloneOptions,
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -766,11 +872,6 @@ export class SessionService {
       await runSetupCommands(session, context, setupCommands, true); // fail-fast
     }
 
-    // Write MCP server settings
-    if (mcpServers && Object.keys(mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, mcpServers);
-    }
-
     // Write auth file for session ingest
     await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
 
@@ -792,50 +893,9 @@ export class SessionService {
       existingMetadata ?? undefined
     );
 
-    // Track first execution to optimize DO fetch and store captured kiloSessionId
-    let isFirstCall = true;
-    let capturedKiloSessionId: string | undefined = undefined;
-
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        const currentIsFirst = isFirstCall;
-        isFirstCall = false;
-
-        // Use captured kiloSessionId if available for subsequent calls
-        const kiloSessionId = capturedKiloSessionId;
-
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...options, isFirstExecution: currentIsFirst, kiloSessionId, images: options?.images },
-          env
-        )) {
-          // Capture kiloSessionId from session_created event for subsequent calls
-          if (
-            event.streamEventType === 'kilocode' &&
-            event.payload?.event === 'session_created' &&
-            event.payload?.sessionId &&
-            !capturedKiloSessionId
-          ) {
-            capturedKiloSessionId = String(event.payload.sessionId);
-            logger.setTags({ kiloSessionId: capturedKiloSessionId });
-          }
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1006,7 +1066,8 @@ export class SessionService {
       orgId,
       encryptedSecrets,
       options.createdOnPlatform ?? existingMetadata?.createdOnPlatform,
-      existingMetadata?.appendSystemPrompt
+      existingMetadata?.appendSystemPrompt,
+      mcpServers
     );
 
     // Check disk space before clone for observability (logs warning if low)
@@ -1014,7 +1075,9 @@ export class SessionService {
 
     // Clone repository using appropriate method
     if (gitUrl) {
-      await cloneGitRepo(session, workspacePath, gitUrl, gitToken);
+      await cloneGitRepo(session, workspacePath, gitUrl, gitToken, undefined, {
+        platform: context.platform,
+      });
     } else if (githubRepo) {
       await cloneGitHubRepo(
         session,
@@ -1059,11 +1122,6 @@ export class SessionService {
       await runSetupCommands(session, context, setupCommands, false);
     }
 
-    // Write MCP settings
-    if (mcpServers && Object.keys(mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, mcpServers);
-    }
-
     // Write auth file for session ingest
     await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
 
@@ -1088,30 +1146,9 @@ export class SessionService {
       metadataToPreserve
     );
 
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        execOptions?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...execOptions, isFirstExecution: false, kiloSessionId, images: execOptions?.images },
-          env
-        )) {
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1208,7 +1245,8 @@ export class SessionService {
       orgId,
       metadata?.encryptedSecrets,
       metadata?.createdOnPlatform,
-      metadata?.appendSystemPrompt
+      metadata?.appendSystemPrompt,
+      metadata?.mcpServers
     );
 
     // Check if workspace repo exists - if not, we may need to reclone
@@ -1238,25 +1276,6 @@ export class SessionService {
     return {
       context,
       session,
-      streamKilocodeExec: (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) =>
-        streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          {
-            ...options,
-            isFirstExecution: false,
-            kiloSessionId: metadata?.kiloSessionId,
-            images: options?.images,
-          },
-          env
-        ),
     };
   }
 
@@ -1295,8 +1314,9 @@ export class SessionService {
         `Session ${sessionId} has no kiloSessionId in metadata. Cannot restore snapshot.`
       );
     }
-    await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
-
+    // Clone first so .git exists when `kilo import` runs — the CLI derives the
+    // project ID from the repo's root commit hash; without a repo the FK on
+    // session.project_id fails.
     await restoreWorkspace(session, context.workspacePath, context.branchName, {
       githubRepo: metadata.githubRepo,
       githubToken: freshGithubToken ?? metadata.githubToken,
@@ -1304,17 +1324,15 @@ export class SessionService {
       gitToken: freshGitToken ?? metadata.gitToken,
       gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
       lastSeenBranch: metadata.upstreamBranch,
+      platform: context.platform,
     });
+
+    await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
 
     // Re-run setup commands (fresh clone, need to reinstall)
     if (metadata.setupCommands && metadata.setupCommands.length > 0) {
       logger.info('Re-running setup commands after fresh clone');
       await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
-    }
-
-    // Re-write MCP settings (fresh clone)
-    if (metadata.mcpServers && Object.keys(metadata.mcpServers).length > 0) {
-      await writeMCPSettings(sandbox, context.sessionHome, metadata.mcpServers);
     }
 
     // Re-write auth file (fresh clone)
@@ -1360,7 +1378,7 @@ export class SessionService {
           label,
           pattern,
         });
-        return session.exec(`pkill -f '${pattern}'`);
+        return session.exec(`pkill -f -- '${pattern}'`);
       };
 
       let execIdError: string | null = null;
@@ -1372,9 +1390,8 @@ export class SessionService {
         if (execResult.exitCode === 0) {
           return {
             success: true,
-            killedProcessIds: [], // pkill doesn't report individual PIDs
-            failedProcessIds: [],
             message: 'Interrupted execution using pkill (executionId)',
+            processesFound: true,
           };
         }
         if (execResult.exitCode !== 1) {
@@ -1400,11 +1417,10 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [], // pkill doesn't report individual PIDs
-          failedProcessIds: [],
           message: execIdError
             ? `Interrupted execution using pkill (sessionId fallback). ${execIdError}`
             : 'Interrupted execution using pkill',
+          processesFound: true,
         };
       }
       if (sessionResult.exitCode === 1) {
@@ -1415,11 +1431,10 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [],
-          failedProcessIds: [],
           message: execIdError
             ? `No running processes found for this session. ${execIdError}`
             : 'No running processes found for this session',
+          processesFound: false,
         };
       }
 
@@ -1432,11 +1447,10 @@ export class SessionService {
 
       return {
         success: false,
-        killedProcessIds: [],
-        failedProcessIds: [],
         message: execIdError
           ? `${execIdError}; sessionId pkill failed with exit code ${sessionResult.exitCode}: ${sessionResult.stderr}`
           : `pkill failed with exit code ${sessionResult.exitCode}: ${sessionResult.stderr}`,
+        processesFound: false,
       };
     } catch (error) {
       logger.error('Interrupt with pkill failed', {
@@ -1486,9 +1500,8 @@ export class SessionService {
 
         return {
           success: true,
-          killedProcessIds: [],
-          failedProcessIds: [],
           message: 'No running kilocode processes found for this session',
+          processesFound: false,
         };
       }
 
@@ -1525,12 +1538,11 @@ export class SessionService {
 
       return {
         success: killed.length > 0,
-        killedProcessIds: killed,
-        failedProcessIds: failed,
         message:
           killed.length > 0
             ? `Interrupted execution: killed ${killed.length} process(es)${failed.length > 0 ? `, ${failed.length} failed` : ''}`
             : `Failed to kill any processes (${failed.length} attempts failed)`,
+        processesFound: true,
       };
     } catch (error) {
       logger.error('Interrupt operation failed', {
@@ -1749,11 +1761,6 @@ function getGitAuthorEnv(
 export interface PreparedSession {
   context: SessionContext;
   session: Awaited<ReturnType<SessionService['getOrCreateSession']>>;
-  streamKilocodeExec: (
-    mode: string,
-    prompt: string,
-    options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-  ) => AsyncGenerator<StreamEvent>;
 }
 
 export interface InitiateOptions {

@@ -1,7 +1,6 @@
 import { Suspense } from 'react';
 import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { GitHubIntegrationDetails } from '@/components/integrations/GitHubIntegrationDetails';
-import { UserGitHubAppsProvider } from '@/components/integrations/UserGitHubAppsProvider';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -34,27 +33,25 @@ export default async function UserGitHubIntegrationPage({
         </Link>
       }
     >
-      <UserGitHubAppsProvider>
-        <Suspense
-          fallback={
-            <Card>
-              <CardContent className="pt-6">
-                <div className="animate-pulse space-y-4">
-                  <div className="bg-muted h-20 rounded" />
-                  <div className="bg-muted h-32 rounded" />
-                </div>
-              </CardContent>
-            </Card>
-          }
-        >
-          <GitHubIntegrationDetails
-            success={search.success === 'installed'}
-            error={search.error}
-            pendingApproval={search.pending_approval === 'true'}
-            existingPendingOrg={search.org}
-          />
-        </Suspense>
-      </UserGitHubAppsProvider>
+      <Suspense
+        fallback={
+          <Card>
+            <CardContent className="pt-6">
+              <div className="animate-pulse space-y-4">
+                <div className="bg-muted h-20 rounded" />
+                <div className="bg-muted h-32 rounded" />
+              </div>
+            </CardContent>
+          </Card>
+        }
+      >
+        <GitHubIntegrationDetails
+          success={search.success === 'installed'}
+          error={search.error}
+          pendingApproval={search.pending_approval === 'true'}
+          existingPendingOrg={search.org}
+        />
+      </Suspense>
     </PageLayout>
   );
 }

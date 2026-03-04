@@ -186,6 +186,73 @@ describe('createSupervisor', () => {
     expect(spawnImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('respawns immediately without backoff or crash counter on clean exit (code 0)', async () => {
+    const { spawnImpl, children } = createSpawnHarness();
+    const supervisor = createSupervisor({
+      gatewayArgs: ['--port', '3001'],
+      spawnImpl: spawnImpl as never,
+      backoffInitialMs: 5_000,
+      backoffMaxMs: 60_000,
+      backoffMultiplier: 2,
+    });
+
+    await supervisor.start();
+    await flushMicrotasks();
+
+    // Gateway exits cleanly (e.g., SIGUSR1 supervised restart after update.run)
+    children[0].emit('exit', 0, null);
+    await flushMicrotasks();
+
+    // Should respawn immediately — no backoff delay needed
+    expect(spawnImpl).toHaveBeenCalledTimes(2);
+    expect(supervisor.getStats().restarts).toBe(1);
+    expect(supervisor.getState()).toBe('running');
+
+    // A subsequent crash should still use initial backoff (not escalated)
+    children[1].emit('exit', 1, null);
+    expect(supervisor.getStats().restarts).toBe(2);
+    vi.advanceTimersByTime(4_999);
+    expect(spawnImpl).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(1);
+    await flushMicrotasks();
+    expect(spawnImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it('treats signal-killed exit (code 0 + signal) as a crash', async () => {
+    const { spawnImpl, children } = createSpawnHarness();
+    const supervisor = createSupervisor({
+      gatewayArgs: ['--port', '3001'],
+      spawnImpl: spawnImpl as never,
+      backoffInitialMs: 1_000,
+    });
+
+    await supervisor.start();
+    await flushMicrotasks();
+
+    // Killed by signal — not a clean exit even though code may be 0
+    children[0].emit('exit', 0, 'SIGKILL');
+    expect(supervisor.getStats().restarts).toBe(1);
+    expect(supervisor.getState()).toBe('crashed');
+  });
+
+  it('signal() sends signal to running child and returns true', async () => {
+    const { spawnImpl, children } = createSpawnHarness();
+    const supervisor = createSupervisor({
+      gatewayArgs: ['--port', '3001'],
+      spawnImpl: spawnImpl as never,
+    });
+
+    // No child yet — signal returns false
+    expect(supervisor.signal('SIGUSR1')).toBe(false);
+
+    await supervisor.start();
+    await flushMicrotasks();
+
+    // Child running — signal returns true and forwards to child
+    expect(supervisor.signal('SIGUSR1')).toBe(true);
+    expect(children[0].kill).toHaveBeenCalledWith('SIGUSR1');
+  });
+
   it('forwards SIGTERM on shutdown and suppresses restarts', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({

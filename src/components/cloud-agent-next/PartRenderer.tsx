@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ToolExecutionCard } from './ToolExecutionCard';
 import { ReadToolCard } from './ReadToolCard';
 import { EditToolCard } from './EditToolCard';
 import { WriteToolCard } from './WriteToolCard';
@@ -13,7 +12,7 @@ import { GlobToolCard } from './GlobToolCard';
 import { GrepToolCard } from './GrepToolCard';
 import { WebSearchToolCard } from './WebSearchToolCard';
 import { ListToolCard } from './ListToolCard';
-import { McpToolCard } from './McpToolCard';
+import { GenericToolCard } from './GenericToolCard';
 import { TodoReadToolCard } from './TodoReadToolCard';
 import { TodoWriteToolCard } from './TodoWriteToolCard';
 import { QuestionToolCard } from './QuestionToolCard';
@@ -21,7 +20,7 @@ import { ChildSessionSection, getTaskToolSessionId } from './ChildSessionSection
 import type { RenderPartFn } from './ChildSessionSection';
 import type { ReactNode } from 'react';
 import { MessageErrorBoundary } from './MessageErrorBoundary';
-import type { Part, ToolExecution, StoredMessage } from './types';
+import type { Part, StoredMessage } from './types';
 import {
   isTextPart,
   isToolPart,
@@ -173,6 +172,11 @@ function ToolPartRenderer({
   childSessionMessages?: Map<string, StoredMessage[]>;
   getChildMessages?: (sessionId: string) => StoredMessage[];
 }) {
+  // plan_enter / plan_exit are internal mode-switching tools with no user-visible output
+  if (part.tool === 'plan_exit' || part.tool === 'plan_enter') {
+    return null;
+  }
+
   // Check if tool input is still streaming (incomplete data)
   if (!hasRequiredInput(part)) {
     return <StreamingToolPlaceholder toolName={part.tool} />;
@@ -236,11 +240,6 @@ function ToolPartRenderer({
     return <ListToolCard toolPart={part} />;
   }
 
-  // Special handling for mcp tool - compact display
-  if (part.tool === 'mcp') {
-    return <McpToolCard toolPart={part} />;
-  }
-
   // Special handling for todoread tool - compact display
   if (part.tool === 'todoread') {
     return <TodoReadToolCard toolPart={part} />;
@@ -256,16 +255,7 @@ function ToolPartRenderer({
     return <QuestionToolCard toolPart={part} />;
   }
 
-  // Convert ToolPart to ToolExecution format for other tools
-  const execution: ToolExecution = {
-    toolName: part.tool,
-    input: part.state.input,
-    output: part.state.status === 'completed' ? part.state.output : undefined,
-    error: part.state.status === 'error' ? part.state.error : undefined,
-    timestamp: new Date().toISOString(),
-  };
-
-  return <ToolExecutionCard execution={execution} />;
+  return <GenericToolCard toolPart={part} />;
 }
 
 /**

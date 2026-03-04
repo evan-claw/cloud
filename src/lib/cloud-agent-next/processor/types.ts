@@ -12,6 +12,7 @@ import type {
   Session,
   UserMessage,
   AssistantMessage,
+  QuestionInfo,
 } from '@/types/opencode.gen';
 
 /**
@@ -21,6 +22,17 @@ import type {
 export type ProcessedMessage = {
   info: UserMessage | AssistantMessage;
   parts: Part[];
+};
+
+/**
+ * Autocommit status for a single turn, keyed by assistant message ID.
+ */
+export type AutocommitStatus = {
+  status: 'in_progress' | 'completed' | 'failed';
+  message: string;
+  timestamp: string;
+  commitHash?: string;
+  commitMessage?: string;
 };
 
 /**
@@ -86,6 +98,15 @@ export type EventProcessorCallbacks = {
 
   /** Called when a question.asked event maps a tool callID to a requestId */
   onQuestionAsked?: (requestId: string, callId: string) => void;
+
+  /** Called when a question.asked event has no associated tool (standalone question) */
+  onStandaloneQuestionAsked?: (requestId: string, questions: QuestionInfo[]) => void;
+
+  /** Called when a question is answered or rejected (question.replied / question.rejected) */
+  onQuestionResolved?: (requestId: string) => void;
+
+  /** Called when an autocommit event (started/completed) is received with a messageId */
+  onAutocommitUpdated?: (messageId: string, status: AutocommitStatus) => void;
 };
 
 /**

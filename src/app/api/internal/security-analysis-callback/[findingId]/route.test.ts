@@ -6,7 +6,7 @@ import type * as analysisServiceModule from '@/lib/security-agent/services/analy
 import type * as sessionIngestModule from '@/lib/session-ingest-client';
 import type * as posthogModule from '@/lib/security-agent/posthog-tracking';
 import type * as tokensModule from '@/lib/tokens';
-import type { SecurityFinding, User } from '@/db/schema';
+import type { SecurityFinding, User } from '@kilocode/db/schema';
 import type { SecurityFindingAnalysis } from '@/lib/security-agent/core/types';
 
 // --- Mock functions ---
@@ -16,6 +16,9 @@ const mockGetSecurityFindingById = jest.fn() as jest.MockedFunction<
 >;
 const mockUpdateAnalysisStatus = jest.fn() as jest.MockedFunction<
   typeof securityAnalysisModule.updateAnalysisStatus
+>;
+const mockTransitionAutoAnalysisQueueFromCallback = jest.fn() as jest.MockedFunction<
+  typeof securityAnalysisModule.transitionAutoAnalysisQueueFromCallback
 >;
 const mockFinalizeAnalysis = jest.fn() as jest.MockedFunction<
   typeof analysisServiceModule.finalizeAnalysis
@@ -32,6 +35,7 @@ const mockTrackAnalysisCompleted = jest.fn() as jest.MockedFunction<
 const mockGenerateApiToken = jest.fn() as jest.MockedFunction<typeof tokensModule.generateApiToken>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockDbSelect = jest.fn<any>();
+const mockCaptureMessage = jest.fn();
 
 // --- Module mocks ---
 
@@ -64,6 +68,7 @@ jest.mock('@/lib/security-agent/db/security-findings', () => ({
 
 jest.mock('@/lib/security-agent/db/security-analysis', () => ({
   updateAnalysisStatus: mockUpdateAnalysisStatus,
+  transitionAutoAnalysisQueueFromCallback: mockTransitionAutoAnalysisQueueFromCallback,
 }));
 
 jest.mock('@/lib/security-agent/services/analysis-service', () => ({
@@ -85,10 +90,12 @@ jest.mock('@/lib/tokens', () => ({
 
 jest.mock('@sentry/nextjs', () => ({
   captureException: jest.fn(),
+  captureMessage: mockCaptureMessage,
 }));
 
 jest.mock('@/lib/utils.server', () => ({
   sentryLogger: () => jest.fn(),
+  logExceptInTest: jest.fn(),
 }));
 
 jest.mock('@/lib/drizzle', () => {
@@ -105,7 +112,7 @@ jest.mock('@/lib/drizzle', () => {
   };
 });
 
-jest.mock('@/db/schema', () => ({
+jest.mock('@kilocode/db/schema', () => ({
   kilocode_users: { id: 'id' },
 }));
 
@@ -145,6 +152,8 @@ const baseAnalysis: SecurityFindingAnalysis = {
   },
   analyzedAt: '2025-01-01T00:00:00.000Z',
   modelUsed: 'anthropic/claude-sonnet-4',
+  triageModel: 'anthropic/claude-sonnet-4',
+  analysisModel: 'anthropic/claude-opus-4.6',
   triggeredByUserId: 'user-trigger-1',
   correlationId: 'corr-123',
 };
@@ -177,7 +186,7 @@ function createMockFinding(overrides: Partial<SecurityFinding> = {}): SecurityFi
     cwe_ids: null,
     cvss_score: null,
     dependency_scope: 'runtime',
-    session_id: 'ses-agent-1',
+    session_id: 'agent-session-1',
     cli_session_id: null,
     analysis_status: 'running',
     analysis_started_at: '2025-01-01T00:00:00.000Z',
@@ -228,6 +237,7 @@ beforeEach(async () => {
   jest.useFakeTimers();
   afterPromises = [];
   mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+  mockTransitionAutoAnalysisQueueFromCallback.mockResolvedValue(undefined);
   mockFinalizeAnalysis.mockResolvedValue(undefined);
   ({ POST } = await import('./route'));
 });
@@ -280,6 +290,27 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
   });
 
   describe('idempotency', () => {
+    it('no-ops callback when session IDs do not match the current finding session', async () => {
+      mockGetSecurityFindingById.mockResolvedValue(
+        createMockFinding({ session_id: 'agent-current', cli_session_id: 'kilo-current' })
+      );
+
+      const req = makeRequest(FINDING_ID, {
+        ...completedPayload,
+        cloudAgentSessionId: 'agent-stale',
+        kiloSessionId: 'kilo-stale',
+      });
+      const response = await POST(req, makeParams(FINDING_ID));
+
+      expect(response.status).toBe(200);
+      expect(mockUpdateAnalysisStatus).not.toHaveBeenCalled();
+      expect(mockTransitionAutoAnalysisQueueFromCallback).not.toHaveBeenCalled();
+      expect(mockCaptureMessage).toHaveBeenCalledWith(
+        'Auto-analysis callback session mismatch',
+        expect.objectContaining({ level: 'warning' })
+      );
+    });
+
     it('skips processing when finding is already completed', async () => {
       mockGetSecurityFindingById.mockResolvedValue(
         createMockFinding({ analysis_status: 'completed' })
@@ -354,7 +385,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockFinalizeAnalysis).toHaveBeenCalledWith(
         FINDING_ID,
         'Analysis result markdown',
-        'anthropic/claude-sonnet-4',
+        'anthropic/claude-opus-4.6',
         { userId: 'user-trigger-1' }, // owner derived from owned_by_user_id
         'user-trigger-1',
         'fresh-token',
@@ -393,7 +424,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockFinalizeAnalysis).toHaveBeenCalledWith(
         FINDING_ID,
         'Org analysis',
-        'anthropic/claude-sonnet-4',
+        'anthropic/claude-opus-4.6',
         { organizationId: orgId }, // owner is org-based
         'user-trigger-1',
         'fresh-token',
@@ -588,7 +619,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
     it('uses default model when modelUsed is missing from analysis context', async () => {
       const finding = createMockFinding({
-        analysis: { ...baseAnalysis, modelUsed: undefined },
+        analysis: { ...baseAnalysis, modelUsed: undefined, analysisModel: undefined },
       });
       mockGetSecurityFindingById.mockResolvedValue(finding);
 
@@ -615,7 +646,90 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockFinalizeAnalysis).toHaveBeenCalledWith(
         FINDING_ID,
         'Result',
-        'anthropic/claude-sonnet-4',
+        'anthropic/claude-opus-4.6',
+        expect.anything(),
+        'user-trigger-1',
+        'fresh-token',
+        expect.any(String),
+        undefined
+      );
+    });
+
+    it('falls back to legacy modelUsed when analysisModel is missing', async () => {
+      const legacyModelSlug = 'anthropic/claude-sonnet-4';
+      const finding = createMockFinding({
+        analysis: {
+          ...baseAnalysis,
+          analysisModel: undefined,
+          modelUsed: legacyModelSlug,
+        },
+      });
+      mockGetSecurityFindingById.mockResolvedValue(finding);
+
+      mockFetchSessionSnapshot.mockResolvedValue({
+        info: {},
+        messages: [
+          {
+            info: { id: 'msg-1', role: 'assistant' },
+            parts: [{ id: 'p-1', type: 'text', text: 'Result' }],
+          },
+        ],
+      });
+      mockExtractLastAssistantMessage.mockReturnValue('Result');
+
+      const mockUser = { id: 'user-trigger-1', api_token_pepper: 'pepper' } as User;
+      mockDbSelect.mockResolvedValue([mockUser]);
+      mockGenerateApiToken.mockReturnValue('fresh-token');
+
+      const req = makeRequest(FINDING_ID, completedPayload);
+      await POST(req, makeParams(FINDING_ID));
+      await flushAfterCallbacks();
+
+      expect(mockFinalizeAnalysis).toHaveBeenCalledWith(
+        FINDING_ID,
+        'Result',
+        legacyModelSlug,
+        expect.anything(),
+        'user-trigger-1',
+        'fresh-token',
+        expect.any(String),
+        undefined
+      );
+    });
+
+    it('uses stored analysisModel over legacy modelUsed for finalization', async () => {
+      const finding = createMockFinding({
+        analysis: {
+          ...baseAnalysis,
+          modelUsed: 'anthropic/claude-sonnet-4',
+          analysisModel: 'x-ai/grok-code-fast-1',
+        },
+      });
+      mockGetSecurityFindingById.mockResolvedValue(finding);
+
+      mockFetchSessionSnapshot.mockResolvedValue({
+        info: {},
+        messages: [
+          {
+            info: { id: 'msg-1', role: 'assistant' },
+            parts: [{ id: 'p-1', type: 'text', text: 'Result' }],
+          },
+        ],
+      });
+      mockExtractLastAssistantMessage.mockReturnValue('Result');
+
+      const mockUser = { id: 'user-trigger-1', api_token_pepper: 'pepper' } as User;
+      mockDbSelect.mockResolvedValue([mockUser]);
+      mockGenerateApiToken.mockReturnValue('fresh-token');
+
+      const req = makeRequest(FINDING_ID, completedPayload);
+      await POST(req, makeParams(FINDING_ID));
+      await flushAfterCallbacks();
+
+      expect(mockFinalizeAnalysis).toHaveBeenCalledWith(
+        FINDING_ID,
+        'Result',
+        'x-ai/grok-code-fast-1',
         expect.anything(),
         'user-trigger-1',
         'fresh-token',
@@ -636,6 +750,9 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(FINDING_ID, 'failed', {
         error: 'Sandbox timed out',
       });
+      expect(mockTransitionAutoAnalysisQueueFromCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ failureCode: 'NETWORK_TIMEOUT' })
+      );
     });
 
     it('marks finding as failed with prefixed message for interrupted status', async () => {
@@ -648,6 +765,9 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
       expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(FINDING_ID, 'failed', {
         error: 'Analysis interrupted: User cancelled',
       });
+      expect(mockTransitionAutoAnalysisQueueFromCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ failureCode: 'STATE_GUARD_REJECTED' })
+      );
     });
 
     it('uses default message when errorMessage is absent for failed status', async () => {
@@ -681,6 +801,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const req = makeRequest(FINDING_ID, failedPayload);
       await POST(req, makeParams(FINDING_ID));
+      await flushAfterCallbacks();
 
       expect(mockTrackAnalysisCompleted).toHaveBeenCalledWith({
         distinctId: 'user-trigger-1',
@@ -688,6 +809,8 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
         organizationId: undefined,
         findingId: FINDING_ID,
         model: 'anthropic/claude-sonnet-4',
+        triageModel: 'anthropic/claude-sonnet-4',
+        analysisModel: 'anthropic/claude-opus-4.6',
         triageOnly: false,
         durationMs: expect.any(Number),
       });
@@ -718,6 +841,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const req = makeRequest(FINDING_ID, failedPayload);
       await POST(req, makeParams(FINDING_ID));
+      await flushAfterCallbacks();
 
       expect(mockTrackAnalysisCompleted).toHaveBeenCalledWith(
         expect.objectContaining({ organizationId: orgId })
@@ -730,6 +854,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
 
       const req = makeRequest(FINDING_ID, failedPayload);
       await POST(req, makeParams(FINDING_ID));
+      await flushAfterCallbacks();
 
       expect(mockTrackAnalysisCompleted).toHaveBeenCalledWith(
         expect.objectContaining({ durationMs: 0 })

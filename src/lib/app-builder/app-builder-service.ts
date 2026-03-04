@@ -20,7 +20,7 @@ import {
   AppBuilderSessionReason,
   cliSessions,
   cli_sessions_v2,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import { TRPCError } from '@trpc/server';
 import { eq, and, sql, asc } from 'drizzle-orm';
 import type { CloudMessage } from '@/components/cloud-agent/types';
@@ -29,6 +29,10 @@ import { createDeployment, getDeployment } from '@/lib/user-deployments/deployme
 import type { DeploymentSource } from '@/lib/user-deployments/types';
 import { getHistoricalMessages } from '@/lib/app-builder/historical-messages';
 import type { Images } from '@/lib/images-schema';
+import { generateImageMCPToken } from '@/lib/app-builder/image-mcp-token';
+import { buildImageContextFromAttachments } from '@/lib/app-builder/image-context';
+import { deleteProjectAssets } from '@/lib/r2/app-builder-assets';
+import { getEnvVariable } from '@/lib/dotenvx';
 
 import type {
   AppBuilderProject,
@@ -88,16 +92,16 @@ function parseWorkerVersion(value: string | null): WorkerVersion | null {
  * Check if new sessions should use cloud-agent-next (v2).
  * Always enabled in development; gated by PostHog feature flag in production.
  */
-async function shouldUseCloudAgentNext(): Promise<boolean> {
+async function shouldUseCloudAgentNext(userId: string): Promise<boolean> {
   if (process.env.NODE_ENV === 'development') return true;
-  return isFeatureFlagEnabled('app-builder-cloud-agent-next');
+  return isFeatureFlagEnabled('app-builder-cloud-agent-next', userId);
 }
 
 /**
  * Get the required worker version based on the feature flag.
  */
-async function getRequiredWorkerVersion(): Promise<WorkerVersion> {
-  return (await shouldUseCloudAgentNext()) ? 'v2' : 'v1';
+async function getRequiredWorkerVersion(userId: string): Promise<WorkerVersion> {
+  return (await shouldUseCloudAgentNext(userId)) ? 'v2' : 'v1';
 }
 
 /**
@@ -195,9 +199,35 @@ async function shouldCreateNewSession(
   return { createNew: false, workerVersion: currentWorkerVersion };
 }
 
+function buildMCPServersConfig(params: {
+  userId: string;
+  projectId: string;
+  owner: Owner;
+}): Record<string, { type: 'remote'; url: string; headers: Record<string, string> }> | undefined {
+  const mcpUrl = getEnvVariable('CLOUD_AGENT_IMAGES_MCP_URL');
+  if (!mcpUrl) return undefined;
+
+  try {
+    const token = generateImageMCPToken(params);
+    return {
+      'app-builder-images': {
+        type: 'remote',
+        url: mcpUrl,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    };
+  } catch (error) {
+    console.error('Failed to build MCP servers config:', error);
+    return undefined;
+  }
+}
+
 type CreateSessionParams = {
   projectId: string;
   currentSessionId: string;
+  createdByUserId: string;
   owner: Owner;
   message: string;
   model: string;
@@ -211,6 +241,7 @@ async function createV1Session(params: CreateSessionParams): Promise<InitiateSes
   const {
     projectId,
     currentSessionId,
+    createdByUserId: _createdByUserId,
     owner,
     message,
     model,
@@ -296,6 +327,7 @@ async function createV2Session(params: CreateSessionParams): Promise<InitiateSes
   const {
     projectId,
     currentSessionId,
+    createdByUserId,
     owner,
     message,
     model,
@@ -306,11 +338,13 @@ async function createV2Session(params: CreateSessionParams): Promise<InitiateSes
   } = params;
   const v2Client = createAppBuilderCloudAgentNextClient(authToken);
 
+  const augmentedMessage = message + buildImageContextFromAttachments(images);
+
   let prepareParams: Parameters<typeof v2Client.prepareSession>[0];
   if (gitRepoFullName) {
     prepareParams = {
       githubRepo: gitRepoFullName,
-      prompt: message,
+      prompt: augmentedMessage,
       mode: 'build',
       model,
       upstreamBranch: 'main',
@@ -319,13 +353,14 @@ async function createV2Session(params: CreateSessionParams): Promise<InitiateSes
       kilocodeOrganizationId: owner.type === 'org' ? owner.id : undefined,
       images,
       appendSystemPrompt: APP_BUILDER_APPEND_SYSTEM_PROMPT,
+      mcpServers: buildMCPServersConfig({ userId: createdByUserId, projectId, owner }),
     };
   } else {
     const { token: gitToken } = await appBuilderClient.generateGitToken(projectId, 'full');
     prepareParams = {
       gitUrl: getProjectGitUrl(projectId),
       gitToken,
-      prompt: message,
+      prompt: augmentedMessage,
       mode: 'build',
       model,
       upstreamBranch: 'main',
@@ -334,6 +369,7 @@ async function createV2Session(params: CreateSessionParams): Promise<InitiateSes
       kilocodeOrganizationId: owner.type === 'org' ? owner.id : undefined,
       images,
       appendSystemPrompt: APP_BUILDER_APPEND_SYSTEM_PROMPT,
+      mcpServers: buildMCPServersConfig({ userId: createdByUserId, projectId, owner }),
     };
   }
 
@@ -421,6 +457,8 @@ async function sendToExistingV2Session(
 ): Promise<InitiateSessionV2OutputNext> {
   const { projectId, sessionId, message, model, authToken, gitRepoFullName, images } = params;
 
+  const imageContext = buildImageContextFromAttachments(images);
+
   let gitToken: string | undefined;
   if (!gitRepoFullName) {
     const tokenResult = await appBuilderClient.generateGitToken(projectId, 'full');
@@ -430,7 +468,7 @@ async function sendToExistingV2Session(
   const v2Client = createAppBuilderCloudAgentNextClient(authToken);
   const result = await v2Client.sendMessage({
     cloudAgentSessionId: sessionId,
-    prompt: message,
+    prompt: message + imageContext,
     mode: 'code',
     model,
     autoCommit: true,
@@ -484,7 +522,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     });
 
     // Determine which worker version to use based on feature flag
-    const workerVersion = await getRequiredWorkerVersion();
+    const workerVersion = await getRequiredWorkerVersion(createdByUserId);
 
     const gitUrl = getProjectGitUrl(projectId);
     const { token: gitToken } = await appBuilderClient.generateGitToken(projectId, 'full');
@@ -492,7 +530,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     const sharedParams = {
       gitUrl,
       gitToken,
-      prompt,
+      prompt: prompt + buildImageContextFromAttachments(images),
       model,
       upstreamBranch: 'main' as const,
       autoCommit: true,
@@ -510,6 +548,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       const result = await client.prepareSession({
         ...sharedParams,
         mode: mode === 'ask' ? 'plan' : 'build',
+        mcpServers: buildMCPServersConfig({ userId: createdByUserId, projectId, owner }),
       });
       cloudAgentSessionId = result.cloudAgentSessionId;
     } else {
@@ -809,7 +848,14 @@ export async function generateCloneToken(
  * Delete a project and all associated resources.
  */
 export async function deleteProject(projectId: string, owner: Owner): Promise<void> {
-  await getProjectWithOwnershipCheck(projectId, owner);
+  const project = await getProjectWithOwnershipCheck(projectId, owner);
+
+  // Only delete public assets if there's no deployment — deployed sites reference these images
+  if (!project.deployment_id) {
+    await deleteProjectAssets(projectId, owner).catch(err => {
+      console.error('Failed to delete project assets from R2:', err);
+    });
+  }
 
   await appBuilderClient.deleteProject(projectId);
   await db.delete(app_builder_projects).where(eq(app_builder_projects.id, projectId));
@@ -946,7 +992,8 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   }
 
   const currentWorkerVersion = await getCurrentSessionWorkerVersion(currentSessionId);
-  const requiredWorkerVersion = await getRequiredWorkerVersion();
+  const userId = project.created_by_user_id ?? owner.id;
+  const requiredWorkerVersion = await getRequiredWorkerVersion(userId);
 
   const decision = await shouldCreateNewSession(
     project,
@@ -960,6 +1007,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     const createParams = {
       projectId,
       currentSessionId,
+      createdByUserId: project.created_by_user_id ?? owner.id,
       owner,
       message,
       model: effectiveModel,

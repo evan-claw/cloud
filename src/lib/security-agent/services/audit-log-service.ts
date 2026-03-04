@@ -6,8 +6,8 @@
  */
 
 import 'server-only';
-import { security_audit_log } from '@/db/schema';
-import type { SecurityAuditLogEntry } from '@/db/schema';
+import { security_audit_log } from '@kilocode/db/schema';
+import type { SecurityAuditLogEntry } from '@kilocode/db/schema';
 import type { DrizzleTransaction } from '@/lib/drizzle';
 import { db } from '@/lib/drizzle';
 import { SecurityAuditLogAction } from '../core/enums';
@@ -82,6 +82,33 @@ export function logSecurityAudit(params: CreateSecurityAuditLogParams): void {
       extra: { action: params.action, resource_type: params.resource_type },
     });
   });
+}
+
+export async function logSecurityAuditAndWait(
+  params: CreateSecurityAuditLogParams,
+  timeoutMs = 1500
+): Promise<void> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    await Promise.race([
+      createSecurityAuditLog(params),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Security audit log write timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'createSecurityAuditLog' },
+      extra: { action: params.action, resource_type: params.resource_type },
+    });
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 /** Replace internal Kilo admin actor details with a generic placeholder for non-admin requestors. */

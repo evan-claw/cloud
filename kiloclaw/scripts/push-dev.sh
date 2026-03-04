@@ -22,27 +22,77 @@ APP_NAME="${APP_NAME:-kiloclaw-dev}"
 
 TAG="dev-$(date +%s)"
 IMAGE="registry.fly.io/$APP_NAME:$TAG"
+GIT_SHA="$(git -C "$KILOCLAW_DIR" rev-parse HEAD 2>/dev/null || echo 'unknown')"
+
+# Extract OpenClaw version from Dockerfile
+OPENCLAW_VERSION=$(sed -n 's/.*openclaw@\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$KILOCLAW_DIR/Dockerfile" | head -1)
 
 echo "Building + pushing $IMAGE (linux/amd64) ..."
+echo "Controller commit: $GIT_SHA"
+
+# Use --metadata-file to capture the pushed image digest
+METADATA_FILE="$(mktemp)"
+trap 'rm -f "$METADATA_FILE"' EXIT
+
 docker buildx build \
   --platform linux/amd64 \
   -f "$KILOCLAW_DIR/Dockerfile" \
+  --build-arg "CONTROLLER_COMMIT=$GIT_SHA" \
   -t "$IMAGE" \
   --push \
+  --metadata-file "$METADATA_FILE" \
   "$KILOCLAW_DIR"
+
+# Extract digest from build metadata
+DIGEST=""
+if [ -f "$METADATA_FILE" ] && command -v jq >/dev/null 2>&1; then
+  DIGEST=$(jq -r '.["containerimage.digest"] // empty' "$METADATA_FILE" 2>/dev/null)
+fi
 
 # Update .dev.vars
 if [ -f "$KILOCLAW_DIR/.dev.vars" ]; then
   if grep -q '^FLY_IMAGE_TAG=' "$KILOCLAW_DIR/.dev.vars"; then
-    sed -i '' "s/^FLY_IMAGE_TAG=.*/FLY_IMAGE_TAG=$TAG/" "$KILOCLAW_DIR/.dev.vars"
+    # Use temp file for cross-platform sed compatibility (macOS/Linux)
+    sed "s/^FLY_IMAGE_TAG=.*/FLY_IMAGE_TAG=$TAG/" "$KILOCLAW_DIR/.dev.vars" > "$KILOCLAW_DIR/.dev.vars.tmp"
+    mv "$KILOCLAW_DIR/.dev.vars.tmp" "$KILOCLAW_DIR/.dev.vars"
   else
     echo "FLY_IMAGE_TAG=$TAG" >> "$KILOCLAW_DIR/.dev.vars"
   fi
-  echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG"
+
+  if [ -n "$DIGEST" ]; then
+    if grep -q '^FLY_IMAGE_DIGEST=' "$KILOCLAW_DIR/.dev.vars"; then
+      # Use temp file for cross-platform sed compatibility (macOS/Linux)
+      sed "s|^FLY_IMAGE_DIGEST=.*|FLY_IMAGE_DIGEST=$DIGEST|" "$KILOCLAW_DIR/.dev.vars" > "$KILOCLAW_DIR/.dev.vars.tmp"
+      mv "$KILOCLAW_DIR/.dev.vars.tmp" "$KILOCLAW_DIR/.dev.vars"
+    else
+      echo "FLY_IMAGE_DIGEST=$DIGEST" >> "$KILOCLAW_DIR/.dev.vars"
+    fi
+    echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG  FLY_IMAGE_DIGEST=$DIGEST"
+  else
+    echo "Updated .dev.vars: FLY_IMAGE_TAG=$TAG  (digest not captured)"
+  fi
+
+  if [ -n "$OPENCLAW_VERSION" ]; then
+    if grep -q '^OPENCLAW_VERSION=' "$KILOCLAW_DIR/.dev.vars"; then
+      sed "s/^OPENCLAW_VERSION=.*/OPENCLAW_VERSION=$OPENCLAW_VERSION/" "$KILOCLAW_DIR/.dev.vars" > "$KILOCLAW_DIR/.dev.vars.tmp"
+      mv "$KILOCLAW_DIR/.dev.vars.tmp" "$KILOCLAW_DIR/.dev.vars"
+    else
+      echo "OPENCLAW_VERSION=$OPENCLAW_VERSION" >> "$KILOCLAW_DIR/.dev.vars"
+    fi
+    echo "Updated .dev.vars: OPENCLAW_VERSION=$OPENCLAW_VERSION"
+  fi
 else
   echo "No .dev.vars found — set FLY_IMAGE_TAG=$TAG manually"
 fi
 
+echo ""
+echo "FLY_IMAGE_TAG=$TAG"
+if [ -n "$DIGEST" ]; then
+  echo "FLY_IMAGE_DIGEST=$DIGEST"
+fi
+if [ -n "$OPENCLAW_VERSION" ]; then
+  echo "OPENCLAW_VERSION=$OPENCLAW_VERSION"
+fi
 echo ""
 echo "Done. Restart wrangler dev to pick up the new tag."
 echo "Then restart your instance from the dashboard (or destroy + re-provision)."

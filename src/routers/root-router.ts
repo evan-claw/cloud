@@ -14,6 +14,7 @@ import { cloudAgentNextRouter } from '@/routers/cloud-agent-next-router';
 import { githubAppsRouter } from '@/routers/github-apps-router';
 import { gitlabRouter } from '@/routers/gitlab-router';
 import { slackRouter } from '@/routers/slack-router';
+import { discordRouter } from '@/routers/discord-router';
 import { codeReviewRouter } from '@/routers/code-reviews/code-reviews-router';
 import { personalReviewAgentRouter } from '@/routers/code-reviews-router';
 import { byokRouter } from '@/routers/byok-router';
@@ -33,6 +34,7 @@ import { appBuilderFeedbackRouter } from '@/routers/app-builder-feedback-router'
 import { cloudAgentNextFeedbackRouter } from '@/routers/cloud-agent-next-feedback-router';
 import { kiloclawRouter } from '@/routers/kiloclaw-router';
 import { unifiedSessionsRouter } from '@/routers/unified-sessions-router';
+import { gastownRouter } from '@/routers/gastown-router';
 
 export const rootRouter = createTRPCRouter({
   test: testRouter,
@@ -47,6 +49,7 @@ export const rootRouter = createTRPCRouter({
   githubApps: githubAppsRouter,
   gitlab: gitlabRouter,
   slack: slackRouter,
+  discord: discordRouter,
   cloudAgent: cloudAgentRouter,
   cloudAgentNext: cloudAgentNextRouter,
   codeReviews: codeReviewRouter,
@@ -68,6 +71,7 @@ export const rootRouter = createTRPCRouter({
   cloudAgentNextFeedback: cloudAgentNextFeedbackRouter,
   kiloclaw: kiloclawRouter,
   unifiedSessions: unifiedSessionsRouter,
+  gastown: gastownRouter,
 });
 // export type definition of API
 export type RootRouter = typeof rootRouter;

@@ -20,19 +20,34 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Trash2, Edit, Eye, EyeOff, Plus, Info, Lock } from 'lucide-react';
+import {
+  Trash2,
+  Edit,
+  Eye,
+  EyeOff,
+  Plus,
+  Info,
+  Lock,
+  ChevronDown,
+  ChevronRight,
+  FlaskConical,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AutocompleteUserByokProviderIdSchema,
   VercelUserByokInferenceProviderIdSchema,
+  AwsCredentialsSchema,
 } from '@/lib/providers/openrouter/inference-provider-id';
+import * as z from 'zod';
 
 // Hardcoded BYOK providers list
 const BYOK_PROVIDERS = [
   { id: VercelUserByokInferenceProviderIdSchema.enum.anthropic, name: 'Anthropic' },
+  { id: VercelUserByokInferenceProviderIdSchema.enum.bedrock, name: 'AWS Bedrock' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.openai, name: 'OpenAI' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.google, name: 'Google AI Studio' },
   { id: VercelUserByokInferenceProviderIdSchema.enum.minimax, name: 'MiniMax' },
@@ -51,6 +66,32 @@ function BYOKDescription() {
   );
 }
 
+function SupportedModelsList({ models }: { models: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (models.length === 0) return null;
+
+  return (
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {models.length} supported model{models.length !== 1 ? 's' : ''}
+      </button>
+      {expanded && (
+        <ul className="text-muted-foreground mt-1 ml-4 space-y-0.5 text-xs">
+          {models.map(model => (
+            <li key={model}>{model}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 type BYOKKeysManagerProps = {
   organizationId?: string;
 };
@@ -61,6 +102,7 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
   const [selectedProvider, setSelectedProvider] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
+  const [awsCredentialError, setAwsCredentialError] = useState<string | null>(null);
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -71,6 +113,8 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
   const { data: keys, isLoading: keysLoading } = useQuery(
     trpc.byok.list.queryOptions(listQueryInput)
   );
+
+  const { data: supportedModels } = useQuery(trpc.byok.listSupportedModels.queryOptions());
 
   const createMutation = useMutation(
     trpc.byok.create.mutationOptions({
@@ -116,9 +160,53 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     })
   );
 
+  const setEnabledMutation = useMutation(
+    trpc.byok.setEnabled.mutationOptions({
+      onSuccess: data => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.byok.list.queryKey(listQueryInput),
+        });
+        toast.success(data.is_enabled ? 'API key enabled' : 'API key disabled');
+      },
+      onError: (error: { message: string }) => {
+        toast.error(`Failed to update API key status: ${error.message}`);
+      },
+    })
+  );
+
+  const testMutation = useMutation(
+    trpc.byok.testApiKey.mutationOptions({
+      onSuccess: result => {
+        if (result.success) {
+          toast.success(result.message);
+        } else {
+          toast.error(result.message);
+        }
+      },
+      onError: (error: { message: string }) => {
+        toast.error(`Test failed: ${error.message}`);
+      },
+    })
+  );
+
   // Check if a provider already has a key
   const hasExistingKey = (providerSlug: string) => {
     return keys?.some(k => k.provider_id === providerSlug) ?? false;
+  };
+
+  const validateAwsCredentials = (value: string): string | null => {
+    if (!value) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return 'Invalid JSON — please enter a valid JSON object.';
+    }
+    const result = AwsCredentialsSchema.safeParse(parsed);
+    if (!result.success) {
+      return `Invalid AWS credentials:\n${z.prettifyError(result.error)}`;
+    }
+    return null;
   };
 
   const closeDialog = () => {
@@ -127,9 +215,15 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     setSelectedProvider('');
     setApiKey('');
     setShowApiKey(false);
+    setAwsCredentialError(null);
   };
 
   const handleSave = () => {
+    if (selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock) {
+      const error = validateAwsCredentials(apiKey);
+      setAwsCredentialError(error);
+      if (error) return;
+    }
     if (editingKeyId) {
       updateMutation.mutate({
         ...(organizationId && { organizationId }),
@@ -160,6 +254,14 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     }
   };
 
+  const handleToggleEnabled = (keyId: string, is_enabled: boolean) => {
+    setEnabledMutation.mutate({
+      ...(organizationId && { organizationId }),
+      id: keyId,
+      is_enabled,
+    });
+  };
+
   if (keysLoading) {
     return (
       <div className="space-y-4">
@@ -182,6 +284,10 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
     return provider?.name || providerId;
   };
 
+  const getProviderModels = (providerId: string): string[] => {
+    return supportedModels?.[providerId] ?? [];
+  };
+
   return (
     <div className="space-y-4">
       <BYOKDescription />
@@ -201,38 +307,83 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                   <tr className="bg-muted/50 border-b">
                     <th className="p-4 text-left font-medium">Provider</th>
                     <th className="p-4 text-left font-medium">Created</th>
+                    <th className="p-4 text-left font-medium">Enabled</th>
                     <th className="p-4 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {keys.map((key: { id: string; provider_id: string; created_at: string }) => (
-                    <tr key={key.id} className="border-b last:border-0">
-                      <td className="p-4">{getProviderDisplayName(key.provider_id)}</td>
-                      <td className="text-muted-foreground p-4">
-                        {new Date(key.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="space-x-2 p-4 text-right">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => handleEdit(key.id)}
-                          disabled={updateMutation.isPending}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() =>
-                            handleDelete(key.id, getProviderDisplayName(key.provider_id))
-                          }
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {keys.map(
+                    (key: {
+                      id: string;
+                      provider_id: string;
+                      created_at: string;
+                      is_enabled: boolean;
+                    }) => (
+                      <tr
+                        key={key.id}
+                        className={
+                          !key.is_enabled
+                            ? 'bg-muted/20 border-b last:border-0'
+                            : 'border-b last:border-0'
+                        }
+                      >
+                        <td className={!key.is_enabled ? 'text-muted-foreground p-4' : 'p-4'}>
+                          <div>{getProviderDisplayName(key.provider_id)}</div>
+                          <SupportedModelsList models={getProviderModels(key.provider_id)} />
+                        </td>
+                        <td className="text-muted-foreground p-4">
+                          {new Date(key.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            <Switch
+                              checked={key.is_enabled}
+                              onCheckedChange={isEnabled => handleToggleEnabled(key.id, isEnabled)}
+                              disabled={setEnabledMutation.isPending}
+                              aria-label={`Toggle ${getProviderDisplayName(key.provider_id)} BYOK key`}
+                            />
+                            <span className="text-sm">
+                              {key.is_enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="space-x-2 p-4 text-right">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              testMutation.mutate({
+                                ...(organizationId && { organizationId }),
+                                id: key.id,
+                              })
+                            }
+                            disabled={testMutation.isPending}
+                            title="Test API key"
+                          >
+                            <FlaskConical className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleEdit(key.id)}
+                            disabled={updateMutation.isPending}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              handleDelete(key.id, getProviderDisplayName(key.provider_id))
+                            }
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    )
+                  )}
                 </tbody>
               </table>
             </div>
@@ -294,26 +445,69 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="apiKey">API Key</Label>
-                <div className="relative">
-                  <Input
-                    id="apiKey"
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                    placeholder="Enter API key"
-                    className="pr-10"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="absolute top-0 right-0 h-full px-3"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
+                <Label htmlFor="apiKey">
+                  {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock
+                    ? 'AWS Credentials'
+                    : 'API Key'}
+                </Label>
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock ? (
+                  <>
+                    <textarea
+                      id="apiKey"
+                      value={apiKey}
+                      onChange={e => {
+                        setApiKey(e.target.value);
+                        setAwsCredentialError(validateAwsCredentials(e.target.value));
+                      }}
+                      placeholder='{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'
+                      className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-20 w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                      rows={4}
+                    />
+                    {awsCredentialError && (
+                      <Alert variant="destructive">
+                        <AlertDescription className="whitespace-break-spaces">
+                          {awsCredentialError}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
+                ) : (
+                  <div className="relative">
+                    <Input
+                      id="apiKey"
+                      type={showApiKey ? 'text' : 'password'}
+                      value={apiKey}
+                      onChange={e => setApiKey(e.target.value)}
+                      placeholder="Enter API key"
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-0 right-0 h-full px-3"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                )}
+                {selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock && (
+                  <Alert>
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>
+                      <p>Enter your AWS credentials as JSON:</p>
+                      <code className="mt-1 block text-xs break-all">
+                        {'{"accessKeyId": "...", "secretAccessKey": "...", "region": "us-east-1"}'}
+                      </code>
+                      <p className="mt-1">
+                        Your IAM user needs <code className="text-xs">bedrock:InvokeModel</code> and{' '}
+                        <code className="text-xs">bedrock:InvokeModelWithResponseStream</code>{' '}
+                        permissions.
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {editingKeyId ? (
                   <Alert>
                     <Lock className="h-4 w-4" />
@@ -331,6 +525,21 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                   </Alert>
                 )}
               </div>
+
+              {selectedProvider && getProviderModels(selectedProvider).length > 0 && (
+                <div className="space-y-2">
+                  <Label>Supported Models</Label>
+                  <div className="text-muted-foreground rounded-md border p-3 text-sm">
+                    <ul className="max-h-32 space-y-0.5 overflow-y-auto">
+                      {getProviderModels(selectedProvider).map(model => (
+                        <li key={model} className="text-xs">
+                          {model}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
             </div>
 
             <DialogFooter>
@@ -342,6 +551,8 @@ export function BYOKKeysManager({ organizationId }: BYOKKeysManagerProps) {
                 disabled={
                   !selectedProvider ||
                   !apiKey ||
+                  (selectedProvider === VercelUserByokInferenceProviderIdSchema.enum.bedrock &&
+                    !!awsCredentialError) ||
                   createMutation.isPending ||
                   updateMutation.isPending
                 }

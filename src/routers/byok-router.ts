@@ -2,9 +2,9 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
-import { db } from '@/lib/drizzle';
-import { byok_api_keys } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { db, readDb } from '@/lib/drizzle';
+import { byok_api_keys, modelsByProvider } from '@kilocode/db/schema';
+import { desc, eq } from 'drizzle-orm';
 import { encryptApiKey } from '@/lib/byok/encryption';
 import { BYOK_ENCRYPTION_KEY } from '@/lib/config.server';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
@@ -12,12 +12,78 @@ import {
   CreateBYOKKeyInputSchema,
   UpdateBYOKKeyInputSchema,
   DeleteBYOKKeyInputSchema,
+  SetBYOKKeyEnabledInputSchema,
   ListBYOKKeysInputSchema,
+  TestBYOKKeyInputSchema,
   BYOKApiKeyResponseSchema,
   type BYOKApiKeyResponse,
 } from '@/lib/byok/types';
+import {
+  UserByokProviderIdSchema,
+  UserByokTestModels,
+  VercelUserByokInferenceProviderIdSchema,
+} from '@/lib/providers/openrouter/inference-provider-id';
+import { unstable_cache } from 'next/cache';
+import { StoredModelSchema } from '@/lib/providers/vercel/types';
+import { createGateway, generateText } from 'ai';
+import { PROVIDERS } from '@/lib/providers';
+import { getVercelInferenceProviderConfigForUserByok } from '@/lib/providers/vercel';
+import { decryptByokRow } from '@/lib/byok';
+import type { GatewayProviderOptions } from '@ai-sdk/gateway';
+
+const fetchSupportedModels = unstable_cache(
+  async (): Promise<Record<string, string[]>> => {
+    const vercelModelMetadata = z
+      .record(z.string(), StoredModelSchema)
+      .safeParse(
+        (
+          await readDb
+            .select({ vercel: modelsByProvider.vercel })
+            .from(modelsByProvider)
+            .orderBy(desc(modelsByProvider.id))
+            .limit(1)
+        ).at(0)?.vercel
+      );
+
+    if (!vercelModelMetadata.success) {
+      console.error(
+        '[fetchSupportedModels] failed to parse Vercel model metadata',
+        z.treeifyError(vercelModelMetadata.error)
+      );
+      return {};
+    }
+
+    const result: Record<string, string[]> = {};
+
+    result['codestral'] = ['Codestral'];
+
+    for (const model of Object.values(vercelModelMetadata.data)) {
+      if (model.id.includes('codestral')) continue;
+      if (model.type !== 'language') continue;
+      for (const endpoint of model.endpoints) {
+        const providerParsed = VercelUserByokInferenceProviderIdSchema.safeParse(endpoint.tag);
+        if (!providerParsed.success) continue;
+        const providerId = providerParsed.data;
+        if (!result[providerId]) result[providerId] = [];
+        result[providerId].push(model.name);
+      }
+    }
+
+    for (const models of Object.values(result)) {
+      models.sort();
+    }
+
+    return result;
+  },
+  undefined,
+  { revalidate: 300 }
+);
 
 export const byokRouter = createTRPCRouter({
+  listSupportedModels: baseProcedure
+    .output(z.record(z.string(), z.array(z.string())))
+    .query(fetchSupportedModels),
+
   list: baseProcedure
     .input(ListBYOKKeysInputSchema)
     .output(z.array(BYOKApiKeyResponseSchema))
@@ -36,6 +102,7 @@ export const byokRouter = createTRPCRouter({
           created_at: byok_api_keys.created_at,
           updated_at: byok_api_keys.updated_at,
           created_by: byok_api_keys.created_by,
+          is_enabled: byok_api_keys.is_enabled,
         })
         .from(byok_api_keys)
         .where(
@@ -88,6 +155,7 @@ export const byokRouter = createTRPCRouter({
           created_at: byok_api_keys.created_at,
           updated_at: byok_api_keys.updated_at,
           created_by: byok_api_keys.created_by,
+          is_enabled: byok_api_keys.is_enabled,
         });
 
       // Create audit log only for organization keys
@@ -176,6 +244,7 @@ export const byokRouter = createTRPCRouter({
           created_at: byok_api_keys.created_at,
           updated_at: byok_api_keys.updated_at,
           created_by: byok_api_keys.created_by,
+          is_enabled: byok_api_keys.is_enabled,
         });
 
       // Create audit log only for organization keys
@@ -194,6 +263,156 @@ export const byokRouter = createTRPCRouter({
         ...updatedKey,
         provider_name: updatedKey.provider_id,
       };
+    }),
+
+  setEnabled: baseProcedure
+    .input(SetBYOKKeyEnabledInputSchema)
+    .output(BYOKApiKeyResponseSchema)
+    .mutation(async ({ input, ctx }): Promise<BYOKApiKeyResponse> => {
+      const { organizationId, id, is_enabled } = input;
+
+      if (organizationId) {
+        await ensureOrganizationAccess(ctx, organizationId, ['owner', 'billing_manager']);
+      }
+
+      const [existingKey] = await db
+        .select({
+          organization_id: byok_api_keys.organization_id,
+          kilo_user_id: byok_api_keys.kilo_user_id,
+          provider_id: byok_api_keys.provider_id,
+        })
+        .from(byok_api_keys)
+        .where(eq(byok_api_keys.id, id));
+
+      if (!existingKey) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'BYOK key not found',
+        });
+      }
+
+      if (organizationId) {
+        if (existingKey.organization_id !== organizationId) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'BYOK key not found',
+          });
+        }
+      } else {
+        if (existingKey.kilo_user_id !== ctx.user.id) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'BYOK key not found',
+          });
+        }
+      }
+
+      const [updatedKey] = await db
+        .update(byok_api_keys)
+        .set({
+          is_enabled,
+        })
+        .where(eq(byok_api_keys.id, id))
+        .returning({
+          id: byok_api_keys.id,
+          provider_id: byok_api_keys.provider_id,
+          created_at: byok_api_keys.created_at,
+          updated_at: byok_api_keys.updated_at,
+          created_by: byok_api_keys.created_by,
+          is_enabled: byok_api_keys.is_enabled,
+        });
+
+      if (existingKey.organization_id) {
+        await createAuditLog({
+          action: 'organization.settings.change',
+          actor_email: ctx.user.google_user_email,
+          actor_id: ctx.user.id,
+          actor_name: ctx.user.google_user_name,
+          message: `${is_enabled ? 'Enabled' : 'Disabled'} BYOK key for provider: ${existingKey.provider_id}`,
+          organization_id: existingKey.organization_id,
+        });
+      }
+
+      return {
+        ...updatedKey,
+        provider_name: updatedKey.provider_id,
+      };
+    }),
+
+  testApiKey: baseProcedure
+    .input(TestBYOKKeyInputSchema)
+    .output(z.object({ success: z.boolean(), message: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const { organizationId, id } = input;
+
+      if (organizationId) {
+        await ensureOrganizationAccess(ctx, organizationId, ['owner', 'billing_manager']);
+      }
+
+      const [existingKey] = await db
+        .select({
+          organization_id: byok_api_keys.organization_id,
+          kilo_user_id: byok_api_keys.kilo_user_id,
+          provider_id: byok_api_keys.provider_id,
+          encrypted_api_key: byok_api_keys.encrypted_api_key,
+        })
+        .from(byok_api_keys)
+        .where(eq(byok_api_keys.id, id));
+
+      if (!existingKey) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'BYOK key not found' });
+      }
+
+      if (organizationId) {
+        if (existingKey.organization_id !== organizationId) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'BYOK key not found' });
+        }
+      } else {
+        if (existingKey.kilo_user_id !== ctx.user.id) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'BYOK key not found' });
+        }
+      }
+
+      const gateway = createGateway({
+        apiKey: PROVIDERS.VERCEL_AI_GATEWAY.apiKey,
+      });
+
+      const [provider, byokList] = getVercelInferenceProviderConfigForUserByok(
+        decryptByokRow(existingKey)
+      );
+
+      try {
+        const model = gateway(
+          UserByokTestModels[UserByokProviderIdSchema.parse(existingKey.provider_id)]
+        );
+
+        const output = await generateText({
+          model,
+          prompt: 'Say hi',
+          maxOutputTokens: 100,
+          providerOptions: {
+            gateway: {
+              only: [provider],
+              byok: { [provider]: byokList },
+            } satisfies GatewayProviderOptions,
+          },
+        });
+
+        const metadata = output.providerMetadata?.gateway?.routing as
+          | { originalModelId?: string; finalProvider?: string }
+          | undefined;
+
+        return {
+          success: true,
+          message: `API key test success. Provider: ${metadata?.finalProvider ?? 'unknown'}. Model: ${metadata?.originalModelId ?? 'unknown'}. Completion: ${output.text}`,
+        };
+      } catch (e) {
+        console.error(e);
+        return {
+          success: false,
+          message: `API key (${provider}) test failed with: ${e instanceof Error ? e.message : e}`,
+        };
+      }
     }),
 
   delete: baseProcedure

@@ -127,10 +127,9 @@ user-provided encrypted secrets and channel tokens are silently skipped.
 
 ### Development Flags
 
-| Variable     | Description                                                                                         |
-| ------------ | --------------------------------------------------------------------------------------------------- |
-| `DEV_MODE`   | Set to `true` to skip JWT auth and enable `allowInsecureAuth` in the container. **Local dev only.** |
-| `WORKER_ENV` | Set to `production` to enforce JWT `env` claim matching. When unset, env validation is skipped.     |
+| Variable     | Description                                                                                                                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WORKER_ENV` | Defaults to `"production"` in `wrangler.jsonc`. **Set to `"development"` in `.dev.vars` for local dev.** Controls JWT `env` claim matching and Fly app name prefixes (`dev-` vs `acct-`). |
 
 ### Optional
 
@@ -170,8 +169,7 @@ npx wrangler secret put CF_ACCOUNT_ID
 # Set encryption key (get from the Next.js deployment's AGENT_ENV_VARS_PRIVATE_KEY)
 npx wrangler secret put AGENT_ENV_VARS_PRIVATE_KEY
 
-# Optional: enforce JWT env matching
-echo "production" | npx wrangler secret put WORKER_ENV
+# WORKER_ENV defaults to "production" in wrangler.jsonc -- no secret needed.
 
 # Deploy
 pnpm deploy
@@ -184,7 +182,7 @@ pnpm deploy
 | `NEXTAUTH_SECRET`            | `NEXTAUTH_SECRET`              | Same HS256 signing key for JWT verification           |
 | `INTERNAL_API_SECRET`        | `KILOCLAW_INTERNAL_API_SECRET` | Platform API authentication                           |
 | `AGENT_ENV_VARS_PRIVATE_KEY` | `AGENT_ENV_VARS_PUBLIC_KEY`    | RSA key pair (worker has private, Next.js has public) |
-| `WORKER_ENV`                 | `NODE_ENV`                     | Should both be `production` in prod                   |
+| `WORKER_ENV`                 | `NODE_ENV`                     | Defaults to `production` in `wrangler.jsonc`          |
 
 ## Architecture
 
@@ -230,11 +228,7 @@ the WebSocket protocol (NOT as a URL parameter). See
 
 ## Local Dev Without Auth
 
-Set `DEV_MODE=true` in `.dev.vars`. This skips JWT validation and sets
-`OPENCLAW_DEV_MODE=true` in the container (bypasses device pairing).
-
-In dev mode the catch-all proxy returns 401 because no `userId` is derived
-(no JWT = no identity = no per-user sandbox). To test the full flow locally,
+To test the full flow locally without browser auth,
 use the platform API routes to provision and start an instance:
 
 ```bash

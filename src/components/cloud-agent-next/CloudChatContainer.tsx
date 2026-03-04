@@ -24,6 +24,9 @@ import {
   getChildSessionMessagesAtom,
   questionRequestIdsAtom,
   sessionOrganizationIdAtom,
+  autocommitStatusMapAtom,
+  sessionStatusIndicatorAtom,
+  standaloneQuestionAtom,
 } from './store/atoms';
 import { buildSessionConfig, needsResumeConfiguration } from './session-config';
 import {
@@ -44,7 +47,6 @@ import { useCloudAgentStream } from './useCloudAgentStream';
 import { useAutoScroll } from './hooks/useAutoScroll';
 import { useCelebrationSound } from '@/hooks/useCelebrationSound';
 import { useNotificationSound } from '@/hooks/useNotificationSound';
-import { useSidebarSessions } from './hooks/useSidebarSessions';
 import { useOrganizationModels } from './hooks/useOrganizationModels';
 import { useSessionDeletion } from './hooks/useSessionDeletion';
 import { useResumeConfigModal } from './hooks/useResumeConfigModal';
@@ -56,7 +58,7 @@ import { useSlashCommandSets } from '@/hooks/useSlashCommandSets';
 import { CloudChatPresentation } from './CloudChatPresentation';
 import { QuestionContextProvider } from './QuestionContext';
 import type { ResumeConfig } from './ResumeConfigModal';
-import type { AgentMode, SessionStartConfig } from './types';
+import type { AgentMode, SessionStartConfig, StoredSession } from './types';
 
 /** Normalize legacy mode strings ('build' → 'code', 'architect' → 'plan') from DB/DO */
 function normalizeMode(mode: string): AgentMode {
@@ -67,9 +69,15 @@ function normalizeMode(mode: string): AgentMode {
 
 type CloudChatContainerProps = {
   organizationId?: string;
+  sessions: StoredSession[];
+  refetchSessions: () => void;
 };
 
-export function CloudChatContainer({ organizationId }: CloudChatContainerProps) {
+export function CloudChatContainer({
+  organizationId,
+  sessions,
+  refetchSessions,
+}: CloudChatContainerProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const trpc = useTRPC();
@@ -83,8 +91,11 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const sessionConfig = useAtomValue(sessionConfigAtom);
   const totalCost = useAtomValue(totalCostAtom);
+  const autocommitStatusMap = useAtomValue(autocommitStatusMapAtom);
+  const sessionStatusIndicator = useAtomValue(sessionStatusIndicatorAtom);
   const questionRequestIds = useAtomValue(questionRequestIdsAtom);
   const questionOrganizationId = useAtomValue(sessionOrganizationIdAtom);
+  const standaloneQuestion = useAtomValue(standaloneQuestionAtom);
 
   // Write to atoms
   const setError = useSetAtom(errorAtom);
@@ -214,9 +225,13 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   const [inputMode, setInputMode] = useState<AgentMode>('code');
   const [inputModel, setInputModel] = useState<string>('');
 
-  // Auto-scroll behavior
+  // Auto-scroll behavior — also scroll when autocommit/status/question content changes
   const { messagesEndRef, scrollContainerRef, showScrollButton, handleScroll, scrollToBottom } =
-    useAutoScroll(dynamicMessages);
+    useAutoScroll(dynamicMessages, [
+      autocommitStatusMap,
+      sessionStatusIndicator,
+      standaloneQuestion,
+    ]);
 
   // Slash commands
   const { availableCommands } = useSlashCommandSets();
@@ -257,17 +272,18 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
     setIsSessionInitiated(true);
   }, []);
 
-  // Sidebar sessions (scoped to organization when in org context, personal-only when undefined)
-  // Pass null for personal chat to filter out org sessions, or the org ID for org chat
-  const { sessions, refetchSessions } = useSidebarSessions({
-    organizationId: organizationId ?? null,
-  });
-
   // Callback for stream completion
   const handleStreamComplete = useCallback(() => {
     playCelebrationSound();
     refetchSessions();
   }, [playCelebrationSound, refetchSessions]);
+
+  // Track failed message text to restore into ChatInput on send failure
+  const [failedMessageText, setFailedMessageText] = useState<string | null>(null);
+
+  const handleSendFailed = useCallback((messageText: string) => {
+    setFailedMessageText(messageText);
+  }, []);
 
   // Stream hook (V2 WebSocket-based)
   const {
@@ -284,6 +300,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
     onKiloSessionCreated: handleKiloSessionCreated,
     onSessionInitiated: handleSessionInitiated,
     onQuestionAsked: playNotification,
+    onSendFailed: handleSendFailed,
   });
 
   // Wrapper for sendMessage that doesn't use sessionIdOverride
@@ -430,8 +447,8 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
           // Check if session has been initiated - prefer DO state, fallback to message check
           const hasMessages = Boolean(
             messagesResult.data &&
-              Array.isArray(messagesResult.data.messages) &&
-              messagesResult.data.messages.length > 0
+            Array.isArray(messagesResult.data.messages) &&
+            messagesResult.data.messages.length > 0
           );
           const isInitiated = runtimeState?.initiatedAt ? true : hasMessages;
           setIsSessionInitiated(isInitiated);
@@ -746,6 +763,8 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
   // Handle send message
   const handleSendMessage = useCallback(
     async (prompt: string) => {
+      // Clear any previously failed message text so a repeated failure can re-trigger initialValue
+      setFailedMessageText(null);
       // Use cloudAgentSessionId (from IndexedDB for resumed sessions) or
       // currentSessionId (from stream for new sessions)
       let effectiveSessionId = cloudAgentSessionId || currentSessionId || null;
@@ -801,6 +820,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare existing session:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }
@@ -835,6 +855,7 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
             console.error('Failed to prepare session for resume:', err);
             setError('Failed to prepare session. Please try again.');
             toast.error('Failed to prepare session. Please try again.');
+            setFailedMessageText(prompt);
             return;
           }
         }
@@ -972,7 +993,10 @@ export function CloudChatContainer({ organizationId }: CloudChatContainerProps) 
         onInputModeChange={handleInputModeChange}
         onInputModelChange={handleInputModelChange}
         isOldSession={isOldSession}
+        sessionStatusIndicator={sessionStatusIndicator}
         getChildMessages={getChildSessionMessages}
+        standaloneQuestion={standaloneQuestion}
+        chatInputInitialValue={failedMessageText ?? undefined}
       />
     </QuestionContextProvider>
   );
