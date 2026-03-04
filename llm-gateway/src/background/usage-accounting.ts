@@ -871,7 +871,7 @@ export async function processUsageAccountingAfterParse(
     geo_country: usageContext.fraudHeaders.geo_country,
     geo_latitude: usageContext.fraudHeaders.geo_latitude,
     geo_longitude: usageContext.fraudHeaders.geo_longitude,
-    ja3_hash: usageContext.fraudHeaders.ja3_hash,
+    ja3_hash: null, // CF provides JA3, not JA4 — don't store in ja4_digest column
     user_prompt_prefix: user_prompt_prefix ?? null,
     system_prompt_prefix: system_prompt_prefix || null,
     system_prompt_length: usageContext.promptInfo.system_prompt_length,

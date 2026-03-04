@@ -189,7 +189,7 @@ export async function classifyAbuse(
     geo_country: fraudHeaders.geo_country,
     geo_latitude: fraudHeaders.geo_latitude,
     geo_longitude: fraudHeaders.geo_longitude,
-    ja4_digest: fraudHeaders.ja3_hash,
+    ja4_digest: null, // CF provides JA3, not JA4 — send null to avoid misidentification
     user_agent: fraudHeaders.http_user_agent,
     provider: context?.provider ?? null,
     requested_model: body.model?.toLowerCase() ?? null,
@@ -265,7 +265,7 @@ export async function reportAbuseCost(
   return reportCost(serviceUrl, secrets, {
     kilo_user_id: usageContext.kiloUserId,
     ip_address: usageContext.fraudHeaders.http_x_forwarded_for,
-    ja4_digest: usageContext.fraudHeaders.ja3_hash,
+    ja4_digest: null, // CF provides JA3, not JA4 — send null to avoid misidentification
     user_agent: usageContext.fraudHeaders.http_user_agent,
     request_id: usageContext.abuse_request_id,
     message_id: usageStats.messageId,
