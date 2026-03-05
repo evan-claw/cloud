@@ -166,23 +166,14 @@ export async function* streamKilocodeExecution(
   if (options?.variant && !/^[a-zA-Z]+$/.test(options.variant)) {
     throw new Error(`Invalid variant: ${options.variant}`);
   }
-  const variantFlag = options?.variant ? ` --variant=${options.variant}` : '';
-
-  const command = `HOME=${sessionCtx.sessionHome} cat ${tmpFile} | kilocode --mode=${mode} --workspace=${sessionCtx.workspacePath} --auto --timeout=${cliTimeoutSeconds} --json${sessionFlag}${variantFlag} ${attachArgs}`;
-  const stream = await session.execStream(command);
+  const variantsToTry: Array<string | undefined> = options?.variant
+    ? [options.variant, undefined]
+    : [undefined];
   const { sessionId, skipInterruptPolling } = options ?? {};
 
   let kiloSessionIdCaptured = false; // Track if we've already captured a kiloSessionId
   let abnormalTermination = false;
   let terminationReason = '';
-
-  // Set up server-side timeout as a safety net
-  let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  const streamTimeoutPromise = new Promise<never>((_, reject) => {
-    streamTimeoutId = setTimeout(() => {
-      reject(new Error('STREAM_TIMEOUT'));
-    }, streamTimeoutSeconds * 1000);
-  });
 
   // Set up interrupt detection if we have access to the DO and polling is not skipped
   // skipInterruptPolling is used for automated sessions (e.g., code reviews) where
@@ -221,168 +212,223 @@ export async function* streamKilocodeExecution(
   }
 
   try {
-    // Create async iterator from parseSSEStream
-    const streamIterator = parseSSEStream<ExecEvent>(stream)[Symbol.asyncIterator]();
+    for (let attempt = 0; attempt < variantsToTry.length; attempt++) {
+      const activeVariant = variantsToTry[attempt];
+      const variantFlag = activeVariant ? ` --variant=${activeVariant}` : '';
+      const command = `HOME=${sessionCtx.sessionHome} cat ${tmpFile} | kilocode --mode=${mode} --workspace=${sessionCtx.workspacePath} --auto --timeout=${cliTimeoutSeconds} --json${sessionFlag}${variantFlag} ${attachArgs}`;
 
-    while (true) {
-      // Race between getting the next event, interrupt detection, and server-side timeout
-      const nextPromise = streamIterator.next();
-      const racers: Promise<IteratorResult<unknown, unknown>>[] = [nextPromise];
+      logger
+        .withFields({
+          sessionId: sessionId ?? sessionCtx.sessionId,
+          attempt: attempt + 1,
+          variant: activeVariant ?? 'default',
+        })
+        .info('Command stream started');
 
-      // Add interrupt promise if available (not for skipInterruptPolling sessions)
-      if (interruptPromise) {
-        racers.push(interruptPromise);
-      }
+      const stream = await session.execStream(command);
 
-      // Always add server-side timeout
-      racers.push(streamTimeoutPromise);
+      // Set up server-side timeout as a safety net (per attempt)
+      let streamTimeoutId: ReturnType<typeof setTimeout> | null = null;
+      const streamTimeoutPromise = new Promise<never>((_, reject) => {
+        streamTimeoutId = setTimeout(() => {
+          reject(new Error('STREAM_TIMEOUT'));
+        }, streamTimeoutSeconds * 1000);
+      });
 
-      const result = await Promise.race(racers);
+      let emittedStreamEvents = false;
+      let retryWithoutVariant = false;
 
-      if (result.done) break;
+      try {
+        // Create async iterator from parseSSEStream
+        const streamIterator = parseSSEStream<ExecEvent>(stream)[Symbol.asyncIterator]();
 
-      const rawEvent = result.value;
-      if (typeof rawEvent !== 'object' || !rawEvent) continue;
-      const event = rawEvent as ExecEvent;
-      if (typeof event.type !== 'string') continue;
+        streamLoop: while (true) {
+          // Race between getting the next event, interrupt detection, and server-side timeout
+          const nextPromise = streamIterator.next();
+          const racers: Promise<IteratorResult<unknown, unknown>>[] = [nextPromise];
 
-      const timestamp = new Date().toISOString();
+          // Add interrupt promise if available (not for skipInterruptPolling sessions)
+          if (interruptPromise) {
+            racers.push(interruptPromise);
+          }
 
-      switch (event.type) {
-        case 'stdout': {
-          const data = typeof event.data === 'string' ? event.data : '';
-          const lines = data.split('\n').filter((line: string) => line.trim());
+          // Always add server-side timeout
+          racers.push(streamTimeoutPromise);
 
-          for (const line of lines) {
-            const parsed = tryParseJson(line);
+          const result = await Promise.race(racers);
 
-            if (parsed !== null) {
-              // Check if this is a session_created event
-              if (
-                parsed.event === 'session_created' &&
-                typeof parsed.sessionId === 'string' &&
-                !kiloSessionIdCaptured
-              ) {
-                const capturedSessionId = parsed.sessionId;
-                const uuidResult = uuidSchema.safeParse(capturedSessionId);
-                if (uuidResult.success) {
-                  kiloSessionIdCaptured = true;
+          if (result.done) break;
 
-                  // Store the kiloSessionId in the durable object with retry (non-blocking)
-                  if (env) {
-                    const doKey = `${sessionCtx.userId}:${sessionCtx.sessionId}`;
+          const rawEvent = result.value;
+          if (typeof rawEvent !== 'object' || !rawEvent) continue;
+          const event = rawEvent as ExecEvent;
+          if (typeof event.type !== 'string') continue;
 
-                    try {
-                      await withDORetry(
-                        () =>
-                          env.CLOUD_AGENT_SESSION.get(env.CLOUD_AGENT_SESSION.idFromName(doKey)),
-                        stub => stub.updateKiloSessionId(capturedSessionId),
-                        'updateKiloSessionId'
-                      );
+          const timestamp = new Date().toISOString();
+
+          switch (event.type) {
+            case 'stdout': {
+              const data = typeof event.data === 'string' ? event.data : '';
+              const lines = data.split('\n').filter((line: string) => line.trim());
+
+              for (const line of lines) {
+                const parsed = tryParseJson(line);
+
+                if (parsed !== null) {
+                  emittedStreamEvents = true;
+
+                  // Check if this is a session_created event
+                  if (
+                    parsed.event === 'session_created' &&
+                    typeof parsed.sessionId === 'string' &&
+                    !kiloSessionIdCaptured
+                  ) {
+                    const capturedSessionId = parsed.sessionId;
+                    const uuidResult = uuidSchema.safeParse(capturedSessionId);
+                    if (uuidResult.success) {
+                      kiloSessionIdCaptured = true;
+
+                      // Store the kiloSessionId in the durable object with retry (non-blocking)
+                      if (env) {
+                        const doKey = `${sessionCtx.userId}:${sessionCtx.sessionId}`;
+
+                        try {
+                          await withDORetry(
+                            () =>
+                              env.CLOUD_AGENT_SESSION.get(env.CLOUD_AGENT_SESSION.idFromName(doKey)),
+                            stub => stub.updateKiloSessionId(capturedSessionId),
+                            'updateKiloSessionId'
+                          );
+                          logger
+                            .withFields({ kiloSessionId: capturedSessionId })
+                            .info('Captured Kilo CLI session ID');
+                        } catch (error) {
+                          logger
+                            .withFields({
+                              kiloSessionId: capturedSessionId,
+                              error: error instanceof Error ? error.message : String(error),
+                            })
+                            .error('Failed to save kiloSessionId');
+                          // Continue streaming despite failure
+                        }
+                      }
+                    } else {
                       logger
-                        .withFields({ kiloSessionId: capturedSessionId })
-                        .info('Captured Kilo CLI session ID');
-                    } catch (error) {
-                      logger
-                        .withFields({
-                          kiloSessionId: capturedSessionId,
-                          error: error instanceof Error ? error.message : String(error),
-                        })
-                        .error('Failed to save kiloSessionId');
-                      // Continue streaming despite failure
+                        .withFields({ invalidSessionId: capturedSessionId })
+                        .warn('Invalid kiloSessionId format, expected UUID');
                     }
+                  } else if (parsed.event === 'session_created' && kiloSessionIdCaptured) {
+                    logger
+                      .withFields({ sessionId: String(parsed.sessionId) })
+                      .warn('Duplicate session_created event ignored');
                   }
+
+                  // Check if this is a terminal event that should stop the stream
+                  const terminalCheck = isTerminalKilocodeEvent(parsed);
+                  if (terminalCheck.isTerminal) {
+                    logger.warn('Terminal Kilocode event detected', {
+                      eventType: parsed.type,
+                      ask: parsed.ask,
+                      reason: terminalCheck.reason,
+                    });
+
+                    // Emit the terminal event so client knows what happened
+                    yield emitKilocodeEvent(parsed, sessionId);
+
+                    // Set termination state and throw to exit the loop
+                    abnormalTermination = true;
+                    terminationReason = terminalCheck.reason ?? 'Terminal event received';
+                    throw new Error('TERMINAL_EVENT');
+                  }
+
+                  yield emitKilocodeEvent(parsed, sessionId);
                 } else {
-                  logger
-                    .withFields({ invalidSessionId: capturedSessionId })
-                    .warn('Invalid kiloSessionId format, expected UUID');
+                  emittedStreamEvents = true;
+                  yield emitOutputEvent(line, 'stdout', timestamp, sessionId);
                 }
-              } else if (parsed.event === 'session_created' && kiloSessionIdCaptured) {
-                logger
-                  .withFields({ sessionId: String(parsed.sessionId) })
-                  .warn('Duplicate session_created event ignored');
+              }
+              break;
+            }
+
+            case 'stderr': {
+              emittedStreamEvents = true;
+              const stderrData = typeof event.data === 'string' ? event.data : '';
+              yield emitOutputEvent(stderrData, 'stderr', timestamp, sessionId);
+              break;
+            }
+
+            case 'complete': {
+              const exitCode = typeof event.exitCode === 'number' ? event.exitCode : 0;
+
+              // Check if this was an interrupt (SIGINT=130, SIGTERM=143, SIGKILL=137)
+              if (exitCode === 130 || exitCode === 143 || exitCode === 137) {
+                const reason =
+                  exitCode === 130
+                    ? 'Interrupted (SIGINT)'
+                    : exitCode === 143
+                      ? 'Terminated (SIGTERM)'
+                      : 'Killed (SIGKILL)';
+                yield {
+                  streamEventType: 'interrupted',
+                  sessionId: options?.sessionId ?? sessionCtx.sessionId,
+                  timestamp: new Date().toISOString(),
+                  reason,
+                } satisfies SystemInterruptedEvent;
+                return; // Exit generator, closing the stream
               }
 
-              // Check if this is a terminal event that should stop the stream
-              const terminalCheck = isTerminalKilocodeEvent(parsed);
-              if (terminalCheck.isTerminal) {
-                logger.warn('Terminal Kilocode event detected', {
-                  eventType: parsed.type,
-                  ask: parsed.ask,
-                  reason: terminalCheck.reason,
-                });
-
-                // Emit the terminal event so client knows what happened
-                yield emitKilocodeEvent(parsed, sessionId);
-
-                // Set termination state and throw to exit the loop
-                abnormalTermination = true;
-                terminationReason = terminalCheck.reason ?? 'Terminal event received';
-                throw new Error('TERMINAL_EVENT');
+              // Handle timeout (exit code 124)
+              if (exitCode === 124) {
+                throw new Error(
+                  `CLI execution exceeded the ${cliTimeoutSeconds}s timeout limit. ` +
+                    `The AI agent's task execution took too long. Try simplifying your request.`
+                );
               }
 
-              yield emitKilocodeEvent(parsed, sessionId);
-            } else {
-              yield emitOutputEvent(line, 'stdout', timestamp, sessionId);
+              // Handle other failures
+              if (exitCode !== 0) {
+                if (activeVariant && !emittedStreamEvents) {
+                  logger
+                    .withFields({
+                      sessionId: sessionId ?? sessionCtx.sessionId,
+                      attempt: attempt + 1,
+                      variant: activeVariant,
+                      exitCode,
+                    })
+                    .warn('Variant execution failed before output; retrying without variant');
+                  retryWithoutVariant = true;
+                  break streamLoop;
+                }
+
+                logger.withFields({ exitCode }).error('Streaming execution failed');
+                throw new Error(`CLI exited with code ${exitCode}`);
+              }
+
+              // Success case
+              logger.info('Streaming execution completed');
+              return;
+            }
+
+            case 'error': {
+              emittedStreamEvents = true;
+              yield {
+                streamEventType: 'error',
+                error: typeof event.error === 'string' ? event.error : 'Unknown error',
+                timestamp,
+                sessionId,
+              };
+              break;
             }
           }
-          break;
         }
-
-        case 'stderr': {
-          const stderrData = typeof event.data === 'string' ? event.data : '';
-          yield emitOutputEvent(stderrData, 'stderr', timestamp, sessionId);
-          break;
+      } finally {
+        if (streamTimeoutId) {
+          clearTimeout(streamTimeoutId);
         }
+      }
 
-        case 'complete': {
-          const exitCode = typeof event.exitCode === 'number' ? event.exitCode : 0;
-
-          // Check if this was an interrupt (SIGINT=130, SIGTERM=143, SIGKILL=137)
-          if (exitCode === 130 || exitCode === 143 || exitCode === 137) {
-            const reason =
-              exitCode === 130
-                ? 'Interrupted (SIGINT)'
-                : exitCode === 143
-                  ? 'Terminated (SIGTERM)'
-                  : 'Killed (SIGKILL)';
-            yield {
-              streamEventType: 'interrupted',
-              sessionId: options?.sessionId ?? sessionCtx.sessionId,
-              timestamp: new Date().toISOString(),
-              reason,
-            } satisfies SystemInterruptedEvent;
-            return; // Exit generator, closing the stream
-          }
-
-          // Handle timeout (exit code 124)
-          if (exitCode === 124) {
-            throw new Error(
-              `CLI execution exceeded the ${cliTimeoutSeconds}s timeout limit. ` +
-                `The AI agent's task execution took too long. Try simplifying your request.`
-            );
-          }
-
-          // Handle other failures
-          if (exitCode !== 0) {
-            logger.withFields({ exitCode }).error('Streaming execution failed');
-            throw new Error(`CLI exited with code ${exitCode}`);
-          }
-
-          // Success case
-          logger.info('Streaming execution completed');
-          return;
-        }
-
-        case 'error': {
-          yield {
-            streamEventType: 'error',
-            error: typeof event.error === 'string' ? event.error : 'Unknown error',
-            timestamp,
-            sessionId,
-          };
-          break;
-        }
+      if (!retryWithoutVariant) {
+        return;
       }
     }
   } catch (error) {
@@ -480,11 +526,6 @@ export async function* streamKilocodeExecution(
     // If not a known termination type, re-throw the error
     throw error;
   } finally {
-    // Clear the server-side timeout
-    if (streamTimeoutId) {
-      clearTimeout(streamTimeoutId);
-    }
-
     if (interruptInterval) {
       clearInterval(interruptInterval);
     }

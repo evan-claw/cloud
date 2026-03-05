@@ -184,6 +184,92 @@ describe('streamKilocodeExecution', () => {
     expect(error.message).toBe('CLI exited with code 2');
   });
 
+  it('retries once without variant when variant execution fails before output', async () => {
+    const firstStream = [{ type: 'complete', exitCode: 1 }];
+    const secondStream = [
+      {
+        type: 'stdout',
+        data: '{"type":"status","message":"retry succeeded"}\n',
+      },
+      {
+        type: 'complete',
+        exitCode: 0,
+      },
+    ];
+
+    const mockExecStream = vi
+      .fn()
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    const mockSession = createMockExecutionSession(mockExecStream);
+    const mockSandbox = createMockSandbox();
+    vi.mocked(parseSSEStream)
+      .mockImplementationOnce(async function* () {
+        yield* firstStream;
+      })
+      .mockImplementationOnce(async function* () {
+        yield* secondStream;
+      });
+
+    const sessionContext = createSessionContext('/workspace/test');
+    const events = await collectEvents(
+      streamKilocodeExecution(
+        mockSandbox,
+        mockSession,
+        sessionContext,
+        'code',
+        'test prompt',
+        { variant: 'medium' }
+      )
+    );
+
+    expect(mockExecStream).toHaveBeenCalledTimes(2);
+    expect((mockExecStream.mock.calls[0]?.[0] as string) ?? '').toContain('--variant=medium');
+    expect((mockExecStream.mock.calls[1]?.[0] as string) ?? '').not.toContain('--variant=');
+    expect(events).toEqual([
+      {
+        streamEventType: 'kilocode',
+        payload: { type: 'status', message: 'retry succeeded' },
+        sessionId: undefined,
+      },
+    ]);
+  });
+
+  it('does not retry variant execution when output was already emitted', async () => {
+    const mockStream = [
+      {
+        type: 'stdout',
+        data: '{"type":"status","message":"started"}\n',
+      },
+      {
+        type: 'complete',
+        exitCode: 1,
+      },
+    ];
+
+    const mockExecStream = vi.fn().mockResolvedValue(mockStream);
+    const mockSession = createMockExecutionSession(mockExecStream);
+    const mockSandbox = createMockSandbox();
+    mockStreamEvents(mockStream);
+
+    const sessionContext = createSessionContext('/workspace/test');
+    const { events, error } = await collectEventsUntilError(
+      streamKilocodeExecution(mockSandbox, mockSession, sessionContext, 'code', 'test prompt', {
+        variant: 'medium',
+      })
+    );
+
+    expect(mockExecStream).toHaveBeenCalledTimes(1);
+    expect(error.message).toBe('CLI exited with code 1');
+    expect(events).toEqual([
+      {
+        streamEventType: 'kilocode',
+        payload: { type: 'status', message: 'started' },
+        sessionId: undefined,
+      },
+    ]);
+  });
+
   it('throws descriptive error on timeout (exit code 124)', async () => {
     const mockStream = [
       {
