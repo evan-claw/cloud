@@ -382,10 +382,8 @@ function buildCommonParams(
   request: OpenRouterChatCompletionRequest,
   isLegacyExtension: boolean
 ) {
-  const verbosity = VerbositySchema.safeParse(request.verbosity ?? customLlm.verbosity).data;
-  const reasoningEffort = ReasoningEffortSchema.safeParse(
-    request.reasoning?.effort ?? customLlm.reasoning_effort
-  ).data;
+  const verbosity = VerbositySchema.safeParse(request.verbosity).data;
+  const reasoningEffort = ReasoningEffortSchema.safeParse(request.reasoning?.effort).data;
   return {
     messages,
     tools: convertTools(request.tools),
