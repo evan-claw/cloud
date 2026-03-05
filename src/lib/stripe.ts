@@ -301,6 +301,7 @@ async function handleAutoTopUpSetup(
 
 async function handleOrgAutoTopUpSetup(
   organizationId: string,
+  kiloUserId: string,
   paymentIntent: Stripe.PaymentIntent,
   config: StripeConfig
 ) {
@@ -336,6 +337,7 @@ async function handleOrgAutoTopUpSetup(
       stripe_payment_method_id: paymentMethodId,
       amount_cents: amountCents,
       disabled_reason: null,
+      created_by_user_id: kiloUserId,
     })
     .onConflictDoUpdate({
       target: auto_top_up_configs.owned_by_organization_id,
@@ -343,6 +345,7 @@ async function handleOrgAutoTopUpSetup(
         stripe_payment_method_id: paymentMethodId,
         amount_cents: amountCents,
         disabled_reason: null,
+        created_by_user_id: kiloUserId,
       },
       targetWhere: sql`${auto_top_up_configs.owned_by_organization_id} IS NOT NULL`,
     });
@@ -394,7 +397,7 @@ export async function handleSuccessfulChargeWithPayment(
     await processTopupForOrganization(kiloUserId, organizationId, creditAmountInCents, config);
 
     if (paymentIntent.metadata.type === 'org-auto-topup-setup') {
-      await handleOrgAutoTopUpSetup(organizationId, paymentIntent, config);
+      await handleOrgAutoTopUpSetup(organizationId, kiloUserId, paymentIntent, config);
     }
 
     // Save payment method for organization (for future auto-top-ups)
@@ -559,6 +562,38 @@ async function handlePaymentMethodEvent(
   }
 }
 
+type AutoTopUpOwner = { type: 'user'; id: string } | { type: 'organization'; id: string };
+
+async function releaseAutoTopUpAttemptLock(owner: AutoTopUpOwner): Promise<void> {
+  if (owner.type === 'user') {
+    await db
+      .update(auto_top_up_configs)
+      .set({ attempt_started_at: null })
+      .where(eq(auto_top_up_configs.owned_by_user_id, owner.id));
+    return;
+  }
+
+  await db
+    .update(auto_top_up_configs)
+    .set({ attempt_started_at: null })
+    .where(eq(auto_top_up_configs.owned_by_organization_id, owner.id));
+}
+
+async function markAutoTopUpCompleted(owner: AutoTopUpOwner): Promise<void> {
+  if (owner.type === 'user') {
+    await db
+      .update(auto_top_up_configs)
+      .set({ last_auto_top_up_at: sql`NOW()`, attempt_started_at: null })
+      .where(eq(auto_top_up_configs.owned_by_user_id, owner.id));
+    return;
+  }
+
+  await db
+    .update(auto_top_up_configs)
+    .set({ last_auto_top_up_at: sql`NOW()`, attempt_started_at: null })
+    .where(eq(auto_top_up_configs.owned_by_organization_id, owner.id));
+}
+
 export async function processStripePaymentEventHook(event: Stripe.Event) {
   switch (event.type) {
     case 'checkout.session.completed':
@@ -605,56 +640,104 @@ export async function processStripePaymentEventHook(event: Stripe.Event) {
           });
           if (!user) break;
 
-          logExceptInTest(`Processing auto top-up for user ${user.id}`, {
-            invoice_id: invoice.id,
-            charge_id: chargeId,
-            amount_paid: invoice.amount_paid,
-          });
+          const traceId = invoice.metadata?.traceId ?? event.id;
+          let processedSuccessfully = false;
 
-          const autoTopUpOk = await processTopUp(user, invoice.amount_paid, config, {
-            isAutoTopUp: true,
-          });
-
-          if (!autoTopUpOk) {
-            sentryLogger('stripe', 'info')('Auto top-up already registered (invoice fallback)', {
-              kilo_user_id: user.id,
+          try {
+            logExceptInTest(`Processing auto top-up for user ${user.id}`, {
               invoice_id: invoice.id,
               charge_id: chargeId,
+              amount_paid: invoice.amount_paid,
+              traceId,
             });
-          }
 
-          // Release the in-progress auto-top-up lock
-          await db
-            .update(auto_top_up_configs)
-            .set({ last_auto_top_up_at: sql`NOW()`, attempt_started_at: null })
-            .where(eq(auto_top_up_configs.owned_by_user_id, user.id));
+            const autoTopUpOk = await processTopUp(user, invoice.amount_paid, config, {
+              isAutoTopUp: true,
+            });
+
+            if (!autoTopUpOk) {
+              sentryLogger('stripe', 'info')('Auto top-up already registered (invoice fallback)', {
+                kilo_user_id: user.id,
+                invoice_id: invoice.id,
+                charge_id: chargeId,
+                traceId,
+              });
+            }
+
+            processedSuccessfully = true;
+          } catch (error) {
+            sentryLogger('stripe', 'error')('Auto top-up webhook processing failed for user', {
+              invoice_id: invoice.id,
+              charge_id: chargeId,
+              kilo_user_id: user.id,
+              traceId,
+              type: 'auto-topup',
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          } finally {
+            try {
+              if (processedSuccessfully) {
+                await markAutoTopUpCompleted({ type: 'user', id: user.id });
+              } else {
+                await releaseAutoTopUpAttemptLock({ type: 'user', id: user.id });
+              }
+            } catch (lockError) {
+              captureException(lockError);
+            }
+          }
         } else {
           const organizationId = invoice.metadata?.organizationId;
           if (!organizationId) break;
 
-          logExceptInTest(`Processing org auto top-up for organization ${organizationId}`, {
-            invoice_id: invoice.id,
-            charge_id: chargeId,
-            amount_paid: invoice.amount_paid,
-          });
+          const traceId = invoice.metadata?.traceId ?? event.id;
+          let processedSuccessfully = false;
 
-          const autoTopUpConfig = await db.query.auto_top_up_configs.findFirst({
-            where: eq(auto_top_up_configs.owned_by_organization_id, organizationId),
-            columns: { created_by_user_id: true },
-          });
+          try {
+            logExceptInTest(`Processing org auto top-up for organization ${organizationId}`, {
+              invoice_id: invoice.id,
+              charge_id: chargeId,
+              amount_paid: invoice.amount_paid,
+              traceId,
+            });
 
-          await processTopupForOrganization(
-            autoTopUpConfig?.created_by_user_id ?? SYSTEM_AUTO_TOP_UP_USER_ID,
-            organizationId,
-            invoice.amount_paid,
-            config
-          );
+            const autoTopUpConfig = await db.query.auto_top_up_configs.findFirst({
+              where: eq(auto_top_up_configs.owned_by_organization_id, organizationId),
+              columns: { created_by_user_id: true },
+            });
 
-          // Release the in-progress auto-top-up lock
-          await db
-            .update(auto_top_up_configs)
-            .set({ last_auto_top_up_at: sql`NOW()`, attempt_started_at: null })
-            .where(eq(auto_top_up_configs.owned_by_organization_id, organizationId));
+            await processTopupForOrganization(
+              autoTopUpConfig?.created_by_user_id ?? SYSTEM_AUTO_TOP_UP_USER_ID,
+              organizationId,
+              invoice.amount_paid,
+              config
+            );
+
+            processedSuccessfully = true;
+          } catch (error) {
+            sentryLogger('stripe', 'error')(
+              'Auto top-up webhook processing failed for organization',
+              {
+                invoice_id: invoice.id,
+                charge_id: chargeId,
+                organization_id: organizationId,
+                traceId,
+                type: 'org-auto-topup',
+                error: error instanceof Error ? error.message : String(error),
+              }
+            );
+            throw error;
+          } finally {
+            try {
+              if (processedSuccessfully) {
+                await markAutoTopUpCompleted({ type: 'organization', id: organizationId });
+              } else {
+                await releaseAutoTopUpAttemptLock({ type: 'organization', id: organizationId });
+              }
+            } catch (lockError) {
+              captureException(lockError);
+            }
+          }
         }
         break;
       }

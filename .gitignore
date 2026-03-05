@@ -86,3 +86,6 @@ run-milvus-test.sh
 .worktrees/
 
 supabase/.temp
+
+# Husky generated hook shims
+.husky/_/

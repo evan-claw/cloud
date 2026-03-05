@@ -103,7 +103,7 @@ export const organizationAutoTopUpRouter = createTRPCRouter({
   changePaymentMethod: organizationOwnerProcedure
     .input(
       OrganizationIdInputSchema.extend({
-        amountCents: z.number().optional(),
+        amountCents: OrgAutoTopUpAmountCentsSchema.optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
