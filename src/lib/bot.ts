@@ -15,7 +15,8 @@ const slackAdapter = createSlackAdapter({
 });
 
 export const bot = new Chat({
-  userName: process.env.NODE_ENV === 'production' ? 'Kilo' : 'Henk Bot',
+  // TODO(remon): Update names before going live
+  userName: process.env.NODE_ENV === 'production' ? 'Pound' : 'Sjors Bot',
   adapters: {
     slack: slackAdapter,
   },
