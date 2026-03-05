@@ -8,7 +8,8 @@ import {
   getEntriesByCategory,
 } from '../catalog.js';
 import { validateFieldValue } from '../validation.js';
-import type { SecretIconKey } from '../types.js';
+import type { SecretIconKey, SecretCatalogEntry } from '../types.js';
+import { DEFAULT_INJECTION_METHOD, getInjectionMethod } from '../types.js';
 
 describe('Secret Catalog', () => {
   describe('Uniqueness constraints', () => {
@@ -138,6 +139,25 @@ describe('Secret Catalog', () => {
     it('returns empty array for categories with no entries', () => {
       const tools = getEntriesByCategory('tool');
       expect(tools).toEqual([]);
+    });
+  });
+
+  describe('getInjectionMethod', () => {
+    it('returns env as default when injectionMethod is undefined', () => {
+      const entry = { injectionMethod: undefined } as SecretCatalogEntry;
+      expect(getInjectionMethod(entry)).toBe('env');
+      expect(DEFAULT_INJECTION_METHOD).toBe('env');
+    });
+
+    it('returns explicit injectionMethod when set', () => {
+      const entry = { injectionMethod: 'openclaw-secrets' } as SecretCatalogEntry;
+      expect(getInjectionMethod(entry)).toBe('openclaw-secrets');
+    });
+
+    it('all current catalog entries use default injection method', () => {
+      for (const entry of SECRET_CATALOG) {
+        expect(getInjectionMethod(entry)).toBe('env');
+      }
     });
   });
 
