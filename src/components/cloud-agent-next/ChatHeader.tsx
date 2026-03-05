@@ -45,10 +45,11 @@ export function ChatHeader({
   const [showActionsDialog, setShowActionsDialog] = useState(false);
 
   const browseUrl = buildRepoBrowseUrl(gitUrl);
+  // Compare URL for GitHub only; GitLab MR links are not yet supported.
   const repoUrl =
     browseUrl && branch && detectGitPlatform(gitUrl) === 'github'
       ? `${browseUrl}/compare/${branch}?expand=1`
-      : (browseUrl ?? (repository ? `https://github.com/${repository}` : undefined));
+      : browseUrl;
 
   return (
     <>

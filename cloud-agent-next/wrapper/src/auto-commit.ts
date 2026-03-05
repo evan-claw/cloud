@@ -60,7 +60,7 @@ export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommit
 
   try {
     // Check current branch (agent may have switched branches during execution)
-    const branch = await getCurrentBranch(workspacePath);
+    const branch = await getCurrentBranch(workspacePath, GIT_LOCAL_TIMEOUT_MS);
     logToFile(`auto-commit: branch=${branch || '(detached HEAD)'}`);
     if (!branch) {
       logToFile('auto-commit: skipping - detached HEAD state');
@@ -92,7 +92,7 @@ export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommit
     }
 
     // Check actual git upstream (not stale config) to decide push strategy
-    const trackingUpstream = await hasGitUpstream(workspacePath);
+    const trackingUpstream = await hasGitUpstream(workspacePath, GIT_LOCAL_TIMEOUT_MS);
     logToFile(`auto-commit: hasGitUpstream=${trackingUpstream}`);
 
     // Check for uncommitted changes

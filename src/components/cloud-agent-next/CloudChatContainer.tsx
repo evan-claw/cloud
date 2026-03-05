@@ -783,6 +783,9 @@ export function CloudChatContainer({
           const resumeRepo =
             extractRepoFromGitUrl(loadedDbSession?.git_url) || sessionConfig.repository;
           const gitUrl = currentIndexedDbSession?.gitUrl || loadedDbSession?.git_url || null;
+          // Self-hosted git hosts (not github.com or gitlab.com) fall through to 'gitlab'
+          // because the prepare API only supports github/gitlab and GitLab API is closer
+          // to what most self-hosted forges expose. No gitUrl → default to 'github'.
           const repoParams = buildPrepareSessionRepoParams({
             repo: resumeRepo,
             platform: !gitUrl || detectGitPlatform(gitUrl) === 'github' ? 'github' : 'gitlab',
