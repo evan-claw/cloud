@@ -6,14 +6,19 @@ import { isOrganizationMember } from '@/lib/organizations/organizations';
 import { getUserFromAuth } from '@/lib/user.server';
 import { platform_integrations } from '@kilocode/db';
 import { and, eq } from 'drizzle-orm';
-import { NextResponse } from 'next/server';
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function errorPage(title: string, message: string, status: number): Response {
+  return new Response(
+    `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<div style="text-align:center">
+  <h1>${title}</h1>
+  <p>${message}</p>
+</div>
+</body></html>`,
+    { status, headers: { 'content-type': 'text/html; charset=utf-8' } }
+  );
 }
 
 /**
@@ -79,15 +84,16 @@ export async function GET(request: Request) {
   const token = url.searchParams.get('token');
 
   if (!token) {
-    return NextResponse.json({ error: 'Missing token parameter' }, { status: 400 });
+    return errorPage('Bad Request', 'Missing token parameter.', 400);
   }
 
   const identity = verifyLinkToken(token);
 
   if (!identity) {
-    return NextResponse.json(
-      { error: 'Invalid or expired link. Please go back to your chat and try again.' },
-      { status: 400 }
+    return errorPage(
+      'Link Expired',
+      'Invalid or expired link. Please go back to your chat and try again.',
+      400
     );
   }
 
@@ -96,20 +102,18 @@ export async function GET(request: Request) {
   if (authFailedResponse) {
     const signInUrl = new URL('/users/sign_in', APP_URL);
     signInUrl.searchParams.set('callbackPath', url.pathname + url.search);
-    return NextResponse.redirect(signInUrl);
+    return Response.redirect(signInUrl.toString());
   }
 
   // Verify the user is allowed to link to this integration
   const access = await verifyIntegrationAccess(identity.platform, identity.teamId, user.id);
   if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: 403 });
+    return errorPage('Access Denied', access.error, 403);
   }
 
   await bot.initialize();
 
   await linkKiloUser(bot.getState(), identity, user.id);
-
-  const platformLabel = escapeHtml(identity.platform);
 
   return new Response(
     `<!DOCTYPE html>
@@ -117,7 +121,7 @@ export async function GET(request: Request) {
 <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
 <div style="text-align:center">
   <h1>Account linked</h1>
-  <p>Your ${platformLabel} account has been linked to your Kilo account.<br>
+  <p>Your ${identity.platform} account has been linked to your Kilo account.<br>
      You can close this tab and @mention Kilo again in your chat.</p>
 </div>
 </body></html>`,
