@@ -28,7 +28,8 @@ import {
   extractFormat,
   type AiSdkReasoningPart,
 } from './reasoning-provider-metadata';
-import type { ChatCompletionChunk, ChatCompletionChunkChoice } from './schemas';
+import type { Phase } from './schemas';
+import { PhaseSchema, type ChatCompletionChunk, type ChatCompletionChunkChoice } from './schemas';
 import { type CustomLlm } from '@kilocode/db/schema';
 import type { OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -292,8 +293,7 @@ function createStreamPartConverter(model: string) {
     switch (part.type) {
       case 'text-end': {
         const rawPhase = part.providerMetadata?.openai?.phase;
-        const phase =
-          rawPhase === 'commentary' || rawPhase === 'final_answer' ? rawPhase : undefined;
+        const phase = PhaseSchema.safeParse(rawPhase).data;
         if (phase === undefined) return null;
         return {
           ...(id !== undefined ? { id } : {}),
@@ -592,11 +592,11 @@ function buildCommonParams(
 
 function extractPhaseFromContent(
   content: Awaited<ReturnType<typeof generateText>>['content']
-): 'commentary' | 'final_answer' | undefined {
+): Phase | undefined {
   for (const part of content) {
     if (part.type === 'text') {
-      const rawPhase = part.providerMetadata?.openai?.phase;
-      if (rawPhase === 'commentary' || rawPhase === 'final_answer') return rawPhase;
+      const phase = PhaseSchema.safeParse(part.providerMetadata?.openai?.phase).data;
+      if (phase) return phase;
     }
   }
   return undefined;
