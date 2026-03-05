@@ -32,7 +32,7 @@ export const parseBodyMiddleware = createMiddleware<HonoContext>(async (c, next)
   // Ensure usage is always returned so background accounting can parse it
   body.stream_options = { ...(body.stream_options ?? {}), include_usage: true };
 
-  const feature = validateFeatureHeader(c.req.header(FEATURE_HEADER) ?? null);
+  const feature = validateFeatureHeader(c.req.header(FEATURE_HEADER) || 'direct-gateway');
   const resolvedModel = body.model.trim().toLowerCase();
 
   c.set('requestBody', body);
