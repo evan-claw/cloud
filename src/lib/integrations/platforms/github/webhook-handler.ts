@@ -11,6 +11,7 @@ import {
   PushEventPayloadSchema,
   PullRequestPayloadSchema,
   IssuePayloadSchema,
+  PullRequestReviewCommentPayloadSchema,
 } from '@/lib/integrations/platforms/github/webhook-schemas';
 import { findIntegrationByInstallationId } from '@/lib/integrations/db/platform-integrations';
 import {
@@ -22,6 +23,7 @@ import {
   handlePushEvent,
   handlePullRequest,
   handleIssue,
+  handlePRReviewComment,
 } from '@/lib/integrations/platforms/github/webhook-handlers';
 import { PLATFORM, GITHUB_EVENT, GITHUB_ACTION } from '@/lib/integrations/core/constants';
 import { logExceptInTest } from '@/lib/utils.server';
@@ -416,6 +418,79 @@ export async function handleGitHubWebhook(
       }
 
       return result;
+    }
+
+    // Handle pull_request_review_comment events
+    if (eventType === GITHUB_EVENT.PULL_REQUEST_REVIEW_COMMENT) {
+      const parseResult = PullRequestReviewCommentPayloadSchema.safeParse(payload);
+      if (!parseResult.success) {
+        logExceptInTest(
+          `Invalid pull_request_review_comment payload${logSuffix}:`,
+          parseResult.error
+        );
+        captureMessage('Invalid GitHub webhook payload structure', {
+          level: 'error',
+          tags: {
+            source: `${sentryPrefix}webhook_validation`,
+            event: 'pull_request_review_comment',
+          },
+          extra: { errors: parseResult.error.issues },
+        });
+        return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+      }
+
+      const action = parseResult.data.action;
+
+      // Only process 'created' actions (new comments)
+      if (action !== GITHUB_ACTION.CREATED) {
+        return NextResponse.json({ message: 'Event received' }, { status: 200 });
+      }
+
+      // Log webhook event
+      const logResult = await logWebhook(integration, action);
+      if (logResult.isDuplicate) {
+        return NextResponse.json({ message: 'Duplicate event' }, { status: 200 });
+      }
+
+      // Process asynchronously to return 200 within GitHub's timeout
+      after(async () => {
+        try {
+          await handlePRReviewComment(parseResult.data, integration);
+          if (logResult.webhookEventId) {
+            await updateWebhookEvent(logResult.webhookEventId, {
+              processed: true,
+              processed_at: new Date().toISOString(),
+              handlers_triggered: ['pr_review_comment_fix'],
+              errors: null,
+            });
+          }
+        } catch (error) {
+          logExceptInTest(`Error handling PR review comment${logSuffix}:`, error);
+          captureException(error, {
+            tags: { source: `${sentryPrefix}webhook_pr_review_comment` },
+          });
+          if (logResult.webhookEventId) {
+            try {
+              await updateWebhookEvent(logResult.webhookEventId, {
+                processed: true,
+                processed_at: new Date().toISOString(),
+                handlers_triggered: ['pr_review_comment_fix'],
+                errors: [
+                  {
+                    message: error instanceof Error ? error.message : String(error),
+                    handler: 'pr_review_comment_fix',
+                    stack: error instanceof Error ? error.stack : undefined,
+                  },
+                ],
+              });
+            } catch {
+              // Best-effort logging
+            }
+          }
+        }
+      });
+
+      return NextResponse.json({ message: 'Event received' }, { status: 200 });
     }
 
     // Handle issues events

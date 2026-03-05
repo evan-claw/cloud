@@ -7,7 +7,7 @@ INTERNAL_API_SECRET=your-secret-here
 # Backend auth token for authenticating incoming requests from backend
 BACKEND_AUTH_TOKEN=your-backend-auth-token
 
-# Cloud agent URL for PR creation execution
-# For local development: use http://127.0.0.1:8788
-# For production: use https://cloud-agent.engineering-e11.workers.dev
-CLOUD_AGENT_URL=http://127.0.0.1:8788
+# Cloud agent URL for auto-fix execution
+# For local development: use http://127.0.0.1:8794
+# For production: use https://cloud-agent-next.kilosessions.ai
+CLOUD_AGENT_URL=http://127.0.0.1:8794

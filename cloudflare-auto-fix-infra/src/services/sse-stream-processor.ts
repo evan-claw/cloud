@@ -143,11 +143,16 @@ export class SSEStreamProcessor {
               }
 
               // Handle error event
+              // Note: cloud-agent SystemErrorEvent uses 'error' field, not 'message'
               if (event.streamEventType === 'error') {
                 metrics.errorEvents++;
-                const errorMessage =
-                  typeof event.message === 'string' ? event.message : 'Unknown error';
-                const error = new Error(`Stream error: ${errorMessage}`);
+                const errorDetail =
+                  typeof event.error === 'string'
+                    ? event.error
+                    : typeof event.message === 'string'
+                      ? event.message
+                      : 'Unknown error';
+                const error = new Error(`Stream error: ${errorDetail}`);
 
                 // Log the error event details for debugging
                 console.warn('[SSEStreamProcessor] Error event received', {
