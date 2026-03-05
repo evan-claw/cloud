@@ -13,7 +13,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-03-05',
     description:
-      'Switched tool profile from "messaging" to "full". New deploys now have access to all tools including exec, filesystem, web search, and messaging. Existing instances pick up the change on next restart.',
+      'New deploys now default to the "full" tool profile, giving agents access to all tools including exec, filesystem, web search, and messaging. Existing instances can change their profile in the Control UI under Settings > Config > Tools > Tool Profile.',
     category: 'feature',
     deployHint: 'redeploy_suggested',
   },
