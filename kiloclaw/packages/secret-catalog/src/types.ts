@@ -35,7 +35,7 @@ export type SecretCatalogEntry = {
   label: string;
   category: SecretCategory;
   icon: SecretIconKey; // typed union, resolved to React component at UI layer
-  fields: SecretFieldDefinition[];
+  fields: readonly SecretFieldDefinition[];
   helpText?: string;
   helpUrl?: string;
   allFieldsRequired?: boolean; // e.g. Slack needs both bot + app tokens

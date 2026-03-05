@@ -19,7 +19,7 @@ export const SECRET_CATALOG: readonly SecretCatalogEntry[] = [
         placeholder: '123456:ABC-DEF...',
         placeholderConfigured: 'Enter new token to replace',
         envVar: 'TELEGRAM_BOT_TOKEN',
-        validationPattern: '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$',
+        validationPattern: '^\\d{8,}:[A-Za-z0-9_-]{30,50}$',
         validationMessage:
           'Telegram tokens look like 123456789:ABCDefGhIJKlmn... (digits, colon, then letters/numbers).',
         maxLength: 100,

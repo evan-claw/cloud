@@ -143,12 +143,12 @@ describe('Secret Catalog', () => {
 
   describe('validateFieldValue', () => {
     it('accepts valid Telegram tokens', () => {
-      const pattern = '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$';
+      const pattern = '^\\d{8,}:[A-Za-z0-9_-]{30,50}$';
       expect(validateFieldValue('123456789:ABCDefGhIJKlmnOPQrstUVWXYZ123456', pattern)).toBe(true);
     });
 
     it('rejects invalid Telegram tokens', () => {
-      const pattern = '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$';
+      const pattern = '^\\d{8,}:[A-Za-z0-9_-]{30,50}$';
       expect(validateFieldValue('invalid', pattern)).toBe(false);
       expect(validateFieldValue('123:short', pattern)).toBe(false);
     });
@@ -194,17 +194,17 @@ describe('Secret Catalog', () => {
     });
 
     it('rejects empty strings', () => {
-      const pattern = '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$';
+      const pattern = '^\\d{8,}:[A-Za-z0-9_-]{30,50}$';
       expect(validateFieldValue('', pattern)).toBe(false);
     });
 
     it('accepts null (no validation needed)', () => {
-      const pattern = '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$';
+      const pattern = '^\\d{8,}:[A-Za-z0-9_-]{30,50}$';
       expect(validateFieldValue(null, pattern)).toBe(true);
     });
 
     it('accepts undefined (no validation needed)', () => {
-      const pattern = '^\\d{8,10}:[A-Za-z0-9_-]{30,50}$';
+      const pattern = '^\\d{8,}:[A-Za-z0-9_-]{30,50}$';
       expect(validateFieldValue(undefined, pattern)).toBe(true);
     });
 
