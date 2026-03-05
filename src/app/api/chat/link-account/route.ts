@@ -97,6 +97,10 @@ export async function GET(request: Request) {
     );
   }
 
+  // TODO(remon): Remove this hack once we've replaced the old slack integration
+  let platform = identity.platform;
+  if (identity.platform === 'slack') platform = 'slack-next';
+
   // Authenticate — redirect to sign-in if no session, then back here
   const { user, authFailedResponse } = await getUserFromAuth({ adminOnly: false });
   if (authFailedResponse) {
@@ -106,7 +110,7 @@ export async function GET(request: Request) {
   }
 
   // Verify the user is allowed to link to this integration
-  const access = await verifyIntegrationAccess(identity.platform, identity.teamId, user.id);
+  const access = await verifyIntegrationAccess(platform, identity.teamId, user.id);
   if (!access.ok) {
     return errorPage('Access Denied', access.error, 403);
   }
