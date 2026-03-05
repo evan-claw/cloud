@@ -176,14 +176,15 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const authToken = generateCloudAgentToken(ctx.user);
-      const githubToken = await getGitHubTokenForOrganization(input.organizationId);
       const client = createCloudAgentNextClient(authToken);
 
+      // No token fetch needed: prepare and initiate happen back-to-back,
+      // so tokens stored during prepareSession are still fresh.
+      // The DO refreshes GitHub App installation tokens internally.
       try {
         return await client.initiateFromPreparedSession({
           cloudAgentSessionId: input.cloudAgentSessionId,
           kilocodeOrganizationId: input.organizationId,
-          githubToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
@@ -202,15 +203,32 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const authToken = generateCloudAgentToken(ctx.user);
-      const githubToken = await getGitHubTokenForOrganization(input.organizationId);
       const client = createCloudAgentNextClient(authToken);
 
-      const { organizationId: _organizationId, ...messageInput } = input;
+      const { organizationId, ...messageInput } = input;
+
+      // Determine platform to fetch the correct token
+      const session = await client.getSession(messageInput.cloudAgentSessionId);
+      let githubToken: string | undefined;
+      let gitToken: string | undefined;
+
+      if (session.platform === 'gitlab') {
+        gitToken = await getGitLabTokenForOrganization(organizationId);
+        if (!gitToken) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No GitLab integration found. Please connect your GitLab account first.',
+          });
+        }
+      } else {
+        githubToken = await getGitHubTokenForOrganization(organizationId);
+      }
 
       try {
         return await client.sendMessage({
           ...messageInput,
           githubToken,
+          gitToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
