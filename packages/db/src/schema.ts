@@ -58,10 +58,10 @@ import type {
   OpenRouterModel,
   StripeSubscriptionStatus,
   OpenCodeSettings,
-  ReasoningEffort,
   Tool,
-  Verbosity,
   StoredModel,
+  CustomLlmExtraBody,
+  CustomLlmProvider,
 } from './schema-types';
 import type { AnyPgColumn as DrizzleAnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -887,7 +887,7 @@ export const custom_llm = pgTable('custom_llm', {
   context_length: integer().notNull(),
   max_completion_tokens: integer().notNull(),
   internal_id: text().notNull(),
-  provider: text().notNull().$type<'anthropic' | 'openai'>(),
+  provider: text().notNull().$type<CustomLlmProvider>(),
   base_url: text().notNull(),
   api_key: text().notNull(),
   organization_ids: jsonb().notNull().$type<string[]>(),
@@ -896,12 +896,7 @@ export const custom_llm = pgTable('custom_llm', {
   supports_image_input: boolean(),
   force_reasoning: boolean(),
   opencode_settings: jsonb().$type<OpenCodeSettings>(),
-
-  /** @deprecated use opencode_settings instead */
-  verbosity: text().$type<Verbosity>(),
-
-  /** @deprecated use opencode_settings instead */
-  reasoning_effort: text().$type<ReasoningEffort>(),
+  extra_body: jsonb().$type<CustomLlmExtraBody>(),
 });
 
 export type CustomLlm = typeof custom_llm.$inferSelect;

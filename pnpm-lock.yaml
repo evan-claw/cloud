@@ -87,6 +87,9 @@ importers:
       '@ai-sdk/openai':
         specifier: ^3.0.37
         version: 3.0.37(zod@4.3.6)
+      '@ai-sdk/openai-compatible':
+        specifier: ^2.0.31
+        version: 2.0.31(zod@4.3.6)
       '@aws-sdk/client-s3':
         specifier: ^3.980.0
         version: 3.980.0
@@ -1592,6 +1595,12 @@ packages:
 
   '@ai-sdk/mistral@3.0.21':
     resolution: {integrity: sha512-GhLRyfXghnKpt51t8ELU3cXwbCUcGOxZFUQFUZvNBt+y298PlOhaAK6pQtihfpNRGUycrdNotKwVajJm0a6uwg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai-compatible@2.0.31':
+    resolution: {integrity: sha512-e78xiImcTe2aCMQoFbVJluQmUV4XgahOmmehAuRPlcwzRv2KtkvuLCXPC9Xcy2u83e8SimVva9k9G8SvZcnaBA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -11802,6 +11811,12 @@ snapshots:
       zod: 4.3.6
 
   '@ai-sdk/mistral@3.0.21(zod@4.3.6)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.16(zod@4.3.6)
+      zod: 4.3.6
+
+  '@ai-sdk/openai-compatible@2.0.31(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.16(zod@4.3.6)
