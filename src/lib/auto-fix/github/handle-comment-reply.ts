@@ -65,6 +65,8 @@ export function sanitizePublicErrorMessage(raw: string): string {
       .replace(/(\n\s+at\s.+)+/g, '\n(stack trace omitted)')
       // strip URLs that aren't github.com
       .replace(/https?:\/\/(?!github\.com)[^\s)]+/g, '[internal-url]')
+      // redact absolute file paths that may leak infra layout
+      .replace(/\/(?:home|var|tmp|usr|opt|etc|root|srv)\/[^\s)]+/g, '[internal-path]')
       .slice(0, PUBLIC_ERROR_MAX_LENGTH)
   );
 }
