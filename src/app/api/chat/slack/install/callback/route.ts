@@ -5,8 +5,18 @@ import { INTEGRATION_STATUS, PLATFORM } from '@/lib/integrations/core/constants'
 import { getUserFromAuth } from '@/lib/user.server';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { platform_integrations } from '@kilocode/db';
+import { captureException } from '@sentry/nextjs';
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+
+async function hasPlatformIntegrationForAccountId(platformAccountId: string) {
+  return !!(await db.query.platform_integrations.findFirst({
+    where: and(
+      eq(platform_integrations.platform, 'slack-next'),
+      eq(platform_integrations.platform_account_id, platformAccountId)
+    ),
+  }));
+}
 
 export async function GET(request: Request) {
   const { user, authFailedResponse } = await getUserFromAuth({ adminOnly: false });
@@ -25,6 +35,27 @@ export async function GET(request: Request) {
 
   const { teamId, installation } = await slackAdapter.handleOAuthCallback(patchedRequest);
 
+  if (await hasPlatformIntegrationForAccountId(teamId)) {
+    captureException(new Error('Slack already installed for other kilo organization/user'), {
+      extra: { teamId, userId: user.id },
+    });
+
+    await slackAdapter.deleteInstallation(teamId);
+
+    return new Response(
+      `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Slack Already Installed</title></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<div style="text-align:center">
+  <h1>Slack workspace already connected</h1>
+  <p>This Slack workspace is already installed for another entity in Kilo.</p>
+  <p>Please reach out to <a href="mailto:hi@kilocode.ai">hi@kilocode.ai</a> for support.</p>
+</div>
+</body></html>`,
+      { headers: { 'content-type': 'text/html; charset=utf-8' } }
+    );
+  }
+
   // TODO: HMAC-sign the state parameter when generating the install URL
   // and verify the signature here to prevent CSRF / tampering.
   const state = url?.searchParams.get('state');
@@ -33,9 +64,6 @@ export async function GET(request: Request) {
     const orgId = state.replace('org_', '');
     await ensureOrganizationAccess({ user }, orgId);
 
-    // TODO: Reconsider blindly deleting the existing integration on re-install.
-    // We also need to handle the case where a teamId was previously installed
-    // for a personal account and is now being re-installed for an org (or vice versa).
     await db.transaction(async tx => {
       await tx
         .delete(platform_integrations)
