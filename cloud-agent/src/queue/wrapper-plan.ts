@@ -8,6 +8,7 @@ export function buildWrapperArgs(params: {
   condenseOnComplete?: boolean;
   idleTimeoutMs?: number;
   appendSystemPromptFile?: string;
+  variant?: string;
 }): string[] {
   const wrapperPath = '/usr/local/bin/kilocode-wrapper.js';
   const args = [
@@ -28,6 +29,9 @@ export function buildWrapperArgs(params: {
   }
   if (params.appendSystemPromptFile) {
     args.push(`--append-system-prompt-file=${params.appendSystemPromptFile}`);
+  }
+  if (params.variant) {
+    args.push(`--variant=${params.variant}`);
   }
   return args;
 }

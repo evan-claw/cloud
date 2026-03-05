@@ -655,6 +655,7 @@ export class CloudAgentSession extends DurableObject {
     prompt: string;
     mode: string;
     model: string;
+    variant?: string;
     kilocodeToken?: string;
     githubRepo?: string;
     githubToken?: string;
@@ -716,6 +717,7 @@ export class CloudAgentSession extends DurableObject {
   async tryUpdate(updates: {
     mode?: string | null;
     model?: string | null;
+    variant?: string | null;
     githubToken?: string | null;
     gitToken?: string | null;
     autoCommit?: boolean | null;
@@ -1317,6 +1319,7 @@ export class CloudAgentSession extends DurableObject {
     userId: string;
     orgId?: string;
     mode: string;
+    variant?: string;
     autoCommit?: boolean;
     condenseOnComplete?: boolean;
     appendSystemPrompt?: string;
@@ -1341,6 +1344,7 @@ export class CloudAgentSession extends DurableObject {
       condenseOnComplete: params.condenseOnComplete,
       idleTimeoutMs: this.getWrapperIdleTimeoutMs(),
       appendSystemPromptFile,
+      variant: params.variant,
     });
     const wrapperEnv = buildWrapperEnvBase({
       sessionId: params.sessionId,
@@ -1505,6 +1509,7 @@ export class CloudAgentSession extends DurableObject {
             userId: request.userId,
             orgId: request.orgId,
             mode: request.mode,
+            variant: request.variant,
             autoCommit: request.autoCommit,
             condenseOnComplete: request.condenseOnComplete,
             appendSystemPrompt: request.appendSystemPrompt,
@@ -1590,6 +1595,7 @@ export class CloudAgentSession extends DurableObject {
             userId: metadata.userId,
             orgId: metadata.orgId,
             mode: metadata.mode as ExecutionMode,
+            variant: metadata.variant,
             autoCommit: metadata.autoCommit,
             condenseOnComplete: metadata.condenseOnComplete,
             appendSystemPrompt: metadata.appendSystemPrompt,
@@ -1625,6 +1631,7 @@ export class CloudAgentSession extends DurableObject {
 
       const mode = (request.mode ?? metadata.mode ?? 'code') as ExecutionMode;
       const model = request.model ?? metadata.model;
+      const variant = request.variant ?? metadata.variant;
       if (!model) {
         return this.buildStartError(
           'BAD_REQUEST',
@@ -1674,6 +1681,7 @@ export class CloudAgentSession extends DurableObject {
           userId: metadata.userId,
           orgId: metadata.orgId,
           mode,
+          variant,
           autoCommit: request.autoCommit ?? metadata.autoCommit,
           condenseOnComplete: request.condenseOnComplete ?? metadata.condenseOnComplete,
           appendSystemPrompt: resolvedAppendSystemPrompt,

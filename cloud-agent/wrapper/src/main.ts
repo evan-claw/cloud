@@ -17,6 +17,7 @@ const { values: args } = parseArgs({
     'condense-on-complete': { type: 'boolean', default: false },
     'idle-timeout': { type: 'string', default: '240000' },
     'append-system-prompt-file': { type: 'string' },
+    variant: { type: 'string' },
   },
   strict: true,
 });
@@ -41,6 +42,7 @@ async function main() {
   const condenseOnComplete = args['condense-on-complete'] ?? false;
   const idleTimeoutMs = parseInt(args['idle-timeout'] ?? '240000', 10);
   const appendSystemPromptFile = args['append-system-prompt-file'];
+  const variant = args['variant'];
 
   // Validate required args
   if (!executionId || !ingestToken || !mode || !promptFile) {
@@ -109,7 +111,10 @@ async function main() {
     logToFile(`appendSystemPromptFile=${appendSystemPromptFile}`);
   }
 
-  // 3. Start kilocode
+  // 3. Start kilocode (with retry logic for early variant failures)
+  const startTime = Date.now();
+  let shouldRetryWithoutVariant = false;
+  
   runner = createKilocodeRunner({
     mode,
     prompt,
@@ -117,6 +122,7 @@ async function main() {
     kiloSessionId,
     idleTimeoutMs,
     appendSystemPromptFile,
+    variant,
     onEvent: event => connection.send(event),
     onTerminalEvent: reason => {
       sentFatalError = true;
@@ -128,7 +134,7 @@ async function main() {
       });
     },
   });
-  logToFile('kilocode runner started');
+  logToFile(`kilocode runner started${variant ? ` with variant=${variant}` : ''}`);
 
   // Handle commands from DO
   connection.onCommand(cmd => {
@@ -152,10 +158,63 @@ async function main() {
   });
 
   // 4. Wait for kilocode to finish
-  const result = await runner.wait();
+  let result = await runner.wait();
+  const executionDuration = Date.now() - startTime;
   logToFile(
-    `kilocode runner exit code=${result.exitCode} signal=${result.signal ?? 'none'} wasKilled=${result.wasKilled}`
+    `kilocode runner exit code=${result.exitCode} signal=${result.signal ?? 'none'} wasKilled=${result.wasKilled} duration=${executionDuration}ms`
   );
+
+  // 5. Check if we should retry without variant on early failure
+  // Early failure = non-zero exit within 10 seconds, not killed, and variant was provided
+  const EARLY_FAILURE_THRESHOLD_MS = 10_000;
+  if (
+    variant &&
+    result.exitCode !== 0 &&
+    !result.wasKilled &&
+    executionDuration < EARLY_FAILURE_THRESHOLD_MS
+  ) {
+    shouldRetryWithoutVariant = true;
+    logToFile(
+      `early CLI failure detected (${executionDuration}ms) - retrying without variant`
+    );
+    connection.send({
+      streamEventType: 'output',
+      data: {
+        content: `Early CLI failure detected with variant '${variant}' - retrying without variant...`,
+        source: 'stderr',
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    // Retry without variant
+    const retryStartTime = Date.now();
+    runner = createKilocodeRunner({
+      mode,
+      prompt,
+      workspacePath,
+      kiloSessionId,
+      idleTimeoutMs,
+      appendSystemPromptFile,
+      variant: undefined, // Remove variant for retry
+      onEvent: event => connection.send(event),
+      onTerminalEvent: reason => {
+        sentFatalError = true;
+        logToFile(`terminal event reason=${reason}`);
+        connection.send({
+          streamEventType: 'error',
+          data: { error: reason, fatal: true },
+          timestamp: new Date().toISOString(),
+        });
+      },
+    });
+    logToFile('kilocode runner restarted without variant');
+
+    result = await runner.wait();
+    const retryDuration = Date.now() - retryStartTime;
+    logToFile(
+      `kilocode retry exit code=${result.exitCode} signal=${result.signal ?? 'none'} wasKilled=${result.wasKilled} duration=${retryDuration}ms`
+    );
+  }
 
   // 5. Check if the process was killed/interrupted
   const wasInterrupted = result.wasKilled || result.signal !== null;

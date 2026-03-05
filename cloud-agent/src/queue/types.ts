@@ -146,6 +146,7 @@ export type StartExecutionV2Request =
       prompt: string;
       mode: ExecutionMode;
       model: string;
+      variant?: string;
       githubRepo?: string;
       githubToken?: string;
       gitUrl?: string;
@@ -174,6 +175,7 @@ export type StartExecutionV2Request =
       prompt: string;
       mode?: ExecutionMode;
       model?: string;
+      variant?: string;
       autoCommit?: boolean;
       condenseOnComplete?: boolean;
       appendSystemPrompt?: string;

@@ -9,6 +9,7 @@ export type RunnerOptions = {
   kiloSessionId?: string;
   idleTimeoutMs: number;
   appendSystemPromptFile?: string;
+  variant?: string;
   onEvent: (event: IngestEvent) => void;
   onTerminalEvent: (reason: string) => void;
 };
@@ -44,6 +45,14 @@ export function createKilocodeRunner(opts: RunnerOptions): KilocodeRunner {
 
   if (opts.appendSystemPromptFile) {
     args.push('--append-system-prompt-file', opts.appendSystemPromptFile);
+  }
+
+  if (opts.variant) {
+    // Validate variant format (alphanumeric only)
+    if (!/^[a-zA-Z]+$/.test(opts.variant)) {
+      throw new Error(`Invalid variant: ${opts.variant}`);
+    }
+    args.push('--variant', opts.variant);
   }
 
   const proc = spawn('kilocode', args, { stdio: ['pipe', 'pipe', 'pipe'] });
