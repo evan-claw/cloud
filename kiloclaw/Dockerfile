@@ -56,7 +56,8 @@ RUN npm install -g @steipete/summarize@0.11.1
 
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
-RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+RUN ARCH="$(dpkg --print-architecture)" \
+    && curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz -o /tmp/go.tar.gz \
     && tar -xzf /tmp/go.tar.gz -C /usr/local \
     && rm /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:/root/go/bin:$PATH"
