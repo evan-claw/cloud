@@ -85,10 +85,21 @@ describe('generateBaseConfig', () => {
     // No default model override when env var not set
     expect(config.agents).toBeUndefined();
 
+    // Tool profile
+    expect(config.tools.profile).toBe('full');
+
     // Exec
     expect(config.tools.exec.host).toBe('gateway');
     expect(config.tools.exec.security).toBe('allowlist');
     expect(config.tools.exec.ask).toBe('on-miss');
+  });
+
+  it('always sets tool profile to full on restore', () => {
+    const existing = JSON.stringify({ tools: { profile: 'coding' } });
+    const { deps } = fakeDeps(existing);
+    const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
+
+    expect(config.tools.profile).toBe('full');
   });
 
   it('preserves existing config keys not touched by the patch', () => {

@@ -13,6 +13,13 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-03-05',
     description:
+      'New deploys now default to the "full" tool profile, giving agents access to all tools including exec, filesystem, web search, and messaging. Existing instances can change their profile in the Control UI under Settings > Config > Tools > Tool Profile.',
+    category: 'feature',
+    deployHint: 'redeploy_suggested',
+  },
+  {
+    date: '2026-03-05',
+    description:
       'Added Go 1.26, gog (gogcli), goplaces, blogwatcher, xurl, gifgrep, and summarize to the default image. Go is available at runtime for installing additional tools via `go install`.',
     category: 'feature',
     deployHint: 'redeploy_suggested',
