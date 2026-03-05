@@ -33,11 +33,10 @@ export async function promptLinkAccount(
   message: Message,
   identity: PlatformIdentity
 ): Promise<void> {
-  const linkUrl = buildLinkAccountUrl(identity);
-  const card = linkAccountCard(linkUrl);
-  const opts = { fallbackToDM: true } as const;
-
   // Post to the channel when the @mention is top-level, otherwise into the thread.
   const target = isChannelLevelMessage(thread, message) ? thread.channel : thread;
-  await target.postEphemeral(message.author, card, opts);
+
+  await target.postEphemeral(message.author, linkAccountCard(buildLinkAccountUrl(identity)), {
+    fallbackToDM: true,
+  });
 }
