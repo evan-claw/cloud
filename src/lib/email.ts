@@ -53,6 +53,7 @@ const teamplates = {
   ossInviteExistingUser: '19',
   ossExistingOrgProvisioned: '20',
   deployFailed: '21',
+  orgEnterpriseSubscription: '22',
 } as const;
 
 type Template = (typeof teamplates)[keyof typeof teamplates];
@@ -102,6 +103,13 @@ export async function sendOrgRenewedEmail(to: string, props: Props) {
 
 export async function sendOrgSubscriptionEmail(to: string, props: Props) {
   return sendOrgEmail(teamplates.orgSubscription, to, props);
+}
+
+export async function sendOrgEnterpriseSubscriptionEmail(
+  to: string,
+  props: Omit<Props, 'seatCount'>
+) {
+  return sendOrgEmail(teamplates.orgEnterpriseSubscription, to, props);
 }
 
 export async function sendOrganizationInviteEmail(data: OrganizationInviteEmailData) {
