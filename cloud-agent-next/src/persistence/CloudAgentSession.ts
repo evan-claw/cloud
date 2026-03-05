@@ -1210,10 +1210,10 @@ export class CloudAgentSession extends DurableObject {
    * to every 30 s by the ingest handler) while an execution is running.
    */
   private async keepContainerAlive(): Promise<void> {
-    const metadata = await this.getMetadata();
-    if (!metadata) return;
-
     try {
+      const metadata = await this.getMetadata();
+      if (!metadata) return;
+
       const sandboxId = await generateSandboxId(metadata.orgId, metadata.userId, metadata.botId);
       const sandbox = getSandbox((this.env as unknown as WorkerEnv).Sandbox, sandboxId);
       await sandbox.setSleepAfter(SANDBOX_SLEEP_AFTER_SECONDS);
