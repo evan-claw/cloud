@@ -67,7 +67,7 @@ export function estimateChatTokens(body: OpenRouterChatCompletionRequest): {
           (c): c is { type: 'text'; text: string } =>
             typeof c === 'object' && c !== null && 'type' in c && c.type === 'text'
         )
-        .reduce((l, c) => l + c.text.length + 1, 0);
+        .reduce((l, c) => l + (c.text ?? '').length + 1, 0);
       return sum + textLength;
     }
     return sum;
