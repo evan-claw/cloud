@@ -31,6 +31,8 @@ import {
 } from '@/lib/integrations/platforms/gitlab/webhook-sync';
 import { getValidGitLabToken } from '@/lib/integrations/gitlab-service';
 import { logExceptInTest } from '@/lib/utils.server';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
+import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 
 const PlatformSchema = z.enum(['github', 'gitlab']).default('github');
 
@@ -162,9 +164,17 @@ export const organizationReviewAgentRouter = createTRPCRouter({
    */
   getReviewConfig: organizationMemberProcedure
     .input(OrganizationIdInputSchema.extend({ platform: PlatformSchema }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const platform = input.platform ?? 'github';
-      const config = await getAgentConfig(input.organizationId, 'code_review', platform);
+      // Resolve bot user for flag evaluation — same identity used at dispatch time
+      const [config, botUserId] = await Promise.all([
+        getAgentConfig(input.organizationId, 'code_review', platform),
+        getBotUserId(input.organizationId, 'code-review'),
+      ]);
+      const flagDistinctId = botUserId ?? ctx.user.id;
+      const isCloudAgentNextEnabled =
+        process.env.NODE_ENV === 'development' ||
+        (await isFeatureFlagEnabled('code-review-cloud-agent-next', flagDistinctId));
 
       if (!config) {
         // Return default configuration
@@ -179,6 +189,7 @@ export const organizationReviewAgentRouter = createTRPCRouter({
           repositorySelectionMode: 'all' as const,
           selectedRepositoryIds: [],
           manuallyAddedRepositories: [],
+          isCloudAgentNextEnabled,
         };
       }
 
@@ -194,6 +205,7 @@ export const organizationReviewAgentRouter = createTRPCRouter({
         repositorySelectionMode: cfg.repository_selection_mode || 'all',
         selectedRepositoryIds: cfg.selected_repository_ids || [],
         manuallyAddedRepositories: cfg.manually_added_repositories || [],
+        isCloudAgentNextEnabled,
       };
     }),
 

@@ -148,6 +148,7 @@ export async function POST(
       cliSessionId,
       status,
       hasError: !!errorMessage,
+      ...(errorMessage ? { errorMessage } : {}),
     });
 
     // Get current review to check if update is needed

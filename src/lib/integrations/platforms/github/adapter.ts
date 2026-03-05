@@ -267,6 +267,56 @@ export async function addReactionToPR(
 }
 
 /**
+ * Adds a reaction to a PR review comment
+ * Used to acknowledge @kilo fix mentions on inline review comments
+ * @param appType - The type of GitHub App to use (defaults to 'standard')
+ */
+export async function addReactionToPRReviewComment(
+  installationId: string,
+  owner: string,
+  repo: string,
+  commentId: number,
+  reaction: 'eyes' | '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket',
+  appType: GitHubAppType = 'standard'
+): Promise<void> {
+  const tokenData = await generateGitHubInstallationToken(installationId, appType);
+  const octokit = new Octokit({ auth: tokenData.token });
+
+  await octokit.reactions.createForPullRequestReviewComment({
+    owner,
+    repo,
+    comment_id: commentId,
+    content: reaction,
+  });
+}
+
+/**
+ * Replies to a PR review comment thread
+ * Used by auto-fix to post completion/failure replies on review threads
+ * @param appType - The type of GitHub App to use (defaults to 'standard')
+ */
+export async function replyToReviewComment(
+  installationId: string,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  commentId: number,
+  body: string,
+  appType: GitHubAppType = 'standard'
+): Promise<void> {
+  const tokenData = await generateGitHubInstallationToken(installationId, appType);
+  const octokit = new Octokit({ auth: tokenData.token });
+
+  await octokit.pulls.createReplyForReviewComment({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    comment_id: commentId,
+    body,
+  });
+}
+
+/**
  * Exchange GitHub OAuth code for user information
  * Used during installation request flow to identify the GitHub user
  * @param appType - The type of GitHub App to use (defaults to 'standard')

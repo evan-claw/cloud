@@ -194,7 +194,6 @@ async function spawnCloudAgentSession(
       createdOnPlatform: 'discord',
     },
     initiateInput: {
-      githubToken,
       kilocodeOrganizationId,
     },
     ticketPayload: {

@@ -275,5 +275,15 @@ describe('organization auto-top-up router', () => {
       expect(result.redirectUrl).toBeDefined();
       expect(typeof result.redirectUrl).toBe('string');
     });
+
+    it('rejects invalid amountCents', async () => {
+      const caller = await createCallerForUser(ownerUser.id);
+      const promise = caller.organizations.autoTopUp.changePaymentMethod({
+        organizationId: testOrg.id,
+        // @ts-expect-error testing runtime validation with an invalid amountCents value
+        amountCents: 1234,
+      });
+      await expect(promise).rejects.toThrow(/amountCents/i);
+    });
   });
 });

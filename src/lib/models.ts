@@ -15,9 +15,7 @@ import { kimi_k25_free_model } from '@/lib/providers/moonshotai';
 import { grok_code_fast_1_optimized_free_model } from '@/lib/providers/xai';
 import { zai_glm5_free_model } from '@/lib/providers/zai';
 
-export const DEFAULT_MODEL_CHOICES = [CLAUDE_SONNET_CURRENT_MODEL_ID, CLAUDE_OPUS_CURRENT_MODEL_ID];
-
-export const PRIMARY_DEFAULT_MODEL = DEFAULT_MODEL_CHOICES[0];
+export const PRIMARY_DEFAULT_MODEL = CLAUDE_SONNET_CURRENT_MODEL_ID;
 
 export const preferredModels = [
   KILO_AUTO_FRONTIER_MODEL.id,
@@ -34,10 +32,6 @@ export const preferredModels = [
   'z-ai/glm-5',
   'x-ai/grok-code-fast-1',
 ].filter(m => m !== null);
-
-export function getFirstFreeModel() {
-  return preferredModels.find(m => isFreeModel(m)) ?? PRIMARY_DEFAULT_MODEL;
-}
 
 export function isFreeModel(model: string): boolean {
   return (

@@ -14,11 +14,7 @@
 import { WrapperState } from './state.js';
 import { createKiloClient } from './kilo-client.js';
 import { createConnectionManager } from './connection.js';
-import {
-  createLifecycleManager,
-  DEFAULT_INFLIGHT_TIMEOUT_MS,
-  DEFAULT_IDLE_TIMEOUT_MS,
-} from './lifecycle.js';
+import { createLifecycleManager, DEFAULT_INFLIGHT_TIMEOUT_MS } from './lifecycle.js';
 import { createServer } from './server.js';
 import { logToFile } from './utils.js';
 import type { WrapperCommand } from '../../src/shared/protocol.js';
@@ -73,7 +69,7 @@ function getOptionalEnvBool(name: string, defaultValue: boolean): boolean {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  logToFile('wrapper starting (long-running mode)');
+  logToFile(`wrapper starting (long-running mode) bun=${Bun.version}`);
 
   // Parse environment variables
   const wrapperPort = getOptionalEnvInt('WRAPPER_PORT', 5000);
@@ -93,7 +89,6 @@ async function main() {
   const model = getOptionalEnv('MODEL', '');
 
   const maxRuntimeMs = getOptionalEnvInt('MAX_RUNTIME_MS', DEFAULT_INFLIGHT_TIMEOUT_MS);
-  const idleTimeoutMs = getOptionalEnvInt('IDLE_TIMEOUT_MS', DEFAULT_IDLE_TIMEOUT_MS);
 
   // Set log path if not already set
   if (!process.env.WRAPPER_LOG_PATH) {
@@ -107,7 +102,7 @@ async function main() {
     logToFile(`config: agentSession=${agentSessionId}`);
   }
   logToFile(
-    `config: autoCommit=${autoCommit} condenseOnComplete=${condenseOnComplete} maxRuntimeMs=${maxRuntimeMs} idleTimeoutMs=${idleTimeoutMs}`
+    `config: autoCommit=${autoCommit} condenseOnComplete=${condenseOnComplete} maxRuntimeMs=${maxRuntimeMs}`
   );
 
   // Create state
@@ -212,7 +207,6 @@ async function main() {
   lifecycleManagerRef.current = createLifecycleManager(
     {
       maxRuntimeMs,
-      idleTimeoutMs,
       autoCommit,
       condenseOnComplete,
       workspacePath,

@@ -37,7 +37,12 @@ import type OpenAI from 'openai';
 import crypto from 'crypto';
 import { db } from '@/lib/drizzle';
 import { inArray } from 'drizzle-orm';
-import { ReasoningEffortSchema, VerbositySchema } from '@kilocode/db/schema-types';
+import {
+  CustomLlmExtraBodySchema,
+  ReasoningEffortSchema,
+  VerbositySchema,
+} from '@kilocode/db/schema-types';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 
 function convertMessages(messages: OpenRouterChatCompletionsInput): ModelMessage[] {
   const toolNameByCallId = new Map<string, string>();
@@ -566,10 +571,8 @@ function buildCommonParams(
   request: OpenRouterChatCompletionRequest,
   isLegacyExtension: boolean
 ) {
-  const verbosity = VerbositySchema.safeParse(request.verbosity ?? customLlm.verbosity).data;
-  const reasoningEffort = ReasoningEffortSchema.safeParse(
-    request.reasoning?.effort ?? customLlm.reasoning_effort
-  ).data;
+  const verbosity = VerbositySchema.safeParse(request.verbosity).data;
+  const reasoningEffort = ReasoningEffortSchema.safeParse(request.reasoning?.effort).data;
   return {
     messages,
     tools: convertTools(request.tools),
@@ -678,6 +681,18 @@ function createModel(customLlm: CustomLlm, userId: string, taskId: string | unde
           : undefined,
     });
     return openai(customLlm.internal_id);
+  }
+  if (customLlm.provider === 'openai-compatible') {
+    const openaiCompatible = createOpenAICompatible({
+      name: 'openaiCompatible',
+      apiKey: customLlm.api_key,
+      baseURL: customLlm.base_url,
+      transformRequestBody: body => {
+        const extraBody = CustomLlmExtraBodySchema.safeParse(customLlm.extra_body).data;
+        return { ...body, ...extraBody };
+      },
+    });
+    return openaiCompatible(customLlm.internal_id);
   }
   throw new Error(`Unknown provider: ${customLlm.provider}`);
 }

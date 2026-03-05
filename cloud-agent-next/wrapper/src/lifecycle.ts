@@ -3,7 +3,7 @@
  *
  * Handles:
  * - Inflight expiry (per-message timeout)
- * - Idle timeout (session-level cleanup)
+ * - SSE health monitoring (inactivity and initial connection timeouts)
  * - Drain period (grace period before closing connections)
  * - Auto-commit and condense on completion
  */
@@ -22,17 +22,11 @@ import { logToFile } from './utils.js';
 /** Interval for checking inflight expiry (5 seconds) */
 const INFLIGHT_CHECK_INTERVAL_MS = 5_000;
 
-/** Interval for checking idle timeout (10 seconds) */
-const IDLE_CHECK_INTERVAL_MS = 10_000;
-
 /** Grace period before closing connections after inflight hits 0 (250ms) */
 const DRAIN_DELAY_MS = 250;
 
 /** Default per-message timeout if MAX_RUNTIME_MS not set (30 minutes) */
 export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_800_000;
-
-/** Default idle timeout if IDLE_TIMEOUT_MS not set (2 minutes) */
-export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
 
 /** SSE inactivity timeout - if no SSE events for this long while active, assume broken (2 minutes) */
 const SSE_INACTIVITY_TIMEOUT_MS = 120_000;
@@ -47,8 +41,6 @@ const AUTO_COMMIT_TIMEOUT_MS = 120_000;
 export type LifecycleConfig = {
   /** Per-message deadline timeout (from MAX_RUNTIME_MS env var) */
   maxRuntimeMs: number;
-  /** Session-level idle timeout (from IDLE_TIMEOUT_MS env var) */
-  idleTimeoutMs: number;
   /** Enable auto-commit on completion */
   autoCommit: boolean;
   /** Enable condense on completion */
@@ -97,7 +89,6 @@ export function createLifecycleManager(
   const { state, kiloClient, connectionManager } = deps;
 
   let inflightCheckInterval: ReturnType<typeof setInterval> | null = null;
-  let idleCheckInterval: ReturnType<typeof setInterval> | null = null;
   let drainTimeout: ReturnType<typeof setTimeout> | null = null;
   let isDraining = false;
   let isAborted = false;
@@ -147,9 +138,9 @@ export function createLifecycleManager(
   }
 
   /**
-   * Check for idle timeout and cleanup stale job context.
+   * Check SSE connection health while active.
    */
-  function checkIdleTimeout(): void {
+  function checkSseHealth(): void {
     // Only check when has job context
     if (!state.hasJob) return;
 
@@ -234,39 +225,6 @@ export function createLifecycleManager(
           triggerDrainAndClose();
           return;
         }
-      }
-    }
-
-    // Check idle timeout when not active (inflight == 0)
-    if (state.isIdle) {
-      const idleMs = state.getIdleMs(now);
-
-      if (idleMs >= config.idleTimeoutMs) {
-        logToFile(`idle timeout: ${idleMs / 1000}s`);
-
-        // Send idle timeout event if connected
-        if (connectionManager.isConnected()) {
-          state.sendToIngest({
-            streamEventType: 'error',
-            data: {
-              error: `Session idle for ${idleMs / 1000}s`,
-              fatal: false,
-              code: 'IDLE_TIMEOUT',
-            },
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        // Cache error in state
-        state.setLastError({
-          code: 'IDLE_TIMEOUT',
-          message: `Session idle for ${idleMs / 1000}s`,
-          timestamp: now,
-        });
-
-        // Close connection and clear job
-        void connectionManager.close();
-        state.clearJob();
       }
     }
   }
@@ -458,8 +416,10 @@ export function createLifecycleManager(
   return {
     start: () => {
       logToFile('starting lifecycle timers');
-      inflightCheckInterval = setInterval(checkInflightExpiry, INFLIGHT_CHECK_INTERVAL_MS);
-      idleCheckInterval = setInterval(checkIdleTimeout, IDLE_CHECK_INTERVAL_MS);
+      inflightCheckInterval = setInterval(() => {
+        checkInflightExpiry();
+        checkSseHealth();
+      }, INFLIGHT_CHECK_INTERVAL_MS);
     },
 
     stop: () => {
@@ -469,11 +429,6 @@ export function createLifecycleManager(
       if (inflightCheckInterval) {
         clearInterval(inflightCheckInterval);
         inflightCheckInterval = null;
-      }
-
-      if (idleCheckInterval) {
-        clearInterval(idleCheckInterval);
-        idleCheckInterval = null;
       }
 
       if (drainTimeout) {

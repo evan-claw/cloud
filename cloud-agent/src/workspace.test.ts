@@ -127,6 +127,20 @@ describe('manageBranch', () => {
         "git checkout -b 'feature/remote' 'origin/feature/remote'"
       );
     });
+
+    it('should checkout upstream branch using existing branch semantics', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0 }) // git fetch
+        .mockResolvedValueOnce({ exitCode: 1 }) // local check (does not exist)
+        .mockResolvedValueOnce({ exitCode: 0 }) // remote check (exists)
+        .mockResolvedValueOnce({ exitCode: 0 }); // checkout
+
+      await manageBranch(fakeSession, '/workspace', 'improve-setup', true);
+
+      const execCalls = mockExec.mock.calls;
+      expect(execCalls[3]?.[0]).toContain("git checkout 'improve-setup'");
+      expect(execCalls[3]?.[0]).not.toContain('checkout -b');
+    });
   });
 
   describe('when branch does not exist anywhere', () => {
@@ -712,6 +726,35 @@ describe('autoCommitChangesStream', () => {
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
 
+    it('should fail auto-commit for unsafe branch names', async () => {
+      // Mock git branch --show-current returning unsafe shell characters
+      mockExec.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'feature/new; rm -rf /\n',
+        stderr: '',
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('invalid branch name') as unknown,
+      });
+      expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
+    });
+
     it('should handle git command failure', async () => {
       // Mock git branch --show-current failing
       mockExec.mockResolvedValueOnce({
@@ -756,6 +799,12 @@ describe('autoCommitChangesStream', () => {
           exitCode: 0,
           stdout: ' M file.txt\n',
           stderr: '',
+        })
+        // Mock git log origin/feature/test..HEAD (push verification) — nothing unpushed
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
         });
 
       // Mock streamKilocodeExec to yield some events
@@ -792,6 +841,137 @@ describe('autoCommitChangesStream', () => {
       });
       expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String) as unknown, {
         sessionId: 'session-123',
+      });
+    });
+
+    it('should throw when programmatic push fails', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/fix\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/fix..HEAD — 1 unpushed commit
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'abc1234 fix: add error logging\n',
+          stderr: '',
+        })
+        // git push origin feature/fix — permission denied
+        .mockResolvedValueOnce({
+          exitCode: 128,
+          stdout: '',
+          stderr: 'remote: Permission denied\nfatal: unable to access',
+        });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      await expect(async () => {
+        for await (const _event of stream) {
+          // consume events
+        }
+      }).rejects.toThrow('Push failed (exit 128)');
+    });
+
+    it('should push programmatically when kilo CLI leaves unpushed commits', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/fix\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/fix..HEAD — 1 unpushed commit
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'abc1234 fix: add error logging\n',
+          stderr: '',
+        })
+        // git push origin feature/fix — succeeds
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      // Should include the "Pushing 1 unpushed commit(s)" status event
+      const pushingEvent = events.find(
+        e => 'message' in e && typeof e.message === 'string' && e.message.includes('Pushing 1')
+      );
+      expect(pushingEvent).toBeDefined();
+
+      // Should end with success
+      const lastEvent = events[events.length - 1];
+      expect(lastEvent).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('Auto-commit completed successfully') as unknown,
+      });
+    });
+
+    it('should push when remote branch does not exist yet', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/new-branch\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/new-branch..HEAD — remote branch missing
+        .mockResolvedValueOnce({
+          exitCode: 128,
+          stdout: "fatal: ambiguous argument 'origin/feature/new-branch..HEAD': unknown revision",
+          stderr: '',
+        })
+        // git push origin feature/new-branch — succeeds
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const pushEvent = events.find(
+        e =>
+          'message' in e &&
+          typeof e.message === 'string' &&
+          e.message.includes("Pushing branch 'feature/new-branch' to origin")
+      );
+      expect(pushEvent).toBeDefined();
+
+      const lastEvent = events[events.length - 1];
+      expect(lastEvent).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('Auto-commit completed successfully') as unknown,
       });
     });
 

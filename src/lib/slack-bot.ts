@@ -288,7 +288,7 @@ async function spawnCloudAgentSession(
 
   // Build platform-specific prepareInput and initiateInput
   let prepareInput: PrepareSessionInput;
-  let initiateInput: { githubToken?: string; kilocodeOrganizationId?: string };
+  let initiateInput: { kilocodeOrganizationId?: string };
 
   if (args.gitlabProject) {
     // GitLab path: get token + instance URL, build clone URL, use gitUrl/gitToken
@@ -353,7 +353,7 @@ async function spawnCloudAgentSession(
       kilocodeOrganizationId,
       createdOnPlatform: 'slack',
     };
-    initiateInput = { githubToken, kilocodeOrganizationId };
+    initiateInput = { kilocodeOrganizationId };
   }
 
   const result = await runSessionToCompletion({

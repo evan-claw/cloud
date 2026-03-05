@@ -96,7 +96,7 @@ export type RunSessionInput = {
   client: CloudAgentNextClient;
   /** Fields forwarded to prepareSession. */
   prepareInput: PrepareSessionInput;
-  /** Partial override for initiateFromPreparedSession (e.g. githubToken). */
+  /** Partial override for initiateFromPreparedSession (e.g. kilocodeOrganizationId). */
   initiateInput?: Omit<InitiateFromPreparedSessionInput, 'cloudAgentSessionId'>;
   /** Payload fields for signing the WebSocket stream ticket. */
   ticketPayload: Pick<StreamTicketPayload, 'userId' | 'organizationId'>;

@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { toast } from 'sonner';
 import type { OrganizationRole, TimePeriod } from '@/lib/organizations/organization-types';
 import { OrganizationContextProvider } from './OrganizationContext';
 import { OrganizationPageHeader } from './OrganizationPageHeader';
@@ -22,9 +24,10 @@ import { useExpiringCredits } from './useExpiringCredits';
 type Props = {
   organizationId: string;
   role: OrganizationRole;
+  isAutoTopUpEnabled: boolean;
 };
 
-export function OrganizationPaymentDetails({ organizationId, role }: Props) {
+export function OrganizationPaymentDetails({ organizationId, role, isAutoTopUpEnabled }: Props) {
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('year');
   const [isSpendingAlertsModalOpen, setIsSpendingAlertsModalOpen] = useState(false);
   const userRole = role;
@@ -32,9 +35,33 @@ export function OrganizationPaymentDetails({ organizationId, role }: Props) {
   const isKiloAdmin = session?.data?.isAdmin ?? false;
   const { data: organizationData } = useOrganizationWithMembers(organizationId);
   const { expiringBlocks, expiring_mUsd, earliestExpiry } = useExpiringCredits(organizationId);
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const hasHandledSetupParam = useRef(false);
+
+  useEffect(() => {
+    if (hasHandledSetupParam.current) return;
+    const setupStatus = searchParams.get('auto_topup_setup');
+    if (!setupStatus) return;
+
+    hasHandledSetupParam.current = true;
+
+    if (setupStatus === 'success') {
+      toast.success('Automatic top up enabled');
+    } else if (setupStatus === 'cancelled') {
+      toast.info('Automatic top up setup cancelled');
+    }
+
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('auto_topup_setup');
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchParams, pathname, router]);
 
   return (
-    <OrganizationContextProvider value={{ userRole, isKiloAdmin }}>
+    <OrganizationContextProvider value={{ userRole, isKiloAdmin, isAutoTopUpEnabled }}>
       <div className="flex w-full flex-col gap-y-8">
         <OrganizationPageHeader
           organizationId={organizationId}
@@ -54,51 +81,50 @@ export function OrganizationPaymentDetails({ organizationId, role }: Props) {
         />
 
         {/* Buy Credits and Auto Top-Up Section */}
-        {isKiloAdmin && (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {/* Buy Credits Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <PiggyBank className="h-5 w-5" />
-                  Balance & Credits
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <span className="text-muted-foreground text-sm font-medium">
-                    Current Balance{' '}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <AnimatedDollars
-                      dollars={fromMicrodollars(
-                        (organizationData?.total_microdollars_acquired ?? 0) -
-                          (organizationData?.microdollars_used ?? 0)
-                      )}
-                      className="text-2xl font-semibold"
-                    />
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => setIsSpendingAlertsModalOpen(true)}
-                            className="hover:bg-muted inline-flex cursor-pointer items-center gap-1 rounded p-1 transition-all duration-200 focus:outline-none"
-                          >
-                            <Bell className="text-muted-foreground hover:text-foreground h-4 w-4" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Configure Low Balance Alert</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* Balance & Credits Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <PiggyBank className="h-5 w-5" />
+                Balance & Credits
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <span className="text-muted-foreground text-sm font-medium">Current Balance </span>
+                <div className="flex items-center gap-2">
+                  <AnimatedDollars
+                    dollars={fromMicrodollars(
+                      (organizationData?.total_microdollars_acquired ?? 0) -
+                        (organizationData?.microdollars_used ?? 0)
+                    )}
+                    className="text-2xl font-semibold"
+                  />
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setIsSpendingAlertsModalOpen(true)}
+                          className="hover:bg-muted inline-flex cursor-pointer items-center gap-1 rounded p-1 transition-all duration-200 focus:outline-none"
+                        >
+                          <Bell className="text-muted-foreground hover:text-foreground h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Configure Low Balance Alert</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
-                <CreditPurchaseOptions amounts={[100, 500, 1000]} organizationId={organizationId} />
-              </CardContent>
-            </Card>
+              </div>
+              <CreditPurchaseOptions amounts={[100, 500, 1000]} organizationId={organizationId} />
+            </CardContent>
+          </Card>
 
-            {/* Auto Top-Up Card */}
+          {/* Auto Top-Up Card */}
+          {isAutoTopUpEnabled && (
             <Card>
               <CardHeader>
                 <CardTitle>Automatic Top-Up</CardTitle>
@@ -107,8 +133,8 @@ export function OrganizationPaymentDetails({ organizationId, role }: Props) {
                 <OrganizationAutoTopUpToggle organizationId={organizationId} />
               </CardContent>
             </Card>
-          </div>
-        )}
+          )}
+        </div>
 
         {expiringBlocks.length > 0 && earliestExpiry && (
           <Card>

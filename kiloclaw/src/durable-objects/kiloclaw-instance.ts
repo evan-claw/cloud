@@ -35,9 +35,7 @@ import {
   type MachineSize,
 } from '../schemas/instance-config';
 import {
-  OPENCLAW_PORT,
   STARTUP_TIMEOUT_SECONDS,
-  DEFAULT_MACHINE_GUEST,
   DEFAULT_VOLUME_SIZE_GB,
   ALARM_INTERVAL_RUNNING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
@@ -52,19 +50,41 @@ import {
   OPENCLAW_BUILTIN_DEFAULT_MODEL,
 } from '../config';
 import type { FlyClientConfig } from '../fly/client';
-import type {
-  FlyMachineConfig,
-  FlyMachine,
-  FlyMachineState,
-  FlyVolumeSnapshot,
-} from '../fly/types';
+import type { FlyMachineConfig, FlyVolumeSnapshot } from '../fly/types';
 import * as fly from '../fly/client';
 import { appNameFromUserId } from '../fly/apps';
 import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../utils/env-encryption';
-import { z, type ZodType } from 'zod';
+import type { ZodType } from 'zod';
 import { resolveLatestVersion, resolveVersionByTag } from '../lib/image-version';
 import { lookupCatalogVersion } from '../lib/catalog-registration';
 import { ImageVariantSchema } from '../schemas/image-version';
+import {
+  type GatewayProcessStatus,
+  GatewayProcessStatusSchema,
+  GatewayCommandResponseSchema,
+  ConfigRestoreResponseSchema,
+  ControllerVersionResponseSchema,
+  GatewayControllerError,
+} from './gateway-controller-types';
+import { parseRegions, shuffleRegions, deprioritizeRegion } from './regions';
+import {
+  METADATA_RECOVERY_COOLDOWN_MS,
+  BOUND_MACHINE_RECOVERY_COOLDOWN_MS,
+  TERMINAL_STOPPED_STATES,
+  selectRecoveryCandidate,
+  volumeIdFromMachine,
+} from './machine-recovery';
+import {
+  METADATA_KEY_USER_ID,
+  buildMachineConfig,
+  guestFromSize,
+  volumeNameFromSandboxId,
+} from './machine-config';
+
+// Re-export extracted helpers so existing consumers don't break.
+export { parseRegions, shuffleRegions, deprioritizeRegion } from './regions';
+export { selectRecoveryCandidate } from './machine-recovery';
+export { METADATA_KEY_USER_ID } from './machine-config';
 
 type InstanceStatus = PersistedState['status'];
 
@@ -73,58 +93,6 @@ type DestroyResult = {
   destroyedUserId: string | null;
   destroyedSandboxId: string | null;
 };
-
-type GatewayProcessStatus = {
-  state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
-  pid: number | null;
-  uptime: number;
-  restarts: number;
-  lastExit: {
-    code: number | null;
-    signal: NodeJS.Signals | null;
-    at: string;
-  } | null;
-};
-
-const GatewayProcessStatusSchema: ZodType<GatewayProcessStatus> = z.object({
-  state: z.enum(['stopped', 'starting', 'running', 'stopping', 'crashed', 'shutting_down']),
-  pid: z.number().int().nullable(),
-  uptime: z.number(),
-  restarts: z.number().int(),
-  lastExit: z
-    .object({
-      code: z.number().int().nullable(),
-      signal: z
-        .custom<NodeJS.Signals>((value): value is NodeJS.Signals => typeof value === 'string')
-        .nullable(),
-      at: z.string(),
-    })
-    .nullable(),
-});
-
-const GatewayCommandResponseSchema = z.object({
-  ok: z.boolean(),
-});
-
-const ConfigRestoreResponseSchema = z.object({
-  ok: z.boolean(),
-  signaled: z.boolean(),
-});
-
-const ControllerVersionResponseSchema = z.object({
-  version: z.string(),
-  commit: z.string(),
-});
-
-class GatewayControllerError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = 'GatewayControllerError';
-    this.status = status;
-  }
-}
 
 // Derived from PersistedStateSchema -- single source of truth for DO KV keys.
 const STORAGE_KEYS = Object.keys(PersistedStateSchema.shape);
@@ -170,188 +138,6 @@ function nextAlarmTime(status: InstanceStatus): number {
 }
 
 // ============================================================================
-// Metadata keys set on every Fly Machine for recovery/orphan detection.
-// Avoid fly_* keys — those are reserved by Fly.
-// ============================================================================
-
-export const METADATA_KEY_USER_ID = 'kiloclaw_user_id';
-export const METADATA_KEY_SANDBOX_ID = 'kiloclaw_sandbox_id';
-export const METADATA_KEY_OPENCLAW_VERSION = 'kiloclaw_openclaw_version';
-export const METADATA_KEY_IMAGE_VARIANT = 'kiloclaw_image_variant';
-
-// ============================================================================
-// Machine config builder
-// ============================================================================
-
-type MachineIdentity = {
-  userId: string;
-  sandboxId: string;
-  openclawVersion: string | null;
-  imageVariant: string | null;
-};
-
-function buildMachineConfig(
-  registryApp: string,
-  imageTag: string,
-  envVars: Record<string, string>,
-  guest: FlyMachineConfig['guest'],
-  flyVolumeId: string | null,
-  identity: MachineIdentity
-): FlyMachineConfig {
-  return {
-    image: `registry.fly.io/${registryApp}:${imageTag}`,
-    env: envVars,
-    guest,
-    services: [
-      {
-        ports: [{ port: 443, handlers: ['tls', 'http'] }],
-        internal_port: OPENCLAW_PORT,
-        protocol: 'tcp' as const,
-        autostart: false,
-        autostop: 'off',
-      },
-    ],
-    checks: {
-      controller: {
-        type: 'http',
-        port: OPENCLAW_PORT,
-        method: 'GET',
-        path: '/_kilo/health',
-        interval: '30s',
-        timeout: '5s',
-        grace_period: '120s',
-      },
-    },
-    mounts: flyVolumeId ? [{ volume: flyVolumeId, path: '/root' }] : [],
-    metadata: {
-      [METADATA_KEY_USER_ID]: identity.userId,
-      [METADATA_KEY_SANDBOX_ID]: identity.sandboxId,
-      ...(identity.openclawVersion && {
-        [METADATA_KEY_OPENCLAW_VERSION]: identity.openclawVersion,
-      }),
-      ...(identity.imageVariant && { [METADATA_KEY_IMAGE_VARIANT]: identity.imageVariant }),
-    },
-  };
-}
-
-function guestFromSize(machineSize: MachineSize | null): FlyMachineConfig['guest'] {
-  if (!machineSize) return DEFAULT_MACHINE_GUEST;
-  return {
-    cpus: machineSize.cpus,
-    memory_mb: machineSize.memory_mb,
-    cpu_kind: machineSize.cpu_kind ?? 'shared',
-  };
-}
-
-// ============================================================================
-// Volume name helper
-// ============================================================================
-
-function volumeNameFromSandboxId(sandboxId: string): string {
-  return `kiloclaw_${sandboxId}`
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '_')
-    .slice(0, 30);
-}
-
-// ============================================================================
-// Region helpers
-// ============================================================================
-
-/** Split a comma-separated region string into an array. */
-export function parseRegions(regionList: string): string[] {
-  return regionList
-    .split(',')
-    .map(r => r.trim())
-    .filter(Boolean);
-}
-
-/** Fisher-Yates shuffle (in-place). Returns the same array for chaining. */
-export function shuffleRegions(regions: string[]): string[] {
-  for (let i = regions.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = regions[i];
-    regions[i] = regions[j];
-    regions[j] = tmp;
-  }
-  return regions;
-}
-
-/**
- * Move a failed region to the end of the list so we try other regions first.
- * E.g. deprioritizeRegion(['dfw', 'yyz', 'cdg'], 'dfw') → ['yyz', 'cdg', 'dfw']
- */
-export function deprioritizeRegion(regions: string[], failedRegion: string | null): string[] {
-  if (!failedRegion) return regions;
-  const without = regions.filter(r => r !== failedRegion);
-  return without.length < regions.length ? [...without, failedRegion] : regions;
-}
-
-// ============================================================================
-// Machine recovery: deterministic selection from metadata query results
-// ============================================================================
-
-/** Cooldown between metadata recovery attempts (1 alarm cycle at idle cadence). */
-const METADATA_RECOVERY_COOLDOWN_MS = ALARM_INTERVAL_IDLE_MS;
-
-/** States that indicate the machine is dead and should be ignored for recovery. */
-const DEAD_STATES: ReadonlySet<FlyMachineState> = new Set(['destroyed', 'destroying']);
-
-/** Terminal non-running states for live check. Transitional states (starting, stopping, replacing)
- *  are intentionally excluded to avoid UI flicker during normal operations. */
-const TERMINAL_STOPPED_STATES: ReadonlySet<FlyMachineState> = new Set([
-  'stopped',
-  'created',
-  'destroyed',
-  'suspended',
-]);
-
-/**
- * Priority order for picking a machine to recover.
- * Lower index = higher preference. `started` is best, then `starting`, etc.
- */
-const STATE_PRIORITY: ReadonlyMap<FlyMachineState, number> = new Map([
-  ['started', 0],
-  ['starting', 1],
-  ['stopped', 2],
-  ['created', 3],
-  ['stopping', 4],
-  ['replacing', 5],
-]);
-
-/**
- * Given a list of machines from Fly's metadata query, pick the best candidate
- * for recovery. Returns null if no live machines found.
- *
- * Selection rules:
- * 1. Ignore destroyed/destroying machines.
- * 2. Prefer started > starting > stopped > created > others.
- * 3. Tie-break by newest updated_at.
- */
-export function selectRecoveryCandidate(machines: FlyMachine[]): FlyMachine | null {
-  const live = machines.filter(m => !DEAD_STATES.has(m.state));
-  if (live.length === 0) return null;
-
-  live.sort((a, b) => {
-    const pa = STATE_PRIORITY.get(a.state) ?? 99;
-    const pb = STATE_PRIORITY.get(b.state) ?? 99;
-    if (pa !== pb) return pa - pb;
-    // Tie-break: newest updated_at first
-    return b.updated_at.localeCompare(a.updated_at);
-  });
-
-  return live[0];
-}
-
-/**
- * Extract the volume ID from a machine's mount config at /root, if present.
- */
-function volumeIdFromMachine(machine: FlyMachine): string | null {
-  const rootMount = (machine.config?.mounts ?? []).find(m => m.path === '/root');
-  return rootMount?.volume ?? null;
-}
-
-// ============================================================================
 // KiloClawInstance DO
 // ============================================================================
 
@@ -384,6 +170,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private imageVariant: string | null = null;
   private trackedImageTag: string | null = null;
   private trackedImageDigest: string | null = null;
+  private lastDestroyErrorOp: 'machine' | 'volume' | 'recover' | null = null;
+  private lastDestroyErrorStatus: number | null = null;
+  private lastDestroyErrorMessage: string | null = null;
+  private lastDestroyErrorAt: number | null = null;
+  private lastBoundMachineRecoveryAt: number | null = null;
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
@@ -425,6 +216,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.imageVariant = s.imageVariant;
       this.trackedImageTag = s.trackedImageTag;
       this.trackedImageDigest = s.trackedImageDigest;
+      this.lastDestroyErrorOp = s.lastDestroyErrorOp;
+      this.lastDestroyErrorStatus = s.lastDestroyErrorStatus;
+      this.lastDestroyErrorMessage = s.lastDestroyErrorMessage;
+      this.lastDestroyErrorAt = s.lastDestroyErrorAt;
+      this.lastBoundMachineRecoveryAt = s.lastBoundMachineRecoveryAt;
     } else {
       const hasAnyData = entries.size > 0;
       if (hasAnyData) {
@@ -1384,6 +1180,71 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     };
   }
 
+  async getDebugState(): Promise<{
+    userId: string | null;
+    sandboxId: string | null;
+    status: InstanceStatus | null;
+    provisionedAt: number | null;
+    lastStartedAt: number | null;
+    lastStoppedAt: number | null;
+    envVarCount: number;
+    secretCount: number;
+    channelCount: number;
+    flyAppName: string | null;
+    flyMachineId: string | null;
+    flyVolumeId: string | null;
+    flyRegion: string | null;
+    machineSize: MachineSize | null;
+    openclawVersion: string | null;
+    imageVariant: string | null;
+    trackedImageTag: string | null;
+    trackedImageDigest: string | null;
+    pendingDestroyMachineId: string | null;
+    pendingDestroyVolumeId: string | null;
+    pendingPostgresMarkOnFinalize: boolean;
+    lastMetadataRecoveryAt: number | null;
+    lastLiveCheckAt: number | null;
+    alarmScheduledAt: number | null;
+    lastDestroyErrorOp: 'machine' | 'volume' | 'recover' | null;
+    lastDestroyErrorStatus: number | null;
+    lastDestroyErrorMessage: string | null;
+    lastDestroyErrorAt: number | null;
+  }> {
+    await this.loadState();
+    const alarmScheduledAt = await this.ctx.storage.getAlarm();
+
+    return {
+      userId: this.userId,
+      sandboxId: this.sandboxId,
+      status: this.status,
+      provisionedAt: this.provisionedAt,
+      lastStartedAt: this.lastStartedAt,
+      lastStoppedAt: this.lastStoppedAt,
+      envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
+      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
+      flyAppName: this.flyAppName,
+      flyMachineId: this.flyMachineId,
+      flyVolumeId: this.flyVolumeId,
+      flyRegion: this.flyRegion,
+      machineSize: this.machineSize,
+      openclawVersion: this.openclawVersion,
+      imageVariant: this.imageVariant,
+      trackedImageTag: this.trackedImageTag,
+      trackedImageDigest: this.trackedImageDigest,
+      pendingDestroyMachineId: this.pendingDestroyMachineId,
+      pendingDestroyVolumeId: this.pendingDestroyVolumeId,
+      pendingPostgresMarkOnFinalize: this.pendingPostgresMarkOnFinalize,
+      lastMetadataRecoveryAt: this.lastMetadataRecoveryAt,
+      lastLiveCheckAt: this.lastLiveCheckAt,
+      alarmScheduledAt,
+      lastDestroyErrorOp: this.lastDestroyErrorOp,
+      lastDestroyErrorStatus: this.lastDestroyErrorStatus,
+      lastDestroyErrorMessage: this.lastDestroyErrorMessage,
+      lastDestroyErrorAt: this.lastDestroyErrorAt,
+    };
+  }
+
   async getConfig(): Promise<InstanceConfig> {
     await this.loadState();
 
@@ -2056,13 +1917,86 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   // Two-phase destroy helpers
   // ========================================================================
 
+  /** Fly machine IDs are lowercase alphanumeric. */
+  private static MACHINE_ID_RE = /^[a-z0-9]+$/;
+
   /**
    * Retry deleting pending Fly resources. Called from alarm for destroying instances.
    */
   private async retryPendingDestroy(flyConfig: FlyClientConfig, reason: string): Promise<void> {
+    await this.recoverBoundMachineForDestroy(flyConfig, reason);
     await this.tryDeleteMachine(flyConfig, reason);
     await this.tryDeleteVolume(flyConfig, reason);
     await this.finalizeDestroyIfComplete();
+  }
+
+  /**
+   * When a volume has a pending destroy but the machine ID was lost (null),
+   * query the volume to discover the attached machine so we can delete it first.
+   * Without this, volume deletion returns 412 "bound to machine" forever.
+   */
+  private async recoverBoundMachineForDestroy(
+    flyConfig: FlyClientConfig,
+    reason: string
+  ): Promise<void> {
+    if (this.pendingDestroyMachineId) return; // already know the machine
+    if (!this.pendingDestroyVolumeId) return; // nothing to check
+
+    // Cooldown: skip if we recently checked and found no attached machine
+    if (
+      this.lastBoundMachineRecoveryAt &&
+      Date.now() - this.lastBoundMachineRecoveryAt < BOUND_MACHINE_RECOVERY_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    try {
+      const volume = await fly.getVolume(flyConfig, this.pendingDestroyVolumeId);
+      const machineId = volume.attached_machine_id;
+
+      if (!machineId || !KiloClawInstance.MACHINE_ID_RE.test(machineId)) {
+        if (machineId) {
+          reconcileLog(reason, 'recover_bound_machine_invalid_id', {
+            volume_id: this.pendingDestroyVolumeId,
+            attached_machine_id: machineId,
+          });
+        }
+        // No machine to recover — set cooldown to avoid repeated getVolume calls
+        this.lastBoundMachineRecoveryAt = Date.now();
+        await this.ctx.storage.put(
+          storageUpdate({ lastBoundMachineRecoveryAt: this.lastBoundMachineRecoveryAt })
+        );
+        return;
+      }
+
+      reconcileLog(reason, 'recover_bound_machine_for_destroy', {
+        volume_id: this.pendingDestroyVolumeId,
+        machine_id: machineId,
+      });
+
+      this.pendingDestroyMachineId = machineId;
+      this.flyMachineId = machineId;
+      this.lastBoundMachineRecoveryAt = null;
+      await this.ctx.storage.put(
+        storageUpdate({
+          pendingDestroyMachineId: machineId,
+          flyMachineId: machineId,
+          lastBoundMachineRecoveryAt: null,
+        })
+      );
+    } catch (err) {
+      if (fly.isFlyNotFound(err)) {
+        // Volume already gone — tryDeleteVolume will handle the 404.
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      const status = err instanceof fly.FlyApiError ? err.status : null;
+      reconcileLog(reason, 'recover_bound_machine_failed', {
+        volume_id: this.pendingDestroyVolumeId,
+        error: message,
+      });
+      await this.persistDestroyError('recover', status, message);
+    }
   }
 
   /**
@@ -2082,10 +2016,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           machine_id: this.pendingDestroyMachineId,
         });
       } else {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof fly.FlyApiError ? err.status : null;
         reconcileLog(reason, 'destroy_machine_failed', {
           machine_id: this.pendingDestroyMachineId,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
         });
+        await this.persistDestroyError('machine', status, message);
         return; // Leave pending, retry next alarm
       }
     }
@@ -2096,6 +2033,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await this.ctx.storage.put(
       storageUpdate({ pendingDestroyMachineId: null, flyMachineId: null })
     );
+    await this.clearDestroyError();
   }
 
   /**
@@ -2115,10 +2053,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           volume_id: this.pendingDestroyVolumeId,
         });
       } else {
+        const message = err instanceof Error ? err.message : String(err);
+        const status = err instanceof fly.FlyApiError ? err.status : null;
         reconcileLog(reason, 'destroy_volume_failed', {
           volume_id: this.pendingDestroyVolumeId,
-          error: err instanceof Error ? err.message : String(err),
+          error: message,
         });
+        await this.persistDestroyError('volume', status, message);
         return; // Leave pending, retry next alarm
       }
     }
@@ -2127,6 +2068,42 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.pendingDestroyVolumeId = null;
     this.flyVolumeId = null;
     await this.ctx.storage.put(storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null }));
+    await this.clearDestroyError();
+  }
+
+  private async persistDestroyError(
+    op: 'machine' | 'volume' | 'recover',
+    status: number | null,
+    message: string
+  ): Promise<void> {
+    this.lastDestroyErrorOp = op;
+    this.lastDestroyErrorStatus = status;
+    this.lastDestroyErrorMessage = message;
+    this.lastDestroyErrorAt = Date.now();
+    await this.ctx.storage.put(
+      storageUpdate({
+        lastDestroyErrorOp: op,
+        lastDestroyErrorStatus: status,
+        lastDestroyErrorMessage: message,
+        lastDestroyErrorAt: this.lastDestroyErrorAt,
+      })
+    );
+  }
+
+  private async clearDestroyError(): Promise<void> {
+    if (!this.lastDestroyErrorOp) return; // already clear
+    this.lastDestroyErrorOp = null;
+    this.lastDestroyErrorStatus = null;
+    this.lastDestroyErrorMessage = null;
+    this.lastDestroyErrorAt = null;
+    await this.ctx.storage.put(
+      storageUpdate({
+        lastDestroyErrorOp: null,
+        lastDestroyErrorStatus: null,
+        lastDestroyErrorMessage: null,
+        lastDestroyErrorAt: null,
+      })
+    );
   }
 
   /**
@@ -2210,6 +2187,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.imageVariant = null;
     this.trackedImageTag = null;
     this.trackedImageDigest = null;
+    this.lastDestroyErrorOp = null;
+    this.lastDestroyErrorStatus = null;
+    this.lastDestroyErrorMessage = null;
+    this.lastDestroyErrorAt = null;
+    this.lastBoundMachineRecoveryAt = null;
     this.loaded = false;
   }
 

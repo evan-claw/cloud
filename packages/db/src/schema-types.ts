@@ -768,6 +768,14 @@ export const OpenCodeSettingsSchema = z.object({
 
 export type OpenCodeSettings = z.infer<typeof OpenCodeSettingsSchema>;
 
+export const CustomLlmProviderSchema = z.enum(['anthropic', 'openai', 'openai-compatible']);
+
+export type CustomLlmProvider = z.infer<typeof CustomLlmProviderSchema>;
+
+export const CustomLlmExtraBodySchema = z.record(z.string(), z.any());
+
+export type CustomLlmExtraBody = z.infer<typeof CustomLlmExtraBodySchema>;
+
 // --- StoredModel ---
 
 export const ModelSchema = z.object({

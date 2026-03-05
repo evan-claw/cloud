@@ -135,6 +135,14 @@ export const PersistedStateSchema = z.object({
   imageVariant: z.string().nullable().default(null),
   trackedImageTag: z.string().nullable().default(null),
   trackedImageDigest: z.string().nullable().default(null),
+  // Structured last-error from the destroy retry loop, for admin observability.
+  lastDestroyErrorOp: z.enum(['machine', 'volume', 'recover']).nullable().default(null),
+  lastDestroyErrorStatus: z.number().nullable().default(null),
+  lastDestroyErrorMessage: z.string().nullable().default(null),
+  lastDestroyErrorAt: z.number().nullable().default(null),
+  // Cooldown for bound-machine recovery during destroy: avoids repeated getVolume
+  // calls when the volume consistently reports no attached machine.
+  lastBoundMachineRecoveryAt: z.number().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

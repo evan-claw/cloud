@@ -28,7 +28,7 @@ import {
   DEFAULT_AUTO_TOP_UP_AMOUNT_CENTS,
 } from '@/lib/autoTopUpConstants';
 
-const ATTEMPT_LOCK_TIMEOUT_SECONDS = 60 * 60 * 2; // 2 hours
+const ATTEMPT_LOCK_TIMEOUT_SECONDS = 60 * 60 * 2; // 2 hours (covers delayed webhook delivery)
 
 type AutoTopUpResult = Result<{ stripe_id: string }, string>;
 
@@ -154,10 +154,19 @@ async function maybePerformAutoTopUpForEntity(entity: AutoTopUpEntity): Promise<
   // Perform the auto-top-up - only user.id is needed, fresh data is fetched inside
   const result = await performAutoTopUpForEntity(entity, traceId);
 
+  if (!result.success && result.error === 'concurrent_attempt_in_progress') {
+    logExceptInTest(`Auto-top-up skipped for ${entityLabel}: concurrent attempt in progress`, {
+      traceId,
+    });
+    return;
+  }
+
   if (result.success) {
     logExceptInTest(`Auto-top-up successful for ${entityLabel}`, {
-      ...result,
       traceId,
+      entity_type: entity.type,
+      entity_id: entityId,
+      stripe_id: result.stripe_id,
     });
   } else {
     sentryLogger('auto-topup', 'warning')(`Auto-top-up failed for ${entityLabel}`, {
@@ -251,8 +260,8 @@ async function performAutoTopUpForEntity(
     // Credit application is handled by the `invoice.paid` webhook.
     const invoiceMetadata: Record<string, string> =
       entity.type === 'user'
-        ? { type: 'auto-topup', kiloUserId: entity.user.id }
-        : { type: 'org-auto-topup', organizationId: entity.organization.id };
+        ? { type: 'auto-topup', kiloUserId: entity.user.id, traceId }
+        : { type: 'org-auto-topup', organizationId: entity.organization.id, traceId };
 
     const invoice = await client.invoices.create({
       customer: stripe_customer_id,
@@ -423,7 +432,10 @@ async function disableAutoTopUpForEntity(entity: AutoTopUpEntity, reason: string
     const members = await getOrganizationMembers(entity.organization.id);
     const ownerEmails = members.filter(m => m.role === 'owner').map(m => m.email);
     for (const email of ownerEmails) {
-      await sendAutoTopUpFailedEmail(email, { reason: message });
+      await sendAutoTopUpFailedEmail(email, {
+        reason: message,
+        organizationId: entity.organization.id,
+      });
     }
   }
 }

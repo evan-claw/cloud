@@ -6,7 +6,8 @@ import {
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
-import type { PlatformStatusResponse, VolumeSnapshot } from '@/lib/kiloclaw/types';
+import { flyAppNameFromUserId } from '@/lib/kiloclaw/fly-app-name';
+import type { PlatformDebugStatusResponse, VolumeSnapshot } from '@/lib/kiloclaw/types';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { eq, and, or, desc, asc, ilike, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
@@ -50,7 +51,8 @@ export type AdminKiloclawInstance = {
 };
 
 export type AdminKiloclawInstanceDetail = AdminKiloclawInstance & {
-  workerStatus: PlatformStatusResponse | null;
+  derived_fly_app_name: string;
+  workerStatus: PlatformDebugStatusResponse | null;
   workerStatusError: string | null;
 };
 
@@ -79,20 +81,26 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       user_email: result.user_email,
     };
 
-    // Fetch live worker status for active instances
-    let workerStatus: PlatformStatusResponse | null = null;
+    const derivedFlyAppName = flyAppNameFromUserId(instance.user_id);
+
+    // Fetch live worker status for all instances.
+    // DB may be marked destroyed while DO is still retrying destroy.
+    let workerStatus: PlatformDebugStatusResponse | null = null;
     let workerStatusError: string | null = null;
 
-    if (instance.destroyed_at === null) {
-      try {
-        const client = new KiloClawInternalClient();
-        workerStatus = await client.getStatus(instance.user_id);
-      } catch (err) {
-        workerStatusError = err instanceof Error ? err.message : 'Failed to fetch worker status';
-      }
+    try {
+      const client = new KiloClawInternalClient();
+      workerStatus = await client.getDebugStatus(instance.user_id);
+    } catch (err) {
+      workerStatusError = err instanceof Error ? err.message : 'Failed to fetch worker status';
     }
 
-    return { ...instance, workerStatus, workerStatusError } satisfies AdminKiloclawInstanceDetail;
+    return {
+      ...instance,
+      derived_fly_app_name: derivedFlyAppName,
+      workerStatus,
+      workerStatusError,
+    } satisfies AdminKiloclawInstanceDetail;
   }),
 
   list: adminProcedure.input(ListInstancesSchema).query(async ({ input }) => {

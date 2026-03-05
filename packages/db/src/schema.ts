@@ -58,10 +58,10 @@ import type {
   OpenRouterModel,
   StripeSubscriptionStatus,
   OpenCodeSettings,
-  ReasoningEffort,
   Tool,
-  Verbosity,
   StoredModel,
+  CustomLlmExtraBody,
+  CustomLlmProvider,
 } from './schema-types';
 import type { AnyPgColumn as DrizzleAnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -182,7 +182,10 @@ export const kilocode_users = pgTable(
     api_token_pepper: text(),
     auto_top_up_enabled: boolean().default(false).notNull(),
     is_bot: boolean().default(false).notNull(),
+
+    /** @deprecated */
     default_model: text(),
+
     cohorts: jsonb().$type<Record<string, number>>().default({}).notNull(),
     completed_welcome_form: boolean().default(false).notNull(),
     linkedin_url: text(),
@@ -884,7 +887,7 @@ export const custom_llm = pgTable('custom_llm', {
   context_length: integer().notNull(),
   max_completion_tokens: integer().notNull(),
   internal_id: text().notNull(),
-  provider: text().notNull().$type<'anthropic' | 'openai'>(),
+  provider: text().notNull().$type<CustomLlmProvider>(),
   base_url: text().notNull(),
   api_key: text().notNull(),
   organization_ids: jsonb().notNull().$type<string[]>(),
@@ -893,12 +896,7 @@ export const custom_llm = pgTable('custom_llm', {
   supports_image_input: boolean(),
   force_reasoning: boolean(),
   opencode_settings: jsonb().$type<OpenCodeSettings>(),
-
-  /** @deprecated use opencode_settings instead */
-  verbosity: text().$type<Verbosity>(),
-
-  /** @deprecated use opencode_settings instead */
-  reasoning_effort: text().$type<ReasoningEffort>(),
+  extra_body: jsonb().$type<CustomLlmExtraBody>(),
 });
 
 export type CustomLlm = typeof custom_llm.$inferSelect;
@@ -2927,6 +2925,17 @@ export const auto_fix_tickets = pgTable(
       .array()
       .default(sql`'{}'`),
 
+    // Trigger source: 'label' for issue label triggers, 'review_comment' for PR review comment triggers
+    trigger_source: text().notNull().default('label').$type<'label' | 'review_comment'>(),
+
+    // Review comment context (populated when trigger_source='review_comment')
+    review_comment_id: bigint({ mode: 'number' }),
+    review_comment_body: text(),
+    file_path: text(),
+    line_number: integer(),
+    diff_hunk: text(),
+    pr_head_ref: text(),
+
     // Classification from triage (denormalized for convenience)
     classification: text().$type<'bug' | 'feature' | 'question' | 'unclear'>(),
     confidence: decimal({ precision: 3, scale: 2 }),
@@ -2959,8 +2968,14 @@ export const auto_fix_tickets = pgTable(
       .$onUpdateFn(() => sql`now()`),
   },
   table => [
-    // Unique constraint: one fix per repo+issue combination
-    uniqueIndex('UQ_auto_fix_tickets_repo_issue').on(table.repo_full_name, table.issue_number),
+    // Unique constraint: one fix per repo+issue combination (for label-triggered fixes)
+    uniqueIndex('UQ_auto_fix_tickets_repo_issue')
+      .on(table.repo_full_name, table.issue_number)
+      .where(sql`${table.trigger_source} = 'label'`),
+    // Unique constraint: one fix per repo+review_comment (for review-comment-triggered fixes)
+    uniqueIndex('UQ_auto_fix_tickets_repo_review_comment')
+      .on(table.repo_full_name, table.review_comment_id)
+      .where(sql`${table.review_comment_id} IS NOT NULL`),
     // Indexes for ownership lookups
     index('IDX_auto_fix_tickets_owned_by_org').on(table.owned_by_organization_id),
     index('IDX_auto_fix_tickets_owned_by_user').on(table.owned_by_user_id),
@@ -2989,6 +3004,10 @@ export const auto_fix_tickets = pgTable(
     check(
       'auto_fix_tickets_confidence_check',
       sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`
+    ),
+    check(
+      'auto_fix_tickets_trigger_source_check',
+      sql`${table.trigger_source} IN ('label', 'review_comment')`
     ),
   ]
 );

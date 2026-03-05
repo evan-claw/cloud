@@ -4,16 +4,17 @@ import type {
   SandboxId,
   SessionContext,
   SessionId,
-  StreamEvent,
   InterruptResult,
 } from './types.js';
 import type { ExecutionParams as _ExecutionParams } from './schema.js';
 import { generateSandboxId } from './sandbox-id.js';
 import {
   checkDiskSpace,
+  cleanupStaleWorkspaces,
   cloneGitHubRepo,
   cloneGitRepo,
   cleanupWorkspace,
+  getBaseWorkspacePath,
   getSessionHomePath,
   getSessionWorkspacePath,
   manageBranch,
@@ -21,7 +22,6 @@ import {
   setupWorkspace,
 } from './workspace.js';
 import { logger, WithLogTags } from './logger.js';
-import { streamKilocodeExecution } from './streaming.js';
 import type {
   PersistenceEnv,
   CloudAgentSessionState,
@@ -30,7 +30,7 @@ import type {
 import { MetadataSchema } from './persistence/schemas.js';
 import { withDORetry } from './utils/do-retry.js';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
-import type { EncryptedSecrets, Images } from './router/schemas.js';
+import type { EncryptedSecrets } from './router/schemas.js';
 
 const SETUP_COMMAND_TIMEOUT_SECONDS = 120; // 2 minutes
 const SANDBOX_RETRY_DEFAULTS = {
@@ -829,8 +829,8 @@ export class SessionService {
       mcpServers
     );
 
-    // Check disk space before clone for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space before clone; clean up stale workspaces if low
+    await SessionService.checkDiskAndCleanIfLow(session, sandbox, orgId, userId, sessionId);
 
     // Clone repository using appropriate method
     // Shallow clone (depth: 1) can be enabled for faster checkout and reduced disk usage
@@ -895,50 +895,9 @@ export class SessionService {
       existingMetadata ?? undefined
     );
 
-    // Track first execution to optimize DO fetch and store captured kiloSessionId
-    let isFirstCall = true;
-    let capturedKiloSessionId: string | undefined = undefined;
-
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        const currentIsFirst = isFirstCall;
-        isFirstCall = false;
-
-        // Use captured kiloSessionId if available for subsequent calls
-        const kiloSessionId = capturedKiloSessionId;
-
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...options, isFirstExecution: currentIsFirst, kiloSessionId, images: options?.images },
-          env
-        )) {
-          // Capture kiloSessionId from session_created event for subsequent calls
-          if (
-            event.streamEventType === 'kilocode' &&
-            event.payload?.event === 'session_created' &&
-            typeof event.payload?.sessionId === 'string' &&
-            !capturedKiloSessionId
-          ) {
-            capturedKiloSessionId = event.payload.sessionId;
-            logger.setTags({ kiloSessionId: capturedKiloSessionId });
-          }
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1113,8 +1072,8 @@ export class SessionService {
       mcpServers
     );
 
-    // Check disk space before clone for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space before clone; clean up stale workspaces if low
+    await SessionService.checkDiskAndCleanIfLow(session, sandbox, orgId, userId, sessionId);
 
     // Clone repository using appropriate method
     if (gitUrl) {
@@ -1189,30 +1148,9 @@ export class SessionService {
       metadataToPreserve
     );
 
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        execOptions?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...execOptions, isFirstExecution: false, kiloSessionId, images: execOptions?.images },
-          env
-        )) {
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1318,8 +1256,8 @@ export class SessionService {
     const repoExists = repoCheck.stdout?.includes('exists') ?? false;
     const isColdStart = !repoExists;
 
-    // Check disk space for observability (logs warning if low)
-    await checkDiskSpace(session);
+    // Check disk space; clean up stale workspaces if low
+    await SessionService.checkDiskAndCleanIfLow(session, sandbox, orgId, userId, sessionId);
 
     // Only re-run setup if we had to reclone (cold start)
     if (isColdStart) {
@@ -1340,25 +1278,6 @@ export class SessionService {
     return {
       context,
       session,
-      streamKilocodeExec: (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) =>
-        streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          {
-            ...options,
-            isFirstExecution: false,
-            kiloSessionId: metadata?.kiloSessionId,
-            images: options?.images,
-          },
-          env
-        ),
     };
   }
 
@@ -1410,6 +1329,9 @@ export class SessionService {
       platform: context.platform,
     });
 
+    // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
+    await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
+
     await this.restoreSessionSnapshot(session, sessionId, metadata.kiloSessionId, env, userId);
 
     // Re-run setup commands (fresh clone, need to reinstall)
@@ -1417,9 +1339,6 @@ export class SessionService {
       logger.info('Re-running setup commands after fresh clone');
       await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
     }
-
-    // Re-write auth file (fresh clone)
-    await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
   }
 
   /**
@@ -1440,6 +1359,24 @@ export class SessionService {
       return SessionService.interruptWithPkill(session, sessionContext, executionId);
     }
     return SessionService.interruptWithSandboxApi(sandbox, session, sessionContext);
+  }
+
+  private static async checkDiskAndCleanIfLow(
+    session: ExecutionSession,
+    sandbox: SandboxInstance,
+    orgId: string | undefined,
+    userId: string,
+    sessionId: string
+  ): Promise<void> {
+    const diskSpace = await checkDiskSpace(session);
+    if (diskSpace.isLow) {
+      await cleanupStaleWorkspaces(
+        session,
+        sandbox,
+        getBaseWorkspacePath(orgId, userId),
+        sessionId
+      );
+    }
   }
 
   /**
@@ -1844,11 +1781,6 @@ function getGitAuthorEnv(
 export interface PreparedSession {
   context: SessionContext;
   session: Awaited<ReturnType<SessionService['getOrCreateSession']>>;
-  streamKilocodeExec: (
-    mode: string,
-    prompt: string,
-    options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-  ) => AsyncGenerator<StreamEvent>;
 }
 
 export interface InitiateOptions {

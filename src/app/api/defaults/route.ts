@@ -1,7 +1,5 @@
-import { chooseAndStoreDefaultModelForUser } from './chooseAndStoreDefaultModelForUser';
 import { NextResponse } from 'next/server';
-import { getUserFromAuth } from '@/lib/user.server';
-import { getFirstFreeModel } from '@/lib/models';
+import { KILO_AUTO_FREE_MODEL, KILO_AUTO_FRONTIER_MODEL } from '@/lib/kilo-auto-model';
 
 type DefaultsResponse = {
   defaultModel: string;
@@ -9,10 +7,8 @@ type DefaultsResponse = {
 };
 
 export async function GET(): Promise<NextResponse<DefaultsResponse>> {
-  const { user } = await getUserFromAuth({ adminOnly: false });
-  const defaultFreeModel = getFirstFreeModel();
   return NextResponse.json({
-    defaultModel: user ? await chooseAndStoreDefaultModelForUser(user) : defaultFreeModel,
-    defaultFreeModel,
+    defaultModel: KILO_AUTO_FRONTIER_MODEL.id,
+    defaultFreeModel: KILO_AUTO_FREE_MODEL.id,
   });
 }

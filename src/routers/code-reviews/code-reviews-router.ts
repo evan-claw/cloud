@@ -32,6 +32,7 @@ import {
 import { DEFAULT_LIST_LIMIT } from '@/lib/code-reviews/core/constants';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { tryDispatchPendingReviews } from '@/lib/code-reviews/dispatch/dispatch-pending-reviews';
+import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 
 export const codeReviewRouter = createTRPCRouter({
   /**
@@ -297,10 +298,20 @@ export const codeReviewRouter = createTRPCRouter({
         // Reset the review for retry
         await resetCodeReviewForRetry(input.reviewId);
 
-        // Build owner object for dispatch
-        const owner: Owner = review.owned_by_organization_id
-          ? { type: 'org', id: review.owned_by_organization_id, userId: ctx.user.id }
-          : { type: 'user', id: review.owned_by_user_id as string, userId: ctx.user.id };
+        // Build owner object for dispatch.
+        // For org reviews, use the bot user ID so feature flags (e.g. code-review-cloud-agent-next)
+        // evaluate consistently regardless of which human triggers the retrigger.
+        let owner: Owner;
+        if (review.owned_by_organization_id) {
+          const botUserId = await getBotUserId(review.owned_by_organization_id, 'code-review');
+          owner = {
+            type: 'org',
+            id: review.owned_by_organization_id,
+            userId: botUserId ?? ctx.user.id,
+          };
+        } else {
+          owner = { type: 'user', id: review.owned_by_user_id as string, userId: ctx.user.id };
+        }
 
         // Try to dispatch the review
         await tryDispatchPendingReviews(owner);

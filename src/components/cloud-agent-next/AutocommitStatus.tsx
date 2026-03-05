@@ -1,5 +1,6 @@
 import { useAtomValue } from 'jotai';
 import { Loader2, Check, X } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import type { AutocommitStatus as AutocommitStatusType } from './store/atoms';
 import { autocommitStatusMapAtom } from './store/atoms';
 import { isAssistantMessage } from './types';
@@ -49,10 +50,15 @@ function StatusIndicator({ status }: { status: AutocommitStatusType }) {
         <span className="text-muted-foreground flex items-center gap-2">
           <Check className="h-3 w-3" />
           {status.commitHash ? (
-            <span>
-              <code className="font-mono">{status.commitHash}</code>{' '}
-              {truncateCommitMessage(status.commitMessage ?? status.message)}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <code className="font-mono">{status.commitHash}</code>{' '}
+                  {truncateCommitMessage(status.commitMessage ?? status.message)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{status.commitMessage ?? status.message}</TooltipContent>
+            </Tooltip>
           ) : (
             <span>{status.message}</span>
           )}

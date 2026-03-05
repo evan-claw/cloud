@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
-import { getFirstFreeModel, isFreeModel, kiloFreeModels } from './models';
+import { isFreeModel, kiloFreeModels } from './models';
 
 describe('isFreeModel', () => {
   describe('free models', () => {
@@ -109,12 +109,5 @@ describe('isFreeModel', () => {
       expect(isFreeModel('openrouter/free ')).toBe(false);
       expect(isFreeModel('openrouter/model-alpha ')).toBe(false);
     });
-  });
-});
-
-describe('getFirstFreeModel', () => {
-  test('should return a model that is actually free', () => {
-    const firstFreeModel = getFirstFreeModel();
-    expect(isFreeModel(firstFreeModel)).toBe(true);
   });
 });
