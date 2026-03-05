@@ -3,7 +3,7 @@ import {
   type AgentMode,
   type PrepareSessionInput,
 } from '@/lib/cloud-agent-next/cloud-agent-client';
-import { runSessionToCompletion } from '@/lib/cloud-agent-next/run-session';
+import { runSessionToCompletion, type RunSessionInput } from '@/lib/cloud-agent-next/run-session';
 import {
   getGitHubTokenForOrganization,
   getGitHubTokenForUser,
@@ -72,7 +72,8 @@ export default async function spawnCloudAgentSession(
   model: string,
   platformIntegration: PlatformIntegration,
   authToken: string,
-  ticketUserId: string
+  ticketUserId: string,
+  onSessionReady?: RunSessionInput['onSessionReady']
 ): Promise<SpawnCloudAgentResult> {
   console.log('[SlackBot] spawnCloudAgentSession called with args:', JSON.stringify(args, null, 2));
 
@@ -157,6 +158,7 @@ export default async function spawnCloudAgentSession(
       organizationId: kilocodeOrganizationId,
     },
     logPrefix: '[KiloBot]',
+    onSessionReady,
   });
 
   return { response: result.response, sessionId: result.sessionId };

@@ -7,6 +7,7 @@ import {
 import spawnCloudAgentSession, {
   spawnCloudAgentInputSchema,
 } from '@/lib/bot/tools/spawn-cloud-agent-session';
+import { buildSessionUrl } from '@/lib/cloud-agent-next/session-url';
 import { APP_URL } from '@/lib/constants';
 import { FEATURE_HEADER } from '@/lib/feature-detection';
 import type { Owner } from '@/lib/integrations/core/types';
@@ -22,6 +23,7 @@ import { generateApiToken } from '@/lib/tokens';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { PlatformIntegration, User } from '@kilocode/db';
 import { ToolLoopAgent, stepCountIs, tool } from 'ai';
+import { Actions, Card, CardText, LinkButton, Section } from 'chat';
 import type { Thread, Message } from 'chat';
 
 function ownerFromIntegration(pi: PlatformIntegration): Owner {
@@ -96,6 +98,8 @@ export async function processMessage({
 
   const modelSlug =
     (platformIntegration.metadata as { model_slug?: string }).model_slug ?? DEFAULT_BOT_MODEL;
+  const owner = ownerFromIntegration(platformIntegration);
+
   const agent = new ToolLoopAgent({
     model: provider.chatModel(modelSlug),
     instructions: await buildSystemPrompt(platformIntegration),
@@ -106,7 +110,17 @@ export async function processMessage({
           'Spawn a Cloud Agent session to perform coding tasks on a GitHub repository. The agent can make code changes, fix bugs, implement features, and more.',
         inputSchema: spawnCloudAgentInputSchema,
         execute: async args =>
-          await spawnCloudAgentSession(args, modelSlug, platformIntegration, authToken, user.id),
+          await spawnCloudAgentSession(
+            args,
+            modelSlug,
+            platformIntegration,
+            authToken,
+            user.id,
+            ({ kiloSessionId }) => {
+              const sessionUrl = buildSessionUrl(kiloSessionId, owner);
+              postSessionLinkEphemeral(thread, message, sessionUrl);
+            }
+          ),
       }),
     },
   });
@@ -122,4 +136,21 @@ export async function processMessage({
 
     await thread.post(`Sorry, there was an error calling the AI service: ${errMsg.slice(0, 200)}`);
   }
+}
+
+function postSessionLinkEphemeral(thread: Thread, message: Message, sessionUrl: string): void {
+  thread
+    .postEphemeral(
+      message.author,
+      Card({
+        children: [
+          Section([CardText('A Cloud Agent session has been started for this task.')]),
+          Actions([LinkButton({ label: 'View Session', url: sessionUrl, style: 'primary' })]),
+        ],
+      }),
+      { fallbackToDM: true }
+    )
+    .catch(error => {
+      console.error('[KiloBot] Failed to post session link ephemeral:', error);
+    });
 }

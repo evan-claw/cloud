@@ -104,6 +104,14 @@ export type RunSessionInput = {
   streamTimeoutMs?: number;
   /** Optional log prefix for console messages (e.g. '[SlackBot]'). */
   logPrefix?: string;
+  /**
+   * Called once, right after the session has been prepared and initiated
+   * (i.e. the cloud agent is running). Useful for posting early user
+   * feedback such as an ephemeral "View Session" link before the session
+   * completes. Errors thrown by this callback are logged but do not abort
+   * the session.
+   */
+  onSessionReady?: (info: { cloudAgentSessionId: string; kiloSessionId: string }) => void;
 };
 
 /** Result from runSessionToCompletion */
@@ -140,6 +148,7 @@ export async function runSessionToCompletion(input: RunSessionInput): Promise<Ru
     initiateInput,
     ticketPayload,
     logPrefix = '[CloudAgentNext]',
+    onSessionReady,
   } = input;
   const streamTimeoutMs = input.streamTimeoutMs ?? DEFAULT_STREAM_TIMEOUT_MS;
 
@@ -189,6 +198,13 @@ export async function runSessionToCompletion(input: RunSessionInput): Promise<Ru
       hasError: true,
       statusMessages,
     };
+  }
+
+  // Notify caller that the session is live (fire-and-forget)
+  try {
+    onSessionReady?.({ cloudAgentSessionId: sessionId, kiloSessionId });
+  } catch (error) {
+    console.error(`${logPrefix} onSessionReady callback error:`, error);
   }
 
   // 3. Resolve URL
