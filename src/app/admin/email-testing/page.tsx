@@ -66,7 +66,7 @@ export default function EmailTestingPage() {
         // Values come directly from the server's getTemplates/getProviders responses,
         // so the cast is safe — tRPC zod will reject anything invalid at runtime anyway.
         template: (selectedTemplate ?? 'orgSubscription') as TemplateName,
-        provider: (selectedProvider ?? 'customerio') as 'customerio',
+        provider: (selectedProvider ?? 'customerio') as 'customerio' | 'mailgun',
       },
       { enabled: selectedTemplate !== null && selectedProvider !== null }
     )
@@ -79,12 +79,12 @@ export default function EmailTestingPage() {
     sendTestMutation.mutate(
       {
         template: selectedTemplate as TemplateName,
-        provider: selectedProvider as 'customerio',
+        provider: selectedProvider as 'customerio' | 'mailgun',
         recipient,
       },
       {
         onSuccess: result => {
-          toast.success(`Test email sent via ${result.provider} to ${result.recipient}`);
+          toast.success(`Test email sent via ${result?.provider} to ${result?.recipient}`);
         },
         onError: error => {
           toast.error(error.message || 'Failed to send test email');
@@ -195,7 +195,7 @@ export default function EmailTestingPage() {
               {previewQuery.isPending && (
                 <p className="text-muted-foreground text-sm">Loading preview...</p>
               )}
-              {previewQuery.data && selectedProvider === 'customerio' && (
+              {previewQuery.data?.type === 'customerio' && (
                 <div className="space-y-2">
                   <p className="text-muted-foreground text-xs">
                     Template ID:{' '}
@@ -226,6 +226,14 @@ export default function EmailTestingPage() {
                     </table>
                   </div>
                 </div>
+              )}
+              {previewQuery.data?.type === 'mailgun' && (
+                <iframe
+                  srcDoc={previewQuery.data.html}
+                  className="h-[600px] w-full rounded-lg border"
+                  title="Email preview"
+                  sandbox="allow-same-origin"
+                />
               )}
             </CardContent>
           </Card>

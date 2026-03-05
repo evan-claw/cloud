@@ -1,9 +1,9 @@
 import { adminProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { NEXTAUTH_URL } from '@/lib/config.server';
 import { sendViaCustomerIo } from '@/lib/email-customerio';
-import { templates, subjects, type TemplateName } from '@/lib/email';
+import { sendViaMailgun } from '@/lib/email-mailgun';
+import { templates, subjects, buildCreditsSection, type TemplateName } from '@/lib/email';
 import * as z from 'zod';
-import { TRPCError } from '@trpc/server';
 
 const templateNames: [TemplateName, ...TemplateName[]] = [
   'orgSubscription',
@@ -22,13 +22,13 @@ const templateNames: [TemplateName, ...TemplateName[]] = [
 
 const TemplateNameSchema = z.enum(templateNames);
 
-const providerNames = ['customerio'] as const;
+const providerNames = ['customerio', 'mailgun'] as const;
 
 type ProviderName = (typeof providerNames)[number];
 
 const ProviderNameSchema = z.enum(providerNames);
 
-function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
+function fixtureTemplateVars(template: TemplateName): Record<string, string> {
   const orgId = 'fixture-org-id';
   const organization_url = `${NEXTAUTH_URL}/organizations/${orgId}`;
   const invoices_url = `${NEXTAUTH_URL}/organizations/${orgId}/payment-details`;
@@ -59,7 +59,7 @@ function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
         app_url: NEXTAUTH_URL,
       };
     case 'balanceAlert':
-      return { minimum_balance: 10, organization_url, invoices_url };
+      return { minimum_balance: '10', organization_url, invoices_url };
     case 'autoTopUpFailed':
       return { reason: 'Card declined', credits_url: `${NEXTAUTH_URL}/credits?show-auto-top-up` };
     case 'ossInviteNewUser':
@@ -69,10 +69,9 @@ function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
         integrations_url,
         code_reviews_url,
         tier_name: 'Premier',
-        seats: 25,
+        seats: '25',
         seat_value: '48,000',
-        has_credits: true,
-        monthly_credits_usd: 500,
+        credits_section: buildCreditsSection(500),
       };
     case 'ossInviteExistingUser':
       return {
@@ -81,10 +80,9 @@ function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
         integrations_url,
         code_reviews_url,
         tier_name: 'Premier',
-        seats: 25,
+        seats: '25',
         seat_value: '48,000',
-        has_credits: true,
-        monthly_credits_usd: 500,
+        credits_section: buildCreditsSection(500),
       };
     case 'ossExistingOrgProvisioned':
       return {
@@ -93,10 +91,9 @@ function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
         integrations_url,
         code_reviews_url,
         tier_name: 'Premier',
-        seats: 25,
+        seats: '25',
         seat_value: '48,000',
-        has_credits: true,
-        monthly_credits_usd: 500,
+        credits_section: buildCreditsSection(500),
       };
     case 'deployFailed':
       return {
@@ -105,6 +102,20 @@ function fixtureTemplateVars(template: TemplateName): Record<string, unknown> {
         repository: 'acme/my-app',
       };
   }
+  throw new Error(`Unknown template: ${template}`);
+}
+
+import fs from 'fs';
+import path from 'path';
+
+function renderTemplateForPreview(
+  templateName: TemplateName,
+  vars: Record<string, string>
+): string {
+  const templatePath = path.join(process.cwd(), 'src', 'emails', `${templateName}.html`);
+  const html = fs.readFileSync(templatePath, 'utf-8');
+  const allVars: Record<string, string> = { ...vars, year: String(new Date().getFullYear()) };
+  return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key: string) => allVars[key] ?? `{{${key}}}`);
 }
 
 export const emailTestingRouter = createTRPCRouter({
@@ -120,6 +131,13 @@ export const emailTestingRouter = createTRPCRouter({
     .input(z.object({ template: TemplateNameSchema, provider: ProviderNameSchema }))
     .query(({ input }) => {
       const vars = fixtureTemplateVars(input.template);
+      if (input.provider === 'mailgun') {
+        return {
+          type: 'mailgun' as const,
+          subject: subjects[input.template],
+          html: renderTemplateForPreview(input.template, vars),
+        };
+      }
       return {
         type: 'customerio' as const,
         transactional_message_id: templates[input.template],
@@ -150,9 +168,9 @@ export const emailTestingRouter = createTRPCRouter({
         return { success: true, provider: input.provider, recipient: input.recipient };
       }
 
-      throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: `Provider '${input.provider}' is not yet implemented`,
-      });
+      const subject = subjects[input.template];
+      const html = renderTemplateForPreview(input.template, vars);
+      await sendViaMailgun({ to: input.recipient, subject, html });
+      return { success: true, provider: input.provider, recipient: input.recipient };
     }),
 });

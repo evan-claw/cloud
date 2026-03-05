@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import type { Organization } from '@kilocode/db/schema';
 import { getMagicLinkUrl, type MagicLinkTokenWithPlaintext } from '@/lib/auth/magic-link-tokens';
 import { EMAIL_PROVIDER, NEXTAUTH_URL } from '@/lib/config.server';
@@ -37,17 +39,36 @@ export const subjects: Record<TemplateName, string> = {
   deployFailed: 'Kilo: Your Deployment Failed',
 };
 
+function renderTemplate(name: string, vars: Record<string, string>): string {
+  const templatePath = path.join(process.cwd(), 'src', 'emails', `${name}.html`);
+  const html = fs.readFileSync(templatePath, 'utf-8');
+  return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key: string) => {
+    if (!(key in vars)) {
+      throw new Error(`Missing template variable '${key}' in email template '${name}'`);
+    }
+    return vars[key];
+  });
+}
+
+export function buildCreditsSection(monthlyCreditsUsd: number): string {
+  if (monthlyCreditsUsd <= 0) return '';
+  return `<br />• <strong style="color: #d1d5db">$${monthlyCreditsUsd} USD in Kilo credits</strong>, which reset every 30 days`;
+}
+
 type SendParams = {
   to: string;
   templateName: TemplateName;
-  // Mixed types to support customerio's native message_data (numbers, booleans, etc.)
-  // PR 2 will tighten this to Record<string, string> once renderTemplate is added.
-  templateVars: Record<string, unknown>;
+  templateVars: Record<string, string>;
 };
 
 function send(params: SendParams) {
   if (EMAIL_PROVIDER === 'mailgun') {
-    return sendViaMailgun();
+    const subject = subjects[params.templateName];
+    const html = renderTemplate(params.templateName, {
+      ...params.templateVars,
+      year: String(new Date().getFullYear()),
+    });
+    return sendViaMailgun({ to: params.to, subject, html });
   }
   return sendViaCustomerIo({
     transactional_message_id: templates[params.templateName],
@@ -197,7 +218,12 @@ export async function sendBalanceAlertEmail(props: SendBalanceAlertEmailProps) {
     send({
       to: email,
       templateName: 'balanceAlert',
-      templateVars: { organizationId, minimum_balance, organization_url, invoices_url },
+      templateVars: {
+        organizationId,
+        minimum_balance: String(minimum_balance),
+        organization_url,
+        invoices_url,
+      },
     });
 
   const BATCH_SIZE = 10;
@@ -236,10 +262,9 @@ export async function sendOssInviteNewUserEmail(data: OssInviteEmailData) {
       integrations_url,
       code_reviews_url,
       tier_name: tierConfig.name,
-      seats: tierConfig.seats,
+      seats: String(tierConfig.seats),
       seat_value: tierConfig.seatValue.toLocaleString(),
-      has_credits: data.monthlyCreditsUsd > 0,
-      monthly_credits_usd: data.monthlyCreditsUsd,
+      credits_section: buildCreditsSection(data.monthlyCreditsUsd),
     },
   });
 }
@@ -260,10 +285,9 @@ export async function sendOssInviteExistingUserEmail(
       integrations_url,
       code_reviews_url,
       tier_name: tierConfig.name,
-      seats: tierConfig.seats,
+      seats: String(tierConfig.seats),
       seat_value: tierConfig.seatValue.toLocaleString(),
-      has_credits: data.monthlyCreditsUsd > 0,
-      monthly_credits_usd: data.monthlyCreditsUsd,
+      credits_section: buildCreditsSection(data.monthlyCreditsUsd),
     },
   });
 }
@@ -287,10 +311,9 @@ export async function sendOssExistingOrgProvisionedEmail(data: OssProvisionEmail
     integrations_url,
     code_reviews_url,
     tier_name: tierConfig.name,
-    seats: tierConfig.seats,
+    seats: String(tierConfig.seats),
     seat_value: tierConfig.seatValue.toLocaleString(),
-    has_credits: data.monthlyCreditsUsd > 0,
-    monthly_credits_usd: data.monthlyCreditsUsd,
+    credits_section: buildCreditsSection(data.monthlyCreditsUsd),
   };
   await Promise.all(
     data.to.map(to => send({ to, templateName: 'ossExistingOrgProvisioned', templateVars }))

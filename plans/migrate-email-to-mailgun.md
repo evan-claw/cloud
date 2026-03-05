@@ -161,22 +161,22 @@ Install: `pnpm add mailgun.js form-data` (keep `customerio-node` until cleanup)
 - ~~Add `EMAIL_PROVIDER=customerio` to `.env.local`, `.env.test`, and `.env.development.local.example`~~ ✅
 - Deploy with `EMAIL_PROVIDER=customerio` — no production change
 
-### PR 2: Mailgun Send Logic + Template Rendering
+### PR 2: Mailgun Send Logic + Template Rendering ✅ Done (merged into PR 1 branch)
 
 Pre-requisite template work:
 
-- ~~Replace `{{ "now" | date: "%Y" }}` with `{{ year }}` in all 12 templates~~ ✅ Done
-- Re-include `src/emails/*.html` and `src/emails/AGENTS.md` (removed from PR 1 branch, cut fresh from PR 1 once merged)
-- Replace the `{% if has_credits %}...{% endif %}` block with `{{ credits_section }}` in the 3 OSS templates (`ossInviteNewUser.html`, `ossInviteExistingUser.html`, `ossExistingOrgProvisioned.html`)
+- ~~Replace `{{ "now" | date: "%Y" }}` with `{{ year }}` in all 12 templates~~ ✅
+- ~~Re-include `src/emails/*.html` and `src/emails/AGENTS.md`~~ ✅
+- ~~Replace the `{% if has_credits %}...{% endif %}` block with `{{ credits_section }}` in the 3 OSS templates (`ossInviteNewUser.html`, `ossInviteExistingUser.html`, `ossExistingOrgProvisioned.html`)~~ ✅
 
 Implementation:
 
-- Install `mailgun.js` + `form-data`
-- Implement `sendViaMailgun({ to, subject, html })` in `src/lib/email-mailgun.ts`
-- Add `renderTemplate()` and `buildCreditsSection()` to `email.ts`
-- Update `send()` in `email.ts`: mailgun branch looks up `subjects[templateName]`, calls `renderTemplate(templateName, templateVars)`, then `sendViaMailgun()`. Tighten `templateVars` to `Record<string, string>` — update all `send*Email` call sites (OSS functions replace `has_credits: boolean` + `monthly_credits_usd: number` with `credits_section: buildCreditsSection(...)`)
-- Add `mailgun` to the providers list in `email-testing-router.ts`; update `getPreview` to return rendered HTML for mailgun; update `sendTest` to call `sendViaMailgun` directly
-- The admin page now shows `mailgun` in the provider dropdown with a full HTML iframe preview
+- ~~Install `mailgun.js` + `form-data`~~ ✅
+- ~~Implement `sendViaMailgun({ to, subject, html })` in `src/lib/email-mailgun.ts`~~ ✅
+- ~~Add `renderTemplate()` and `buildCreditsSection()` to `email.ts`~~ ✅
+- ~~Update `send()` in `email.ts`: mailgun branch looks up `subjects[templateName]`, calls `renderTemplate(templateName, templateVars)`, then `sendViaMailgun()`. Tighten `templateVars` to `Record<string, string>` — update all `send*Email` call sites (OSS functions replace `has_credits: boolean` + `monthly_credits_usd: number` with `credits_section: buildCreditsSection(...)`)~~ ✅
+- ~~Add `mailgun` to the providers list in `email-testing-router.ts`; update `getPreview` to return rendered HTML for mailgun; update `sendTest` to call `sendViaMailgun` directly~~ ✅
+- ~~The admin page now shows `mailgun` in the provider dropdown with a full HTML iframe preview~~ ✅
 - Deploy with `EMAIL_PROVIDER=customerio` — still no production change
 
 **QA** (no PR): Use the admin testing page to send each template via Mailgun to real inboxes. Compare rendered output against the Customer.io versions. Verify all variable substitution, styling, links.
