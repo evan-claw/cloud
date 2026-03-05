@@ -78,11 +78,17 @@ export function buildRepoBrowseUrl(gitUrl: string | null | undefined): string | 
     return `https://${sshMatch[1]}/${sshMatch[2]}`;
   }
 
-  // HTTPS format
+  // Standard URL format (https://, ssh://, etc.)
   try {
     const url = new URL(gitUrl);
     const pathname = url.pathname.replace(/\.git$/, '');
-    return url.origin + pathname;
+    // For non-browseable protocols (e.g. ssh://git@github.com/owner/repo.git),
+    // url.origin is null — force https:// so the result is a clickable URL.
+    const origin =
+      url.protocol === 'http:' || url.protocol === 'https:'
+        ? url.origin
+        : `https://${url.hostname}`;
+    return origin + pathname;
   } catch {
     return undefined;
   }

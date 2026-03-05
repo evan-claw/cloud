@@ -59,6 +59,24 @@ describe('buildRepoBrowseUrl', () => {
     );
   });
 
+  test('ssh:// URI format with .git', () => {
+    expect(buildRepoBrowseUrl('ssh://git@github.com/owner/repo.git')).toBe(
+      'https://github.com/owner/repo'
+    );
+  });
+
+  test('ssh:// URI format without .git', () => {
+    expect(buildRepoBrowseUrl('ssh://git@github.com/owner/repo')).toBe(
+      'https://github.com/owner/repo'
+    );
+  });
+
+  test('ssh:// URI format GitLab nested groups', () => {
+    expect(buildRepoBrowseUrl('ssh://git@gitlab.com/group/subgroup/project.git')).toBe(
+      'https://gitlab.com/group/subgroup/project'
+    );
+  });
+
   test('null returns undefined', () => {
     expect(buildRepoBrowseUrl(null)).toBeUndefined();
   });
@@ -97,6 +115,14 @@ describe('detectGitPlatform', () => {
     expect(detectGitPlatform('git@gitlab.mycompany.com:team/repo.git')).toBeUndefined();
   });
 
+  test('GitHub ssh:// URI format', () => {
+    expect(detectGitPlatform('ssh://git@github.com/owner/repo.git')).toBe('github');
+  });
+
+  test('GitLab ssh:// URI format', () => {
+    expect(detectGitPlatform('ssh://git@gitlab.com/group/project.git')).toBe('gitlab');
+  });
+
   test('Bitbucket returns undefined', () => {
     expect(detectGitPlatform('https://bitbucket.org/owner/repo.git')).toBeUndefined();
   });
@@ -117,6 +143,16 @@ describe('extractRepoFromGitUrl', () => {
 
   test('GitLab SSH nested groups', () => {
     expect(extractRepoFromGitUrl('git@gitlab.com:group/subgroup/project.git')).toBe(
+      'group/subgroup/project'
+    );
+  });
+
+  test('ssh:// URI format', () => {
+    expect(extractRepoFromGitUrl('ssh://git@github.com/owner/repo.git')).toBe('owner/repo');
+  });
+
+  test('ssh:// URI format GitLab nested groups', () => {
+    expect(extractRepoFromGitUrl('ssh://git@gitlab.com/group/subgroup/project.git')).toBe(
       'group/subgroup/project'
     );
   });
