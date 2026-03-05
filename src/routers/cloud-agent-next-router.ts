@@ -126,8 +126,15 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const authToken = generateCloudAgentToken(ctx.user);
-      const githubToken = await getGitHubTokenForUser(ctx.user.id);
       const client = createCloudAgentNextClient(authToken);
+
+      // Determine platform to fetch the correct token
+      const session = await client.getSession(input.cloudAgentSessionId);
+      let githubToken: string | undefined;
+
+      if (session.platform !== 'gitlab') {
+        githubToken = await getGitHubTokenForUser(ctx.user.id);
+      }
 
       try {
         return await client.initiateFromPreparedSession({
@@ -151,13 +158,30 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const authToken = generateCloudAgentToken(ctx.user);
-      const githubToken = await getGitHubTokenForUser(ctx.user.id);
       const client = createCloudAgentNextClient(authToken);
+
+      // Determine platform to fetch the correct token
+      const session = await client.getSession(input.cloudAgentSessionId);
+      let githubToken: string | undefined;
+      let gitToken: string | undefined;
+
+      if (session.platform === 'gitlab') {
+        gitToken = await getGitLabTokenForUser(ctx.user.id);
+        if (!gitToken) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No GitLab integration found. Please connect your GitLab account first.',
+          });
+        }
+      } else {
+        githubToken = await getGitHubTokenForUser(ctx.user.id);
+      }
 
       try {
         return await client.sendMessage({
           ...input,
           githubToken,
+          gitToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);

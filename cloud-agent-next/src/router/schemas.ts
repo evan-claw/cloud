@@ -353,6 +353,7 @@ export const GetSessionOutput = z.object({
   // Repository info (no tokens)
   githubRepo: z.string().optional().describe('GitHub repository in org/repo format'),
   gitUrl: z.string().optional().describe('Generic git URL'),
+  platform: z.enum(['github', 'gitlab']).optional().describe('Git platform type'),
 
   // Execution params
   prompt: z.string().optional().describe('Task prompt'),

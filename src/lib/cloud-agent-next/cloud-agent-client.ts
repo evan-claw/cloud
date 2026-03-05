@@ -172,6 +172,7 @@ export type GetSessionOutput = {
   // Repository info (no tokens)
   githubRepo?: string;
   gitUrl?: string;
+  platform?: 'github' | 'gitlab';
 
   // Execution params
   prompt?: string;

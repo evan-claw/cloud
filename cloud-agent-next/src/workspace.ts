@@ -25,6 +25,12 @@ function sanitizeGitUrlForLogging(gitUrl: string): string {
   }
 }
 
+// Mask authentication tokens in git stderr output to prevent leaking secrets in logs/errors.
+// Handles patterns like `oauth2:TOKEN@`, `x-access-token:TOKEN@`, and `x-token-auth:TOKEN@`.
+function sanitizeGitStderr(stderr: string): string {
+  return stderr.replace(/(oauth2|x-access-token|x-token-auth):([^@]+)@/gi, '$1:***@');
+}
+
 const SESSION_HOME_ROOT = `/home`;
 const KILOCODE_DIR = `.kilocode`;
 const CLI_DIR = `${KILOCODE_DIR}/cli`;
@@ -502,7 +508,7 @@ export async function updateGitRemoteToken(
 async function gitFetch(session: ExecutionSession, workspacePath: string): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git fetch origin`);
   if (result.exitCode !== 0) {
-    logger.withFields({ stderr: result.stderr }).warn('Git fetch failed');
+    logger.withFields({ stderr: sanitizeGitStderr(result.stderr) }).warn('Git fetch failed');
   }
 }
 
@@ -535,7 +541,9 @@ async function checkoutExistingBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to checkout branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to checkout branch ${branchName}: ${sanitizeGitStderr(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -548,7 +556,7 @@ async function pullLatestChangesLenient(
   if (result.exitCode !== 0) {
     // Session branches might have unpushed work or conflicts, just warn
     logger
-      .withFields({ branchName, stderr: result.stderr })
+      .withFields({ branchName, stderr: sanitizeGitStderr(result.stderr) })
       .warn('Could not pull branch, continuing with local version');
   }
 }
@@ -563,7 +571,7 @@ async function createTrackingBranch(
   );
   if (result.exitCode !== 0) {
     throw new Error(
-      `Failed to create tracking branch ${branchName}: ${result.stderr || result.stdout}`
+      `Failed to create tracking branch ${branchName}: ${sanitizeGitStderr(result.stderr || result.stdout)}`
     );
   }
 }
@@ -575,7 +583,9 @@ async function createNewBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout -b '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to create branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to create branch ${branchName}: ${sanitizeGitStderr(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -593,7 +603,7 @@ async function fetchPullRefAndCheckout(
   const fetchResult = await session.exec(`cd ${workspacePath} && git fetch origin '${pullRef}'`);
   if (fetchResult.exitCode !== 0) {
     throw new Error(
-      `Failed to fetch pull ref ${pullRef}: ${fetchResult.stderr || fetchResult.stdout}`
+      `Failed to fetch pull ref ${pullRef}: ${sanitizeGitStderr(fetchResult.stderr || fetchResult.stdout)}`
     );
   }
 
@@ -602,7 +612,7 @@ async function fetchPullRefAndCheckout(
   );
   if (checkoutResult.exitCode !== 0) {
     throw new Error(
-      `Failed to checkout pull ref ${pullRef}: ${checkoutResult.stderr || checkoutResult.stdout}`
+      `Failed to checkout pull ref ${pullRef}: ${sanitizeGitStderr(checkoutResult.stderr || checkoutResult.stdout)}`
     );
   }
 }
