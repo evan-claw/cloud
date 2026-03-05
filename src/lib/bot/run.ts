@@ -5,12 +5,15 @@ import {
   DEFAULT_BOT_MODEL,
 } from '@/lib/bot/constants';
 import { MAX_ITERATIONS } from '@/lib/bot/constants';
+import spawnCloudAgentSession, {
+  spawnCloudAgentInputSchema,
+} from '@/lib/bot/tools/spawn-cloud-agent-session';
 import { APP_URL } from '@/lib/constants';
 import { FEATURE_HEADER } from '@/lib/feature-detection';
 import { generateApiToken } from '@/lib/tokens';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { PlatformIntegration, User } from '@kilocode/db';
-import { ToolLoopAgent, stepCountIs } from 'ai';
+import { ToolLoopAgent, stepCountIs, tool } from 'ai';
 import type { Thread, Message } from 'chat';
 
 export async function processMessage({
@@ -34,25 +37,35 @@ export async function processMessage({
     headers['X-KiloCode-OrganizationId'] = platformIntegration.owned_by_organization_id;
   }
 
+  const authToken = generateApiToken(user, { internalApiUse: true });
   const provider = createOpenAICompatible({
-    name: 'kilo-proxy',
+    name: 'kilo-gateway',
     baseURL: `${APP_URL}/api/openrouter`,
-    apiKey: generateApiToken(user, { internalApiUse: true }),
+    apiKey: authToken,
     headers,
   });
 
+  const modelSlug =
+    (platformIntegration.metadata as { model_slug?: string }).model_slug ?? DEFAULT_BOT_MODEL;
   const agent = new ToolLoopAgent({
-    model: provider.chatModel(
-      (platformIntegration.metadata as { model_slug?: string }).model_slug ?? DEFAULT_BOT_MODEL
-    ),
+    model: provider.chatModel(modelSlug),
     instructions: BOT_SYSTEM_PROMPT,
     stopWhen: stepCountIs(MAX_ITERATIONS),
+    tools: {
+      spawnCloudAgentSession: tool({
+        description:
+          'Spawn a Cloud Agent session to perform coding tasks on a GitHub repository. The agent can make code changes, fix bugs, implement features, and more.',
+        inputSchema: spawnCloudAgentInputSchema,
+        execute: async args =>
+          await spawnCloudAgentSession(args, modelSlug, platformIntegration, authToken, user.id),
+      }),
+    },
   });
 
   try {
     const result = await agent.generate({ prompt: message.text });
 
-    await thread.post(result.text);
+    await thread.post({ markdown: result.text });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
 
