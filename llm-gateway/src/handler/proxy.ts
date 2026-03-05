@@ -21,6 +21,11 @@ import { classifyAbuse } from '../lib/abuse-service';
 import { scheduleBackgroundTasks, type BackgroundTaskParams } from './background-tasks';
 import { getToolsUsed } from '../background/api-metrics';
 import { captureException } from '../lib/sentry';
+import {
+  isOpenCodeBasedClient,
+  isRooCodeBasedClient,
+  fixOpenCodeDuplicateReasoning,
+} from '../lib/fix-opencode-duplicate-reasoning';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 
@@ -161,11 +166,16 @@ export const proxyHandler: Handler<HonoContext> = async c => {
     }
   );
 
+  // ── Pre-request transforms ──────────────────────────────────────────────────
+  if (isOpenCodeBasedClient(fraudHeaders)) {
+    fixOpenCodeDuplicateReasoning(resolvedModel, requestBody, taskId ?? undefined);
+  }
+
   // ── Upstream request ────────────────────────────────────────────────────────
   let response: Response;
   if (customLlm) {
     const db = c.get('db');
-    const isLegacyExtension = !!fraudHeaders.http_user_agent?.startsWith('Kilo-Code/');
+    const isLegacyExtension = isRooCodeBasedClient(fraudHeaders);
     response = await customLlmRequest(
       customLlm,
       requestBody,
