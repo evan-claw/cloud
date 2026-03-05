@@ -43,6 +43,7 @@
     "@aws-sdk/client-s3": "^3.980.0",
     "@aws-sdk/s3-request-presigner": "^3.980.0",
     "@chat-adapter/slack": "^4.15.0",
+    "@chat-adapter/state-memory": "^4.15.0",
     "@chat-adapter/state-redis": "^4.15.0",
     "@kilocode/db": "workspace:*",
     "@kilocode/encryption": "workspace:*",

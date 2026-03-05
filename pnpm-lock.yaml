@@ -99,6 +99,9 @@ importers:
       '@chat-adapter/slack':
         specifier: ^4.15.0
         version: 4.15.0
+      '@chat-adapter/state-memory':
+        specifier: ^4.15.0
+        version: 4.15.0
       '@chat-adapter/state-redis':
         specifier: ^4.15.0
         version: 4.15.0
@@ -2485,6 +2488,9 @@ packages:
 
   '@chat-adapter/slack@4.15.0':
     resolution: {integrity: sha512-DE2puxMXitt2AVLBvMAldZ4KKUKpKWxSd62nWLDX6xXtOo6z9uXAggZD3FnMOGITqw+oQypdFopvm/Wu6OxeFg==}
+
+  '@chat-adapter/state-memory@4.15.0':
+    resolution: {integrity: sha512-I/p6dA8fl8peZH9utKOsO8raFttUSyIQwyhB/uP6cR9d07hZVcG/SF30t4RjKDgegnq8+euqPFj3lCssIaYhoA==}
 
   '@chat-adapter/state-redis@4.15.0':
     resolution: {integrity: sha512-156CGZCkMXzsnMC20nIpNkAGScbasOHxR9YcPMuLm2IwSC1L/Kyea7o9TEv2ldvk63q/e+AaU+98T7T5/2+mvg==}
@@ -13312,6 +13318,12 @@ snapshots:
       - debug
       - supports-color
 
+  '@chat-adapter/state-memory@4.15.0':
+    dependencies:
+      chat: 4.15.0
+    transitivePeerDependencies:
+      - supports-color
+
   '@chat-adapter/state-redis@4.15.0':
     dependencies:
       chat: 4.15.0
@@ -17680,7 +17692,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 2.0.0
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
   '@vitest/utils@3.2.4':
     dependencies:
