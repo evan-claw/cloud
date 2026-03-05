@@ -49,7 +49,7 @@ function StatusIndicator({ status }: { status: AutocommitStatusType }) {
         <span className="text-muted-foreground flex items-center gap-2">
           <Check className="h-3 w-3" />
           {status.commitHash ? (
-            <span>
+            <span title={status.commitMessage ?? status.message}>
               <code className="font-mono">{status.commitHash}</code>{' '}
               {truncateCommitMessage(status.commitMessage ?? status.message)}
             </span>
