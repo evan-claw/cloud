@@ -65,6 +65,7 @@ export const SecurityAgentConfigSchema = z
     auto_dismiss_confidence_threshold: z.enum(['high', 'medium', 'low']).default('high'),
     auto_analysis_enabled: z.boolean().default(false),
     auto_analysis_min_severity: z.enum(['critical', 'high', 'medium', 'all']).default('high'),
+    auto_analysis_include_existing: z.boolean().default(false),
   })
   .passthrough();
 

@@ -74,18 +74,59 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
     .input(UpdateVersionStatusSchema)
     .mutation(async ({ input, ctx }) => {
       // Prevent disabling the :latest version — it would break all unpinned users.
-      // Note: TOCTOU race exists between fetching latest from KV and the DB update below.
-      // Acceptable because this is an admin-only operation with low concurrent usage.
       if (input.status === 'disabled') {
         const client = new KiloClawInternalClient();
         try {
-          const latestTag = (await client.getLatestVersion())?.imageTag;
-          if (latestTag === input.imageTag) {
+          const latestTagBefore = (await client.getLatestVersion())?.imageTag;
+          if (latestTagBefore === input.imageTag) {
             throw new TRPCError({
               code: 'PRECONDITION_FAILED',
               message: 'Cannot disable the current :latest version. Push a new image first.',
             });
           }
+
+          const [updated] = await db
+            .update(kiloclaw_image_catalog)
+            .set({
+              status: input.status,
+              updated_by: ctx.user.id,
+              updated_at: new Date().toISOString(),
+            })
+            .where(eq(kiloclaw_image_catalog.image_tag, input.imageTag))
+            .returning();
+
+          if (!updated) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'Version not found' });
+          }
+
+          // Re-verify after update to catch race condition where :latest changed
+          const latestTagAfter = (await client.getLatestVersion())?.imageTag;
+          if (latestTagAfter === input.imageTag) {
+            // Rollback the disable - this version became :latest during the operation
+            try {
+              await db
+                .update(kiloclaw_image_catalog)
+                .set({
+                  status: 'available',
+                  updated_by: ctx.user.id,
+                  updated_at: new Date().toISOString(),
+                })
+                .where(eq(kiloclaw_image_catalog.image_tag, input.imageTag));
+            } catch (rollbackErr) {
+              console.error(
+                `Failed to rollback disable for ${input.imageTag}:`,
+                rollbackErr instanceof Error ? rollbackErr.message : rollbackErr
+              );
+              // Still throw the precondition error so the caller knows the operation failed
+            }
+
+            throw new TRPCError({
+              code: 'PRECONDITION_FAILED',
+              message: 'This version became :latest during the operation. Cannot disable.',
+            });
+          }
+
+          return updated;
         } catch (err) {
           // If it's already a TRPCError, re-throw it
           if (err instanceof TRPCError) {
@@ -100,6 +141,7 @@ export const adminKiloclawVersionsRouter = createTRPCRouter({
         }
       }
 
+      // For non-disable status changes, no :latest check needed
       const [updated] = await db
         .update(kiloclaw_image_catalog)
         .set({

@@ -151,14 +151,6 @@ export function applyVercelSettings(
 ) {
   requestToMutate.model = mapModelIdToVercel(requestedModel);
 
-  if (isAnthropicModel(requestedModel)) {
-    // https://vercel.com/docs/ai-gateway/model-variants#anthropic-claude-sonnet-4:-1m-token-context-beta
-    extraHeaders['anthropic-beta'] = [extraHeaders['x-anthropic-beta'], 'context-1m-2025-08-07']
-      .filter(Boolean)
-      .join(',');
-    delete extraHeaders['x-anthropic-beta'];
-  }
-
   if (userByok) {
     if (userByok.length === 0) {
       throw new Error('Invalid state: userByok should be null or not empty');

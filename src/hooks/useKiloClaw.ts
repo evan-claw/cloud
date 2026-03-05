@@ -169,6 +169,26 @@ export function useKiloClawMutations() {
         },
       })
     ),
+    setMyPin: useMutation(
+      trpc.kiloclaw.setMyPin.mutationOptions({
+        onSuccess: async () => {
+          await invalidateStatus();
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.getMyPin.queryKey(),
+          });
+        },
+      })
+    ),
+    removeMyPin: useMutation(
+      trpc.kiloclaw.removeMyPin.mutationOptions({
+        onSuccess: async () => {
+          await invalidateStatus();
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.getMyPin.queryKey(),
+          });
+        },
+      })
+    ),
   };
 }
 
@@ -179,6 +199,28 @@ export function useKiloClawServiceDegraded() {
     trpc.kiloclaw.serviceDegraded.queryOptions(undefined, {
       staleTime: 60_000,
       refetchInterval: 60_000,
+    })
+  );
+}
+
+// User version pinning hooks
+export function useKiloClawAvailableVersions(offset = 0, limit = 25) {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.listAvailableVersions.queryOptions(
+      { offset, limit },
+      {
+        staleTime: 5 * 60_000, // versions don't change frequently
+      }
+    )
+  );
+}
+
+export function useKiloClawMyPin() {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.getMyPin.queryOptions(undefined, {
+      staleTime: 60_000, // pins don't change frequently
     })
   );
 }

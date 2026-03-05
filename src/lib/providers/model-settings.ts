@@ -1,4 +1,3 @@
-import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { giga_potato_model, giga_potato_thinking_model } from '@/lib/providers/gigapotato';
 import { isGemini3Model, isGeminiModel } from '@/lib/providers/google';
 import { isMoonshotModel } from '@/lib/providers/moonshotai';
@@ -41,7 +40,8 @@ export function getVersionedModelSettings(model: string): VersionedSettings | un
 }
 
 export function getModelVariants(model: string): OpenCodeSettings['variants'] {
-  if (isAnthropicModel(model)) {
+  // Inlined to avoid importing anthropic.ts (which transitively pulls in Node.js crypto)
+  if (model.startsWith('anthropic/')) {
     return {
       none: { reasoning: { enabled: false } },
       low: { reasoning: { enabled: true, effort: 'low' }, verbosity: 'low' },

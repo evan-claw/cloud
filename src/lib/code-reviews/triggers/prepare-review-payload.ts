@@ -71,6 +71,8 @@ export type SessionInput = {
   prompt: string;
   mode: 'code';
   model: string;
+  /** Thinking effort variant name (e.g. "high", "max") — undefined means model default */
+  variant?: string;
   upstreamBranch: string;
   /** GitHub installation token (for GitHub platform) */
   githubToken?: string;
@@ -338,6 +340,7 @@ export async function prepareReviewPayload(
     // Build platform-specific session input
     // GitHub: uses githubRepo (owner/repo format) + githubToken
     // GitLab: uses gitUrl (full HTTPS URL) + gitToken
+    const variant = config.thinking_effort ?? undefined;
     const sessionInput: SessionInput =
       platform === PLATFORM.GITLAB
         ? {
@@ -349,6 +352,7 @@ export async function prepareReviewPayload(
             prompt,
             mode: DEFAULT_CODE_REVIEW_MODE as 'code',
             model: config.model_slug || DEFAULT_CODE_REVIEW_MODEL,
+            variant,
             upstreamBranch: review.head_ref,
           }
         : {
@@ -360,6 +364,7 @@ export async function prepareReviewPayload(
             prompt,
             mode: DEFAULT_CODE_REVIEW_MODE as 'code',
             model: config.model_slug || DEFAULT_CODE_REVIEW_MODEL,
+            variant,
             upstreamBranch: review.head_ref,
           };
 

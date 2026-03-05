@@ -7,10 +7,18 @@ import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
-import { KILOCLAW_API_URL } from '@/lib/config.server';
+import {
+  KILOCLAW_API_URL,
+  STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID,
+  STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID,
+} from '@/lib/config.server';
 import { db } from '@/lib/drizzle';
-import { kiloclaw_version_pins } from '@kilocode/db/schema';
-import { eq } from 'drizzle-orm';
+import {
+  kiloclaw_version_pins,
+  kiloclaw_image_catalog,
+  kiloclaw_earlybird_purchases,
+} from '@kilocode/db/schema';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
@@ -18,6 +26,8 @@ import {
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
+import { client as stripe } from '@/lib/stripe-client';
+import { APP_URL } from '@/lib/constants';
 
 const kilocodeDefaultModelSchema = z
   .string()
@@ -46,7 +56,7 @@ const provisionSchema = z.object({
   envVars: z.record(z.string(), z.string()).optional(),
   secrets: z.record(z.string(), z.string()).optional(),
   channels: channelsSchema,
-  kilocodeDefaultModel: kilocodeDefaultModelSchema,
+  kilocodeDefaultModel: kilocodeDefaultModelSchema.nullable().optional(),
 });
 
 const updateKiloCodeConfigSchema = z.object({
@@ -134,6 +144,7 @@ async function provisionInstance(
     .from(kiloclaw_version_pins)
     .where(eq(kiloclaw_version_pins.user_id, user.id))
     .limit(1);
+  const pinnedImageTag = pin?.image_tag;
 
   const client = new KiloClawInternalClient();
   return client.provision(user.id, {
@@ -143,7 +154,7 @@ async function provisionInstance(
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
-    pinnedImageTag: pin?.image_tag,
+    pinnedImageTag,
   });
 }
 
@@ -369,5 +380,268 @@ export const kiloclawRouter = createTRPCRouter({
   restoreConfig: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.restoreConfig(ctx.user.id);
+  }),
+
+  getEarlybirdStatus: baseProcedure
+    .output(z.object({ purchased: z.boolean() }))
+    .query(async ({ ctx }) => {
+      const rows = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+      return { purchased: rows.length > 0 };
+    }),
+
+  createEarlybirdCheckoutSession: baseProcedure
+    .output(z.object({ url: z.url().nullable() }))
+    .mutation(async ({ ctx }) => {
+      const existing = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existing.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'You have already purchased the early bird offer.',
+        });
+      }
+
+      const stripeCustomerId = ctx.user.stripe_customer_id;
+      if (!stripeCustomerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Missing Stripe customer for user.',
+        });
+      }
+
+      if (!STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Early bird pricing is not configured.',
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: stripeCustomerId,
+        billing_address_collection: 'required',
+        line_items: [{ price: STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID, quantity: 1 }],
+        ...(STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID
+          ? { discounts: [{ coupon: STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID }] }
+          : { allow_promotion_codes: true }),
+        customer_update: {
+          name: 'auto',
+          address: 'auto',
+        },
+        tax_id_collection: {
+          enabled: true,
+          required: 'never',
+        },
+        payment_intent_data: {
+          metadata: {
+            type: 'kiloclaw-earlybird',
+            kiloUserId: ctx.user.id,
+          },
+        },
+        success_url: `${APP_URL}/claw?earlybird_checkout=success`,
+        cancel_url: `${APP_URL}/claw/earlybird?checkout=cancelled`,
+        metadata: {
+          type: 'kiloclaw-earlybird',
+          kiloUserId: ctx.user.id,
+        },
+      });
+
+      return { url: typeof session.url === 'string' ? session.url : null };
+    }),
+
+  // User version pinning endpoints
+  listAvailableVersions: baseProcedure
+    .input(
+      z.object({
+        offset: z.number().min(0).default(0),
+        limit: z.number().min(1).max(100).default(25),
+      })
+    )
+    .query(async ({ input }) => {
+      const { offset, limit } = input;
+
+      const [items, countResult] = await Promise.all([
+        db
+          .select({
+            openclaw_version: kiloclaw_image_catalog.openclaw_version,
+            variant: kiloclaw_image_catalog.variant,
+            image_tag: kiloclaw_image_catalog.image_tag,
+            description: kiloclaw_image_catalog.description,
+            published_at: kiloclaw_image_catalog.published_at,
+          })
+          .from(kiloclaw_image_catalog)
+          .where(eq(kiloclaw_image_catalog.status, 'available'))
+          .orderBy(desc(kiloclaw_image_catalog.published_at))
+          .offset(offset)
+          .limit(limit),
+        db
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(kiloclaw_image_catalog)
+          .where(eq(kiloclaw_image_catalog.status, 'available')),
+      ]);
+
+      const totalCount = countResult[0]?.count ?? 0;
+
+      return {
+        items,
+        pagination: {
+          offset,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit),
+        },
+      };
+    }),
+
+  getMyPin: baseProcedure.query(async ({ ctx }) => {
+    const [result] = await db
+      .select({
+        pin: kiloclaw_version_pins,
+        openclaw_version: kiloclaw_image_catalog.openclaw_version,
+        variant: kiloclaw_image_catalog.variant,
+      })
+      .from(kiloclaw_version_pins)
+      .leftJoin(
+        kiloclaw_image_catalog,
+        eq(kiloclaw_version_pins.image_tag, kiloclaw_image_catalog.image_tag)
+      )
+      // Intentionally not joining pinned_by user — avoid leaking admin email to end users
+      .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+      .limit(1);
+
+    if (!result) return null;
+
+    return {
+      ...result.pin,
+      openclaw_version: result.openclaw_version,
+      variant: result.variant,
+    };
+  }),
+
+  setMyPin: baseProcedure
+    .input(
+      z.object({
+        imageTag: z.string().min(1),
+        reason: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Verify the version exists and is available
+      // Note: There is a small TOCTOU window between this check and the insert below.
+      // Worst case: a user pins to a version disabled milliseconds before. The FK constraint
+      // on image_tag ensures referential integrity, and the status check is best-effort.
+      const [version] = await db
+        .select()
+        .from(kiloclaw_image_catalog)
+        .where(eq(kiloclaw_image_catalog.image_tag, input.imageTag))
+        .limit(1);
+
+      if (!version) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Image tag '${input.imageTag}' not found in catalog`,
+        });
+      }
+
+      if (version.status !== 'available') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot pin to version with status '${version.status}'. Only 'available' versions can be pinned.`,
+        });
+      }
+
+      // Prevent users from overwriting admin-set pins
+      const [existingPin] = await db
+        .select({ pinned_by: kiloclaw_version_pins.pinned_by })
+        .from(kiloclaw_version_pins)
+        .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existingPin && existingPin.pinned_by !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Your version is pinned by an admin. Contact your Kilo admin to change or remove the pin.',
+        });
+      }
+
+      let result;
+      try {
+        [result] = await db
+          .insert(kiloclaw_version_pins)
+          .values({
+            user_id: ctx.user.id,
+            image_tag: input.imageTag,
+            pinned_by: ctx.user.id, // User is pinning themselves
+            reason: input.reason ?? null,
+          })
+          .onConflictDoUpdate({
+            target: kiloclaw_version_pins.user_id,
+            set: {
+              image_tag: input.imageTag,
+              pinned_by: ctx.user.id,
+              reason: input.reason ?? null,
+              updated_at: new Date().toISOString(),
+            },
+          })
+          .returning();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('foreign key')) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Image tag '${input.imageTag}' not found in catalog`,
+          });
+        }
+        throw err;
+      }
+
+      if (!result) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create pin' });
+      }
+
+      return result;
+    }),
+
+  removeMyPin: baseProcedure.mutation(async ({ ctx }) => {
+    // Atomically delete only self-set pins — the WHERE clause enforces the admin-pin guard
+    // so there's no TOCTOU race between checking pinned_by and deleting.
+    const [deleted] = await db
+      .delete(kiloclaw_version_pins)
+      .where(
+        and(
+          eq(kiloclaw_version_pins.user_id, ctx.user.id),
+          eq(kiloclaw_version_pins.pinned_by, ctx.user.id)
+        )
+      )
+      .returning();
+
+    if (!deleted) {
+      // Check if a pin exists at all — if so, it's admin-set
+      const [existingPin] = await db
+        .select({ pinned_by: kiloclaw_version_pins.pinned_by })
+        .from(kiloclaw_version_pins)
+        .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existingPin) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Your version is pinned by an admin. Contact your Kilo admin to remove the pin.',
+        });
+      }
+
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'No pin found for your account' });
+    }
+
+    return { success: true };
   }),
 });

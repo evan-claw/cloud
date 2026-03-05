@@ -97,6 +97,7 @@ export function isFindingEligibleForAutoAnalysis(params: {
   isAgentEnabled: boolean;
   autoAnalysisEnabled: boolean;
   autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+  autoAnalysisIncludeExisting?: boolean;
 }): { eligible: boolean; severityRank: number | null } {
   const severityRank = getSeverityRank(params.severity);
 
@@ -109,7 +110,10 @@ export function isFindingEligibleForAutoAnalysis(params: {
   if (!params.ownerAutoAnalysisEnabledAt) {
     return { eligible: false, severityRank };
   }
-  if (Date.parse(params.findingCreatedAt) < Date.parse(params.ownerAutoAnalysisEnabledAt)) {
+  if (
+    !params.autoAnalysisIncludeExisting &&
+    Date.parse(params.findingCreatedAt) < Date.parse(params.ownerAutoAnalysisEnabledAt)
+  ) {
     return { eligible: false, severityRank };
   }
   if (severityRank == null) {
@@ -408,6 +412,7 @@ export async function syncAutoAnalysisQueueForFinding(params: {
   autoAnalysisEnabled: boolean;
   autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
   ownerAutoAnalysisEnabledAt: string | null;
+  autoAnalysisIncludeExisting?: boolean;
 }): Promise<AutoAnalysisQueueSyncResult> {
   const ownerConverted = toOwner(params.owner);
   const { eligible, severityRank } = isFindingEligibleForAutoAnalysis({
@@ -418,8 +423,10 @@ export async function syncAutoAnalysisQueueForFinding(params: {
     isAgentEnabled: params.isAgentEnabled,
     autoAnalysisEnabled: params.autoAnalysisEnabled,
     autoAnalysisMinSeverity: params.autoAnalysisMinSeverity,
+    autoAnalysisIncludeExisting: params.autoAnalysisIncludeExisting,
   });
   const isBoundarySkip =
+    !params.autoAnalysisIncludeExisting &&
     params.ownerAutoAnalysisEnabledAt != null &&
     Date.parse(params.findingCreatedAt) < Date.parse(params.ownerAutoAnalysisEnabledAt);
   const unknownSeverityCount = severityRank == null ? 1 : 0;

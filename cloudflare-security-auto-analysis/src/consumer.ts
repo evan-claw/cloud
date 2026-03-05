@@ -180,7 +180,10 @@ function isEligibleForAutoLaunch(params: {
   if (!params.autoAnalysisEnabledAt) {
     return false;
   }
-  if (Date.parse(params.findingCreatedAt) < Date.parse(params.autoAnalysisEnabledAt)) {
+  if (
+    !params.config.auto_analysis_include_existing &&
+    Date.parse(params.findingCreatedAt) < Date.parse(params.autoAnalysisEnabledAt)
+  ) {
     return false;
   }
 

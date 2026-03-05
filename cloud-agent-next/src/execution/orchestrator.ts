@@ -189,8 +189,8 @@ export class ExecutionOrchestrator {
       const result = await wrapperClient.prompt({
         prompt,
         model: wrapper.model,
-        agent: normalizedMode,
         variant: wrapper.variant,
+        agent: normalizedMode,
       });
       logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
     } catch (error) {
@@ -292,10 +292,6 @@ export class ExecutionOrchestrator {
         return {
           context,
           session,
-          // eslint-disable-next-line require-yield
-          streamKilocodeExec: async function* (): AsyncGenerator<never, void, unknown> {
-            throw new Error('streamKilocodeExec not available for fast path');
-          },
         };
       }
 

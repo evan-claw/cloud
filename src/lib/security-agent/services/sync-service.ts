@@ -121,6 +121,7 @@ export async function syncDependabotAlertsForRepo(params: {
             autoAnalysisEnabled: config.auto_analysis_enabled,
             autoAnalysisMinSeverity: config.auto_analysis_min_severity,
             ownerAutoAnalysisEnabledAt,
+            autoAnalysisIncludeExisting: config.auto_analysis_include_existing,
           });
           queueSyncTotals.enqueueCount += queueSyncResult.enqueueCount;
           queueSyncTotals.eligibleCount += queueSyncResult.eligibleCount;

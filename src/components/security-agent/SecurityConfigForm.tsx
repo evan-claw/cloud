@@ -66,6 +66,7 @@ type SecurityConfigFormProps = {
   autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
   autoAnalysisEnabled: boolean;
   autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+  autoAnalysisIncludeExisting: boolean;
   repositories: RepositoryData[];
   repositoriesSyncedAt?: string | null;
   isLoadingRepositories?: boolean;
@@ -81,6 +82,7 @@ type SecurityConfigFormProps = {
       autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
       autoAnalysisEnabled: boolean;
       autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+      autoAnalysisIncludeExisting: boolean;
     }
   ) => void;
   onToggleEnabled: (
@@ -211,6 +213,7 @@ export function SecurityConfigForm({
   autoDismissConfidenceThreshold: initialAutoDismissThreshold,
   autoAnalysisEnabled: initialAutoAnalysisEnabled,
   autoAnalysisMinSeverity: initialAutoAnalysisMinSeverity,
+  autoAnalysisIncludeExisting: initialAutoAnalysisIncludeExisting,
   repositories,
   repositoriesSyncedAt,
   isLoadingRepositories,
@@ -244,6 +247,9 @@ export function SecurityConfigForm({
   const [autoAnalysisMinSeverity, setAutoAnalysisMinSeverity] = useState<AutoAnalysisMinSeverity>(
     initialAutoAnalysisMinSeverity
   );
+  const [autoAnalysisIncludeExisting, setAutoAnalysisIncludeExisting] = useState(
+    initialAutoAnalysisIncludeExisting
+  );
   const [hasChanges, setHasChanges] = useState(false);
 
   useEffect(() => {
@@ -261,6 +267,7 @@ export function SecurityConfigForm({
     setAutoDismissConfidenceThreshold(initialAutoDismissThreshold);
     setAutoAnalysisEnabled(initialAutoAnalysisEnabled);
     setAutoAnalysisMinSeverity(initialAutoAnalysisMinSeverity);
+    setAutoAnalysisIncludeExisting(initialAutoAnalysisIncludeExisting);
     setHasChanges(false);
   }, [
     slaConfig,
@@ -273,52 +280,57 @@ export function SecurityConfigForm({
     initialAutoDismissThreshold,
     initialAutoAnalysisEnabled,
     initialAutoAnalysisMinSeverity,
+    initialAutoAnalysisIncludeExisting,
   ]);
 
+  type FormState = {
+    config: SlaConfig;
+    repositorySelectionMode: 'all' | 'selected';
+    selectedRepositoryIds: number[];
+    triageModel: string;
+    analysisModel: string;
+    analysisMode: AnalysisMode;
+    autoDismissEnabled: boolean;
+    autoDismissConfidenceThreshold: AutoDismissConfidenceThreshold;
+    autoAnalysisEnabled: boolean;
+    autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+    autoAnalysisIncludeExisting: boolean;
+  };
+
+  const currentFormState = (): FormState => ({
+    config: localConfig,
+    repositorySelectionMode,
+    selectedRepositoryIds,
+    triageModel: selectedTriageModel,
+    analysisModel: selectedAnalysisModel,
+    analysisMode,
+    autoDismissEnabled,
+    autoDismissConfidenceThreshold,
+    autoAnalysisEnabled,
+    autoAnalysisMinSeverity,
+    autoAnalysisIncludeExisting,
+  });
+
   const checkForChanges = useCallback(
-    (
-      newConfig: SlaConfig,
-      newMode: 'all' | 'selected',
-      newSelectedIds: number[],
-      newTriageModel: string,
-      newAnalysisModel: string,
-      newAnalysisMode: AnalysisMode,
-      newAutoDismissEnabled: boolean,
-      newAutoDismissThreshold: AutoDismissConfidenceThreshold,
-      newAutoAnalysisEnabled: boolean,
-      newAutoAnalysisMinSeverity: AutoAnalysisMinSeverity
-    ) => {
-      const configChanged =
-        newConfig.critical !== slaConfig.critical ||
-        newConfig.high !== slaConfig.high ||
-        newConfig.medium !== slaConfig.medium ||
-        newConfig.low !== slaConfig.low;
+    (s: FormState) => {
+      const changed =
+        s.config.critical !== slaConfig.critical ||
+        s.config.high !== slaConfig.high ||
+        s.config.medium !== slaConfig.medium ||
+        s.config.low !== slaConfig.low ||
+        s.repositorySelectionMode !== initialSelectionMode ||
+        JSON.stringify([...s.selectedRepositoryIds].sort()) !==
+          JSON.stringify([...initialSelectedIds].sort()) ||
+        s.triageModel !== initialTriageModel ||
+        s.analysisModel !== initialAnalysisModel ||
+        s.analysisMode !== initialAnalysisMode ||
+        s.autoDismissEnabled !== initialAutoDismissEnabled ||
+        s.autoDismissConfidenceThreshold !== initialAutoDismissThreshold ||
+        s.autoAnalysisEnabled !== initialAutoAnalysisEnabled ||
+        s.autoAnalysisMinSeverity !== initialAutoAnalysisMinSeverity ||
+        s.autoAnalysisIncludeExisting !== initialAutoAnalysisIncludeExisting;
 
-      const modeChanged = newMode !== initialSelectionMode;
-      const idsChanged =
-        JSON.stringify([...newSelectedIds].sort()) !==
-        JSON.stringify([...initialSelectedIds].sort());
-      const triageModelChanged = newTriageModel !== initialTriageModel;
-      const analysisModelChanged = newAnalysisModel !== initialAnalysisModel;
-      const analysisModeChanged = newAnalysisMode !== initialAnalysisMode;
-      const autoDismissEnabledChanged = newAutoDismissEnabled !== initialAutoDismissEnabled;
-      const autoDismissThresholdChanged = newAutoDismissThreshold !== initialAutoDismissThreshold;
-      const autoAnalysisEnabledChanged = newAutoAnalysisEnabled !== initialAutoAnalysisEnabled;
-      const autoAnalysisMinSeverityChanged =
-        newAutoAnalysisMinSeverity !== initialAutoAnalysisMinSeverity;
-
-      setHasChanges(
-        configChanged ||
-          modeChanged ||
-          idsChanged ||
-          triageModelChanged ||
-          analysisModelChanged ||
-          analysisModeChanged ||
-          autoDismissEnabledChanged ||
-          autoDismissThresholdChanged ||
-          autoAnalysisEnabledChanged ||
-          autoAnalysisMinSeverityChanged
-      );
+      setHasChanges(changed);
     },
     [
       slaConfig,
@@ -331,6 +343,7 @@ export function SecurityConfigForm({
       initialAutoDismissThreshold,
       initialAutoAnalysisEnabled,
       initialAutoAnalysisMinSeverity,
+      initialAutoAnalysisIncludeExisting,
     ]
   );
 
@@ -340,162 +353,57 @@ export function SecurityConfigForm({
 
     const newConfig = { ...localConfig, [key]: numValue };
     setLocalConfig(newConfig);
-    checkForChanges(
-      newConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), config: newConfig });
   };
 
   const handleSelectionModeChange = (mode: 'all' | 'selected') => {
     setRepositorySelectionMode(mode);
-    checkForChanges(
-      localConfig,
-      mode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), repositorySelectionMode: mode });
   };
 
   const handleSelectedIdsChange = (ids: number[]) => {
     setSelectedRepositoryIds(ids);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      ids,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), selectedRepositoryIds: ids });
   };
 
   const handleTriageModelChange = (model: string) => {
     setSelectedTriageModel(model);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      model,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), triageModel: model });
   };
 
   const handleAnalysisModelChange = (model: string) => {
     setSelectedAnalysisModel(model);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      model,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), analysisModel: model });
   };
 
   const handleAnalysisModeChange = (mode: AnalysisMode) => {
     setAnalysisMode(mode);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      mode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), analysisMode: mode });
   };
 
   const handleAutoDismissEnabledChange = (newEnabled: boolean) => {
     setAutoDismissEnabled(newEnabled);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      newEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), autoDismissEnabled: newEnabled });
   };
 
   const handleAutoDismissThresholdChange = (threshold: AutoDismissConfidenceThreshold) => {
     setAutoDismissConfidenceThreshold(threshold);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      threshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), autoDismissConfidenceThreshold: threshold });
   };
 
   const handleAutoAnalysisEnabledChange = (newEnabled: boolean) => {
     setAutoAnalysisEnabled(newEnabled);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      newEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), autoAnalysisEnabled: newEnabled });
   };
 
   const handleAutoAnalysisMinSeverityChange = (severity: AutoAnalysisMinSeverity) => {
     setAutoAnalysisMinSeverity(severity);
-    checkForChanges(
-      localConfig,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      severity
-    );
+    checkForChanges({ ...currentFormState(), autoAnalysisMinSeverity: severity });
+  };
+
+  const handleAutoAnalysisIncludeExistingChange = (newIncludeExisting: boolean) => {
+    setAutoAnalysisIncludeExisting(newIncludeExisting);
+    checkForChanges({ ...currentFormState(), autoAnalysisIncludeExisting: newIncludeExisting });
   };
 
   const handleSave = () => {
@@ -511,23 +419,13 @@ export function SecurityConfigForm({
       autoDismissConfidenceThreshold,
       autoAnalysisEnabled,
       autoAnalysisMinSeverity,
+      autoAnalysisIncludeExisting,
     });
   };
 
   const handleReset = () => {
     setLocalConfig(DEFAULT_SLA_CONFIG);
-    checkForChanges(
-      DEFAULT_SLA_CONFIG,
-      repositorySelectionMode,
-      selectedRepositoryIds,
-      selectedTriageModel,
-      selectedAnalysisModel,
-      analysisMode,
-      autoDismissEnabled,
-      autoDismissConfidenceThreshold,
-      autoAnalysisEnabled,
-      autoAnalysisMinSeverity
-    );
+    checkForChanges({ ...currentFormState(), config: DEFAULT_SLA_CONFIG });
   };
 
   // Map repositories to the format expected by RepositoryMultiSelect
@@ -831,6 +729,25 @@ export function SecurityConfigForm({
                     </Label>
                   ))}
                 </RadioGroup>
+              </div>
+            )}
+
+            {autoAnalysisEnabled && (
+              <div className="flex items-center justify-between rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                <div className="space-y-1">
+                  <Label htmlFor="auto-analysis-include-existing" className="font-medium">
+                    Include Existing Findings
+                  </Label>
+                  <p className="text-muted-foreground text-sm">
+                    Also analyse findings that were synced before auto-analysis was enabled. This
+                    may use additional credits if there are many existing findings.
+                  </p>
+                </div>
+                <Switch
+                  id="auto-analysis-include-existing"
+                  checked={autoAnalysisIncludeExisting}
+                  onCheckedChange={handleAutoAnalysisIncludeExistingChange}
+                />
               </div>
             )}
           </CardContent>

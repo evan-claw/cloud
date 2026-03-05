@@ -72,6 +72,7 @@ declare type CloudflareEnv = {
   INTERNAL_API_SECRET: SecretBinding;
   KILOCODE_BACKEND_BASE_URL: string;
   ENVIRONMENT: string;
+  BETTERSTACK_HEARTBEAT_URL: string | undefined;
 };
 
 declare type GitTokenLookupFailureReason = Extract<

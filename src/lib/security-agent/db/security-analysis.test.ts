@@ -16,9 +16,11 @@ jest.mock('@/lib/drizzle', () => ({
 jest.mock('@sentry/nextjs', () => ({ captureException: jest.fn() }));
 
 let cleanupStaleAnalyses: typeof analysisDbModule.cleanupStaleAnalyses;
+let isFindingEligibleForAutoAnalysis: typeof analysisDbModule.isFindingEligibleForAutoAnalysis;
 
 beforeAll(async () => {
-  ({ cleanupStaleAnalyses } = await import('./security-analysis'));
+  ({ cleanupStaleAnalyses, isFindingEligibleForAutoAnalysis } =
+    await import('./security-analysis'));
 });
 
 beforeEach(() => {
@@ -36,5 +38,66 @@ describe('cleanupStaleAnalyses', () => {
     expect(serialized).toContain('security_analysis_queue');
     expect(serialized).toContain('pending');
     expect(serialized).toContain('running');
+  });
+});
+
+describe('isFindingEligibleForAutoAnalysis', () => {
+  const baseParams = {
+    findingCreatedAt: '2025-06-01T00:00:00Z',
+    findingStatus: 'open',
+    severity: 'high',
+    ownerAutoAnalysisEnabledAt: '2025-07-01T00:00:00Z',
+    isAgentEnabled: true,
+    autoAnalysisEnabled: true,
+    autoAnalysisMinSeverity: 'high' as const,
+  };
+
+  it('rejects findings created before auto_analysis_enabled_at by default', () => {
+    const result = isFindingEligibleForAutoAnalysis(baseParams);
+    expect(result.eligible).toBe(false);
+  });
+
+  it('accepts findings created after auto_analysis_enabled_at', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      findingCreatedAt: '2025-08-01T00:00:00Z',
+    });
+    expect(result.eligible).toBe(true);
+  });
+
+  it('accepts pre-existing findings when autoAnalysisIncludeExisting is true', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      autoAnalysisIncludeExisting: true,
+    });
+    expect(result.eligible).toBe(true);
+  });
+
+  it('still rejects non-open findings even with autoAnalysisIncludeExisting', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      findingStatus: 'fixed',
+      autoAnalysisIncludeExisting: true,
+    });
+    expect(result.eligible).toBe(false);
+  });
+
+  it('still respects severity threshold with autoAnalysisIncludeExisting', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      severity: 'low',
+      autoAnalysisMinSeverity: 'high',
+      autoAnalysisIncludeExisting: true,
+    });
+    expect(result.eligible).toBe(false);
+  });
+
+  it('rejects when agent is not enabled even with autoAnalysisIncludeExisting', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      isAgentEnabled: false,
+      autoAnalysisIncludeExisting: true,
+    });
+    expect(result.eligible).toBe(false);
   });
 });

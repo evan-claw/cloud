@@ -4,7 +4,6 @@ import type {
   SandboxId,
   SessionContext,
   SessionId,
-  StreamEvent,
   InterruptResult,
 } from './types.js';
 import type { ExecutionParams as _ExecutionParams } from './schema.js';
@@ -21,7 +20,6 @@ import {
   setupWorkspace,
 } from './workspace.js';
 import { logger, WithLogTags } from './logger.js';
-import { streamKilocodeExecution } from './streaming.js';
 import type {
   PersistenceEnv,
   CloudAgentSessionState,
@@ -30,7 +28,7 @@ import type {
 import { MetadataSchema } from './persistence/schemas.js';
 import { withDORetry } from './utils/do-retry.js';
 import { mergeEnvVarsWithSecrets } from './utils/encryption.js';
-import type { EncryptedSecrets, Images } from './router/schemas.js';
+import type { EncryptedSecrets } from './router/schemas.js';
 
 const SETUP_COMMAND_TIMEOUT_SECONDS = 120; // 2 minutes
 const SANDBOX_RETRY_DEFAULTS = {
@@ -556,39 +554,43 @@ export class SessionService {
       createdOnPlatform === 'app-builder';
     const commandGuardPolicy = getCommandGuardPolicy(createdOnPlatform);
 
-    const configContent: Record<string, unknown> = {
-      permission: {
-        external_directory: {
-          [`/tmp/attachments/${sessionId}/**`]: 'allow',
-          [`${workspacePath}/**`]: 'allow',
-        },
-        ...(!isInteractive && { question: 'deny' }),
+    const permission: Record<string, unknown> = {
+      external_directory: {
+        [`/tmp/attachments/${sessionId}/**`]: 'allow',
+        [`${workspacePath}/**`]: 'allow',
       },
-      provider: {
-        kilo: {
-          options: providerOptions,
-        },
-      },
+      ...(!isInteractive && { question: 'deny' }),
     };
 
     if (commandGuardPolicy) {
-      configContent.autoApproval = {
-        enabled: true,
-        read: { enabled: true, outside: false },
-        write: { enabled: false, outside: false, protected: true },
-        browser: { enabled: false },
-        retry: { enabled: false, delay: 10 },
-        mcp: { enabled: true },
-        mode: { enabled: true },
-        subtasks: { enabled: true },
-        execute: {
-          enabled: true,
-          allowed: commandGuardPolicy.allowed,
-          denied: commandGuardPolicy.denied,
-        },
-        question: { enabled: false, timeout: 60 },
-        todo: { enabled: true },
-      };
+      // Build bash permission rules from guard policy.
+      // Denied patterns (e.g. "git add *") are more specific than allowed patterns
+      // (e.g. "git *"); the CLI resolves overlapping globs most-specific-first,
+      // so denied sub-commands correctly override broader allows.
+      const bashPermissions: Record<string, string> = {};
+      for (const cmd of commandGuardPolicy.denied) {
+        bashPermissions[`${cmd} *`] = 'deny';
+      }
+      for (const cmd of commandGuardPolicy.allowed) {
+        bashPermissions[`${cmd} *`] = 'allow';
+      }
+
+      // Parity with old autoApproval config:
+      //   read: allow  (was read.enabled: true)
+      //   edit: deny   (was write.enabled: false)
+      //   webfetch/websearch/codesearch: deny  (was browser.enabled: false)
+      //   MCP: allowed by default (was mcp.enabled: true)
+      //   question: handled above (line 564) for non-interactive sessions
+      Object.assign(permission, {
+        read: 'allow',
+        edit: 'deny',
+        bash: bashPermissions,
+        webfetch: 'deny',
+        websearch: 'deny',
+        codesearch: 'deny',
+        todowrite: 'allow',
+        todoread: 'allow',
+      });
 
       logger
         .withFields({
@@ -598,6 +600,15 @@ export class SessionService {
         })
         .info('Enabled read-only command guard policy');
     }
+
+    const configContent: Record<string, unknown> = {
+      permission,
+      provider: {
+        kilo: {
+          options: providerOptions,
+        },
+      },
+    };
     // MCP configs are already in CLI-native format — pass through directly
     if (mcpServers && Object.keys(mcpServers).length > 0) {
       configContent.mcp = mcpServers;
@@ -882,50 +893,9 @@ export class SessionService {
       existingMetadata ?? undefined
     );
 
-    // Track first execution to optimize DO fetch and store captured kiloSessionId
-    let isFirstCall = true;
-    let capturedKiloSessionId: string | undefined = undefined;
-
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        const currentIsFirst = isFirstCall;
-        isFirstCall = false;
-
-        // Use captured kiloSessionId if available for subsequent calls
-        const kiloSessionId = capturedKiloSessionId;
-
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...options, isFirstExecution: currentIsFirst, kiloSessionId, images: options?.images },
-          env
-        )) {
-          // Capture kiloSessionId from session_created event for subsequent calls
-          if (
-            event.streamEventType === 'kilocode' &&
-            event.payload?.event === 'session_created' &&
-            typeof event.payload?.sessionId === 'string' &&
-            !capturedKiloSessionId
-          ) {
-            capturedKiloSessionId = event.payload.sessionId;
-            logger.setTags({ kiloSessionId: capturedKiloSessionId });
-          }
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1176,30 +1146,9 @@ export class SessionService {
       metadataToPreserve
     );
 
-    const captureAndStoreBranch = this.captureAndStoreBranch.bind(this);
-
     return {
       context,
       session,
-      streamKilocodeExec: async function* (
-        mode: string,
-        prompt: string,
-        execOptions?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) {
-        for await (const event of streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          { ...execOptions, isFirstExecution: false, kiloSessionId, images: execOptions?.images },
-          env
-        )) {
-          yield event;
-        }
-
-        await captureAndStoreBranch(session, context, env);
-      },
     };
   }
 
@@ -1327,25 +1276,6 @@ export class SessionService {
     return {
       context,
       session,
-      streamKilocodeExec: (
-        mode: string,
-        prompt: string,
-        options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-      ) =>
-        streamKilocodeExecution(
-          sandbox,
-          session,
-          context,
-          mode,
-          prompt,
-          {
-            ...options,
-            isFirstExecution: false,
-            kiloSessionId: metadata?.kiloSessionId,
-            images: options?.images,
-          },
-          env
-        ),
     };
   }
 
@@ -1831,11 +1761,6 @@ function getGitAuthorEnv(
 export interface PreparedSession {
   context: SessionContext;
   session: Awaited<ReturnType<SessionService['getOrCreateSession']>>;
-  streamKilocodeExec: (
-    mode: string,
-    prompt: string,
-    options?: { sessionId?: string; skipInterruptPolling?: boolean; images?: Images }
-  ) => AsyncGenerator<StreamEvent>;
 }
 
 export interface InitiateOptions {

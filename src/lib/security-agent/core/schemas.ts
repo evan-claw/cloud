@@ -35,6 +35,7 @@ export const SaveSecurityConfigInputSchema = z.object({
   autoDismissConfidenceThreshold: AutoDismissConfidenceThresholdSchema.optional(),
   autoAnalysisEnabled: z.boolean().optional(),
   autoAnalysisMinSeverity: AutoAnalysisMinSeveritySchema.optional(),
+  autoAnalysisIncludeExisting: z.boolean().optional(),
 });
 
 export const ExploitabilityFilterSchema = z.enum(['all', 'exploitable', 'not_exploitable']);

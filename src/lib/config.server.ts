@@ -166,6 +166,14 @@ if (process.env.NODE_ENV === 'production') {
 export const KILOCLAW_API_URL = getEnvVariable('KILOCLAW_API_URL') || '';
 export const KILOCLAW_INTERNAL_API_SECRET = getEnvVariable('KILOCLAW_INTERNAL_API_SECRET') || '';
 
+// KiloClaw Early Bird Checkout
+export const STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID = getEnvVariable(
+  'STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID'
+);
+export const STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID = getEnvVariable(
+  'STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID'
+);
+
 // Webhook Agent Ingest Worker
 export const WEBHOOK_AGENT_URL =
   getEnvVariable('WEBHOOK_AGENT_URL') || 'https://hooks.kilosessions.ai';

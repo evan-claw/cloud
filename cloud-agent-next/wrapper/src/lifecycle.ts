@@ -28,8 +28,8 @@ const IDLE_CHECK_INTERVAL_MS = 10_000;
 /** Grace period before closing connections after inflight hits 0 (250ms) */
 const DRAIN_DELAY_MS = 250;
 
-/** Default per-message timeout if MAX_RUNTIME_MS not set (20 minutes) */
-export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_200_000;
+/** Default per-message timeout if MAX_RUNTIME_MS not set (30 minutes) */
+export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_800_000;
 
 /** Default idle timeout if IDLE_TIMEOUT_MS not set (2 minutes) */
 export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;

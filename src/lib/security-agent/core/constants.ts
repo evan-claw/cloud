@@ -27,6 +27,7 @@ export const DEFAULT_SECURITY_AGENT_CONFIG: SecurityAgentConfig = {
   auto_dismiss_confidence_threshold: 'high',
   auto_analysis_enabled: false,
   auto_analysis_min_severity: 'high',
+  auto_analysis_include_existing: false,
 };
 
 export const SECURITY_ANALYSIS_OWNER_CAP = 3;
