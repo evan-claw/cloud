@@ -26,12 +26,17 @@ export async function GET(request: Request) {
 
   const { teamId, installation } = await slackAdapter.handleOAuthCallback(patchedRequest);
 
+  // TODO: HMAC-sign the state parameter when generating the install URL
+  // and verify the signature here to prevent CSRF / tampering.
   const state = url?.searchParams.get('state');
 
   if (state?.startsWith('org_')) {
     const orgId = state.split('_')[1];
     await ensureOrganizationAccess({ user }, orgId);
 
+    // TODO: Reconsider blindly deleting the existing integration on re-install.
+    // We also need to handle the case where a teamId was previously installed
+    // for a personal account and is now being re-installed for an org (or vice versa).
     await db.transaction(async tx => {
       await tx
         .delete(platform_integrations)
