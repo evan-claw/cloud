@@ -141,6 +141,12 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     if (storedState) {
       this.state = storedState;
 
+      console.log('[CodeReviewOrchestrator] State loaded from storage', {
+        reviewId: storedState.reviewId,
+        status: storedState.status,
+        agentVersion: storedState.agentVersion,
+      });
+
       // Restore usage accumulators from persisted state so they survive DO eviction
       if (storedState.model != null) this.model = storedState.model;
       if (storedState.totalTokensIn != null) this.totalTokensIn = storedState.totalTokensIn;
@@ -512,7 +518,15 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     }
 
     // Branch based on agent version
-    if (this.state.agentVersion === 'v2') {
+    const agentVersion = this.state.agentVersion;
+    console.log('[CodeReviewOrchestrator] runReview routing decision', {
+      reviewId: this.state.reviewId,
+      agentVersion,
+      agentVersionType: typeof agentVersion,
+      willUseV2: agentVersion === 'v2',
+    });
+
+    if (agentVersion === 'v2') {
       await this.runWithCloudAgentNext();
     } else {
       await this.runWithCloudAgent();

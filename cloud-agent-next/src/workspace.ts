@@ -1,5 +1,6 @@
 import type { SandboxInstance, ExecutionSession, SystemSandboxUsageEvent } from './types.js';
 import { logger } from './logger.js';
+import { findWrapperForSessionInProcesses } from './kilo/wrapper-manager.js';
 import { withTimeout } from '@kilocode/worker-utils';
 
 /**
@@ -22,6 +23,12 @@ function sanitizeGitUrlForLogging(gitUrl: string): string {
     // If URL parsing fails, return as-is (shouldn't happen with validated URLs)
     return gitUrl;
   }
+}
+
+// Mask authentication tokens in git output to prevent leaking secrets in logs/errors.
+// Handles patterns like `oauth2:TOKEN@`, `x-access-token:TOKEN@`, and `x-token-auth:TOKEN@`.
+function sanitizeGitOutput(output: string): string {
+  return output.replace(/(oauth2|x-access-token|x-token-auth):([^@]+)@/gi, '$1:***@');
 }
 
 const SESSION_HOME_ROOT = `/home`;
@@ -157,6 +164,93 @@ export async function cleanupWorkspace(
   }
 }
 
+/**
+ * Clean up workspace directories for sessions that no longer have a running wrapper.
+ * Called when disk space is low to reclaim space from abandoned sessions.
+ * Errors are caught and logged — never rethrown — so cleanup failure never blocks setup.
+ */
+export async function cleanupStaleWorkspaces(
+  session: ExecutionSession,
+  sandbox: SandboxInstance,
+  baseWorkspacePath: string,
+  currentSessionId: string
+): Promise<void> {
+  logger
+    .withFields({ baseWorkspacePath, currentSessionId })
+    .info('Starting stale workspace cleanup');
+
+  let sessionDirs: string[];
+  try {
+    const lsResult = await session.exec(`ls -1 '${baseWorkspacePath}/sessions/'`);
+    if (lsResult.exitCode !== 0 || !lsResult.stdout) {
+      logger
+        .withFields({ stderr: lsResult.stderr })
+        .info('No sessions directory or listing failed, skipping cleanup');
+      return;
+    }
+    sessionDirs = lsResult.stdout
+      .trim()
+      .split('\n')
+      .map(d => d.trim())
+      .filter(d => /^agent_[\w-]+$/.test(d));
+  } catch (error) {
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Failed to list sessions directory, skipping cleanup');
+    return;
+  }
+
+  logger.withFields({ found: sessionDirs.length }).info('Found session directories');
+
+  // Fetch the process list once so we don't call listProcesses() per session
+  let processes: Awaited<ReturnType<SandboxInstance['listProcesses']>>;
+  try {
+    processes = await sandbox.listProcesses();
+  } catch (error) {
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Failed to list processes, skipping cleanup');
+    return;
+  }
+
+  let cleaned = 0;
+  let skipped = 0;
+
+  for (const candidateSessionId of sessionDirs) {
+    if (candidateSessionId === currentSessionId) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const wrapperInfo = findWrapperForSessionInProcesses(processes, candidateSessionId);
+      if (wrapperInfo !== null) {
+        logger.withFields({ candidateSessionId }).info('Skipping session: wrapper is running');
+        skipped++;
+        continue;
+      }
+
+      const workspacePath = `${baseWorkspacePath}/sessions/${candidateSessionId}`;
+      const sessionHome = getSessionHomePath(candidateSessionId);
+      logger
+        .withFields({ candidateSessionId, workspacePath, sessionHome })
+        .info('Removing stale session directories');
+
+      await cleanupWorkspace(session, workspacePath, sessionHome);
+      cleaned++;
+    } catch (error) {
+      logger
+        .withFields({
+          candidateSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Error while cleaning up stale session, continuing');
+    }
+  }
+
+  logger.withFields({ cleaned, skipped }).info('Stale workspace cleanup complete');
+}
+
 export type GitAuthorConfig = {
   name: string;
   email: string;
@@ -170,6 +264,7 @@ export const LOW_DISK_THRESHOLD_MB = 2048; // 2GB
 export type DiskSpaceResult = {
   availableMB: number;
   totalMB: number;
+  isLow: boolean;
 };
 
 /**
@@ -222,6 +317,7 @@ export async function checkDiskSpace(session: ExecutionSession): Promise<DiskSpa
   return {
     availableMB,
     totalMB,
+    isLow,
   };
 }
 
@@ -412,7 +508,7 @@ export async function updateGitRemoteToken(
 async function gitFetch(session: ExecutionSession, workspacePath: string): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git fetch origin`);
   if (result.exitCode !== 0) {
-    logger.withFields({ stderr: result.stderr }).warn('Git fetch failed');
+    logger.withFields({ stderr: sanitizeGitOutput(result.stderr) }).warn('Git fetch failed');
   }
 }
 
@@ -445,7 +541,9 @@ async function checkoutExistingBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to checkout branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to checkout branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -458,7 +556,7 @@ async function pullLatestChangesLenient(
   if (result.exitCode !== 0) {
     // Session branches might have unpushed work or conflicts, just warn
     logger
-      .withFields({ branchName, stderr: result.stderr })
+      .withFields({ branchName, stderr: sanitizeGitOutput(result.stderr) })
       .warn('Could not pull branch, continuing with local version');
   }
 }
@@ -473,7 +571,7 @@ async function createTrackingBranch(
   );
   if (result.exitCode !== 0) {
     throw new Error(
-      `Failed to create tracking branch ${branchName}: ${result.stderr || result.stdout}`
+      `Failed to create tracking branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
     );
   }
 }
@@ -485,7 +583,9 @@ async function createNewBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout -b '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to create branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to create branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -503,7 +603,7 @@ async function fetchPullRefAndCheckout(
   const fetchResult = await session.exec(`cd ${workspacePath} && git fetch origin '${pullRef}'`);
   if (fetchResult.exitCode !== 0) {
     throw new Error(
-      `Failed to fetch pull ref ${pullRef}: ${fetchResult.stderr || fetchResult.stdout}`
+      `Failed to fetch pull ref ${pullRef}: ${sanitizeGitOutput(fetchResult.stderr || fetchResult.stdout)}`
     );
   }
 
@@ -512,7 +612,7 @@ async function fetchPullRefAndCheckout(
   );
   if (checkoutResult.exitCode !== 0) {
     throw new Error(
-      `Failed to checkout pull ref ${pullRef}: ${checkoutResult.stderr || checkoutResult.stdout}`
+      `Failed to checkout pull ref ${pullRef}: ${sanitizeGitOutput(checkoutResult.stderr || checkoutResult.stdout)}`
     );
   }
 }

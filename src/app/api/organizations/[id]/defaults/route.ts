@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getAuthorizedOrgContext } from '@/lib/organizations/organization-auth';
 import type { NextRequest } from 'next/server';
-import { PRIMARY_DEFAULT_MODEL, getFirstFreeModel, preferredModels } from '@/lib/models';
+import { preferredModels, PRIMARY_DEFAULT_MODEL } from '@/lib/models';
 import { getEnhancedOpenRouterModels } from '@/lib/providers/openrouter';
 import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
 import { getModelIdToProviderSlugsIndex } from '@/lib/providers/openrouter/models-by-provider-index.server';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 type DefaultsResponse = {
   defaultModel: string;
@@ -103,6 +104,6 @@ export async function GET(
 
   return NextResponse.json({
     defaultModel,
-    defaultFreeModel: getFirstFreeModel(),
+    defaultFreeModel: KILO_AUTO_FREE_MODEL.id,
   });
 }

@@ -432,6 +432,32 @@ jobs:
     uses: ./.github/workflows/deploy-deployment-builder.yml
     secrets: inherit
 
+  check-code-review-worker-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.changes.outputs['code-review-worker'] }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for code-review-worker changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            code-review-worker:
+              - 'cloudflare-code-review-infra/**'
+
+  deploy-code-review-worker:
+    needs: [check-code-review-worker-changes]
+    if: needs.check-code-review-worker-changes.outputs.changed == 'true'
+    uses: ./.github/workflows/deploy-code-review-worker.yml
+    secrets: inherit
+    with:
+      environment: prod
+
   check-app-builder-changes:
     runs-on: ubuntu-latest
     outputs:

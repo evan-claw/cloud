@@ -468,24 +468,35 @@ export const kiloclawRouter = createTRPCRouter({
     .query(async ({ input }) => {
       const { offset, limit } = input;
 
-      const [items, countResult] = await Promise.all([
-        db
-          .select({
+      // Subquery: for each version+variant, pick the most recently published image tag
+      const latestPerVersion = db
+        .selectDistinctOn(
+          [kiloclaw_image_catalog.openclaw_version, kiloclaw_image_catalog.variant],
+          {
             openclaw_version: kiloclaw_image_catalog.openclaw_version,
             variant: kiloclaw_image_catalog.variant,
             image_tag: kiloclaw_image_catalog.image_tag,
             description: kiloclaw_image_catalog.description,
             published_at: kiloclaw_image_catalog.published_at,
-          })
-          .from(kiloclaw_image_catalog)
-          .where(eq(kiloclaw_image_catalog.status, 'available'))
-          .orderBy(desc(kiloclaw_image_catalog.published_at))
+          }
+        )
+        .from(kiloclaw_image_catalog)
+        .where(eq(kiloclaw_image_catalog.status, 'available'))
+        .orderBy(
+          kiloclaw_image_catalog.openclaw_version,
+          kiloclaw_image_catalog.variant,
+          desc(kiloclaw_image_catalog.published_at)
+        )
+        .as('latest_per_version');
+
+      const [items, countResult] = await Promise.all([
+        db
+          .select()
+          .from(latestPerVersion)
+          .orderBy(desc(latestPerVersion.published_at))
           .offset(offset)
           .limit(limit),
-        db
-          .select({ count: sql<number>`COUNT(*)::int` })
-          .from(kiloclaw_image_catalog)
-          .where(eq(kiloclaw_image_catalog.status, 'available')),
+        db.select({ count: sql<number>`COUNT(*)::int` }).from(latestPerVersion),
       ]);
 
       const totalCount = countResult[0]?.count ?? 0;

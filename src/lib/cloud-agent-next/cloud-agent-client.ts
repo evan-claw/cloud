@@ -108,7 +108,6 @@ export type PrepareSessionOutput = {
 export type InitiateFromPreparedSessionInput = {
   cloudAgentSessionId: string;
   kilocodeOrganizationId?: string;
-  githubToken?: string;
 };
 
 /** Input for sendMessage procedure (V2 - uses cloudAgentSessionId) */
@@ -172,6 +171,7 @@ export type GetSessionOutput = {
   // Repository info (no tokens)
   githubRepo?: string;
   gitUrl?: string;
+  platform?: 'github' | 'gitlab';
 
   // Execution params
   prompt?: string;

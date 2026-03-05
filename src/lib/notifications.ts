@@ -71,6 +71,7 @@ export async function generateUserNotifications(user: User): Promise<KiloNotific
     generateByokProvidersNotification,
     generateFirstDayWelcomeNotification,
     generateKiloPassNotification,
+    generateKimiFreeEndingNotification,
   ];
 
   const resolvedConditionalNotifications = (
@@ -281,4 +282,47 @@ async function generateKiloPassNotification(user: User): Promise<KiloNotificatio
       showIn: ['cli', 'extension'],
     },
   ];
+}
+
+async function generateKimiFreeEndingNotification(user: User): Promise<KiloNotification[]> {
+  try {
+    const kimiFreeUsers = await cachedPosthogQuery(
+      z.array(z.tuple([z.string()]).transform(([userId]) => userId))
+    )(
+      'kimi-k25-free-users',
+      `
+        select u.id
+        from events ev
+        join postgres.kilocode_users u on u.google_user_email = ev.distinct_id
+        where ev.event = 'LLM Completion'
+          and ev.properties.model = 'moonshotai/kimi-k2.5:free'
+          and ev.timestamp >= now() - interval 30 day
+        group by u.id
+        order by max(ev.timestamp) desc
+        limit 1e5
+      `
+    );
+
+    if (!kimiFreeUsers.includes(user.id)) {
+      return [];
+    }
+
+    return [
+      {
+        id: 'kimi-k25-free-ending-mar-5',
+        title: 'Kimi K2.5 Free Promotion Ending Soon',
+        message:
+          'We hope you enjoyed free use of Kimi K2.5! The promotion will be ending soon. You can switch to Kilo: Auto free mode or keep using Kimi with credits.',
+        suggestModelId: 'kilo/auto-free',
+        action: {
+          actionText: 'Switch to Kilo: Auto Free',
+          actionURL: `${APP_URL}/credits`,
+        },
+        showIn: ['cli', 'extension'],
+      },
+    ];
+  } catch (e) {
+    console.error('[generateKimiFreeEndingNotification]', e);
+    return [];
+  }
 }

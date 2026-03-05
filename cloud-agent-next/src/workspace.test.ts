@@ -5,10 +5,11 @@ import {
   cloneGitRepo,
   updateGitRemoteToken,
   checkDiskSpace,
+  cleanupStaleWorkspaces,
   createSandboxUsageEvent,
   LOW_DISK_THRESHOLD_MB,
 } from './workspace';
-import type { ExecutionSession } from './types';
+import type { ExecutionSession, SandboxInstance } from './types';
 
 describe('manageBranch', () => {
   let fakeSession: ExecutionSession;
@@ -302,6 +303,7 @@ describe('disk space checking', () => {
       expect(result).toBeDefined();
       expect(result.availableMB).toBe(1024);
       expect(result.totalMB).toBe(10000);
+      expect(result.isLow).toBe(true);
     });
 
     it('should return DiskSpaceResult with adequate disk space', async () => {
@@ -317,6 +319,7 @@ describe('disk space checking', () => {
       expect(result).toBeDefined();
       expect(result.availableMB).toBe(5000);
       expect(result.totalMB).toBe(10000);
+      expect(result.isLow).toBe(false);
     });
 
     it('should throw when df command fails', async () => {
@@ -562,6 +565,213 @@ describe('disk space checking', () => {
   describe('LOW_DISK_THRESHOLD_MB export', () => {
     it('should export threshold constant as 2048 (2GB)', () => {
       expect(LOW_DISK_THRESHOLD_MB).toBe(2048);
+    });
+  });
+
+  describe('cleanupStaleWorkspaces', () => {
+    let fakeSandbox: SandboxInstance;
+    let mockListProcesses: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockListProcesses = vi.fn();
+      fakeSandbox = {
+        listProcesses: mockListProcesses,
+      } as unknown as SandboxInstance;
+    });
+
+    it('cleans up sessions with no running wrapper', async () => {
+      mockExec
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'agent_stale-1111\nagent_current-aaaa\n',
+          stderr: '',
+        }) // ls sessions/
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm -rf workspace for stale session
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // rm -rf home for stale session
+
+      mockListProcesses.mockResolvedValue([]);
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      // listProcesses is called exactly once (not per session)
+      expect(mockListProcesses).toHaveBeenCalledTimes(1);
+
+      const execCalls = mockExec.mock.calls.map(c => c[0] as string);
+      expect(execCalls[1]).toContain("rm -rf '/workspace/org/user/sessions/agent_stale-1111'");
+      expect(execCalls[2]).toContain("rm -rf '/home/agent_stale-1111'");
+    });
+
+    it('skips the current session directory', async () => {
+      mockExec.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'agent_current-aaaa\n',
+        stderr: '',
+      });
+
+      mockListProcesses.mockResolvedValue([]);
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      // Only the ls call — no rm calls
+      expect(mockExec).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips sessions that have a running wrapper', async () => {
+      mockExec.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'agent_active-bbbb\n',
+        stderr: '',
+      });
+
+      mockListProcesses.mockResolvedValue([
+        {
+          id: 1,
+          command: 'kilocode-wrapper --agent-session agent_active-bbbb WRAPPER_PORT=5001',
+          status: 'running',
+        },
+      ]);
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      // Only the ls call — no rm calls
+      expect(mockExec).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns early when sessions directory does not exist', async () => {
+      mockExec.mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'No such file or directory',
+      });
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      expect(mockExec).toHaveBeenCalledTimes(1);
+      expect(mockListProcesses).not.toHaveBeenCalled();
+    });
+
+    it('returns early when sessions directory is empty', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      expect(mockExec).toHaveBeenCalledTimes(1);
+      expect(mockListProcesses).not.toHaveBeenCalled();
+    });
+
+    it('continues cleaning remaining sessions when one throws', async () => {
+      mockExec
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'agent_stale-aaaa\nagent_stale-bbbb\n',
+          stderr: '',
+        }) // ls
+        .mockRejectedValueOnce(new Error('exec threw during agent_stale-aaaa cleanup')) // throws during first session
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm workspace agent_stale-bbbb
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // rm home agent_stale-bbbb
+
+      mockListProcesses.mockResolvedValue([]);
+
+      // Should not throw
+      await expect(
+        cleanupStaleWorkspaces(
+          fakeSession,
+          fakeSandbox,
+          '/workspace/org/user',
+          'agent_current-aaaa'
+        )
+      ).resolves.toBeUndefined();
+
+      // listProcesses is called exactly once (not per session)
+      expect(mockListProcesses).toHaveBeenCalledTimes(1);
+
+      // second session was still attempted despite first throwing
+      const execCalls = mockExec.mock.calls.map(c => c[0] as string);
+      expect(execCalls.some(c => c.includes('agent_stale-bbbb'))).toBe(true);
+    });
+
+    it('does not throw when listProcesses rejects', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: 'agent_stale-1111\n', stderr: '' });
+      mockListProcesses.mockRejectedValue(new Error('sandbox unavailable'));
+
+      // Should not throw — returns early without cleaning any sessions
+      await expect(
+        cleanupStaleWorkspaces(
+          fakeSession,
+          fakeSandbox,
+          '/workspace/org/user',
+          'agent_current-aaaa'
+        )
+      ).resolves.toBeUndefined();
+
+      // Only the ls call — no rm calls since listProcesses failed
+      expect(mockExec).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not throw when ls throws', async () => {
+      mockExec.mockRejectedValueOnce(new Error('exec error'));
+
+      await expect(
+        cleanupStaleWorkspaces(
+          fakeSession,
+          fakeSandbox,
+          '/workspace/org/user',
+          'agent_current-aaaa'
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    it('skips directory entries that do not match the agent_ session ID format', async () => {
+      mockExec
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'unexpected-dir\n.hidden\nlost+found\nagent_valid-1234\n',
+          stderr: '',
+        }) // ls
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm workspace agent_valid-1234
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // rm home agent_valid-1234
+
+      mockListProcesses.mockResolvedValue([]);
+
+      await cleanupStaleWorkspaces(
+        fakeSession,
+        fakeSandbox,
+        '/workspace/org/user',
+        'agent_current-aaaa'
+      );
+
+      const execCalls = mockExec.mock.calls.map(c => c[0] as string);
+      // Non-matching entries never appear in any exec call after the ls
+      expect(execCalls.every(c => !c.includes('unexpected-dir'))).toBe(true);
+      expect(execCalls.every(c => !c.includes('.hidden'))).toBe(true);
+      expect(execCalls.every(c => !c.includes('lost+found'))).toBe(true);
+      // The valid session was cleaned up
+      expect(execCalls.some(c => c.includes('agent_valid-1234'))).toBe(true);
     });
   });
 });

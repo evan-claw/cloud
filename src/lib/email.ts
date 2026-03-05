@@ -154,13 +154,19 @@ export async function sendMagicLinkEmail(
 
   return send(mailRequest);
 }
-export async function sendAutoTopUpFailedEmail(to: string, props: { reason: string }) {
+export async function sendAutoTopUpFailedEmail(
+  to: string,
+  props: { reason: string; organizationId?: string }
+) {
+  const credits_url = props.organizationId
+    ? `${NEXTAUTH_URL}/organizations/${props.organizationId}/payment-details`
+    : `${NEXTAUTH_URL}/credits?show-auto-top-up`;
   return send({
     transactional_message_id: teamplates.autoTopUpFailed,
     to,
     message_data: {
       reason: props.reason,
-      credits_url: `${NEXTAUTH_URL}/credits?show-auto-top-up`,
+      credits_url,
     },
     identifiers: {
       email: to,

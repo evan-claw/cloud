@@ -599,11 +599,12 @@ describe('SessionService', () => {
         writeFile: vi.fn().mockResolvedValue(undefined),
         deleteFile: vi.fn().mockResolvedValue(undefined),
       };
+      const sandboxWriteFile = vi.fn().mockResolvedValue(undefined);
       const sandbox = {
         createSession: vi.fn().mockResolvedValue(fakeSession),
         mkdir: vi.fn().mockResolvedValue(undefined),
         exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
-        writeFile: vi.fn().mockResolvedValue(undefined),
+        writeFile: sandboxWriteFile,
       } as unknown as SandboxInstance;
 
       const kiloSessionId = 'ses_test_kilo_session_id_0001';
@@ -656,6 +657,14 @@ describe('SessionService', () => {
       const restoreWorkspaceOrder = mockedRestoreWorkspace.mock.invocationCallOrder[0];
       const kiloImportOrder = fakeSession.exec.mock.invocationCallOrder[kiloImportCallIndex];
       expect(restoreWorkspaceOrder).toBeLessThan(kiloImportOrder);
+
+      // Verify writeAuthFile ran before kilo import so KiloSessions.bootstrap() can authenticate
+      const authWriteCallIndex = sandboxWriteFile.mock.calls.findIndex(
+        (args: string[]) => typeof args[0] === 'string' && args[0].includes('auth.json')
+      );
+      expect(authWriteCallIndex).toBeGreaterThanOrEqual(0);
+      const authWriteOrder = sandboxWriteFile.mock.invocationCallOrder[authWriteCallIndex];
+      expect(authWriteOrder).toBeLessThan(kiloImportOrder);
     });
   });
 

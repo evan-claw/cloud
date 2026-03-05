@@ -66,6 +66,7 @@ app.post('/review', async (c: Context<HonoEnv>) => {
   console.log('[POST /review] Received review request', {
     reviewId: body.reviewId,
     owner: body.owner,
+    agentVersion: body.agentVersion,
   });
 
   // Create DO name from reviewId (concurrency controlled by Next.js dispatch)

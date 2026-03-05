@@ -10,11 +10,13 @@ import type { OrganizationMember } from '@/lib/organizations/organization-types'
 type OrganizationContextWrapperProps = {
   organizationId: string;
   children: ReactNode;
+  isAutoTopUpEnabled?: boolean;
 };
 
 export function OrganizationAdminContextProvider({
   organizationId,
   children,
+  isAutoTopUpEnabled,
 }: OrganizationContextWrapperProps) {
   const { data: organizationData } = useOrganizationWithMembers(organizationId);
   const { assumedRole } = useRoleTesting();
@@ -32,7 +34,7 @@ export function OrganizationAdminContextProvider({
   const isKiloAdmin = assumedRole === 'KILO ADMIN' || session?.data?.isAdmin || false;
 
   return (
-    <OrganizationContextProvider value={{ userRole: currentRole, isKiloAdmin }}>
+    <OrganizationContextProvider value={{ userRole: currentRole, isKiloAdmin, isAutoTopUpEnabled }}>
       {children}
     </OrganizationContextProvider>
   );

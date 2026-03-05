@@ -55,7 +55,7 @@ export interface WrapperStatus {
 // ---------------------------------------------------------------------------
 
 export class WrapperState {
-  // Job context (set on /job/start, cleared on idle timeout)
+  // Job context (set on /job/start, cleared on reset or drain)
   private job: JobContext | null = null;
 
   // Inflight prompts (keyed by messageId)
@@ -141,7 +141,7 @@ export class WrapperState {
   }
 
   /**
-   * Clear job context. Called on idle timeout or explicit reset.
+   * Clear job context. Called on explicit reset or when draining.
    */
   clearJob(): void {
     this._logUploader?.stop();

@@ -411,6 +411,7 @@ export function createSessionManagementHandlers() {
 
             githubRepo: metadata.githubRepo,
             gitUrl: metadata.gitUrl,
+            platform: metadata.platform,
             // githubToken: OMITTED
             // gitToken: OMITTED
 

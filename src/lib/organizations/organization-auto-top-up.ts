@@ -5,6 +5,14 @@ import {
   ORG_AUTO_TOP_UP_THRESHOLD_DOLLARS,
   DEFAULT_ORG_AUTO_TOP_UP_AMOUNT_CENTS,
 } from '@/lib/autoTopUpConstants';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
+
+export async function isOrgAutoTopUpFeatureEnabled(organizationId: string): Promise<boolean> {
+  return (
+    process.env.NODE_ENV === 'development' ||
+    (await isFeatureFlagEnabled('org-auto-topup', organizationId))
+  );
+}
 
 /**
  * Creates a Stripe checkout session for organization auto-top-up setup.

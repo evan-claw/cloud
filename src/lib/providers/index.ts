@@ -145,17 +145,16 @@ export async function getProvider(
         display_name: kiloFreeModel.display_name,
         context_length: kiloFreeModel.context_length,
         max_completion_tokens: kiloFreeModel.max_completion_tokens,
-        verbosity: null,
         provider: 'openai', // xai doesn't support preserved reasoning currently: https://github.com/vercel/ai/issues/10542
         organization_ids: [],
         base_url: freeModelProvider.apiUrl,
         api_key: freeModelProvider.apiKey,
-        reasoning_effort: null,
         included_tools: null,
         excluded_tools: null,
         supports_image_input: kiloFreeModel.flags.includes('vision'),
         force_reasoning: true,
         opencode_settings: null,
+        extra_body: null,
       },
     };
   }
