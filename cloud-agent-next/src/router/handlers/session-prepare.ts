@@ -22,6 +22,7 @@ import type { SandboxId } from '../../types.js';
 import { setupWorkspace, cloneGitHubRepo, cloneGitRepo, manageBranch } from '../../workspace.js';
 import { ensureKiloServer, createKiloCliSession } from '../../kilo/server-manager.js';
 import { withDORetry } from '../../utils/do-retry.js';
+import { SANDBOX_SLEEP_AFTER_SECONDS } from '../../core/lease.js';
 
 type SessionPrepareHandlers = {
   prepareSession: typeof prepareSessionHandler;
@@ -192,7 +193,9 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       // 3. Get sandbox
       logger.info('Getting sandbox');
-      const sandbox = getSandbox(ctx.env.Sandbox, sandboxId, { sleepAfter: 900 });
+      const sandbox = getSandbox(ctx.env.Sandbox, sandboxId, {
+        sleepAfter: SANDBOX_SLEEP_AFTER_SECONDS,
+      });
 
       // 4. Setup workspace directories
       logger.info('Setting up workspace directories');
