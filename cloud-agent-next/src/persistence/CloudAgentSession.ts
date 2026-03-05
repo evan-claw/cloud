@@ -247,6 +247,10 @@ export class CloudAgentSession extends DurableObject {
         },
         updateHeartbeat: async (executionId: string, timestamp: number) => {
           await this.executionQueries.updateHeartbeat(executionId as ExecutionId, timestamp);
+          // Reset the sandbox container's sleep timer alongside the heartbeat.
+          // The wrapper heartbeat travels over an outbound WebSocket that
+          // bypasses containerFetch(), so the idle timer never refreshes otherwise.
+          void this.keepContainerAlive();
         },
         updateExecutionStatus: async (
           executionId: string,
@@ -922,9 +926,6 @@ export class CloudAgentSession extends DurableObject {
       const activeExecutionId = await this.executionQueries.getActiveExecutionId();
       if (activeExecutionId) {
         nextInterval = REAPER_ACTIVE_INTERVAL_MS;
-        // Reset the sandbox container's sleep timer so it isn't killed
-        // while the execution is still running.
-        await this.keepContainerAlive();
       }
     } catch {
       // Fall through with default interval
@@ -1205,8 +1206,8 @@ export class CloudAgentSession extends DurableObject {
    * `setSleepAfter()` with the same value is a lightweight RPC that resets
    * the timer without changing the configuration.
    *
-   * Called from the alarm handler every {@link REAPER_ACTIVE_INTERVAL_MS}
-   * while an execution is running.
+   * Called from the DO context's `updateHeartbeat` callback (debounced
+   * to every 30 s by the ingest handler) while an execution is running.
    */
   private async keepContainerAlive(): Promise<void> {
     const metadata = await this.getMetadata();
