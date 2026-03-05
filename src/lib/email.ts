@@ -2,7 +2,6 @@ import type { Organization } from '@kilocode/db/schema';
 import { getMagicLinkUrl, type MagicLinkTokenWithPlaintext } from '@/lib/auth/magic-link-tokens';
 import { EMAIL_PROVIDER, NEXTAUTH_URL } from '@/lib/config.server';
 import { sendViaCustomerIo } from '@/lib/email-customerio';
-import type { Identifiers } from 'customerio-node/dist/lib/api/requests';
 import { sendViaMailgun } from '@/lib/email-mailgun';
 
 export const templates = {
@@ -44,9 +43,6 @@ type SendParams = {
   // Mixed types to support customerio's native message_data (numbers, booleans, etc.)
   // PR 2 will tighten this to Record<string, string> once renderTemplate is added.
   templateVars: Record<string, unknown>;
-  // Override customerio's default identifier (email). Used for invite flows where
-  // the invite code is the identifier.
-  customerioIdentifiers?: Identifiers;
 };
 
 function send(params: SendParams) {
@@ -57,14 +53,13 @@ function send(params: SendParams) {
     transactional_message_id: templates[params.templateName],
     to: params.to,
     message_data: params.templateVars,
-    identifiers: params.customerioIdentifiers ?? { email: params.to },
+    identifiers: { email: params.to },
     reply_to: 'hi@kilocode.ai',
   });
 }
 
 type OrganizationInviteEmailData = {
   to: string;
-  inviteCode: string;
   inviterName: string;
   organizationName: Organization['name'];
   acceptInviteUrl: string;
@@ -126,7 +121,6 @@ export async function sendOrganizationInviteEmail(data: OrganizationInviteEmailD
       inviter_name: data.inviterName,
       accept_invite_url: data.acceptInviteUrl,
     },
-    customerioIdentifiers: { id: data.inviteCode },
   });
 }
 
@@ -225,7 +219,6 @@ type OssInviteEmailData = {
   organizationName: string;
   organizationId: string;
   acceptInviteUrl: string;
-  inviteCode: string;
   tier: OssTier;
   monthlyCreditsUsd: number;
 };
@@ -248,7 +241,6 @@ export async function sendOssInviteNewUserEmail(data: OssInviteEmailData) {
       has_credits: data.monthlyCreditsUsd > 0,
       monthly_credits_usd: data.monthlyCreditsUsd,
     },
-    customerioIdentifiers: { id: data.inviteCode },
   });
 }
 

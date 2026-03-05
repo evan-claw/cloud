@@ -199,7 +199,6 @@ async function processOssRow(
           organizationName: orgName,
           organizationId: organization.id,
           acceptInviteUrl,
-          inviteCode: inviteToken,
           tier,
           monthlyCreditsUsd: creditsDollars,
         });
