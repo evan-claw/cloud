@@ -7,6 +7,7 @@ import {
   jsonSchema,
   streamText,
   type ModelMessage,
+  type TextPart,
   type TextStreamPart,
   type ToolChoice,
   type ToolSet,
@@ -28,15 +29,11 @@ import {
   type AiSdkReasoningPart,
 } from './reasoning-provider-metadata';
 import type { ChatCompletionChunk, ChatCompletionChunkChoice } from './schemas';
-import { temp_phase, type CustomLlm } from '@kilocode/db/schema';
+import { type CustomLlm } from '@kilocode/db/schema';
 import type { OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { debugSaveLog, inStreamDebugMode } from '@/lib/debugUtils';
 import { ReasoningFormat } from '@/lib/custom-llm/format';
-import type OpenAI from 'openai';
-import crypto from 'crypto';
-import { db } from '@/lib/drizzle';
-import { inArray } from 'drizzle-orm';
 import {
   CustomLlmExtraBodySchema,
   ReasoningEffortSchema,
@@ -203,7 +200,7 @@ function audioFormatToMediaType(format: string): string {
 }
 
 type AssistantContentPart =
-  | { type: 'text'; text: string }
+  | TextPart
   | AiSdkReasoningPart
   | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown };
 
@@ -231,6 +228,22 @@ function convertAssistantContent(msg: ChatCompletionAssistantMessageParam) {
         input: JSON.parse(tc.function.arguments),
       });
     }
+  }
+
+  // Attach phase as providerOptions on text parts so the AI SDK OpenAI provider
+  // can forward it to the Responses API input items.
+  if (msg.phase != null) {
+    const phaseOpts = { openai: { phase: msg.phase } };
+    for (const part of parts) {
+      if (part.type === 'text') {
+        part.providerOptions = phaseOpts;
+      }
+    }
+    // If there are no text parts but phase is set, emit an empty text part to carry it.
+    if (!parts.some(p => p.type === 'text')) {
+      parts.unshift({ type: 'text', text: '', providerOptions: phaseOpts });
+    }
+    return parts;
   }
 
   if (parts.length === 1 && parts[0].type === 'text') {
@@ -264,25 +277,7 @@ const FINISH_REASON_MAP: Record<string, string> = {
   other: 'stop',
 };
 
-function phaseKey(userId: string, taskId: string | undefined, content: string[]) {
-  return crypto.hash('sha256', [userId, taskId, ...content].join('|'));
-}
-
-function extractMessageTextParts(content: unknown): string[] {
-  if (typeof content === 'string') return [content];
-  if (!Array.isArray(content)) return [];
-  return content
-    .filter(
-      (part): part is { type: string; text: string } =>
-        part !== null &&
-        typeof part === 'object' &&
-        (part.type === 'input_text' || part.type === 'output_text') &&
-        typeof part.text === 'string'
-    )
-    .map(part => part.text);
-}
-
-function createStreamPartConverter(userId: string, taskId: string | undefined, model: string) {
+function createStreamPartConverter(model: string) {
   const toolCallIndices = new Map<string, number>();
   let nextToolIndex = 0;
   let nextReasoningIndex = 0;
@@ -295,27 +290,18 @@ function createStreamPartConverter(userId: string, taskId: string | undefined, m
   ): Promise<ChatCompletionChunk | null> {
     const id = responseId;
     switch (part.type) {
-      case 'raw': {
-        const event = part.rawValue as OpenAI.Responses.ResponseStreamEvent;
-        if (event.type === 'response.output_item.done') {
-          const item = event.item;
-          const phase = 'phase' in item && typeof item.phase === 'string' ? item.phase : null;
-          if (item.type === 'message' && phase) {
-            await db
-              .insert(temp_phase)
-              .values({
-                key: phaseKey(
-                  userId,
-                  taskId,
-                  item.content.filter(c => c.type === 'output_text').map(c => c.text)
-                ),
-                value: phase,
-              })
-              .onConflictDoNothing();
-          }
-        }
-        return null;
+      case 'text-end': {
+        const rawPhase = part.providerMetadata?.openai?.phase;
+        const phase =
+          rawPhase === 'commentary' || rawPhase === 'final_answer' ? rawPhase : undefined;
+        if (phase === undefined) return null;
+        return {
+          ...(id !== undefined ? { id } : {}),
+          model,
+          choices: [{ delta: { phase } }],
+        };
       }
+
       case 'text-delta':
         return {
           ...(id !== undefined ? { id } : {}),
@@ -604,6 +590,18 @@ function buildCommonParams(
   };
 }
 
+function extractPhaseFromContent(
+  content: Awaited<ReturnType<typeof generateText>>['content']
+): 'commentary' | 'final_answer' | undefined {
+  for (const part of content) {
+    if (part.type === 'text') {
+      const rawPhase = part.providerMetadata?.openai?.phase;
+      if (rawPhase === 'commentary' || rawPhase === 'final_answer') return rawPhase;
+    }
+  }
+  return undefined;
+}
+
 function convertGenerateResultToResponse(
   result: Awaited<ReturnType<typeof generateText>>,
   model: string
@@ -621,6 +619,8 @@ function convertGenerateResultToResponse(
   const reasoning_details =
     result.reasoning.length > 0 ? reasoningOutputToDetails(result.reasoning) : undefined;
 
+  const phase = extractPhaseFromContent(result.content);
+
   return {
     id: result.response.id,
     model,
@@ -632,6 +632,7 @@ function convertGenerateResultToResponse(
           ...(result.reasoningText ? { reasoning: result.reasoningText } : {}),
           ...(reasoning_details ? { reasoning_details } : {}),
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          ...(phase !== undefined ? { phase } : {}),
         },
         finish_reason: FINISH_REASON_MAP[result.finishReason] ?? 'stop',
         index: 0,
@@ -663,7 +664,7 @@ function convertGenerateResultToResponse(
   };
 }
 
-function createModel(customLlm: CustomLlm, userId: string, taskId: string | undefined) {
+function createModel(customLlm: CustomLlm) {
   if (customLlm.provider === 'anthropic') {
     const anthropic = createAnthropic({
       apiKey: customLlm.api_key,
@@ -675,10 +676,6 @@ function createModel(customLlm: CustomLlm, userId: string, taskId: string | unde
     const openai = createOpenAI({
       apiKey: customLlm.api_key,
       baseURL: customLlm.base_url,
-      fetch:
-        customLlm.base_url === 'https://api.openai.com/v1'
-          ? responseCreateParamsPatchFetch(userId, taskId)
-          : undefined,
     });
     return openai(customLlm.internal_id);
   }
@@ -723,57 +720,6 @@ function applyLegacyExtensionHack(choice: ChatCompletionChunkChoice | undefined)
   }
 }
 
-function responseCreateParamsPatchFetch(userId: string, taskId: string | undefined) {
-  return async function (input: string | URL | Request, init?: RequestInit) {
-    if (typeof init?.body === 'string') {
-      const json = JSON.parse(init.body) as OpenAI.Responses.ResponseCreateParams;
-      if (Array.isArray(json.input)) {
-        type AssistantMessage = (typeof json.input)[number] & { role: 'assistant' };
-        const assistantMessages = json.input.filter(
-          (message): message is AssistantMessage =>
-            'role' in message && message.role === 'assistant'
-        );
-
-        if (assistantMessages.length > 0) {
-          const keyByMessage = new Map(
-            assistantMessages.map(message => [
-              message,
-              phaseKey(
-                userId,
-                taskId,
-                extractMessageTextParts((message as { content?: unknown }).content)
-              ),
-            ])
-          );
-
-          const keys = [...new Set(keyByMessage.values())];
-          const rows = await db
-            .select({ key: temp_phase.key, phase: temp_phase.value })
-            .from(temp_phase)
-            .where(inArray(temp_phase.key, keys));
-          const phaseByKey = new Map(rows.map(row => [row.key, row.phase]));
-
-          for (const message of assistantMessages) {
-            const phase = phaseByKey.get(keyByMessage.get(message) ?? '');
-            if (phase) {
-              Object.assign(message, { phase });
-            } else {
-              console.error(
-                `[responseCreateParamsPatchFetch] failed to find phase param for userId: ${userId}, taskId: ${taskId}, message: `,
-                message
-              );
-            }
-          }
-
-          init.body = JSON.stringify(json);
-          debugSaveLog(init.body, 'request.native-patched.json');
-        }
-      }
-    }
-    return await fetch(input, init);
-  };
-}
-
 export async function customLlmRequest(
   customLlm: CustomLlm,
   request: OpenRouterChatCompletionRequest,
@@ -786,7 +732,7 @@ export async function customLlmRequest(
     reverseLegacyExtensionHack(messages);
   }
 
-  const model = createModel(customLlm, userId, taskId);
+  const model = createModel(customLlm);
   const commonParams = buildCommonParams(
     customLlm,
     convertMessages(messages),
@@ -823,7 +769,7 @@ export async function customLlmRequest(
     debugSaveLog(JSON.stringify((await result.request).body, undefined, 2), 'request.native.json');
   }
 
-  const convertStreamPartToChunk = createStreamPartConverter(userId, taskId, modelId);
+  const convertStreamPartToChunk = createStreamPartConverter(modelId);
 
   const debugGatewayChunks = new Array<unknown>();
   const debugAiSdkChunks = new Array<unknown>();

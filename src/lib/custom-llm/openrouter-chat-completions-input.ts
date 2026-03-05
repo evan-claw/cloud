@@ -86,6 +86,7 @@ export interface ChatCompletionAssistantMessageParam {
   annotations?: FileAnnotation[];
   tool_calls?: Array<ChatCompletionMessageToolCall>;
   cache_control?: OpenRouterCacheControl;
+  phase?: 'commentary' | 'final_answer' | null;
 }
 
 export interface ChatCompletionMessageToolCall {

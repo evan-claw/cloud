@@ -53,6 +53,7 @@ export const OpenRouterNonStreamChatCompletionResponseSchema = z.union([
               reasoning: z.string().nullable().optional(),
               reasoning_details: ReasoningDetailArraySchema.nullish(),
               images: ImageResponseArraySchema.nullish(),
+              phase: z.enum(['commentary', 'final_answer']).nullable().optional(),
 
               tool_calls: z
                 .array(
@@ -174,6 +175,7 @@ export const OpenRouterStreamChatCompletionChunkChoiceSchema = z
         reasoning: z.string().nullish().optional(),
         reasoning_details: ReasoningDetailArraySchema.nullish(),
         images: ImageResponseArraySchema.nullish(),
+        phase: z.enum(['commentary', 'final_answer']).nullable().optional(),
         tool_calls: z
           .array(
             z
