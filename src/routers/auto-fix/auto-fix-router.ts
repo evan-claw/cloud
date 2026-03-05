@@ -374,6 +374,7 @@ export const autoFixRouter = createTRPCRouter({
           skip_labels: fullInput.skip_labels ?? [],
           required_labels: fullInput.required_labels ?? [],
           model_slug: fullInput.model_slug ?? 'anthropic/claude-sonnet-4.5',
+          thinking_effort: fullInput.thinking_effort ?? null,
           custom_instructions: fullInput.custom_instructions ?? null,
           pr_title_template: fullInput.pr_title_template ?? 'Fix #{issue_number}: {issue_title}',
           pr_body_template: fullInput.pr_body_template ?? null,

@@ -87,6 +87,11 @@ export const AutoFixAgentConfigSchema = z
       .string()
       .default('anthropic/claude-sonnet-4.5')
       .describe('Model to use for PR creation'),
+    thinking_effort: z
+      .string()
+      .nullable()
+      .optional()
+      .describe('Optional model thinking effort variant for cloud-agent-next'),
     custom_instructions: z
       .string()
       .nullable()
@@ -135,6 +140,7 @@ export const SaveAutoFixConfigSchema = z
     skip_labels: z.array(z.string()).optional(),
     required_labels: z.array(z.string()).optional(),
     model_slug: z.string().optional(),
+    thinking_effort: z.string().nullable().optional(),
     custom_instructions: z.string().nullable().optional(),
     pr_title_template: z.string().optional(),
     pr_body_template: z.string().nullable().optional(),
@@ -369,6 +375,7 @@ export const DispatchFixRequestSchema = z.object({
     relatedFiles: z.array(z.string()).optional(),
     customInstructions: z.string().nullable().optional(),
     modelSlug: z.string(),
+    thinkingEffort: z.string().nullable().optional(),
     maxPRCreationTimeMinutes: z
       .number()
       .int()

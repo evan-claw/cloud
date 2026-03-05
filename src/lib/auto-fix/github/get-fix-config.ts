@@ -23,6 +23,7 @@ type GetFixConfigResult =
       githubToken: string | undefined;
       config: {
         model_slug: string;
+        thinking_effort?: string | null;
         pr_base_branch: string;
         pr_title_template: string;
         pr_body_template?: string | null;
@@ -136,6 +137,7 @@ export async function getFixConfig(ticketId: string): Promise<GetFixConfigResult
     githubToken,
     config: {
       model_slug: config.model_slug,
+      thinking_effort: config.thinking_effort ?? null,
       pr_base_branch: config.pr_base_branch || 'main',
       pr_title_template: config.pr_title_template || 'Fix #{issue_number}: {issue_title}',
       pr_body_template: config.pr_body_template,

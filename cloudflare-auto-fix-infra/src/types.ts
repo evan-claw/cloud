@@ -35,6 +35,7 @@ export interface SessionInput {
   kilocodeOrganizationId?: string;
   customInstructions?: string | null;
   modelSlug: string;
+  thinkingEffort?: string | null;
   prBaseBranch: string;
   prBranchPrefix: string;
   prTitleTemplate: string;

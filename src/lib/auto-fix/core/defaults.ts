@@ -19,6 +19,7 @@ export const DEFAULT_AUTO_FIX_CONFIG: AutoFixAgentConfig = {
   skip_labels: [],
   required_labels: [],
   model_slug: 'anthropic/claude-sonnet-4.5',
+  thinking_effort: null,
   custom_instructions: null,
   pr_title_template: 'Fix #{issue_number}: {issue_title}',
   pr_body_template: null,

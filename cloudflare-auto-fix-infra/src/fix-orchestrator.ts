@@ -58,7 +58,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     await this.updateStatus('running');
 
     try {
-      // Create PR using Cloud Agent
+      // Dispatch auto-fix execution via cloud-agent-next.
       await this.createPR();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -134,6 +134,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
       githubToken?: string;
       config: {
         model_slug: string;
+        thinking_effort?: string | null;
         custom_instructions?: string | null;
       };
     } = await configResponse.json();
@@ -200,6 +201,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     await this.createFixWithCloudAgentNext({
       prompt,
       model: config.model_slug,
+      variant: config.thinking_effort ?? this.state.sessionInput.thinkingEffort ?? undefined,
       githubToken,
       callbackUrl,
       upstreamBranch: reviewCommentUpstreamBranch,
@@ -209,6 +211,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
   private async createFixWithCloudAgentNext(params: {
     prompt: string;
     model: string;
+    variant?: string;
     githubToken?: string;
     callbackUrl: string;
     upstreamBranch?: string;
@@ -228,6 +231,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
       prompt: params.prompt,
       mode: 'code' as const,
       model: params.model,
+      variant: params.variant,
       githubToken: params.githubToken,
       autoCommit: true,
       createdOnPlatform: 'autofix',

@@ -9,6 +9,7 @@ type PrepareSessionInput = {
   prompt: string;
   mode: 'ask' | 'code';
   model: string;
+  variant?: string;
   githubToken?: string;
   autoCommit?: boolean;
   upstreamBranch?: string;

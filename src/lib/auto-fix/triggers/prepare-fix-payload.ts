@@ -77,6 +77,7 @@ export async function prepareFixPayload(params: PreparePayloadParams): Promise<D
       relatedFiles: ticket.related_files || undefined,
       customInstructions: config.custom_instructions || null,
       modelSlug: config.model_slug || 'anthropic/claude-sonnet-4.5',
+      thinkingEffort: config.thinking_effort ?? null,
       prBaseBranch: config.pr_base_branch || 'main',
       prTitleTemplate: config.pr_title_template || 'Fix #{issue_number}: {issue_title}',
       prBodyTemplate: config.pr_body_template || null,
