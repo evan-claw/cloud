@@ -21,7 +21,6 @@ export const preferredModels = [
   KILO_AUTO_FRONTIER_MODEL.id,
   KILO_AUTO_FREE_MODEL.id,
   minimax_m25_free_model.is_enabled ? minimax_m25_free_model.public_id : 'minimax/minimax-m2.5',
-  kimi_k25_free_model.is_enabled ? kimi_k25_free_model.public_id : 'moonshotai/kimi-k2.5',
   giga_potato_thinking_model.is_enabled ? giga_potato_thinking_model.public_id : null,
   'arcee-ai/trinity-large-preview:free',
   CLAUDE_OPUS_CURRENT_MODEL_ID,

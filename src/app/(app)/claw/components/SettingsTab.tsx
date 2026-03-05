@@ -38,7 +38,6 @@ export const KILOCODE_CATALOG_IDS = new Set([
   'google/gemini-3-pro-preview',
   'google/gemini-3-flash-preview',
   'x-ai/grok-code-fast-1',
-  'moonshotai/kimi-k2.5',
 ]);
 
 /** Returns true if calver `version` is >= `minVersion` (e.g. "2026.2.26"). Fails closed on malformed input. */
