@@ -453,7 +453,7 @@ export function CloudSessionsPage({ organizationId }: CloudSessionsPageProps) {
 
       // Invalidate the sessions list cache so the sidebar shows the new session
       void queryClient.invalidateQueries({
-        queryKey: trpc.cliSessions.list.queryKey({
+        queryKey: trpc.unifiedSessions.list.queryKey({
           limit: 3,
           createdOnPlatform: 'cloud-agent',
           orderBy: 'updated_at',
@@ -482,7 +482,7 @@ export function CloudSessionsPage({ organizationId }: CloudSessionsPageProps) {
     selectedPlatform,
     selectedRepo,
     selectedProfile,
-    trpc.cliSessions.list,
+    trpc.unifiedSessions.list,
     trpcClient,
   ]);
 
@@ -602,16 +602,18 @@ export function CloudSessionsPage({ organizationId }: CloudSessionsPageProps) {
   );
 
   const subtitleContent = (
-    <p className="text-muted-foreground">
-      Start a new cloud agent session{' '}
+    <>
+      <p className="text-muted-foreground">Start a new cloud agent session</p>
       <a
         href="https://kilo.ai/docs/advanced-usage/cloud-agent"
-        className="inline-flex items-center gap-1 text-blue-400 underline hover:text-blue-300"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
       >
-        Learn more
-        <ExternalLink className="h-3 w-3" />
+        Learn how to use it
+        <ExternalLink className="size-4" />
       </a>
-    </p>
+    </>
   );
 
   // Check if NEITHER platform has an integration installed

@@ -11,14 +11,9 @@ import {
   SessionService,
   fetchSessionMetadata,
 } from '../../session-service.js';
-import {
-  cleanupWorkspace,
-  getSessionWorkspacePath,
-  getSessionHomePath,
-  getWrapperLogFilePath,
-} from '../../workspace.js';
+import { cleanupWorkspace, getSessionWorkspacePath, getSessionHomePath } from '../../workspace.js';
 import { withDORetry } from '../../utils/do-retry.js';
-import { protectedProcedure, publicProcedure } from '../auth.js';
+import { protectedProcedure, publicProcedure, internalApiProtectedProcedure } from '../auth.js';
 import { sessionIdSchema, GetSessionInput, GetSessionOutput } from '../schemas.js';
 import { computeExecutionHealth } from '../../core/execution.js';
 
@@ -175,9 +170,8 @@ export function createSessionManagementHandlers() {
               logger.info('Session not found');
               return {
                 success: false,
-                killedProcessIds: [],
-                failedProcessIds: [],
                 message: 'Session not found',
+                processesFound: false,
               };
             }
 
@@ -250,12 +244,55 @@ export function createSessionManagementHandlers() {
               activeExecutionId ?? undefined
             );
 
-            logger
-              .withFields({
-                killedCount: result.killedProcessIds.length,
-                failedCount: result.failedProcessIds.length,
-              })
-              .info('Session interruption completed');
+            logger.info('Session interruption completed');
+
+            // If no processes were found but there's still an active execution,
+            // the wrapper is already dead — clear the stale execution immediately.
+            // Note: pkill always returns killedProcessIds: [], so we check
+            // processesFound instead to distinguish "killed" from "nothing to kill".
+            if (!result.processesFound && activeExecutionId) {
+              logger
+                .withFields({ executionId: activeExecutionId })
+                .info('No processes found during interrupt - clearing stale active execution');
+
+              const statusResult = await withDORetry(
+                getStub,
+                async stub => {
+                  const r = await stub.updateExecutionStatus({
+                    executionId: activeExecutionId,
+                    status: 'failed',
+                    error: 'Interrupted - no running processes found',
+                    completedAt: Date.now(),
+                  });
+                  return { ok: r.ok } as { ok: boolean };
+                },
+                'updateExecutionStatus'
+              );
+
+              // If another codepath already moved the execution to a terminal
+              // state, skip cleanup to avoid spurious events.
+              if (!statusResult.ok) {
+                logger
+                  .withFields({ executionId: activeExecutionId })
+                  .info('Skipping interrupt cleanup - status transition failed');
+              } else {
+                await withDORetry(
+                  getStub,
+                  stub => stub.clearActiveExecution(),
+                  'clearActiveExecution'
+                );
+
+                await withDORetry(
+                  getStub,
+                  stub =>
+                    stub.emitExecutionError(
+                      activeExecutionId,
+                      'Interrupted - no running processes found'
+                    ),
+                  'emitExecutionError'
+                );
+              }
+            }
 
             return result;
           } catch (error) {
@@ -374,12 +411,12 @@ export function createSessionManagementHandlers() {
 
             githubRepo: metadata.githubRepo,
             gitUrl: metadata.gitUrl,
+            platform: metadata.platform,
             // githubToken: OMITTED
             // gitToken: OMITTED
 
             prompt: metadata.prompt,
-            // Cast mode since CloudAgentSessionState.mode is string | undefined
-            // but was validated at storage time to be a valid AgentMode
+            // mode is validated by zod (AgentModeSchema) at storage time
             mode: metadata.mode as AgentMode | undefined,
             model: metadata.model,
             autoCommit: metadata.autoCommit,
@@ -421,26 +458,24 @@ export function createSessionManagementHandlers() {
       }),
 
     /**
-     * Get the wrapper log file content for a specific execution.
+     * Get all log files and running processes for a session's sandbox.
      *
-     * Returns the contents of /tmp/kilocode-wrapper-{executionId}.log from the sandbox.
-     * This is useful for debugging wrapper startup issues.
+     * Discovers wrapper logs from /tmp and CLI logs from the session home directory.
+     * Useful for debugging wrapper startup and CLI issues.
      */
-    getWrapperLogs: protectedProcedure
+    getWrapperLogs: internalApiProtectedProcedure
       .input(
         z.object({
           sessionId: sessionIdSchema.describe('Session ID'),
-          executionId: z.string().describe('Execution ID to get wrapper logs for'),
         })
       )
       .query(async ({ input, ctx }) => {
         return withLogTags({ source: 'getWrapperLogs' }, async () => {
           const sessionId = input.sessionId as SessionId;
-          const { executionId } = input;
           const { userId, env } = ctx;
 
-          logger.setTags({ userId, sessionId, executionId });
-          logger.info('Fetching wrapper logs');
+          logger.setTags({ userId, sessionId });
+          logger.info('Fetching all session logs');
 
           // Fetch session metadata to get sandboxId and validate ownership
           const sessionService = new SessionService();
@@ -468,9 +503,8 @@ export function createSessionManagementHandlers() {
           logger.setTags({ sandboxId, orgId: sessionService.metadata?.orgId ?? '(personal)' });
 
           const sandbox = getSandbox(env.Sandbox, sandboxId);
-          const logFilePath = getWrapperLogFilePath(executionId);
 
-          // Get or create a session to read the file
+          // Get or create a session to read files
           const context = sessionService.buildContext({
             sandboxId,
             orgId: sessionService.metadata?.orgId,
@@ -487,58 +521,82 @@ export function createSessionManagementHandlers() {
             sessionService.metadata?.orgId
           );
 
-          logger.withTags({ logFilePath }).debug('Reading wrapper log file');
+          // Discover all log files from the sandbox
+          const logPaths: string[] = [];
 
-          // Fetch running processes for this execution (best-effort)
+          // 1. Wrapper logs: /tmp/kilocode-wrapper-*.log (one per execution)
+          try {
+            const tmpFiles = await session.listFiles('/tmp');
+            if (tmpFiles.success) {
+              for (const f of tmpFiles.files) {
+                if (
+                  f.type === 'file' &&
+                  f.name.startsWith('kilocode-wrapper-') &&
+                  f.name.endsWith('.log')
+                ) {
+                  logPaths.push(f.absolutePath);
+                }
+              }
+            }
+          } catch {
+            logger.debug('Could not list /tmp for wrapper logs');
+          }
+
+          // 2. CLI logs: {sessionHome}/.local/share/kilo/log/ (matches wrapper R2 uploader)
+          const sessionHome = getSessionHomePath(sessionId);
+          const cliLogsDir = `${sessionHome}/.local/share/kilo/log`;
+          try {
+            const cliFiles = await session.listFiles(cliLogsDir, { recursive: true });
+            if (cliFiles.success) {
+              for (const f of cliFiles.files) {
+                if (f.type === 'file') {
+                  logPaths.push(f.absolutePath);
+                }
+              }
+            }
+          } catch {
+            logger.debug('Could not list CLI logs directory', { cliLogsDir });
+          }
+
+          // Read all discovered files in parallel (best-effort per file)
+          const files: Record<string, string> = {};
+          const readResults = await Promise.allSettled(
+            logPaths.map(async path => {
+              const fileInfo = await session.readFile(path, { encoding: 'utf-8' });
+              return { path, content: fileInfo.content };
+            })
+          );
+          for (const result of readResults) {
+            if (result.status === 'fulfilled') {
+              files[result.value.path] = result.value.content;
+            }
+          }
+
+          // Fetch running processes (best-effort)
           let processes: Array<{ pid: number; command: string; status: string }> | undefined;
           try {
             type ProcessInfo = { id: string; status: string; command: string };
             const allProcesses = (await sandbox.listProcesses()) as ProcessInfo[];
-            // Filter for processes belonging to this execution
-            // The wrapper command includes --execution-id=<executionId>
-            processes = allProcesses
-              .filter((p: ProcessInfo) => p.command.includes(executionId))
-              .map((p: ProcessInfo) => ({
-                pid: parseInt(p.id, 10) || 0,
-                command: p.command,
-                status: p.status,
-              }));
+            processes = allProcesses.map((p: ProcessInfo) => ({
+              pid: parseInt(p.id, 10) || 0,
+              command: p.command,
+              status: p.status,
+            }));
           } catch (err) {
-            // Sandbox may not be available (evicted, not started, etc.)
             logger.debug('Could not fetch sandbox processes', {
               error: err instanceof Error ? err.message : String(err),
             });
           }
 
-          try {
-            const fileInfo = await session.readFile(logFilePath, { encoding: 'utf-8' });
+          logger.info('Successfully retrieved session logs', {
+            fileCount: Object.keys(files).length,
+          });
 
-            logger.info('Successfully retrieved wrapper logs');
-
-            return {
-              content: fileInfo.content,
-              sessionId,
-              executionId,
-              processes,
-            };
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-
-            // Check if file doesn't exist
-            if (errorMsg.includes('ENOENT') || errorMsg.includes('not found')) {
-              throw new TRPCError({
-                code: 'NOT_FOUND',
-                message: `No wrapper log file found for execution ${executionId}. The wrapper may not have started or may have crashed before logging.`,
-              });
-            }
-
-            logger.withFields({ error: errorMsg }).error('Failed to read wrapper log file');
-
-            throw new TRPCError({
-              code: 'INTERNAL_SERVER_ERROR',
-              message: `Failed to read wrapper log file: ${errorMsg}`,
-            });
-          }
+          return {
+            sessionId,
+            files,
+            processes,
+          };
         });
       }),
 

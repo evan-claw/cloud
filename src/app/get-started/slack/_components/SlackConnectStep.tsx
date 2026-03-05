@@ -18,9 +18,9 @@ export function SlackConnectStep({ workspace, onBack }: SlackConnectStepProps) {
 
   // Get OAuth URL based on workspace type
   const { data: oauthUrlData, isLoading: isLoadingOAuthUrl } = useQuery(
-    workspace.type === 'org'
-      ? trpc.organizations.slack.getOAuthUrl.queryOptions({ organizationId: workspace.id })
-      : trpc.slack.getOAuthUrl.queryOptions()
+    trpc.slack.getOAuthUrl.queryOptions(
+      workspace.type === 'org' ? { organizationId: workspace.id } : undefined
+    )
   );
 
   const handleConnectSlack = () => {

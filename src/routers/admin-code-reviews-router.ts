@@ -6,7 +6,7 @@ import {
   microdollar_usage,
   microdollar_usage_metadata,
   organizations,
-} from '@/db/schema';
+} from '@kilocode/db/schema';
 import * as z from 'zod';
 import { sql, and, gte, lt, eq, isNotNull, desc, ilike, or, type SQL } from 'drizzle-orm';
 import {
@@ -335,6 +335,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
         started_at: cloud_agent_code_reviews.started_at,
         completed_at: cloud_agent_code_reviews.completed_at,
         created_at: cloud_agent_code_reviews.created_at,
+        session_id: cloud_agent_code_reviews.session_id,
       })
       .from(cloud_agent_code_reviews)
       .where(and(...conditions))

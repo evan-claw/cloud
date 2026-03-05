@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
+import { isValidImageTag } from '../lib/image-tag-validation';
 
 /**
  * API routes
@@ -39,13 +40,22 @@ adminApi.post('/storage/sync', async c => {
 // POST /api/admin/gateway/restart - Restart the Fly Machine via the DO
 adminApi.post('/gateway/restart', async c => {
   const stub = resolveStub(c);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawTag = typeof body.imageTag === 'string' ? body.imageTag : undefined;
 
-  const result = await stub.restartGateway();
+  if (rawTag && !isValidImageTag(rawTag)) {
+    return c.json({ success: false, error: 'Invalid image tag format' }, 400);
+  }
+
+  const imageTag = rawTag;
+  const result = await stub.restartGateway(imageTag ? { imageTag } : undefined);
 
   if (result.success) {
     return c.json({
       success: true,
-      message: 'Machine restarting with updated configuration...',
+      message: imageTag
+        ? `Machine restarting with image tag: ${imageTag}...`
+        : 'Machine restarting with updated configuration...',
     });
   } else {
     return c.json({ success: false, error: result.error }, 500);

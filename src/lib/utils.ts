@@ -1,4 +1,4 @@
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import type { PaymentMethodInfo } from './stripePaymentMethodInfo';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -34,6 +34,14 @@ export function getFraudDetectionHeaders(headers: Headers) {
     http_x_vercel_ja4_digest: headers.get('x-vercel-ja4-digest'),
     http_user_agent: headers.get('user-agent'),
   };
+}
+
+export function isRooCodeBasedClient(headers: FraudDetectionHeaders) {
+  return !!headers.http_user_agent?.startsWith('Kilo-Code/');
+}
+
+export function isOpenCodeBasedClient(headers: FraudDetectionHeaders) {
+  return !!headers.http_user_agent?.startsWith('opencode-kilo-provider');
 }
 
 export function getInitials(user: User) {

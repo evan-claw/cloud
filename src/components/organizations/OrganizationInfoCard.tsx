@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import {
   useIsKiloAdmin,
+  useIsAutoTopUpEnabled,
   useUserOrganizationRole,
 } from '@/components/organizations/OrganizationContext';
 import BuyOrganizationCreditsDialog from '@/components/payment/BuyOrganizationCreditsDialog';
@@ -178,6 +179,7 @@ function Inner(props: InnerProps) {
   };
 
   const isKiloAdmin = useIsKiloAdmin();
+  const isAutoTopUpEnabled = useIsAutoTopUpEnabled();
   const isInAdminDashboard = isKiloAdmin && showAdminControls;
   const isOrgOwner = useCanManagePaymentInfo();
 
@@ -354,7 +356,7 @@ function Inner(props: InnerProps) {
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              {auto_top_up_enabled && isKiloAdmin && (
+              {auto_top_up_enabled && isAutoTopUpEnabled && (
                 <Link
                   href={`/organizations/${id}/payment-details`}
                   className="text-muted-foreground hover:text-foreground text-sm hover:underline"

@@ -1,7 +1,7 @@
 import { createCallerForUser } from '@/routers/test-utils';
 import { db } from '@/lib/drizzle';
-import { auto_top_up_configs, organizations } from '@/db/schema';
-import type { User, Organization } from '@/db/schema';
+import { auto_top_up_configs, organizations } from '@kilocode/db/schema';
+import type { User, Organization } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 import { insertTestUser } from '@/tests/helpers/user.helper';
 import { createOrganization, addUserToOrganization } from '@/lib/organizations/organizations';
@@ -274,6 +274,16 @@ describe('organization auto-top-up router', () => {
 
       expect(result.redirectUrl).toBeDefined();
       expect(typeof result.redirectUrl).toBe('string');
+    });
+
+    it('rejects invalid amountCents', async () => {
+      const caller = await createCallerForUser(ownerUser.id);
+      const promise = caller.organizations.autoTopUp.changePaymentMethod({
+        organizationId: testOrg.id,
+        // @ts-expect-error testing runtime validation with an invalid amountCents value
+        amountCents: 1234,
+      });
+      await expect(promise).rejects.toThrow(/amountCents/i);
     });
   });
 });

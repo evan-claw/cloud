@@ -14,21 +14,22 @@ import {
 import { applyXaiModelSettings, isXaiModel } from '@/lib/providers/xai';
 import { applyVercelSettings, shouldRouteToVercel } from '@/lib/providers/vercel';
 import { kiloFreeModels } from '@/lib/models';
-import { applyMinimaxProviderSettings } from '@/lib/providers/minimax';
 import {
   applyAnthropicModelSettings,
   isAnthropicModel,
   isHaikuModel,
 } from '@/lib/providers/anthropic';
 import { applyGigaPotatoProviderSettings } from '@/lib/providers/gigapotato';
-import { getBYOKforOrganization, getBYOKforUser, type BYOKResult } from '@/lib/byok';
-import type { CustomLlm } from '@/db/schema';
-import { custom_llm, type User } from '@/db/schema';
-import type { OpenRouterInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
 import {
-  inferUserByokProviderForModel,
-  OpenRouterInferenceProviderIdSchema,
-} from '@/lib/providers/openrouter/inference-provider-id';
+  getBYOKforOrganization,
+  getBYOKforUser,
+  getModelUserByokProviders,
+  type BYOKResult,
+} from '@/lib/byok';
+import type { CustomLlm } from '@kilocode/db/schema';
+import { custom_llm, type User } from '@kilocode/db/schema';
+import type { OpenRouterInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
+import { OpenRouterInferenceProviderIdSchema } from '@/lib/providers/openrouter/inference-provider-id';
 import { applyCoreThinkProviderSettings } from '@/lib/providers/corethink';
 import { hasAttemptCompletionTool } from '@/lib/tool-calling';
 import { applyGoogleModelSettings, isGeminiModel } from '@/lib/providers/google';
@@ -40,13 +41,13 @@ import { isAnonymousContext } from '@/lib/anonymous';
 import { isOpenAiModel } from '@/lib/providers/openai';
 import { applyQwenModelSettings, isQwenModel } from '@/lib/providers/qwen';
 import type { ProviderId } from '@/lib/providers/provider-id';
+import { isZaiModel } from '@/lib/providers/zai';
 
 export type Provider = {
   id: ProviderId;
   apiUrl: string;
   apiKey: string;
   hasGenerationEndpoint: boolean;
-  requiresResponseRewrite: boolean;
 };
 
 export const PROVIDERS = {
@@ -55,70 +56,36 @@ export const PROVIDERS = {
     apiUrl: 'https://openrouter.ai/api/v1',
     apiKey: getEnvVariable('OPENROUTER_API_KEY'),
     hasGenerationEndpoint: true,
-    requiresResponseRewrite: false,
   },
   GIGAPOTATO: {
     id: 'gigapotato',
     apiUrl: getEnvVariable('GIGAPOTATO_API_URL'),
     apiKey: getEnvVariable('GIGAPOTATO_API_KEY'),
     hasGenerationEndpoint: false,
-    requiresResponseRewrite: true,
   },
   CORETHINK: {
     id: 'corethink',
     apiUrl: 'https://api.corethink.ai/v1/code',
     apiKey: getEnvVariable('CORETHINK_API_KEY'),
     hasGenerationEndpoint: false,
-    requiresResponseRewrite: true,
-  },
-  INCEPTION: {
-    id: 'inception',
-    apiUrl: 'https://api.inceptionlabs.ai/v1',
-    apiKey: getEnvVariable('INCEPTION_API_KEY'),
-    hasGenerationEndpoint: false,
-    requiresResponseRewrite: false,
   },
   MARTIAN: {
     id: 'martian',
     apiUrl: 'https://api.withmartian.com/v1',
     apiKey: getEnvVariable('MARTIAN_API_KEY'),
     hasGenerationEndpoint: false,
-    requiresResponseRewrite: true,
   },
   MISTRAL: {
     id: 'mistral',
     apiUrl: 'https://api.mistral.ai/v1',
     apiKey: getEnvVariable('MISTRAL_API_KEY'),
     hasGenerationEndpoint: false,
-    requiresResponseRewrite: false,
-  },
-  MINIMAX: {
-    id: 'minimax',
-    apiUrl: 'https://api.minimax.io/v1',
-    apiKey: getEnvVariable('MINIMAX_API_KEY'),
-    hasGenerationEndpoint: false,
-    requiresResponseRewrite: false,
-  },
-  STREAMLAKE: {
-    id: 'streamlake',
-    apiUrl: 'https://vanchin.streamlake.ai/api/gateway/v1/endpoints',
-    apiKey: getEnvVariable('STREAMLAKE_API_KEY'),
-    hasGenerationEndpoint: false,
-    requiresResponseRewrite: false,
   },
   VERCEL_AI_GATEWAY: {
     id: 'vercel',
     apiUrl: 'https://ai-gateway.vercel.sh/v1',
     apiKey: getEnvVariable('VERCEL_AI_GATEWAY_API_KEY'),
     hasGenerationEndpoint: true,
-    requiresResponseRewrite: false,
-  },
-  XAI: {
-    id: 'x-ai',
-    apiUrl: 'https://api.x.ai/v1',
-    apiKey: getEnvVariable('XAI_API_KEY'),
-    hasGenerationEndpoint: false,
-    requiresResponseRewrite: false,
   },
 } as const satisfies Record<string, Provider>;
 
@@ -128,20 +95,21 @@ export async function getProvider(
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
-): Promise<{ provider: Provider; userByok: BYOKResult | null; customLlm: CustomLlm | null }> {
+): Promise<{ provider: Provider; userByok: BYOKResult[] | null; customLlm: CustomLlm | null }> {
   if (!isAnonymousContext(user)) {
-    const modelProvider = inferUserByokProviderForModel(requestedModel);
-    const userByok = !modelProvider
-      ? null
-      : organizationId
-        ? await getBYOKforOrganization(db, organizationId, modelProvider)
-        : await getBYOKforUser(db, user.id, modelProvider);
+    const modelProviders = await getModelUserByokProviders(requestedModel);
+    const userByok =
+      modelProviders.length === 0
+        ? null
+        : organizationId
+          ? await getBYOKforOrganization(db, organizationId, modelProviders)
+          : await getBYOKforUser(db, user.id, modelProviders);
     if (userByok) {
       return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok, customLlm: null };
     }
   }
 
-  if (requestedModel.startsWith('kilo/') && organizationId) {
+  if (requestedModel.startsWith('kilo-internal/') && organizationId) {
     const [customLlm] = await db
       .select()
       .from(custom_llm)
@@ -153,7 +121,6 @@ export async function getProvider(
           apiUrl: customLlm.base_url,
           apiKey: customLlm.api_key,
           hasGenerationEndpoint: true,
-          requiresResponseRewrite: false,
         },
         userByok: null,
         customLlm,
@@ -170,7 +137,7 @@ export async function getProvider(
 
   if (kiloFreeModel && freeModelProvider?.id === 'martian') {
     return {
-      provider: { ...freeModelProvider, id: 'custom', requiresResponseRewrite: false },
+      provider: { ...freeModelProvider, id: 'custom' },
       userByok: null,
       customLlm: {
         public_id: kiloFreeModel.public_id,
@@ -178,15 +145,16 @@ export async function getProvider(
         display_name: kiloFreeModel.display_name,
         context_length: kiloFreeModel.context_length,
         max_completion_tokens: kiloFreeModel.max_completion_tokens,
-        verbosity: null,
         provider: 'openai', // xai doesn't support preserved reasoning currently: https://github.com/vercel/ai/issues/10542
         organization_ids: [],
         base_url: freeModelProvider.apiUrl,
         api_key: freeModelProvider.apiKey,
-        reasoning_effort: null,
         included_tools: null,
         excluded_tools: null,
         supports_image_input: kiloFreeModel.flags.includes('vision'),
+        force_reasoning: true,
+        opencode_settings: null,
+        extra_body: null,
       },
     };
   }
@@ -213,7 +181,6 @@ function applyToolChoiceSetting(
     isXaiModel(requestedModel) ||
     isOpenAiModel(requestedModel) ||
     isGeminiModel(requestedModel) ||
-    (isMoonshotModel(requestedModel) && !isReasoningEnabled) ||
     (isHaikuModel(requestedModel) && !isReasoningEnabled)
   ) {
     console.debug('[applyToolChoiceSetting] setting tool_choice required');
@@ -221,40 +188,47 @@ function applyToolChoiceSetting(
   }
 }
 
-function getPreferredProvider(requestedModel: string): OpenRouterInferenceProviderId | null {
+function getPreferredProviderOrder(requestedModel: string): OpenRouterInferenceProviderId[] {
   if (isAnthropicModel(requestedModel)) {
-    return OpenRouterInferenceProviderIdSchema.enum['amazon-bedrock'];
+    // Use `order` (set below in applyPreferredProvider) to preferentially
+    // route Anthropic models to Bedrock and Anthropic. Google Vertex doesn't
+    // support assistant message prefill, which causes 400 errors on tool
+    // calls when OpenRouter falls back to it.
+    return [
+      OpenRouterInferenceProviderIdSchema.enum['amazon-bedrock'],
+      OpenRouterInferenceProviderIdSchema.enum.anthropic,
+    ];
   }
   if (requestedModel.startsWith('minimax/')) {
-    return OpenRouterInferenceProviderIdSchema.enum.minimax;
+    return [OpenRouterInferenceProviderIdSchema.enum.minimax];
   }
   if (isMistralModel(requestedModel)) {
-    return OpenRouterInferenceProviderIdSchema.enum.mistral;
+    return [OpenRouterInferenceProviderIdSchema.enum.mistral];
   }
   if (isMoonshotModel(requestedModel)) {
-    return OpenRouterInferenceProviderIdSchema.enum.moonshotai;
+    return [OpenRouterInferenceProviderIdSchema.enum.moonshotai];
   }
-  if (requestedModel.startsWith('z-ai/')) {
-    return OpenRouterInferenceProviderIdSchema.enum['z-ai'];
+  if (isZaiModel(requestedModel)) {
+    return [OpenRouterInferenceProviderIdSchema.enum['z-ai']];
   }
-  return null;
+  return [];
 }
 
 function applyPreferredProvider(
   requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest
 ) {
-  const preferredProvider = getPreferredProvider(requestedModel);
-  if (!preferredProvider) {
+  const preferredProviderOrder = getPreferredProviderOrder(requestedModel);
+  if (preferredProviderOrder.length === 0) {
     return;
   }
   console.debug(
-    `[applyPreferredProvider] Preferentially routing ${requestedModel} to ${preferredProvider}`
+    `[applyPreferredProvider] Preferentially routing ${requestedModel} to ${preferredProviderOrder.join()}`
   );
   if (!requestToMutate.provider) {
-    requestToMutate.provider = { order: [preferredProvider] };
+    requestToMutate.provider = { order: preferredProviderOrder };
   } else if (!requestToMutate.provider.order) {
-    requestToMutate.provider.order = [preferredProvider];
+    requestToMutate.provider.order = preferredProviderOrder;
   }
 }
 
@@ -263,7 +237,7 @@ export function applyProviderSpecificLogic(
   requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest,
   extraHeaders: Record<string, string>,
-  userByok: BYOKResult | null
+  userByok: BYOKResult[] | null
 ) {
   const kiloFreeModel = kiloFreeModels.find(m => m.public_id === requestedModel);
   if (kiloFreeModel) {
@@ -298,15 +272,11 @@ export function applyProviderSpecificLogic(
   }
 
   if (provider.id === 'gigapotato') {
-    applyGigaPotatoProviderSettings(requestToMutate);
+    applyGigaPotatoProviderSettings(requestedModel, requestToMutate);
   }
 
   if (provider.id === 'corethink') {
     applyCoreThinkProviderSettings(requestToMutate);
-  }
-
-  if (provider.id === 'minimax') {
-    applyMinimaxProviderSettings(requestToMutate);
   }
 
   if (provider.id === 'mistral') {

@@ -5,6 +5,13 @@
 /** Port that the OpenClaw gateway listens on inside the Fly Machine */
 export const OPENCLAW_PORT = 18789;
 
+/** Internal loopback port for the OpenClaw gateway process (behind controller) */
+export const OPENCLAW_INTERNAL_PORT = 3001;
+
+/** OpenClaw's built-in default model when using the kilocode provider.
+ *  Used as fallback when the user clears their model selection. */
+export const OPENCLAW_BUILTIN_DEFAULT_MODEL = 'kilocode/anthropic/claude-opus-4.6';
+
 /** Maximum time to wait for the machine to reach 'started' state.
  *  Fly's /wait endpoint caps at 60s (spec.json:1538). */
 export const STARTUP_TIMEOUT_SECONDS = 60;
@@ -18,15 +25,19 @@ export const KILOCLAW_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24;
 /** Expected JWT token version -- must match cloud's JWT_TOKEN_VERSION */
 export const KILO_TOKEN_VERSION = 3;
 
-/** Default Fly Machine guest spec (shared-cpu-2x, 4GB) */
+/** Default Fly Machine guest spec (shared-cpu-2x, 3GB) */
 export const DEFAULT_MACHINE_GUEST = {
   cpus: 2,
-  memory_mb: 4096,
+  memory_mb: 3072,
   cpu_kind: 'shared' as const,
 };
 
 /** Default Fly Volume size in GB */
 export const DEFAULT_VOLUME_SIZE_GB = 10;
+
+/** Default Fly region priority list when FLY_REGION env var is not set.
+ *  Callers shuffle before selecting so order here doesn't matter. */
+export const DEFAULT_FLY_REGION = 'us,eu';
 
 // Alarm cadence by instance status
 /** Running machines: fast health checks */
@@ -40,3 +51,16 @@ export const ALARM_JITTER_MS = 60 * 1000; // 0-60s
 
 /** Consecutive failed health checks before marking a running instance as stopped */
 export const SELF_HEAL_THRESHOLD = 5;
+
+/** Minimum interval between live Fly API checks in getStatus() (30 seconds).
+ *  At 10s UI poll interval, only ~1 in 3 polls will hit Fly. */
+export const LIVE_CHECK_THROTTLE_MS = 30 * 1000;
+
+/** Maximum time to wait for the gateway health probe to return 200 after machine starts */
+export const HEALTH_PROBE_TIMEOUT_SECONDS = 60;
+
+/** Interval between health probe retries during startup */
+export const HEALTH_PROBE_INTERVAL_MS = 3_000;
+
+/** Auto-destroy provisioned instances that never started after this duration */
+export const STALE_PROVISION_THRESHOLD_MS = 8 * 60 * 60 * 1000; // 8 hours

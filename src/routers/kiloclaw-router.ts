@@ -4,61 +4,63 @@ import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
-import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
-import { KILOCLAW_API_URL } from '@/lib/config.server';
-import { isReleaseToggleEnabled } from '@/lib/posthog-feature-flags';
+import {
+  KILOCLAW_API_URL,
+  STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID,
+  STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID,
+} from '@/lib/config.server';
+import { db } from '@/lib/drizzle';
+import {
+  kiloclaw_version_pins,
+  kiloclaw_image_catalog,
+  kiloclaw_earlybird_purchases,
+} from '@kilocode/db/schema';
+import { and, eq, desc, sql } from 'drizzle-orm';
+import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
   ensureActiveInstance,
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
+import { client as stripe } from '@/lib/stripe-client';
+import { APP_URL } from '@/lib/constants';
 
-const kiloclawProcedure = baseProcedure.use(async ({ ctx, next }) => {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  const isEnabled = await isReleaseToggleEnabled('kiloclaw', ctx.user.id);
-  if (!isEnabled && !isDevelopment) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'KiloClaw access restricted' });
-  }
-  return next();
-});
+const kilocodeDefaultModelSchema = z
+  .string()
+  .regex(
+    /^kilocode\/[^/]+\/.+$/,
+    'kilocodeDefaultModel must start with kilocode/ and include a provider'
+  );
 
-const modelEntrySchema = z.object({ id: z.string(), name: z.string() });
+const channelsSchema = z
+  .object({
+    telegramBotToken: z.string().optional(),
+    discordBotToken: z.string().optional(),
+    slackBotToken: z.string().optional(),
+    slackAppToken: z.string().optional(),
+  })
+  .optional();
 
 const updateConfigSchema = z.object({
   envVars: z.record(z.string(), z.string()).optional(),
   secrets: z.record(z.string(), z.string()).optional(),
-  channels: z
-    .object({
-      telegramBotToken: z.string().optional(),
-      discordBotToken: z.string().optional(),
-      slackBotToken: z.string().optional(),
-      slackAppToken: z.string().optional(),
-    })
-    .optional(),
-  kilocodeDefaultModel: z
-    .string()
-    .regex(
-      /^kilocode\/[^/]+\/.+$/,
-      'kilocodeDefaultModel must start with kilocode/ and include a provider'
-    )
-    .nullable()
-    .optional(),
-  kilocodeModels: z.array(modelEntrySchema).nullable().optional(),
+  channels: channelsSchema,
+  kilocodeDefaultModel: kilocodeDefaultModelSchema.nullable().optional(),
+});
+
+const provisionSchema = z.object({
+  envVars: z.record(z.string(), z.string()).optional(),
+  secrets: z.record(z.string(), z.string()).optional(),
+  channels: channelsSchema,
+  kilocodeDefaultModel: kilocodeDefaultModelSchema.nullable().optional(),
 });
 
 const updateKiloCodeConfigSchema = z.object({
-  kilocodeDefaultModel: z
-    .string()
-    .regex(
-      /^kilocode\/[^/]+\/.+$/,
-      'kilocodeDefaultModel must start with kilocode/ and include a provider'
-    )
-    .nullable()
-    .optional(),
-  kilocodeModels: z.array(modelEntrySchema).nullable().optional(),
+  kilocodeDefaultModel: kilocodeDefaultModelSchema.nullable().optional(),
 });
 
 const patchChannelsSchema = z.object({
@@ -106,7 +108,7 @@ function buildWorkerChannelsPatch(channels: z.infer<typeof patchChannelsSchema>)
 
 type KiloCodeConfigPublicResponse = Pick<
   KiloCodeConfigResponse,
-  'kilocodeApiKeyExpiresAt' | 'kilocodeDefaultModel' | 'kilocodeModels'
+  'kilocodeApiKeyExpiresAt' | 'kilocodeDefaultModel'
 >;
 
 function sanitizeKiloCodeConfigResponse(
@@ -115,7 +117,6 @@ function sanitizeKiloCodeConfigResponse(
   return {
     kilocodeApiKeyExpiresAt: response.kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: response.kilocodeDefaultModel,
-    kilocodeModels: response.kilocodeModels,
   };
 }
 
@@ -137,6 +138,14 @@ async function provisionInstance(
   });
   const kilocodeApiKeyExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
+  // Check if the user has a version pin
+  const [pin] = await db
+    .select({ image_tag: kiloclaw_version_pins.image_tag })
+    .from(kiloclaw_version_pins)
+    .where(eq(kiloclaw_version_pins.user_id, user.id))
+    .limit(1);
+  const pinnedImageTag = pin?.image_tag;
+
   const client = new KiloClawInternalClient();
   return client.provision(user.id, {
     envVars: input.envVars,
@@ -145,7 +154,7 @@ async function provisionInstance(
     kilocodeApiKey,
     kilocodeApiKeyExpiresAt,
     kilocodeDefaultModel: input.kilocodeDefaultModel ?? undefined,
-    kilocodeModels: input.kilocodeModels ?? undefined,
+    pinnedImageTag,
   });
 }
 
@@ -169,9 +178,43 @@ async function patchConfig(
   return sanitizeKiloCodeConfigResponse(response);
 }
 
+const KILOCLAW_STATUS_PAGE_RESOURCE_ID = '8737418';
+const STATUS_PAGE_TIMEOUT_MS = 5_000;
+
+const logStatusPageWarning = sentryLogger('kiloclaw-status-page', 'warning');
+
+async function fetchKiloClawServiceDegraded(): Promise<boolean> {
+  try {
+    const response = await fetch('https://status.kilo.ai/index.json', {
+      signal: AbortSignal.timeout(STATUS_PAGE_TIMEOUT_MS),
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    const included: Array<{ id: string; type: string; attributes?: { status?: string } }> =
+      data.included ?? [];
+    const resource = included.find(
+      entry =>
+        entry.type === 'status_page_resource' && entry.id === KILOCLAW_STATUS_PAGE_RESOURCE_ID
+    );
+    if (!resource) {
+      logStatusPageWarning(
+        `Status page resource ${KILOCLAW_STATUS_PAGE_RESOURCE_ID} not found in status page response`
+      );
+      return false;
+    }
+    return resource.attributes?.status != null && resource.attributes.status !== 'operational';
+  } catch {
+    return false;
+  }
+}
+
 export const kiloclawRouter = createTRPCRouter({
+  serviceDegraded: baseProcedure.query(async () => {
+    return fetchKiloClawServiceDegraded();
+  }),
+
   // Status + gateway token (two internal client calls, merged for the dashboard)
-  getStatus: kiloclawProcedure.query(async ({ ctx }) => {
+  getStatus: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     const status = await client.getStatus(ctx.user.id);
 
@@ -191,18 +234,18 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // Instance lifecycle
-  start: kiloclawProcedure.mutation(async ({ ctx }) => {
+  start: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.start(ctx.user.id);
   }),
 
-  stop: kiloclawProcedure.mutation(async ({ ctx }) => {
+  stop: baseProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.stop(ctx.user.id);
   }),
 
   // Instance lifecycle
-  destroy: kiloclawProcedure.mutation(async ({ ctx }) => {
+  destroy: baseProcedure.mutation(async ({ ctx }) => {
     const destroyedRow = await markActiveInstanceDestroyed(ctx.user.id);
     const client = new KiloClawInternalClient();
     try {
@@ -216,28 +259,26 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // Explicit lifecycle APIs
-  provision: kiloclawProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
+  provision: baseProcedure.input(provisionSchema).mutation(async ({ ctx, input }) => {
     return provisionInstance(ctx.user, input);
   }),
 
-  patchConfig: kiloclawProcedure
-    .input(updateKiloCodeConfigSchema)
-    .mutation(async ({ ctx, input }) => {
-      return patchConfig(ctx.user, input);
-    }),
+  patchConfig: baseProcedure.input(updateKiloCodeConfigSchema).mutation(async ({ ctx, input }) => {
+    return patchConfig(ctx.user, input);
+  }),
 
   // Backward-compatible aliases.
-  updateConfig: kiloclawProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
+  updateConfig: baseProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
     return provisionInstance(ctx.user, input);
   }),
 
-  updateKiloCodeConfig: kiloclawProcedure
+  updateKiloCodeConfig: baseProcedure
     .input(updateKiloCodeConfigSchema)
     .mutation(async ({ ctx, input }) => {
       return patchConfig(ctx.user, input);
     }),
 
-  patchChannels: kiloclawProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
+  patchChannels: baseProcedure.input(patchChannelsSchema).mutation(async ({ ctx, input }) => {
     const client = new KiloClawInternalClient();
     return client.patchChannels(ctx.user.id, {
       channels: buildWorkerChannelsPatch(input),
@@ -245,31 +286,373 @@ export const kiloclawRouter = createTRPCRouter({
   }),
 
   // User-facing (user client -- forwards user's short-lived JWT)
-  getConfig: kiloclawProcedure.query(async ({ ctx }) => {
+  getConfig: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawUserClient(
       generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
     );
     return client.getConfig();
   }),
 
-  restartGateway: kiloclawProcedure.mutation(async ({ ctx }) => {
-    const client = new KiloClawUserClient(
-      generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
-    );
-    return client.restartGateway();
-  }),
+  restartGateway: baseProcedure
+    .input(
+      z
+        .object({
+          imageTag: z
+            .string()
+            .max(128, 'Image tag too long')
+            .regex(
+              /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
+              'Image tag must be alphanumeric with dots, hyphens, or underscores'
+            )
+            .optional(),
+        })
+        .optional()
+    )
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawUserClient(
+        generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
+      );
+      return client.restartGateway(input?.imageTag ? { imageTag: input.imageTag } : undefined);
+    }),
 
-  listPairingRequests: kiloclawProcedure
+  listPairingRequests: baseProcedure
     .input(z.object({ refresh: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.listPairingRequests(ctx.user.id, input?.refresh);
     }),
 
-  approvePairingRequest: kiloclawProcedure
+  approvePairingRequest: baseProcedure
     .input(z.object({ channel: z.string().min(1), code: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
       return client.approvePairingRequest(ctx.user.id, input.channel, input.code);
     }),
+
+  listDevicePairingRequests: baseProcedure
+    .input(z.object({ refresh: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      return client.listDevicePairingRequests(ctx.user.id, input?.refresh);
+    }),
+
+  approveDevicePairingRequest: baseProcedure
+    .input(z.object({ requestId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      return client.approveDevicePairingRequest(ctx.user.id, input.requestId);
+    }),
+
+  gatewayStatus: baseProcedure.query(async ({ ctx }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.getGatewayStatus(ctx.user.id);
+    } catch (err) {
+      console.error('Failed to fetch gateway status for user:', ctx.user.id, err);
+      if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Gateway control unavailable',
+        });
+      }
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch gateway status',
+      });
+    }
+  }),
+
+  controllerVersion: baseProcedure.query(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.getControllerVersion(ctx.user.id);
+  }),
+
+  restartOpenClaw: baseProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.restartGatewayProcess(ctx.user.id);
+  }),
+
+  runDoctor: baseProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.runDoctor(ctx.user.id);
+  }),
+
+  restoreConfig: baseProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.restoreConfig(ctx.user.id);
+  }),
+
+  getEarlybirdStatus: baseProcedure
+    .output(z.object({ purchased: z.boolean() }))
+    .query(async ({ ctx }) => {
+      const rows = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+      return { purchased: rows.length > 0 };
+    }),
+
+  createEarlybirdCheckoutSession: baseProcedure
+    .output(z.object({ url: z.url().nullable() }))
+    .mutation(async ({ ctx }) => {
+      const existing = await db
+        .select({ id: kiloclaw_earlybird_purchases.id })
+        .from(kiloclaw_earlybird_purchases)
+        .where(eq(kiloclaw_earlybird_purchases.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existing.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'You have already purchased the early bird offer.',
+        });
+      }
+
+      const stripeCustomerId = ctx.user.stripe_customer_id;
+      if (!stripeCustomerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Missing Stripe customer for user.',
+        });
+      }
+
+      if (!STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Early bird pricing is not configured.',
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: stripeCustomerId,
+        billing_address_collection: 'required',
+        line_items: [{ price: STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID, quantity: 1 }],
+        ...(STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID
+          ? { discounts: [{ coupon: STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID }] }
+          : { allow_promotion_codes: true }),
+        customer_update: {
+          name: 'auto',
+          address: 'auto',
+        },
+        tax_id_collection: {
+          enabled: true,
+          required: 'never',
+        },
+        payment_intent_data: {
+          metadata: {
+            type: 'kiloclaw-earlybird',
+            kiloUserId: ctx.user.id,
+          },
+        },
+        success_url: `${APP_URL}/claw?earlybird_checkout=success`,
+        cancel_url: `${APP_URL}/claw/earlybird?checkout=cancelled`,
+        metadata: {
+          type: 'kiloclaw-earlybird',
+          kiloUserId: ctx.user.id,
+        },
+      });
+
+      return { url: typeof session.url === 'string' ? session.url : null };
+    }),
+
+  // User version pinning endpoints
+  listAvailableVersions: baseProcedure
+    .input(
+      z.object({
+        offset: z.number().min(0).default(0),
+        limit: z.number().min(1).max(100).default(25),
+      })
+    )
+    .query(async ({ input }) => {
+      const { offset, limit } = input;
+
+      // Subquery: for each version+variant, pick the most recently published image tag
+      const latestPerVersion = db
+        .selectDistinctOn(
+          [kiloclaw_image_catalog.openclaw_version, kiloclaw_image_catalog.variant],
+          {
+            openclaw_version: kiloclaw_image_catalog.openclaw_version,
+            variant: kiloclaw_image_catalog.variant,
+            image_tag: kiloclaw_image_catalog.image_tag,
+            description: kiloclaw_image_catalog.description,
+            published_at: kiloclaw_image_catalog.published_at,
+          }
+        )
+        .from(kiloclaw_image_catalog)
+        .where(eq(kiloclaw_image_catalog.status, 'available'))
+        .orderBy(
+          kiloclaw_image_catalog.openclaw_version,
+          kiloclaw_image_catalog.variant,
+          desc(kiloclaw_image_catalog.published_at)
+        )
+        .as('latest_per_version');
+
+      const [items, countResult] = await Promise.all([
+        db
+          .select()
+          .from(latestPerVersion)
+          .orderBy(desc(latestPerVersion.published_at))
+          .offset(offset)
+          .limit(limit),
+        db.select({ count: sql<number>`COUNT(*)::int` }).from(latestPerVersion),
+      ]);
+
+      const totalCount = countResult[0]?.count ?? 0;
+
+      return {
+        items,
+        pagination: {
+          offset,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit),
+        },
+      };
+    }),
+
+  getMyPin: baseProcedure.query(async ({ ctx }) => {
+    const [result] = await db
+      .select({
+        pin: kiloclaw_version_pins,
+        openclaw_version: kiloclaw_image_catalog.openclaw_version,
+        variant: kiloclaw_image_catalog.variant,
+      })
+      .from(kiloclaw_version_pins)
+      .leftJoin(
+        kiloclaw_image_catalog,
+        eq(kiloclaw_version_pins.image_tag, kiloclaw_image_catalog.image_tag)
+      )
+      // Intentionally not joining pinned_by user — avoid leaking admin email to end users
+      .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+      .limit(1);
+
+    if (!result) return null;
+
+    return {
+      ...result.pin,
+      openclaw_version: result.openclaw_version,
+      variant: result.variant,
+    };
+  }),
+
+  setMyPin: baseProcedure
+    .input(
+      z.object({
+        imageTag: z.string().min(1),
+        reason: z.string().max(500).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      // Verify the version exists and is available
+      // Note: There is a small TOCTOU window between this check and the insert below.
+      // Worst case: a user pins to a version disabled milliseconds before. The FK constraint
+      // on image_tag ensures referential integrity, and the status check is best-effort.
+      const [version] = await db
+        .select()
+        .from(kiloclaw_image_catalog)
+        .where(eq(kiloclaw_image_catalog.image_tag, input.imageTag))
+        .limit(1);
+
+      if (!version) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `Image tag '${input.imageTag}' not found in catalog`,
+        });
+      }
+
+      if (version.status !== 'available') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot pin to version with status '${version.status}'. Only 'available' versions can be pinned.`,
+        });
+      }
+
+      // Prevent users from overwriting admin-set pins
+      const [existingPin] = await db
+        .select({ pinned_by: kiloclaw_version_pins.pinned_by })
+        .from(kiloclaw_version_pins)
+        .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existingPin && existingPin.pinned_by !== ctx.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            'Your version is pinned by an admin. Contact your Kilo admin to change or remove the pin.',
+        });
+      }
+
+      let result;
+      try {
+        [result] = await db
+          .insert(kiloclaw_version_pins)
+          .values({
+            user_id: ctx.user.id,
+            image_tag: input.imageTag,
+            pinned_by: ctx.user.id, // User is pinning themselves
+            reason: input.reason ?? null,
+          })
+          .onConflictDoUpdate({
+            target: kiloclaw_version_pins.user_id,
+            set: {
+              image_tag: input.imageTag,
+              pinned_by: ctx.user.id,
+              reason: input.reason ?? null,
+              updated_at: new Date().toISOString(),
+            },
+          })
+          .returning();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('foreign key')) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `Image tag '${input.imageTag}' not found in catalog`,
+          });
+        }
+        throw err;
+      }
+
+      if (!result) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create pin' });
+      }
+
+      return result;
+    }),
+
+  removeMyPin: baseProcedure.mutation(async ({ ctx }) => {
+    // Atomically delete only self-set pins — the WHERE clause enforces the admin-pin guard
+    // so there's no TOCTOU race between checking pinned_by and deleting.
+    const [deleted] = await db
+      .delete(kiloclaw_version_pins)
+      .where(
+        and(
+          eq(kiloclaw_version_pins.user_id, ctx.user.id),
+          eq(kiloclaw_version_pins.pinned_by, ctx.user.id)
+        )
+      )
+      .returning();
+
+    if (!deleted) {
+      // Check if a pin exists at all — if so, it's admin-set
+      const [existingPin] = await db
+        .select({ pinned_by: kiloclaw_version_pins.pinned_by })
+        .from(kiloclaw_version_pins)
+        .where(eq(kiloclaw_version_pins.user_id, ctx.user.id))
+        .limit(1);
+
+      if (existingPin) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Your version is pinned by an admin. Contact your Kilo admin to remove the pin.',
+        });
+      }
+
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'No pin found for your account' });
+    }
+
+    return { success: true };
+  }),
 });

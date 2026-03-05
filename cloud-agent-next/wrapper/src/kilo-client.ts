@@ -36,6 +36,8 @@ export type SendPromptOptions = {
   prompt?: string;
   /** Full parts array (takes precedence over prompt) */
   parts?: MessagePart[];
+  /** Thinking effort variant name (e.g. "high", "max") */
+  variant?: string;
   /** Agent mode (e.g., 'code', 'architect', 'ask') */
   agent?: string;
   /** Model configuration */
@@ -90,9 +92,11 @@ export type KiloClient = {
   /** Answer a permission request */
   answerPermission: (permissionId: string, response: PermissionResponse) => Promise<boolean>;
   /** Answer a question */
-  answerQuestion: (questionId: string, answers: string[]) => Promise<boolean>;
+  answerQuestion: (questionId: string, answers: string[][]) => Promise<boolean>;
   /** Reject a question */
   rejectQuestion: (questionId: string) => Promise<boolean>;
+  /** Generate a commit message for staged/unstaged changes */
+  generateCommitMessage: (opts: { path: string }) => Promise<{ message: string }>;
 };
 
 /**
@@ -161,6 +165,7 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/session/${opts.sessionId}/prompt_async`, {
         parts,
         messageID: opts.messageId,
+        variant: opts.variant,
         agent: opts.agent,
         model: opts.model
           ? {
@@ -191,7 +196,7 @@ export function createKiloClient(baseUrl: string): KiloClient {
       return true;
     },
 
-    answerQuestion: async (questionId: string, answers: string[]) => {
+    answerQuestion: async (questionId: string, answers: string[][]) => {
       // Question answers go to POST /question/:questionId/reply
       await requestNoContent('POST', `/question/${questionId}/reply`, { answers });
       return true;
@@ -202,5 +207,8 @@ export function createKiloClient(baseUrl: string): KiloClient {
       await requestNoContent('POST', `/question/${questionId}/reject`, {});
       return true;
     },
+
+    generateCommitMessage: (opts: { path: string }) =>
+      requestJson<{ message: string }>('POST', '/commit-message', { path: opts.path }),
   };
 }

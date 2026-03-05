@@ -135,6 +135,7 @@ export function createSessionInitHandlers() {
             for await (const event of streamKilocodeExec(input.mode, input.prompt, {
               sessionId,
               images: input.images,
+              variant: input.variant,
             })) {
               yield event;
               if (event.streamEventType === 'interrupted') {
@@ -310,31 +311,39 @@ export function createSessionInitHandlers() {
             // may be necessary to avoid hitting Cloudflare's subrequest limit, but in this context it is set to false.
             // Infrastructure interruptions (RPC disconnects, container failures, etc.) will still be handled appropriately.
             let interrupted = false;
+            let interruptReason: string | undefined;
             for await (const event of streamKilocodeExec(input.mode, input.prompt, {
               sessionId,
               skipInterruptPolling: false,
               images: input.images,
+              variant: input.variant,
             })) {
               yield event;
               if (event.streamEventType === 'interrupted' || event.streamEventType === 'error') {
                 interrupted = true;
+                if (event.streamEventType === 'error') {
+                  interruptReason = event.error;
+                } else if (event.streamEventType === 'interrupted') {
+                  interruptReason = event.reason;
+                }
                 break;
               }
             }
 
-            yield await createSandboxUsageEvent(session, sessionId);
-
             // sessionId is assigned at generator start, so it's always available here
             const confirmedSessionId = sessionId;
+
+            yield await createSandboxUsageEvent(session, confirmedSessionId);
 
             if (interrupted) {
               logger.info('Session execution interrupted/failed; skipping post-exec steps');
 
-              // Invoke callback with interrupted/failed status
+              // Invoke callback with interrupted/failed status, including the real error reason
               logger.info('Invoking callback for interrupted session');
               await invokeCallback(callbackUrl, callbackHeaders, {
                 sessionId: confirmedSessionId,
                 status: 'interrupted',
+                ...(interruptReason ? { errorMessage: interruptReason } : {}),
               });
 
               // Auto-cleanup still happens in the finally block below

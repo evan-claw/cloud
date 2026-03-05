@@ -47,11 +47,22 @@ export type FlyMachineMount = {
   name?: string;
 };
 
+export type FlyMachineCheck = {
+  type: 'http' | 'tcp';
+  port: number;
+  interval?: string;
+  timeout?: string;
+  grace_period?: string;
+  method?: string;
+  path?: string;
+};
+
 export type FlyMachineConfig = {
   image: string;
   env?: Record<string, string>;
   guest?: FlyMachineGuest;
   services?: FlyMachineService[];
+  checks?: Record<string, FlyMachineCheck>;
   mounts?: FlyMachineMount[];
   metadata?: Record<string, string>;
   auto_destroy?: boolean;
@@ -87,11 +98,38 @@ export type FlyVolume = {
   created_at: string;
 };
 
+/**
+ * Hint to Fly about the expected machine spec that will attach to this volume.
+ * When provided, Fly places the volume on a host with capacity for the machine,
+ * reducing the chance of a 412 "insufficient resources" on subsequent machine creation.
+ */
+export type VolumeComputeHint = {
+  cpu_kind?: 'shared' | 'performance';
+  cpus?: number;
+  memory_mb?: number;
+};
+
 export type CreateVolumeRequest = {
   name: string;
   region: string;
   size_gb: number;
   snapshot_retention?: number;
+  /** Fork an existing volume. Creates a copy on a different host/region. */
+  source_volume_id?: string;
+  /** Expected machine spec — helps Fly pick a host with capacity. */
+  compute?: VolumeComputeHint;
+};
+
+// -- Volume snapshot types --
+
+export type FlyVolumeSnapshot = {
+  id: string;
+  created_at: string;
+  digest: string;
+  retention_days: number;
+  size: number;
+  status: string;
+  volume_size: number;
 };
 
 // -- Exec types --

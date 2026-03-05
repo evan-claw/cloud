@@ -5,12 +5,17 @@
 NEXTAUTH_SECRET=dev-secret-change-me
 INTERNAL_API_SECRET=dev-internal-secret
 GATEWAY_TOKEN_SECRET=dev-gateway-secret-kiloclaw
+# Override WORKER_ENV to "development" for local development.
+# Production default is set in wrangler.jsonc. This selects the development
+# Fly app naming prefix ("dev-") for per-user app creation.
 WORKER_ENV=development
 
-# Optional: Override KiloCode base URL (dev)
-# In dev you'll want to use ngrok or cloudflare tunnel to route back to your nextjs app
+# Optional: Override KiloCode provider base URL (local dev only)
+# OpenClaw's native kilocode provider hardcodes https://api.kilo.ai/api/gateway/.
+# In dev, set this to a Cloudflare tunnel or ngrok URL pointing to your local Next.js app
+# so that Fly machines route model requests through the tunnel instead of production.
 # e.g.: `cloudflared tunnel --url http://localhost:3000`
-# KILOCODE_API_BASE_URL=https://api.kilo.ai/api/openrouter/
+# KILOCODE_API_BASE_URL=https://<tunnel>.trycloudflare.com/api/gateway/
 
 # Fly.io Machines API
 # Get a token (run: `fly tokens create some-name-for-this-dev-token`)
@@ -28,6 +33,11 @@ FLY_REGION=us,eu
 # In dev, use "latest" or run scripts/push-dev.sh which sets a timestamped tag.
 # In production, pin to a version (e.g., v40, sha-abc1234).
 FLY_IMAGE_TAG=latest
+# OpenClaw version (must match the openclaw@x.x.x version in the Dockerfile).
+# Used by the worker to self-register the version → image tag mapping in KV,
+# enabling per-user version tracking. Without this, version tracking fields
+# will be null and instances fall back to FLY_IMAGE_TAG directly.
+OPENCLAW_VERSION=2026.2.9
 
 # Legacy fallback for existing instances without per-user apps.
 # New instances get per-user apps (acct-{hash}) created automatically.
@@ -46,6 +56,3 @@ OPENCLAW_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8795,http://claw
 # In wrangler dev, it connects to the remote Postgres via the Hyperdrive service.
 # To use a local Postgres instead, add "localConnectionString" to the hyperdrive
 # config in wrangler.jsonc (see https://developers.cloudflare.com/hyperdrive/configuration/local-development/).
-
-# Development
-DEV_MODE=true

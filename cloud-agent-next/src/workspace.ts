@@ -1,6 +1,7 @@
 import type { SandboxInstance, ExecutionSession, SystemSandboxUsageEvent } from './types.js';
 import { logger } from './logger.js';
-import { withTimeout } from './utils/timeout.js';
+import { findWrapperForSessionInProcesses } from './kilo/wrapper-manager.js';
+import { withTimeout } from '@kilocode/worker-utils';
 
 /**
  * Sanitize a string for use in filesystem paths by replacing forbidden characters with dashes.
@@ -22,6 +23,12 @@ function sanitizeGitUrlForLogging(gitUrl: string): string {
     // If URL parsing fails, return as-is (shouldn't happen with validated URLs)
     return gitUrl;
   }
+}
+
+// Mask authentication tokens in git output to prevent leaking secrets in logs/errors.
+// Handles patterns like `oauth2:TOKEN@`, `x-access-token:TOKEN@`, and `x-token-auth:TOKEN@`.
+function sanitizeGitOutput(output: string): string {
+  return output.replace(/(oauth2|x-access-token|x-token-auth):([^@]+)@/gi, '$1:***@');
 }
 
 const SESSION_HOME_ROOT = `/home`;
@@ -157,6 +164,93 @@ export async function cleanupWorkspace(
   }
 }
 
+/**
+ * Clean up workspace directories for sessions that no longer have a running wrapper.
+ * Called when disk space is low to reclaim space from abandoned sessions.
+ * Errors are caught and logged — never rethrown — so cleanup failure never blocks setup.
+ */
+export async function cleanupStaleWorkspaces(
+  session: ExecutionSession,
+  sandbox: SandboxInstance,
+  baseWorkspacePath: string,
+  currentSessionId: string
+): Promise<void> {
+  logger
+    .withFields({ baseWorkspacePath, currentSessionId })
+    .info('Starting stale workspace cleanup');
+
+  let sessionDirs: string[];
+  try {
+    const lsResult = await session.exec(`ls -1 '${baseWorkspacePath}/sessions/'`);
+    if (lsResult.exitCode !== 0 || !lsResult.stdout) {
+      logger
+        .withFields({ stderr: lsResult.stderr })
+        .info('No sessions directory or listing failed, skipping cleanup');
+      return;
+    }
+    sessionDirs = lsResult.stdout
+      .trim()
+      .split('\n')
+      .map(d => d.trim())
+      .filter(d => /^agent_[\w-]+$/.test(d));
+  } catch (error) {
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Failed to list sessions directory, skipping cleanup');
+    return;
+  }
+
+  logger.withFields({ found: sessionDirs.length }).info('Found session directories');
+
+  // Fetch the process list once so we don't call listProcesses() per session
+  let processes: Awaited<ReturnType<SandboxInstance['listProcesses']>>;
+  try {
+    processes = await sandbox.listProcesses();
+  } catch (error) {
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Failed to list processes, skipping cleanup');
+    return;
+  }
+
+  let cleaned = 0;
+  let skipped = 0;
+
+  for (const candidateSessionId of sessionDirs) {
+    if (candidateSessionId === currentSessionId) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const wrapperInfo = findWrapperForSessionInProcesses(processes, candidateSessionId);
+      if (wrapperInfo !== null) {
+        logger.withFields({ candidateSessionId }).info('Skipping session: wrapper is running');
+        skipped++;
+        continue;
+      }
+
+      const workspacePath = `${baseWorkspacePath}/sessions/${candidateSessionId}`;
+      const sessionHome = getSessionHomePath(candidateSessionId);
+      logger
+        .withFields({ candidateSessionId, workspacePath, sessionHome })
+        .info('Removing stale session directories');
+
+      await cleanupWorkspace(session, workspacePath, sessionHome);
+      cleaned++;
+    } catch (error) {
+      logger
+        .withFields({
+          candidateSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Error while cleaning up stale session, continuing');
+    }
+  }
+
+  logger.withFields({ cleaned, skipped }).info('Stale workspace cleanup complete');
+}
+
 export type GitAuthorConfig = {
   name: string;
   email: string;
@@ -170,6 +264,7 @@ export const LOW_DISK_THRESHOLD_MB = 2048; // 2GB
 export type DiskSpaceResult = {
   availableMB: number;
   totalMB: number;
+  isLow: boolean;
 };
 
 /**
@@ -222,6 +317,7 @@ export async function checkDiskSpace(session: ExecutionSession): Promise<DiskSpa
   return {
     availableMB,
     totalMB,
+    isLow,
   };
 }
 
@@ -279,14 +375,14 @@ export async function cloneGitRepo(
   gitUrl: string,
   gitToken?: string,
   gitAuthor?: GitAuthorConfig,
-  options?: { shallow?: boolean }
+  options?: { shallow?: boolean; platform?: 'github' | 'gitlab' }
 ): Promise<void> {
   // Build URL with token if available (for private repos)
-  // Use x-access-token format which works across most git providers
+  // GitLab OAuth tokens require username 'oauth2'; all other providers use 'x-access-token'
   let repoUrl = gitUrl;
   if (gitToken) {
     const url = new URL(gitUrl);
-    url.username = 'x-access-token';
+    url.username = options?.platform === 'gitlab' ? 'oauth2' : 'x-access-token';
     url.password = gitToken;
     repoUrl = url.toString();
   }
@@ -338,6 +434,7 @@ export type RestoreWorkspaceOptions = {
   gitToken?: string;
   gitAuthorEnv?: { GITHUB_APP_SLUG?: string; GITHUB_APP_BOT_USER_ID?: string };
   lastSeenBranch?: string;
+  platform?: 'github' | 'gitlab';
 };
 
 export async function restoreWorkspace(
@@ -347,7 +444,9 @@ export async function restoreWorkspace(
   options: RestoreWorkspaceOptions
 ): Promise<void> {
   if (options.gitUrl) {
-    await cloneGitRepo(session, workspacePath, options.gitUrl, options.gitToken);
+    await cloneGitRepo(session, workspacePath, options.gitUrl, options.gitToken, undefined, {
+      platform: options.platform,
+    });
   } else if (options.githubRepo) {
     await cloneGitHubRepo(
       session,
@@ -367,22 +466,23 @@ export async function restoreWorkspace(
 /**
  * Update the git remote origin URL to include a new token.
  * This is needed when the git token changes and we need to push/pull.
- * Uses the same x-access-token format as cloneGitRepo() for consistency.
  *
  * @param session - Execution session
  * @param workspacePath - Path to the git repository
  * @param gitUrl - Full git URL (e.g., https://github.com/org/repo.git)
  * @param gitToken - New git token for authentication
+ * @param platform - Git platform; GitLab requires 'oauth2' as the username
  */
 export async function updateGitRemoteToken(
   session: ExecutionSession,
   workspacePath: string,
   gitUrl: string,
-  gitToken: string
+  gitToken: string,
+  platform?: 'github' | 'gitlab'
 ): Promise<void> {
-  // Build new URL with token embedded (same format as cloneGitRepo)
+  // Build new URL with token embedded (GitLab uses 'oauth2', others use 'x-access-token')
   const newUrl = new URL(gitUrl);
-  newUrl.username = 'x-access-token';
+  newUrl.username = platform === 'gitlab' ? 'oauth2' : 'x-access-token';
   newUrl.password = gitToken;
 
   const sanitizedGitUrl = sanitizeGitUrlForLogging(gitUrl);
@@ -408,7 +508,7 @@ export async function updateGitRemoteToken(
 async function gitFetch(session: ExecutionSession, workspacePath: string): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git fetch origin`);
   if (result.exitCode !== 0) {
-    logger.withFields({ stderr: result.stderr }).warn('Git fetch failed');
+    logger.withFields({ stderr: sanitizeGitOutput(result.stderr) }).warn('Git fetch failed');
   }
 }
 
@@ -441,7 +541,9 @@ async function checkoutExistingBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to checkout branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to checkout branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -454,7 +556,7 @@ async function pullLatestChangesLenient(
   if (result.exitCode !== 0) {
     // Session branches might have unpushed work or conflicts, just warn
     logger
-      .withFields({ branchName, stderr: result.stderr })
+      .withFields({ branchName, stderr: sanitizeGitOutput(result.stderr) })
       .warn('Could not pull branch, continuing with local version');
   }
 }
@@ -469,7 +571,7 @@ async function createTrackingBranch(
   );
   if (result.exitCode !== 0) {
     throw new Error(
-      `Failed to create tracking branch ${branchName}: ${result.stderr || result.stdout}`
+      `Failed to create tracking branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
     );
   }
 }
@@ -481,7 +583,9 @@ async function createNewBranch(
 ): Promise<void> {
   const result = await session.exec(`cd ${workspacePath} && git checkout -b '${branchName}'`);
   if (result.exitCode !== 0) {
-    throw new Error(`Failed to create branch ${branchName}: ${result.stderr || result.stdout}`);
+    throw new Error(
+      `Failed to create branch ${branchName}: ${sanitizeGitOutput(result.stderr || result.stdout)}`
+    );
   }
 }
 
@@ -499,7 +603,7 @@ async function fetchPullRefAndCheckout(
   const fetchResult = await session.exec(`cd ${workspacePath} && git fetch origin '${pullRef}'`);
   if (fetchResult.exitCode !== 0) {
     throw new Error(
-      `Failed to fetch pull ref ${pullRef}: ${fetchResult.stderr || fetchResult.stdout}`
+      `Failed to fetch pull ref ${pullRef}: ${sanitizeGitOutput(fetchResult.stderr || fetchResult.stdout)}`
     );
   }
 
@@ -508,7 +612,7 @@ async function fetchPullRefAndCheckout(
   );
   if (checkoutResult.exitCode !== 0) {
     throw new Error(
-      `Failed to checkout pull ref ${pullRef}: ${checkoutResult.stderr || checkoutResult.stdout}`
+      `Failed to checkout pull ref ${pullRef}: ${sanitizeGitOutput(checkoutResult.stderr || checkoutResult.stdout)}`
     );
   }
 }

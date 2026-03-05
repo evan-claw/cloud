@@ -1,4 +1,8 @@
-import { microdollar_usage, organization_seats_purchases, organizations } from '@/db/schema';
+import {
+  microdollar_usage,
+  organization_seats_purchases,
+  organizations,
+} from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
 import { successResult } from '@/lib/maybe-result';
 import { captureMessage } from '@sentry/nextjs';
@@ -36,14 +40,13 @@ import * as z from 'zod';
 import { getCreditTransactionsForOrganization } from '@/lib/creditTransactions';
 import { getCreditBlocks } from '@/lib/getCreditBlocks';
 import { processOrganizationExpirations } from '@/lib/creditExpiration';
-import { credit_transactions } from '@/db/schema';
+import { credit_transactions } from '@kilocode/db/schema';
 import { getOrganizationSeatUsage } from '@/lib/organizations/organization-seats';
 import { organizationSsoRouter } from '@/routers/organizations/organization-sso-router';
 import { organizationAuditLogRouter } from '@/routers/organizations/organization-audit-log-router';
 import { organizationAdminRouter } from '@/routers/organizations/organization-admin-router';
 import { organizationModesRouter } from '@/routers/organizations/organization-modes-router';
 import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
-import { organizationGitHubAppsRouter } from '@/routers/organizations/organization-github-apps-router';
 import { organizationDeploymentsRouter } from '@/routers/organizations/organization-deployments-router';
 import PostHogClient from '@/lib/posthog';
 import { organizationReviewAgentRouter } from '@/routers/organizations/organization-code-reviews-router';
@@ -51,7 +54,7 @@ import { organizationCloudAgentRouter } from '@/routers/organizations/organizati
 import { organizationCloudAgentNextRouter } from '@/routers/organizations/organization-cloud-agent-next-router';
 import { organizationAppBuilderRouter } from '@/routers/organizations/organization-app-builder-router';
 import { organizationSecurityAgentRouter } from '@/routers/organizations/organization-security-agent-router';
-import { organizationSlackRouter } from '@/routers/organizations/organization-slack-router';
+import { organizationSecurityAuditLogRouter } from '@/routers/organizations/organization-security-audit-log-router';
 import { organizationAutoTriageRouter } from '@/routers/organizations/organization-auto-triage-router';
 import { organizationAutoFixRouter } from '@/routers/organizations/organization-auto-fix-router';
 import { organizationAutoTopUpRouter } from '@/routers/organizations/organization-auto-top-up-router';
@@ -99,14 +102,13 @@ export const organizationsRouter = createTRPCRouter({
   auditLogs: organizationAuditLogRouter,
   admin: organizationAdminRouter,
   modes: organizationModesRouter,
-  githubApps: organizationGitHubAppsRouter,
   deployments: organizationDeploymentsRouter,
   reviewAgent: organizationReviewAgentRouter,
   cloudAgent: organizationCloudAgentRouter,
   cloudAgentNext: organizationCloudAgentNextRouter,
   appBuilder: organizationAppBuilderRouter,
   securityAgent: organizationSecurityAgentRouter,
-  slack: organizationSlackRouter,
+  securityAuditLog: organizationSecurityAuditLogRouter,
   autoTriage: organizationAutoTriageRouter,
   autoFix: organizationAutoFixRouter,
   autoTopUp: organizationAutoTopUpRouter,

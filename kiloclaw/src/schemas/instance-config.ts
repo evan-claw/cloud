@@ -1,19 +1,19 @@
 import { z } from 'zod';
+import { IMAGE_TAG_RE, IMAGE_TAG_MAX_LENGTH } from '../lib/image-tag-validation';
 
 export const EncryptedEnvelopeSchema = z.object({
-  encryptedData: z.string(),
-  encryptedDEK: z.string(),
+  // AES-256-GCM ciphertext: 16-byte IV + ciphertext + 16-byte tag, base64-encoded.
+  // 8 KiB is generous for token values (typical bot tokens are < 200 bytes).
+  encryptedData: z.string().max(8192),
+  // RSA-2048 OAEP ciphertext of the 32-byte DEK, base64-encoded (~344 chars).
+  encryptedDEK: z.string().max(1024),
   algorithm: z.literal('rsa-aes-256-gcm'),
   version: z.literal(1),
 });
 
-export type ModelEntry = { id: string; name: string };
-
-const ModelEntrySchema = z.object({ id: z.string(), name: z.string() });
-
 const MachineSizeSchema = z.object({
-  cpus: z.number(),
-  memory_mb: z.number(),
+  cpus: z.number().int().min(1).max(8),
+  memory_mb: z.number().int().min(256).max(16384),
   cpu_kind: z.enum(['shared', 'performance']).optional(),
 });
 
@@ -38,7 +38,6 @@ export const InstanceConfigSchema = z.object({
   kilocodeApiKey: z.string().nullable().optional(),
   kilocodeApiKeyExpiresAt: z.string().nullable().optional(),
   kilocodeDefaultModel: z.string().nullable().optional(),
-  kilocodeModels: z.array(ModelEntrySchema).nullable().optional(),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -52,6 +51,9 @@ export const InstanceConfigSchema = z.object({
   // Examples: "us,eu" (try US first, then Europe), "lhr" (London only).
   // If omitted, falls back to the FLY_REGION env var.
   region: z.string().optional(),
+  // If set, use this image tag instead of resolving latest from KV.
+  // Set by the cloud app when the user has a version pin.
+  pinnedImageTag: z.string().regex(IMAGE_TAG_RE).max(IMAGE_TAG_MAX_LENGTH).optional(),
 });
 
 export type InstanceConfig = z.infer<typeof InstanceConfigSchema>;
@@ -100,7 +102,6 @@ export const PersistedStateSchema = z.object({
   kilocodeApiKey: z.string().nullable().default(null),
   kilocodeApiKeyExpiresAt: z.string().nullable().default(null),
   kilocodeDefaultModel: z.string().nullable().default(null),
-  kilocodeModels: z.array(ModelEntrySchema).nullable().default(null),
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -124,9 +125,24 @@ export const PersistedStateSchema = z.object({
   // Two-phase destroy: IDs pending deletion on Fly. Cleared once Fly confirms.
   pendingDestroyMachineId: z.string().nullable().default(null),
   pendingDestroyVolumeId: z.string().nullable().default(null),
+  // For stale auto-destroy only: defer DO state wipe until Postgres row is marked destroyed.
+  pendingPostgresMarkOnFinalize: z.boolean().default(false),
   // Cooldown: last time we attempted metadata-based machine recovery from Fly.
   // Prevents hammering listMachines on every alarm when there's genuinely nothing.
   lastMetadataRecoveryAt: z.number().nullable().default(null),
+  // Image version tracking: records what version/variant/tag a user was provisioned with
+  openclawVersion: z.string().nullable().default(null),
+  imageVariant: z.string().nullable().default(null),
+  trackedImageTag: z.string().nullable().default(null),
+  trackedImageDigest: z.string().nullable().default(null),
+  // Structured last-error from the destroy retry loop, for admin observability.
+  lastDestroyErrorOp: z.enum(['machine', 'volume', 'recover']).nullable().default(null),
+  lastDestroyErrorStatus: z.number().nullable().default(null),
+  lastDestroyErrorMessage: z.string().nullable().default(null),
+  lastDestroyErrorAt: z.number().nullable().default(null),
+  // Cooldown for bound-machine recovery during destroy: avoids repeated getVolume
+  // calls when the volume consistently reports no attached machine.
+  lastBoundMachineRecoveryAt: z.number().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

@@ -28,11 +28,12 @@ export const APP_URL =
     ? 'https://app.kilo.ai'
     : (process.env.APP_URL_OVERRIDE ?? 'http://localhost:3000');
 
-export const TRIAL_DURATION_DAYS = 30;
+export const TRIAL_DURATION_DAYS = 14;
 
 export const AUTOCOMPLETE_MODEL = 'codestral-2508';
 
 export const ENABLE_DEPLOY_FEATURE = true;
+export const ENABLE_GASTOWN_FEATURE = true;
 
 export const IS_DEVELOPMENT = process.env.NODE_ENV === 'development';
 
@@ -41,6 +42,10 @@ export const CLOUD_AGENT_WS_URL = process.env.NEXT_PUBLIC_CLOUD_AGENT_WS_URL ?? 
 // Cloud Agent Next WebSocket URL (client-side, inlined at build time)
 // Separate URL for the new cloud-agent-next implementation
 export const CLOUD_AGENT_NEXT_WS_URL = process.env.NEXT_PUBLIC_CLOUD_AGENT_NEXT_WS_URL ?? '';
+
+// Gastown worker URL (client-side, inlined at build time)
+// The browser talks directly to the gastown Cloudflare Worker for tRPC + WS.
+export const GASTOWN_URL = process.env.NEXT_PUBLIC_GASTOWN_URL ?? '';
 
 // Free model rate limits (applies to both anonymous and authenticated users)
 export const FREE_MODEL_RATE_LIMIT_WINDOW_HOURS = 1;

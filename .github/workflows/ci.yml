@@ -17,7 +17,9 @@ jobs:
       cloud_agent: ${{ steps.filter.outputs.cloud_agent }}
       cloud_agent_next: ${{ steps.filter.outputs.cloud_agent_next }}
       webhook_agent: ${{ steps.filter.outputs.webhook_agent }}
+      security_auto_analysis: ${{ steps.filter.outputs.security_auto_analysis }}
       kiloclaw: ${{ steps.filter.outputs.kiloclaw }}
+      app_builder: ${{ steps.filter.outputs.app_builder }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,8 +36,12 @@ jobs:
               - 'cloud-agent-next/**'
             webhook_agent:
               - 'cloudflare-webhook-agent-ingest/**'
+            security_auto_analysis:
+              - 'cloudflare-security-auto-analysis/**'
             kiloclaw:
               - 'kiloclaw/**'
+            app_builder:
+              - 'cloudflare-app-builder/**'
 
   test:
     runs-on: ubuntu-24.04-8core
@@ -85,6 +91,13 @@ jobs:
 
       - name: Lint
         run: pnpm run lint
+
+      - name: Format check
+        run: |
+          pnpm run format:check || {
+            echo "::error::Prettier formatting check failed. Please run 'pnpm run format' locally and commit the changes before pushing."
+            exit 1
+          }
 
       - name: Dependency cycle check
         run: pnpm run dependency-cycle-check
@@ -255,6 +268,36 @@ jobs:
       - name: Run webhook-agent-ingest tests
         run: pnpm --filter cloudflare-webhook-agent-ingest test
 
+  security-auto-analysis:
+    needs: changes
+    if: needs.changes.outputs.security_auto_analysis == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (security-auto-analysis)
+        run: pnpm --filter cloudflare-security-auto-analysis typecheck
+
+      - name: Run security-auto-analysis tests
+        run: pnpm --filter cloudflare-security-auto-analysis test
+
   kiloclaw:
     needs: changes
     if: needs.changes.outputs.kiloclaw == 'true'
@@ -288,6 +331,36 @@ jobs:
       - name: Run kiloclaw tests
         run: pnpm --filter kiloclaw test
 
+  app-builder:
+    needs: changes
+    if: needs.changes.outputs.app_builder == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (app-builder)
+        run: pnpm --filter app-builder typecheck
+
+      - name: Run app-builder tests
+        run: pnpm --filter app-builder test
+
   cloudflare:
     strategy:
       fail-fast: false
@@ -297,8 +370,6 @@ jobs:
             filter: kilo-deploy-builder
           - name: deploy-dispatcher
             filter: deploy-dispatcher
-          - name: app-builder
-            filter: app-builder
           - name: code-review
             filter: kilo-code-review-worker
     name: cloudflare-${{ matrix.name }}

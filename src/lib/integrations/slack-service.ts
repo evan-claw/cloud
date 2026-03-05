@@ -1,7 +1,7 @@
 import 'server-only';
 import { db } from '@/lib/drizzle';
-import type { PlatformIntegration } from '@/db/schema';
-import { platform_integrations } from '@/db/schema';
+import type { PlatformIntegration } from '@kilocode/db/schema';
+import { platform_integrations } from '@kilocode/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import type { Owner } from '@/lib/integrations/core/types';
@@ -10,19 +10,20 @@ import { SLACK_CLIENT_ID, SLACK_CLIENT_SECRET } from '@/lib/config.server';
 import { APP_URL } from '@/lib/constants';
 import { WebClient } from '@slack/web-api';
 import type { OAuthV2Response } from '@slack/oauth';
-import { opus_46_free_slackbot_model } from '@/lib/providers/anthropic';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { minimax_m25_free_model } from '@/lib/providers/minimax';
+import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
 
 // Default model for Slack integrations - separate from the global platform default
-const SLACK_DEFAULT_MODEL = opus_46_free_slackbot_model.is_enabled
-  ? opus_46_free_slackbot_model.public_id
-  : 'minimax/minimax-m2.1';
+const SLACK_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
+  ? minimax_m25_free_model.public_id
+  : CLAUDE_OPUS_CURRENT_MODEL_ID;
 
 // Slack OAuth scopes for the integration
 // These should be kept in sync with the scopes requested in the Slack app configuration
-const SLACK_SCOPES = [
+export const SLACK_SCOPES = [
   'app_mentions:read',
   'channels:history',
   'channels:read',

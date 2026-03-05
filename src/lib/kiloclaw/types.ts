@@ -1,5 +1,14 @@
 import type { EncryptedEnvelope } from '@/lib/encryption';
 
+/** Mirrors the worker's ImageVersionEntry schema (KV stored version metadata) */
+export type ImageVersionEntry = {
+  openclawVersion: string;
+  variant: string;
+  imageTag: string;
+  imageDigest: string | null;
+  publishedAt: string;
+};
+
 /** Input to POST /api/platform/provision */
 export type ProvisionInput = {
   envVars?: Record<string, string>;
@@ -13,26 +22,19 @@ export type ProvisionInput = {
   kilocodeApiKey?: string;
   kilocodeApiKeyExpiresAt?: string;
   kilocodeDefaultModel?: string;
-  kilocodeModels?: KiloCodeModelEntry[];
-};
-
-export type KiloCodeModelEntry = {
-  id: string;
-  name: string;
+  pinnedImageTag?: string;
 };
 
 export type KiloCodeConfigPatchInput = {
   kilocodeApiKey?: string | null;
   kilocodeApiKeyExpiresAt?: string | null;
   kilocodeDefaultModel?: string | null;
-  kilocodeModels?: KiloCodeModelEntry[] | null;
 };
 
 export type KiloCodeConfigResponse = {
   kilocodeApiKey: string | null;
   kilocodeApiKeyExpiresAt: string | null;
   kilocodeDefaultModel: string | null;
-  kilocodeModels: KiloCodeModelEntry[] | null;
 };
 
 /** Input to PATCH /api/platform/channels */
@@ -73,6 +75,34 @@ export type PairingApproveResponse = {
   message: string;
 };
 
+/** A pending device pairing request (e.g. Control UI or node) */
+export type DevicePairingRequest = {
+  requestId: string;
+  deviceId: string;
+  role?: string;
+  platform?: string;
+  clientId?: string;
+  ts?: number;
+};
+
+/** Response from GET /api/platform/device-pairing */
+export type DevicePairingListResponse = {
+  requests: DevicePairingRequest[];
+};
+
+/** Response from POST /api/platform/device-pairing/approve */
+export type DevicePairingApproveResponse = {
+  success: boolean;
+  message: string;
+};
+
+/** Fly Machine guest spec (CPU/memory configuration) */
+export type MachineSize = {
+  cpus: number;
+  memory_mb: number;
+  cpu_kind?: 'shared' | 'performance';
+};
+
 /** Response from GET /api/platform/status and GET /api/kiloclaw/status */
 export type PlatformStatusResponse = {
   userId: string | null;
@@ -88,6 +118,41 @@ export type PlatformStatusResponse = {
   flyMachineId: string | null;
   flyVolumeId: string | null;
   flyRegion: string | null;
+  machineSize: MachineSize | null;
+  openclawVersion: string | null;
+  imageVariant: string | null;
+  trackedImageTag: string | null;
+  trackedImageDigest: string | null;
+};
+
+/** Response from GET /api/platform/debug-status (internal/admin only). */
+export type PlatformDebugStatusResponse = PlatformStatusResponse & {
+  pendingDestroyMachineId: string | null;
+  pendingDestroyVolumeId: string | null;
+  pendingPostgresMarkOnFinalize: boolean;
+  lastMetadataRecoveryAt: number | null;
+  lastLiveCheckAt: number | null;
+  alarmScheduledAt: number | null;
+  lastDestroyErrorOp: 'machine' | 'volume' | 'recover' | null;
+  lastDestroyErrorStatus: number | null;
+  lastDestroyErrorMessage: string | null;
+  lastDestroyErrorAt: number | null;
+};
+
+/** A Fly volume snapshot. */
+export type VolumeSnapshot = {
+  id: string;
+  created_at: string;
+  digest: string;
+  retention_days: number;
+  size: number;
+  status: string;
+  volume_size: number;
+};
+
+/** Response from GET /api/platform/volume-snapshots */
+export type VolumeSnapshotsResponse = {
+  snapshots: VolumeSnapshot[];
 };
 
 /** Response from GET /api/kiloclaw/config */
@@ -105,11 +170,48 @@ export type UserConfigResponse = {
   };
 };
 
+/** Response from POST /api/platform/doctor */
+export type DoctorResponse = {
+  success: boolean;
+  output: string;
+};
+
 /** Response from POST /api/admin/gateway/restart */
 export type RestartGatewayResponse = {
   success: boolean;
   message?: string;
   error?: string;
+};
+
+/** Response from GET /api/platform/gateway/status */
+export type GatewayProcessStatusResponse = {
+  state: 'stopped' | 'starting' | 'running' | 'stopping' | 'crashed' | 'shutting_down';
+  pid: number | null;
+  uptime: number;
+  restarts: number;
+  lastExit: {
+    code: number | null;
+    signal: string | null;
+    at: string;
+  } | null;
+};
+
+/** Response from POST /api/platform/gateway/{start|stop|restart} */
+export type GatewayProcessActionResponse = {
+  ok: boolean;
+};
+
+/** Response from POST /api/platform/config/restore */
+export type ConfigRestoreResponse = {
+  ok: boolean;
+  signaled: boolean;
+};
+
+/** Response from GET /api/platform/controller-version. Null fields = old controller. */
+export type ControllerVersionResponse = {
+  version: string | null;
+  commit: string | null;
+  openclawVersion?: string | null;
 };
 
 /** Combined status + gateway token returned by tRPC getStatus */

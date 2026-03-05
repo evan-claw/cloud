@@ -1,7 +1,9 @@
 'use client';
 
-import { User, Bot, Scissors, Image, FileText } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { useCallback } from 'react';
+import { User, Bot, Scissors, Image, FileText, AlertCircle } from 'lucide-react';
+import { TimeAgo } from '@/components/shared/TimeAgo';
+import type { AssistantMessage } from '@/types/opencode.gen';
 import type { StoredMessage, Part, CompactionPart } from './types';
 import {
   isUserMessage,
@@ -13,16 +15,18 @@ import {
 } from './types';
 import type { FilePart } from './types';
 import { PartRenderer } from './PartRenderer';
+import { CopyMessageButton } from '@/components/shared/CopyMessageButton';
+import { stripImageContext } from '@/lib/app-builder/message-utils';
 
 /**
  * Compaction separator component - shown when context is compacted
  */
 function CompactionSeparator({
   compactionPart,
-  timeAgo,
+  timestamp,
 }: {
   compactionPart: CompactionPart;
-  timeAgo: string;
+  timestamp: number | string;
 }) {
   const isAuto = compactionPart.auto;
 
@@ -33,7 +37,7 @@ function CompactionSeparator({
         <Scissors className="h-3 w-3" />
         <span>Context compacted{isAuto ? ' (auto)' : ''}</span>
         <span className="text-muted-foreground/60">·</span>
-        <span className="text-muted-foreground/60">{timeAgo}</span>
+        <TimeAgo timestamp={timestamp} className="text-muted-foreground/60" />
       </div>
       <div className="bg-border h-px flex-1" />
     </div>
@@ -80,7 +84,29 @@ function InlineFileAttachment({ part }: { part: FilePart }) {
  */
 function getUserTextContent(parts: Part[]): string {
   const textParts = parts.filter(isTextPart);
-  return textParts.map(p => p.text).join('');
+  return stripImageContext(textParts.map(p => p.text).join(''));
+}
+
+/**
+ * Get copyable text content from message parts.
+ * Extracts text from TextParts (the main prose the assistant writes).
+ */
+function getAssistantTextContent(parts: Part[]): string {
+  return parts
+    .filter(isTextPart)
+    .map(p => p.text)
+    .join('\n\n')
+    .trim();
+}
+
+/**
+ * Extract a human-readable error message from an AssistantMessage error field.
+ */
+function getAssistantErrorMessage(error: NonNullable<AssistantMessage['error']>): string {
+  if ('data' in error && 'message' in error.data && typeof error.data.message === 'string') {
+    return error.data.message;
+  }
+  return 'An error occurred while generating a response';
 }
 
 type MessageBubbleProps = {
@@ -135,7 +161,8 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   const isStreaming = isStreamingProp ?? isMessageStreaming(message);
   const timestamp = message.info.time.created;
-  const timeAgo = formatDistanceToNow(new Date(timestamp), { addSuffix: true });
+
+  const getTextForCopy = useCallback(() => getAssistantTextContent(message.parts), [message.parts]);
 
   // User message
   if (isUserMessage(message.info)) {
@@ -146,7 +173,7 @@ export function MessageBubble({
 
     // Render compaction separator for compaction-only messages
     if (hasOnlyCompactionParts && compactionPart) {
-      return <CompactionSeparator compactionPart={compactionPart} timeAgo={timeAgo} />;
+      return <CompactionSeparator compactionPart={compactionPart} timestamp={timestamp} />;
     }
 
     const displayName = userName ?? 'You';
@@ -158,7 +185,7 @@ export function MessageBubble({
       <div className="flex items-start justify-end gap-2 py-4 md:gap-3">
         <div className="flex flex-1 flex-col items-end space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">{timeAgo}</span>
+            <TimeAgo timestamp={timestamp} className="text-muted-foreground text-xs" />
             <span className="text-sm font-medium">{displayName}</span>
           </div>
           <div className="bg-primary text-primary-foreground max-w-[95%] rounded-lg p-3 sm:max-w-[85%] md:max-w-[80%] md:p-4">
@@ -192,10 +219,13 @@ export function MessageBubble({
 
   // Assistant message
   if (isAssistantMessage(message.info)) {
-    const { cost, tokens } = message.info;
+    const { cost, tokens, error } = message.info;
+    // Show error when message failed with no output
+    const showError = !isStreaming && error !== undefined;
+    const errorMessage = error ? getAssistantErrorMessage(error) : undefined;
 
     return (
-      <div className="flex items-start gap-2 py-4 md:gap-3">
+      <div className="group/msg flex items-start gap-2 py-4 md:gap-3">
         <AvatarWithDebugInfo messageId={message.info.id} sessionId={message.info.sessionID}>
           <div className="bg-muted flex h-7 w-7 shrink-0 items-center justify-center rounded-full md:h-8 md:w-8">
             <Bot className="h-4 w-4" />
@@ -204,7 +234,7 @@ export function MessageBubble({
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">Kilo Code</span>
-            <span className="text-muted-foreground text-xs">{timeAgo}</span>
+            <TimeAgo timestamp={timestamp} className="text-muted-foreground text-xs" />
             {isStreaming && (
               <span className="text-muted-foreground flex items-center gap-1 text-xs">
                 <span className="relative flex h-2 w-2">
@@ -214,14 +244,26 @@ export function MessageBubble({
                 Streaming...
               </span>
             )}
+            {showError && (
+              <span className="text-destructive flex items-center gap-1 text-xs">
+                <AlertCircle className="h-3 w-3" />
+                Failed
+              </span>
+            )}
             {/* Cost/token display */}
-            {!isStreaming && (cost !== undefined || tokens !== undefined) && (
+            {!isStreaming && !showError && (cost !== undefined || tokens !== undefined) && (
               <span className="text-muted-foreground text-xs">
                 {tokens !== undefined &&
                   `${(tokens.input + tokens.output).toLocaleString()} tokens`}
                 {tokens !== undefined && cost !== undefined && ' · '}
                 {cost !== undefined && `$${cost.toFixed(4)}`}
               </span>
+            )}
+            {!isStreaming && (
+              <CopyMessageButton
+                getText={getTextForCopy}
+                className="opacity-0 transition-opacity group-hover/msg:opacity-100"
+              />
             )}
           </div>
           {/* Render all parts via PartRenderer */}
@@ -235,6 +277,8 @@ export function MessageBubble({
               />
             ))}
           </div>
+          {/* Inline error message for failed responses */}
+          {showError && errorMessage && <p className="text-destructive text-sm">{errorMessage}</p>}
         </div>
       </div>
     );

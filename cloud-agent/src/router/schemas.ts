@@ -44,6 +44,11 @@ export const PromptPayload = z.object({
     .enum(['architect', 'code', 'ask', 'debug', 'orchestrator'])
     .describe('Kilo Code execution mode (required)'),
   model: z.string().min(1, 'Model is required').describe('AI model to use (required)'),
+  variant: z
+    .string()
+    .max(50)
+    .regex(/^[a-zA-Z]+$/)
+    .optional(),
 });
 
 /**
@@ -297,6 +302,11 @@ export const InitiateSessionAsyncInput = z
       .enum(['architect', 'code', 'ask', 'debug', 'orchestrator'])
       .describe('Kilo Code execution mode (required)'),
     model: z.string().min(1, 'Model is required').describe('AI model to use (required)'),
+    variant: z
+      .string()
+      .max(50)
+      .regex(/^[a-zA-Z]+$/)
+      .optional(),
     // Callback fields (required for async)
     callbackUrl: z.string().url().describe('URL to POST completion/error notification to'),
     callbackHeaders: z

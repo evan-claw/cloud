@@ -2,15 +2,40 @@ import 'server-only';
 
 import { KILOCLAW_API_URL, KILOCLAW_INTERNAL_API_SECRET } from '@/lib/config.server';
 import type {
+  ImageVersionEntry,
   ProvisionInput,
   PlatformStatusResponse,
+  PlatformDebugStatusResponse,
   KiloCodeConfigPatchInput,
   KiloCodeConfigResponse,
   ChannelsPatchInput,
   ChannelsPatchResponse,
   PairingListResponse,
   PairingApproveResponse,
+  DevicePairingListResponse,
+  DevicePairingApproveResponse,
+  VolumeSnapshotsResponse,
+  DoctorResponse,
+  GatewayProcessStatusResponse,
+  GatewayProcessActionResponse,
+  ConfigRestoreResponse,
+  ControllerVersionResponse,
 } from './types';
+
+/**
+ * Error thrown when the KiloClaw API returns a non-OK response.
+ * Preserves the HTTP status code for structured error handling
+ * without leaking the raw response body.
+ */
+export class KiloClawApiError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number) {
+    super(`KiloClaw API error (${statusCode})`);
+    this.name = 'KiloClawApiError';
+    this.statusCode = statusCode;
+  }
+}
 
 /**
  * KiloClaw worker client for platform (internal) routes.
@@ -43,10 +68,31 @@ export class KiloClawInternalClient {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`KiloClaw API error (${res.status}): ${body}`);
+      console.error(
+        `KiloClaw API error (${res.status}) ${options?.method ?? 'GET'} ${path}:`,
+        body
+      );
+      throw new KiloClawApiError(res.status);
     }
 
     return res.json() as Promise<T>;
+  }
+
+  async listVersions(): Promise<ImageVersionEntry[]> {
+    return this.request('/api/platform/versions');
+  }
+
+  async getLatestVersion(): Promise<ImageVersionEntry | null> {
+    try {
+      return await this.request('/api/platform/versions/latest');
+    } catch (err) {
+      // Only return null for 404 (no latest version set)
+      // Re-throw other errors (network, auth, server errors) so callers can handle them
+      if (err instanceof KiloClawApiError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
   }
 
   async provision(userId: string, config: ProvisionInput): Promise<{ sandboxId: string }> {
@@ -81,6 +127,10 @@ export class KiloClawInternalClient {
     return this.request(`/api/platform/status?userId=${encodeURIComponent(userId)}`);
   }
 
+  async getDebugStatus(userId: string): Promise<PlatformDebugStatusResponse> {
+    return this.request(`/api/platform/debug-status?userId=${encodeURIComponent(userId)}`);
+  }
+
   async getGatewayToken(userId: string): Promise<{ gatewayToken: string }> {
     return this.request(`/api/platform/gateway-token?userId=${encodeURIComponent(userId)}`);
   }
@@ -102,6 +152,10 @@ export class KiloClawInternalClient {
     });
   }
 
+  async listVolumeSnapshots(userId: string): Promise<VolumeSnapshotsResponse> {
+    return this.request(`/api/platform/volume-snapshots?userId=${encodeURIComponent(userId)}`);
+  }
+
   async listPairingRequests(userId: string, refresh = false): Promise<PairingListResponse> {
     const params = new URLSearchParams({ userId });
     if (refresh) params.set('refresh', 'true');
@@ -116,6 +170,68 @@ export class KiloClawInternalClient {
     return this.request('/api/platform/pairing/approve', {
       method: 'POST',
       body: JSON.stringify({ userId, channel, code }),
+    });
+  }
+
+  async listDevicePairingRequests(
+    userId: string,
+    refresh = false
+  ): Promise<DevicePairingListResponse> {
+    const params = new URLSearchParams({ userId });
+    if (refresh) params.set('refresh', 'true');
+    return this.request(`/api/platform/device-pairing?${params.toString()}`);
+  }
+
+  async approveDevicePairingRequest(
+    userId: string,
+    requestId: string
+  ): Promise<DevicePairingApproveResponse> {
+    return this.request('/api/platform/device-pairing/approve', {
+      method: 'POST',
+      body: JSON.stringify({ userId, requestId }),
+    });
+  }
+
+  async runDoctor(userId: string): Promise<DoctorResponse> {
+    return this.request('/api/platform/doctor', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async getGatewayStatus(userId: string): Promise<GatewayProcessStatusResponse> {
+    return this.request(`/api/platform/gateway/status?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async getControllerVersion(userId: string): Promise<ControllerVersionResponse> {
+    return this.request(`/api/platform/controller-version?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async startGateway(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/start', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async stopGateway(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/stop', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async restartGatewayProcess(userId: string): Promise<GatewayProcessActionResponse> {
+    return this.request('/api/platform/gateway/restart', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async restoreConfig(userId: string, version = 'base'): Promise<ConfigRestoreResponse> {
+    return this.request('/api/platform/config/restore', {
+      method: 'POST',
+      body: JSON.stringify({ userId, version }),
     });
   }
 }

@@ -3,6 +3,9 @@
  */
 
 import type { AutoFixOrchestrator } from './fix-orchestrator';
+import type { Owner } from '@kilocode/worker-utils';
+
+export type { Owner };
 
 export type FixStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -17,11 +20,7 @@ export interface ClassificationResult {
   suggestedAction?: string;
 }
 
-export interface Owner {
-  type: 'user' | 'org';
-  id: string;
-  userId: string;
-}
+export type TriggerSource = 'label' | 'review_comment';
 
 export interface SessionInput {
   repoFullName: string;
@@ -41,6 +40,13 @@ export interface SessionInput {
   prTitleTemplate: string;
   prBodyTemplate?: string | null;
   maxPRCreationTimeMinutes?: number;
+  // Review comment context
+  upstreamBranch?: string;
+  reviewCommentId?: number;
+  reviewCommentBody?: string;
+  filePath?: string;
+  lineNumber?: number;
+  diffHunk?: string;
 }
 
 export interface FixEvent {
@@ -56,6 +62,7 @@ export interface FixTicket {
   authToken: string;
   sessionInput: SessionInput;
   owner: Owner;
+  triggerSource: TriggerSource;
   status: FixStatus;
   sessionId?: string;
   cliSessionId?: string;
@@ -87,6 +94,7 @@ export interface FixRequest {
   authToken: string;
   sessionInput: SessionInput;
   owner: Owner;
+  triggerSource?: TriggerSource;
 }
 
 export interface FixResponse {
@@ -106,7 +114,6 @@ export interface Env {
   INTERNAL_API_SECRET: string;
   BACKEND_AUTH_TOKEN: string;
   CLOUD_AGENT_URL: string;
-  CLOUD_AGENT_API_KEY: string;
 
   // Optional Sentry
   SENTRY_DSN?: string;

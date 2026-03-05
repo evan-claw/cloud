@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { db } from './drizzle';
-import type { MicrodollarUsage, Organization } from '@/db/schema';
-import { microdollar_usage } from '@/db/schema';
+import type { MicrodollarUsage, Organization } from '@kilocode/db/schema';
+import { microdollar_usage } from '@kilocode/db/schema';
 import type { FeatureValue } from '@/lib/feature-detection';
 import { createTimer } from '@/lib/timer';
 import type { OpenAI } from 'openai';
@@ -33,10 +33,10 @@ import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
 
 const posthogClient = PostHogClient();
 
-type OpenRouterUsage = {
+export type OpenRouterUsage = {
   cost?: number;
   is_byok?: boolean | null;
-  cost_details: { upstream_inference_cost: number };
+  cost_details?: { upstream_inference_cost: number };
   completion_tokens: number;
   completion_tokens_details: { reasoning_tokens: number };
   prompt_tokens: number;
@@ -44,7 +44,7 @@ type OpenRouterUsage = {
   total_tokens: number;
 }; //ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
 
-type VercelProviderMetaData = { gateway?: { routing?: { resolvedProvider?: string } } };
+type VercelProviderMetaData = { gateway?: { routing?: { finalProvider?: string } } };
 
 type MaybeHasVercelProviderMetaData = {
   choices?: {
@@ -65,7 +65,7 @@ type MaybeHasOpenRouterUsage = {
   provider?: string | null;
 };
 
-type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
+export type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
   MaybeHasOpenRouterUsage &
   MaybeHasVercelProviderMetaDataChunk;
 
@@ -138,6 +138,8 @@ type NotYetCostedUsageStats = {
 type JustTheCostsUsageStats = {
   cost_mUsd: number;
   cacheDiscount_mUsd?: number;
+  /** The real cost before any free/BYOK/promo zeroing. Set by processTokenData. */
+  market_cost?: number;
   inputTokens: number;
   outputTokens: number;
   cacheWriteTokens: number;
@@ -176,10 +178,17 @@ export type MicrodollarUsageContext = {
   user_byok: boolean;
   has_tools: boolean;
   botId?: string;
+  tokenSource?: string;
   /** Request ID from abuse service classify response, for cost tracking correlation. 0 means skip. */
   abuse_request_id?: number;
   /** Which product feature generated this API call. NULL if header not sent. */
   feature: FeatureValue | null;
+  /** Client session/task identifier from X-KiloCode-TaskId header. */
+  session_id: string | null;
+  /** Client mode from x-kilocode-mode header (e.g. 'code', 'build', 'architect'). */
+  mode: string | null;
+  /** The kilo/auto model ID when one was requested (e.g. 'kilo/auto', 'kilo/auto-free'). */
+  auto_model: string | null;
 };
 
 export type UsageContextInfo = ReturnType<typeof extractUsageContextInfo>;
@@ -200,6 +209,9 @@ export function extractUsageContextInfo(usageContext: MicrodollarUsageContext) {
     is_user_byok: usageContext.user_byok,
     has_tools: usageContext.has_tools,
     feature: usageContext.feature,
+    session_id: usageContext.session_id,
+    mode: usageContext.mode,
+    auto_model: usageContext.auto_model,
   };
 }
 
@@ -251,6 +263,7 @@ export function toInsertableDbUsageRecord(
     is_byok: usageStats.is_byok,
     streamed: usageStats.streamed,
     cancelled: usageStats.cancelled,
+    market_cost: usageStats.market_cost ?? null,
   };
 
   // Legacy heuristic classification removed - abuse_classification is now handled
@@ -433,6 +446,10 @@ export type UsageMetaData = {
   has_tools: boolean | null;
   machine_id: string | null;
   feature: string | null;
+  session_id: string | null;
+  mode: string | null;
+  auto_model: string | null;
+  market_cost: number | null;
 };
 
 export async function insertUsageRecord(
@@ -519,6 +536,8 @@ async function insertUsageAndMetadataWithBalanceUpdate(
           , ${createUpsertCTE(sql`finish_reason`, metadataFields.finish_reason)}
           , ${createUpsertCTE(sql`editor_name`, metadataFields.editor_name)}
           , ${createUpsertCTE(sql`feature`, metadataFields.feature)}
+          , ${createUpsertCTE(sql`mode`, metadataFields.mode)}
+          , ${createUpsertCTE(sql`auto_model`, metadataFields.auto_model)}
           , metadata_ins AS (
             INSERT INTO microdollar_usage_metadata (
               id,
@@ -541,6 +560,8 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               cancelled,
               has_tools,
               machine_id,
+              session_id,
+              market_cost,
 
               http_user_agent_id,
               http_ip_id,
@@ -550,7 +571,9 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               system_prompt_prefix_id,
               finish_reason_id,
               editor_name_id,
-              feature_id
+              feature_id,
+              mode_id,
+              auto_model_id
             )
             SELECT
               ${metadataFields.id},
@@ -573,6 +596,8 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               ${metadataFields.cancelled},
               ${metadataFields.has_tools},
               ${metadataFields.machine_id},
+              ${metadataFields.session_id},
+              ${metadataFields.market_cost},
 
               (SELECT http_user_agent_id FROM http_user_agent_cte),
               (SELECT http_ip_id FROM http_ip_cte),
@@ -582,7 +607,9 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               (SELECT system_prompt_prefix_id FROM system_prompt_prefix_cte),
               (SELECT finish_reason_id FROM finish_reason_cte),
               (SELECT editor_name_id FROM editor_name_cte),
-              (SELECT feature_id FROM feature_cte)
+              (SELECT feature_id FROM feature_cte),
+              (SELECT mode_id FROM mode_cte),
+              (SELECT auto_model_id FROM auto_model_cte)
           )
           UPDATE kilocode_users
           SET microdollars_used = microdollars_used + ${coreUsageFields.cost}
@@ -776,7 +803,7 @@ export async function parseMicrodollarUsageFromStream(
       const choice = json.choices?.[0];
       inference_provider =
         json.provider ??
-        choice?.delta?.provider_metadata?.gateway?.routing?.resolvedProvider ??
+        choice?.delta?.provider_metadata?.gateway?.routing?.finalProvider ??
         inference_provider;
       finish_reason = choice?.finish_reason ?? finish_reason;
 
@@ -865,7 +892,7 @@ export function parseMicrodollarUsageFromString(
     responseContent: choice?.message.content ?? '',
     inference_provider:
       responseJson?.provider ??
-      choice?.message?.provider_metadata?.gateway?.routing?.resolvedProvider ??
+      choice?.message?.provider_metadata?.gateway?.routing?.finalProvider ??
       null,
     upstream_id: null,
     finish_reason: choice?.finish_reason ?? null,
@@ -939,6 +966,9 @@ async function processTokenData(
   reportAbuseCost(usageContext, usageStats).catch(error => {
     console.error('[Abuse] Failed to report cost:', error);
   });
+
+  // Preserve the real cost before zeroing for free/BYOK/promo
+  usageStats.market_cost = usageStats.cost_mUsd;
 
   if (
     isFreeModel(usageContext.requested_model) ||

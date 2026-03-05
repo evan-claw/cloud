@@ -23,12 +23,13 @@ import {
   Key,
   Wrench,
   Webhook,
+  Factory,
 } from 'lucide-react';
 import HeaderLogo from '@/components/HeaderLogo';
 import OrganizationSwitcher from './OrganizationSwitcher';
 import SidebarMenuList from './SidebarMenuList';
 import SidebarUserFooter from './SidebarUserFooter';
-import { ENABLE_DEPLOY_FEATURE } from '@/lib/constants';
+import { ENABLE_DEPLOY_FEATURE, ENABLE_GASTOWN_FEATURE } from '@/lib/constants';
 import { isEnabledForUser } from '@/lib/code-indexing/util';
 import { useFeatureFlagEnabled } from 'posthog-js/react';
 import KiloCrabIcon from '@/components/KiloCrabIcon';
@@ -39,8 +40,7 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
   // Feature flags
   const isAutoTriageFeatureEnabled = useFeatureFlagEnabled('auto-triage-feature');
   const isDevelopment = process.env.NODE_ENV === 'development';
-  const isAdmin = user?.is_admin || false;
-  const isKiloClawEnabled = useFeatureFlagEnabled('kiloclaw');
+  const isAdmin = user?.is_admin ?? false;
 
   // Dashboard group
   const dashboardItems: Array<{
@@ -98,28 +98,18 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
       icon: Bot,
       url: '/code-reviews',
     },
-    ...(isAdmin
-      ? [
-          {
-            title: 'Security Agent',
-            icon: Shield,
-            url: '/security-agent',
-          },
-        ]
-      : []),
+    {
+      title: 'Security Agent',
+      icon: Shield,
+      url: '/security-agent',
+    },
+    {
+      title: 'Auto Triage',
+      icon: ListChecks,
+      url: '/auto-triage',
+    },
     ...(isAutoTriageFeatureEnabled || isDevelopment
-      ? [
-          {
-            title: 'Auto Triage',
-            icon: ListChecks,
-            url: '/auto-triage',
-          },
-          {
-            title: 'Auto Fix',
-            icon: Wrench,
-            url: '/auto-fix',
-          },
-        ]
+      ? [{ title: 'Auto Fix', icon: Wrench, url: '/auto-fix' }]
       : []),
     ...(ENABLE_DEPLOY_FEATURE
       ? [
@@ -127,6 +117,15 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
             title: 'Deploy',
             icon: Rocket,
             url: '/deploy',
+          },
+        ]
+      : []),
+    ...(ENABLE_GASTOWN_FEATURE && isAdmin
+      ? [
+          {
+            title: 'Gastown',
+            icon: Factory,
+            url: '/gastown',
           },
         ]
       : []),
@@ -139,15 +138,11 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
           },
         ]
       : []),
-    ...(isKiloClawEnabled || isDevelopment
-      ? [
-          {
-            title: 'Claw',
-            icon: KiloCrabIcon,
-            url: '/claw',
-          },
-        ]
-      : []),
+    {
+      title: 'Claw',
+      icon: KiloCrabIcon,
+      url: '/claw',
+    },
   ];
 
   // Account group

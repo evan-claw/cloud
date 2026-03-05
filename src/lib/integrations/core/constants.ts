@@ -146,6 +146,8 @@ export const PLATFORM = {
   GITHUB: 'github',
   GITLAB: 'gitlab',
   SLACK: 'slack',
+  DISCORD: 'discord',
+  SLACK_NEXT: 'slack-next',
 } as const;
 
 /**

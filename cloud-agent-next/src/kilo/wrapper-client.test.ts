@@ -39,11 +39,12 @@ const createMockSession = (
       ? vi.fn().mockImplementation((cmd: string) => Promise.resolve(execResult(cmd)))
       : vi.fn().mockResolvedValue(execResult);
 
-  // Mock startProcess that returns a process with waitForPort
+  // Mock startProcess that returns a process with waitForPort and getLogs
   const startProcessFn = vi.fn().mockImplementation(() =>
     Promise.resolve({
       id: 'mock-process-id',
       waitForPort: vi.fn().mockResolvedValue(undefined),
+      getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
     })
   );
 
@@ -259,7 +260,7 @@ describe('WrapperClient', () => {
       const options: WrapperPromptOptions = {
         prompt: 'Complex prompt',
         model: { providerID: 'kilo', modelID: 'anthropic/claude-sonnet-4-20250514' },
-        agent: 'build',
+        agent: 'code',
         messageId: 'msg_custom',
         system: 'You are a helpful assistant',
         tools: { read_file: true, write_file: false },
@@ -269,6 +270,21 @@ describe('WrapperClient', () => {
 
       const execCall = (session.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(execCall).toContain('/job/prompt');
+    });
+
+    it('includes variant in request body when provided', async () => {
+      const session = createMockSession(
+        createSuccessResponse({ status: 'sent', messageId: 'msg_variant' })
+      );
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.prompt({
+        prompt: 'Test with variant',
+        variant: 'high',
+      });
+
+      const execCall = (session.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(execCall).toContain('"variant":"high"');
     });
 
     it('throws WrapperNoJobError when no job started', async () => {
@@ -363,7 +379,7 @@ describe('WrapperClient', () => {
       );
       const client = new WrapperClient({ session, port: defaultPort });
 
-      const result = await client.answerQuestion('q_123', ['Yes']);
+      const result = await client.answerQuestion('q_123', [['Yes']]);
 
       expect(result.success).toBe(true);
     });
@@ -374,7 +390,7 @@ describe('WrapperClient', () => {
       );
       const client = new WrapperClient({ session, port: defaultPort });
 
-      await client.answerQuestion('q_456', ['Option A', 'Option B']);
+      await client.answerQuestion('q_456', [['Option A', 'Option B']]);
 
       const execCall = (session.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(execCall).toContain('/job/answer-question');
@@ -470,6 +486,7 @@ describe('WrapperClient', () => {
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: waitForPortMock,
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -491,14 +508,18 @@ describe('WrapperClient', () => {
       });
     });
 
-    it('throws WrapperNotReadyError on timeout', async () => {
+    it('throws WrapperNotReadyError after exhausting all retry attempts', async () => {
       // Health check fails (not running)
       const session = createMockSession(createCurlError(7, 'Connection refused'));
 
+      const getLogsMock = vi
+        .fn()
+        .mockResolvedValue({ stdout: 'some output', stderr: 'some error' });
       // Make startProcess return a process where waitForPort times out
       (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 'mock-process-id',
         waitForPort: vi.fn().mockRejectedValue(new Error('Port not ready within timeout')),
+        getLogs: getLogsMock,
       });
 
       const client = new WrapperClient({ session, port: defaultPort });
@@ -512,6 +533,81 @@ describe('WrapperClient', () => {
           workspacePath: '/workspace/test',
         })
       ).rejects.toThrow(WrapperNotReadyError);
+
+      // Should have retried (2 attempts total)
+      expect(session.startProcess).toHaveBeenCalledTimes(2);
+      // getLogs should be called on each failed attempt
+      expect(getLogsMock).toHaveBeenCalledTimes(2);
+      // pkill should be called between attempts to clean up the failed process
+      const execCalls = (session.exec as ReturnType<typeof vi.fn>).mock.calls;
+      const pkillCalls = execCalls.filter(call => String(call[0]).includes('pkill'));
+      expect(pkillCalls).toHaveLength(1);
+      expect(pkillCalls[0][0]).toContain('--agent-session test-session');
+    });
+
+    it('retries once on failure then succeeds', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+
+      let attempt = 0;
+      (session.startProcess as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        attempt++;
+        const waitForPort =
+          attempt === 1
+            ? vi.fn().mockRejectedValue(new Error('SIGILL'))
+            : vi.fn().mockResolvedValue(undefined);
+        return Promise.resolve({
+          id: `mock-process-${attempt}`,
+          waitForPort,
+          getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+        });
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        maxWaitMs: 5000,
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+      });
+
+      // First attempt fails, second succeeds
+      expect(session.startProcess).toHaveBeenCalledTimes(2);
+
+      // pkill should be called between attempts to clean up the failed process
+      const execCalls = (session.exec as ReturnType<typeof vi.fn>).mock.calls;
+      const pkillCalls = execCalls.filter(call => String(call[0]).includes('pkill'));
+      expect(pkillCalls).toHaveLength(1);
+      expect(pkillCalls[0][0]).toContain('--agent-session test-session');
+    });
+
+    it('calls getLogs on process when startup fails', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+
+      const getLogsMock = vi.fn().mockResolvedValue({
+        stdout: 'wrapper output before crash',
+        stderr: 'illegal instruction',
+      });
+
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockRejectedValue(new Error('Process exited with code 132')),
+        getLogs: getLogsMock,
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          maxWaitMs: 100,
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(WrapperNotReadyError);
+
+      // getLogs should be called for each failed attempt
+      expect(getLogsMock).toHaveBeenCalledTimes(2);
     });
 
     it('uses default wrapper path and calls startProcess', async () => {
@@ -549,6 +645,144 @@ describe('WrapperClient', () => {
       expect(startProcessCall[0]).toContain('WRAPPER_PORT=5000');
       expect(startProcessCall[0]).toContain('KILO_SERVER_PORT=4600');
       expect(startProcessCall[0]).toContain('--agent-session test-session');
+    });
+
+    it('includes AUTO_COMMIT=true in command when autoCommit is true', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        autoCommit: true,
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).toContain('AUTO_COMMIT=true');
+    });
+
+    it('includes CONDENSE_ON_COMPLETE=true in command when condenseOnComplete is true', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        condenseOnComplete: true,
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).toContain('CONDENSE_ON_COMPLETE=true');
+    });
+
+    it('includes UPSTREAM_BRANCH in command when upstreamBranch is provided', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        upstreamBranch: 'main',
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).toContain('UPSTREAM_BRANCH=main');
+    });
+
+    it('includes MODEL in command when model is provided', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        model: 'claude-sonnet-4-20250514',
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).toContain('MODEL=claude-sonnet-4-20250514');
+    });
+
+    it('omits optional env vars when not provided', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).not.toContain('AUTO_COMMIT');
+      expect(startProcessCall[0]).not.toContain('CONDENSE_ON_COMPLETE');
+      expect(startProcessCall[0]).not.toContain('UPSTREAM_BRANCH');
+      expect(startProcessCall[0]).not.toContain('MODEL=');
+    });
+
+    it('includes all optional env vars when all are provided', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        autoCommit: true,
+        condenseOnComplete: true,
+        upstreamBranch: 'develop',
+        model: 'gpt-4o',
+      });
+
+      const startProcessCall = (session.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(startProcessCall[0]).toContain('AUTO_COMMIT=true');
+      expect(startProcessCall[0]).toContain('CONDENSE_ON_COMPLETE=true');
+      expect(startProcessCall[0]).toContain('UPSTREAM_BRANCH=develop');
+      expect(startProcessCall[0]).toContain('MODEL=gpt-4o');
+      // Core env vars still present
+      expect(startProcessCall[0]).toContain('WRAPPER_PORT=5000');
+      expect(startProcessCall[0]).toContain('KILO_SERVER_PORT=4600');
+      expect(startProcessCall[0]).toContain('WORKSPACE_PATH=/workspace/test');
     });
   });
 

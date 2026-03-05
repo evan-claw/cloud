@@ -8,6 +8,10 @@
 import { atom } from 'jotai';
 import type { SessionConfig, StoredMessage, Part } from '../types';
 import { isMessageStreaming, isAssistantMessage } from '../types';
+import type { QuestionInfo } from '@/types/opencode.gen';
+import { splitByContiguousPrefix } from '@/lib/utils/splitByContiguousPrefix';
+import type { AutocommitStatus } from '@/lib/cloud-agent-next/processor/types';
+export type { AutocommitStatus };
 
 // ============================================================================
 // Primary State - StoredMessage format
@@ -33,6 +37,45 @@ export const partsMapAtom = atom<Map<string, { messageId: string; part: Part }>>
 export const childSessionsMapAtom = atom<Map<string, StoredMessage[]>>(new Map());
 
 /**
+ * Map of tool callID -> question requestId.
+ * Populated from question.asked events. Used by QuestionToolCard
+ * to know which requestId to send when answering/rejecting.
+ */
+export const questionRequestIdsAtom = atom<Map<string, string>>(new Map());
+
+/**
+ * Record a callID -> requestId mapping from a question.asked event.
+ */
+export const setQuestionRequestIdAtom = atom(
+  null,
+  (get, set, payload: { callId: string; requestId: string }) => {
+    const map = new Map(get(questionRequestIdsAtom));
+    map.set(payload.callId, payload.requestId);
+    set(questionRequestIdsAtom, map);
+  }
+);
+
+/**
+ * A standalone question from a question.asked event that has no tool.callID.
+ * These are questions raised outside the tool-call flow (e.g. PlanFollowup).
+ * Only one standalone question can be active at a time.
+ */
+export type StandaloneQuestion = {
+  requestId: string;
+  questions: QuestionInfo[];
+};
+
+export const standaloneQuestionAtom = atom<StandaloneQuestion | null>(null);
+
+/** Clear the standalone question only if its requestId matches the resolved one. */
+export const clearStandaloneQuestionAtom = atom(null, (get, set, resolvedRequestId: string) => {
+  const current = get(standaloneQuestionAtom);
+  if (current && current.requestId === resolvedRequestId) {
+    set(standaloneQuestionAtom, null);
+  }
+});
+
+/**
  * Session status from session.status events
  * Can be 'idle', 'busy', or 'retry' with additional metadata
  */
@@ -42,11 +85,33 @@ export const sessionStatusAtom = atom<
   | { type: 'retry'; attempt: number; message: string; next: number }
 >({ type: 'idle' });
 
+/**
+ * Per-message autocommit status map.
+ * Key is the assistant message ID; value is the status for that turn's autocommit.
+ * Replaces the old single-value `autocommitStatusAtom` to survive multi-turn replays.
+ */
+export const autocommitStatusMapAtom = atom<Map<string, AutocommitStatus>>(new Map());
+
+/**
+ * Inline session status indicator — shown in the chat feed for recoverable
+ * session errors, reconnection states, and interrupts.
+ * Non-recoverable errors still go through `errorAtom` → `ErrorBanner`.
+ */
+export type SessionStatusIndicator = {
+  type: 'error' | 'warning' | 'info';
+  message: string;
+  timestamp: number;
+};
+
+export const sessionStatusIndicatorAtom = atom<SessionStatusIndicator | null>(null);
+
 // ============================================================================
 // Common State
 // ============================================================================
 
 export const currentSessionIdAtom = atom<string | null>(null);
+/** Organization ID for the current session (null for personal sessions) */
+export const sessionOrganizationIdAtom = atom<string | null>(null);
 export const sessionConfigAtom = atom<SessionConfig | null>(null);
 export const isStreamingAtom = atom(false);
 export const errorAtom = atom<string | null>(null);
@@ -70,24 +135,18 @@ export const messagesListAtom = atom(get => {
 });
 
 /**
- * Static messages - all complete messages that can be memoized.
+ * Split messages into static (complete, contiguous from the start) and dynamic (everything after).
  * A message is complete when its info.time.completed is set (for assistant messages)
  * and all parts have their time.end set.
  */
-export const staticMessagesAtom = atom(get => {
+const splitMessagesAtom = atom(get => {
   const messages = get(messagesListAtom);
-  const { staticMessages } = splitMessages(messages);
-  return staticMessages;
+  return splitByContiguousPrefix(messages, msg => !isMessageStreaming(msg));
 });
 
-/**
- * Dynamic messages - messages that are still streaming.
- */
-export const dynamicMessagesAtom = atom(get => {
-  const messages = get(messagesListAtom);
-  const { dynamicMessages } = splitMessages(messages);
-  return dynamicMessages;
-});
+export const staticMessagesAtom = atom(get => get(splitMessagesAtom).staticItems);
+
+export const dynamicMessagesAtom = atom(get => get(splitMessagesAtom).dynamicItems);
 
 // Matches CLI's getApiMetrics logic
 export const totalCostAtom = atom(get => {
@@ -107,9 +166,14 @@ export const totalCostAtom = atom(get => {
 export const clearMessagesAtom = atom(null, (_get, set) => {
   set(isStreamingAtom, false);
   set(currentSessionIdAtom, null);
+  set(sessionOrganizationIdAtom, null);
   set(errorAtom, null);
   set(messagesMapAtom, new Map());
   set(partsMapAtom, new Map());
+  set(questionRequestIdsAtom, new Map());
+  set(autocommitStatusMapAtom, new Map());
+  set(sessionStatusIndicatorAtom, null);
+  set(standaloneQuestionAtom, null);
 });
 
 // ============================================================================
@@ -232,10 +296,10 @@ export const addUserMessageAtom = atom(
       agent?: string;
       model?: { providerID: string; modelID: string };
     }
-  ) => {
+  ): string => {
     const { sessionId, content, agent = 'code', model = { providerID: '', modelID: '' } } = payload;
-    const messageId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const partId = `part_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const messageId = `optimistic-${crypto.randomUUID()}`;
+    const partId = `part_${crypto.randomUUID()}`;
     const now = Date.now();
 
     const userMessage: StoredMessage = {
@@ -273,18 +337,43 @@ export const addUserMessageAtom = atom(
     const partsMap = new Map(get(partsMapAtom));
     partsMap.set(partId, { messageId, part: userMessage.parts[0] });
     set(partsMapAtom, partsMap);
+
+    return messageId;
   }
 );
 
 /**
- * Clear all streaming state atoms.
- * Resets messagesMapAtom, partsMapAtom, childSessionsMapAtom, and sessionStatusAtom to initial state.
+ * Remove the optimistic user message (if any) from the store.
+ * No-op when no optimistic message exists (avoids unnecessary Map copies / subscriber notifications).
+ * Returns true if an optimistic message was found and removed.
  */
-export const clearStreamingStateAtom = atom(null, (_get, set) => {
-  set(messagesMapAtom, new Map());
-  set(partsMapAtom, new Map());
-  set(childSessionsMapAtom, new Map());
-  set(sessionStatusAtom, { type: 'idle' });
+export const removeOptimisticMessageAtom = atom(null, (get, set): boolean => {
+  const messagesMap = get(messagesMapAtom);
+
+  // Find the optimistic message without copying first
+  let optimisticId: string | null = null;
+  for (const id of messagesMap.keys()) {
+    if (id.startsWith('optimistic-')) {
+      optimisticId = id;
+      break;
+    }
+  }
+  if (!optimisticId) return false;
+
+  const message = messagesMap.get(optimisticId);
+  const newMessagesMap = new Map(messagesMap);
+  const newPartsMap = new Map(get(partsMapAtom));
+
+  if (message) {
+    for (const part of message.parts) {
+      newPartsMap.delete(part.id);
+    }
+  }
+  newMessagesMap.delete(optimisticId);
+
+  set(messagesMapAtom, newMessagesMap);
+  set(partsMapAtom, newPartsMap);
+  return true;
 });
 
 /**
@@ -415,28 +504,3 @@ export const getChildSessionMessagesAtom = atom(get => {
     return childSessionsMap.get(childSessionId) || [];
   };
 });
-
-// Splits messages into static (complete) and dynamic (streaming) groups
-function splitMessages(messages: StoredMessage[]): {
-  staticMessages: StoredMessage[];
-  dynamicMessages: StoredMessage[];
-} {
-  let lastCompleteIndex = -1;
-
-  for (let i = 0; i < messages.length; i++) {
-    if (!isMessageStreaming(messages[i])) {
-      if (i === 0 || i === lastCompleteIndex + 1) {
-        lastCompleteIndex = i;
-      } else {
-        break;
-      }
-    } else {
-      break;
-    }
-  }
-
-  return {
-    staticMessages: messages.slice(0, lastCompleteIndex + 1),
-    dynamicMessages: messages.slice(lastCompleteIndex + 1),
-  };
-}

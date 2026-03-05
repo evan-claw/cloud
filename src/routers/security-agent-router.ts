@@ -33,12 +33,14 @@ import {
   syncAllReposForOwner,
 } from '@/lib/security-agent/services/sync-service';
 import { startSecurityAnalysis } from '@/lib/security-agent/services/analysis-service';
+import { trpcCodeForAnalysisError } from '@/lib/security-agent/core/error-classification';
 import {
   autoDismissEligibleFindings,
   countEligibleForAutoDismiss,
 } from '@/lib/security-agent/services/auto-dismiss-service';
 import { dismissDependabotAlert } from '@/lib/security-agent/github/dependabot-api';
 import { getGitHubTokenForUser } from '@/lib/cloud-agent/github-integration-helpers';
+import { rethrowAsPaymentRequired } from '@/lib/cloud-agent-next/cloud-agent-client';
 import type { SecurityReviewOwner } from '@/lib/security-agent/core/types';
 import {
   SaveSecurityConfigInputSchema,
@@ -52,13 +54,21 @@ import {
   ListAnalysisJobsInputSchema,
   DeleteFindingsByRepoInputSchema,
 } from '@/lib/security-agent/core/schemas';
-import { DEFAULT_SECURITY_AGENT_MODEL } from '@/lib/security-agent/core/constants';
+import {
+  DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+  DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+  SECURITY_ANALYSIS_OWNER_CAP,
+} from '@/lib/security-agent/core/constants';
 import {
   trackSecurityAgentEnabled,
   trackSecurityAgentConfigSaved,
   trackSecurityAgentSync,
   trackSecurityAgentFindingDismissed,
 } from '@/lib/security-agent/posthog-tracking';
+import {
+  logSecurityAudit,
+  SecurityAuditLogAction,
+} from '@/lib/security-agent/services/audit-log-service';
 
 /**
  * Security Agent Router for personal users
@@ -110,12 +120,28 @@ export const securityAgentRouter = createTRPCRouter({
         autoSyncEnabled: true,
         repositorySelectionMode: 'selected' as const,
         selectedRepositoryIds: [] as number[],
-        modelSlug: DEFAULT_SECURITY_AGENT_MODEL,
-        // Auto-dismiss defaults (off by default)
+        modelSlug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+        triageModelSlug: DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
+        analysisModelSlug: DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL,
+        analysisMode: 'auto' as const,
         autoDismissEnabled: false,
         autoDismissConfidenceThreshold: 'high' as const,
+        autoAnalysisEnabled: false,
+        autoAnalysisMinSeverity: 'high' as const,
+        autoAnalysisIncludeExisting: false,
       };
     }
+
+    const triageModelSlug =
+      result.storedConfig.triage_model_slug ||
+      result.storedConfig.model_slug ||
+      result.config.triage_model_slug ||
+      DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+    const analysisModelSlug =
+      result.storedConfig.analysis_model_slug ||
+      result.storedConfig.model_slug ||
+      result.config.analysis_model_slug ||
+      DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
 
     return {
       isEnabled: result.isEnabled,
@@ -126,10 +152,15 @@ export const securityAgentRouter = createTRPCRouter({
       autoSyncEnabled: result.config.auto_sync_enabled,
       repositorySelectionMode: result.config.repository_selection_mode || 'selected',
       selectedRepositoryIds: result.config.selected_repository_ids || [],
-      modelSlug: result.config.model_slug || DEFAULT_SECURITY_AGENT_MODEL,
-      // Auto-dismiss configuration
+      modelSlug: result.config.model_slug || analysisModelSlug,
+      triageModelSlug,
+      analysisModelSlug,
+      analysisMode: result.config.analysis_mode ?? 'auto',
       autoDismissEnabled: result.config.auto_dismiss_enabled ?? false,
       autoDismissConfidenceThreshold: result.config.auto_dismiss_confidence_threshold ?? 'high',
+      autoAnalysisEnabled: result.config.auto_analysis_enabled ?? false,
+      autoAnalysisMinSeverity: result.config.auto_analysis_min_severity ?? 'high',
+      autoAnalysisIncludeExisting: result.config.auto_analysis_include_existing ?? false,
     };
   }),
 
@@ -141,6 +172,52 @@ export const securityAgentRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const owner = { type: 'user' as const, id: ctx.user.id, userId: ctx.user.id };
 
+      const existingConfig = await getSecurityAgentConfigWithStatus(owner);
+      const existingTriageModelSlug =
+        existingConfig?.storedConfig.triage_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
+        existingConfig?.config.triage_model_slug ??
+        DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+      const existingAnalysisModelSlug =
+        existingConfig?.storedConfig.analysis_model_slug ??
+        existingConfig?.storedConfig.model_slug ??
+        existingConfig?.config.analysis_model_slug ??
+        DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
+      const beforeState = existingConfig
+        ? {
+            autoSyncEnabled: existingConfig.config.auto_sync_enabled,
+            analysisMode: existingConfig.config.analysis_mode,
+            autoDismissEnabled: existingConfig.config.auto_dismiss_enabled,
+            autoDismissConfidenceThreshold: existingConfig.config.auto_dismiss_confidence_threshold,
+            autoAnalysisEnabled: existingConfig.config.auto_analysis_enabled,
+            autoAnalysisMinSeverity: existingConfig.config.auto_analysis_min_severity,
+            autoAnalysisIncludeExisting: existingConfig.config.auto_analysis_include_existing,
+            modelSlug: existingConfig.config.model_slug,
+            triageModelSlug: existingTriageModelSlug,
+            analysisModelSlug: existingAnalysisModelSlug,
+            repositorySelectionMode: existingConfig.config.repository_selection_mode,
+            selectedRepositoryIds: existingConfig.config.selected_repository_ids,
+            slaCriticalDays: existingConfig.config.sla_critical_days,
+            slaHighDays: existingConfig.config.sla_high_days,
+            slaMediumDays: existingConfig.config.sla_medium_days,
+            slaLowDays: existingConfig.config.sla_low_days,
+          }
+        : undefined;
+
+      const triageModelSlug =
+        input.triageModelSlug ??
+        (input.modelSlug ? input.modelSlug : undefined) ??
+        existingTriageModelSlug;
+      const analysisModelSlug =
+        input.analysisModelSlug ??
+        (input.modelSlug ? input.modelSlug : undefined) ??
+        existingAnalysisModelSlug;
+      const modelSlug =
+        input.modelSlug ??
+        existingConfig?.storedConfig.model_slug ??
+        analysisModelSlug ??
+        triageModelSlug;
+
       await upsertSecurityAgentConfig(
         owner,
         {
@@ -151,10 +228,15 @@ export const securityAgentRouter = createTRPCRouter({
           auto_sync_enabled: input.autoSyncEnabled,
           repository_selection_mode: input.repositorySelectionMode,
           selected_repository_ids: input.selectedRepositoryIds,
-          model_slug: input.modelSlug,
-          // Auto-dismiss configuration
+          model_slug: modelSlug,
+          triage_model_slug: triageModelSlug,
+          analysis_model_slug: analysisModelSlug,
+          analysis_mode: input.analysisMode,
           auto_dismiss_enabled: input.autoDismissEnabled,
           auto_dismiss_confidence_threshold: input.autoDismissConfidenceThreshold,
+          auto_analysis_enabled: input.autoAnalysisEnabled,
+          auto_analysis_min_severity: input.autoAnalysisMinSeverity,
+          auto_analysis_include_existing: input.autoAnalysisIncludeExisting,
         },
         ctx.user.id
       );
@@ -163,11 +245,43 @@ export const securityAgentRouter = createTRPCRouter({
         distinctId: ctx.user.id,
         userId: ctx.user.id,
         autoSyncEnabled: input.autoSyncEnabled,
+        analysisMode: input.analysisMode,
         autoDismissEnabled: input.autoDismissEnabled,
         autoDismissConfidenceThreshold: input.autoDismissConfidenceThreshold,
-        modelSlug: input.modelSlug,
+        modelSlug,
+        triageModelSlug,
+        analysisModelSlug,
         repositorySelectionMode: input.repositorySelectionMode,
         selectedRepoCount: input.selectedRepositoryIds?.length,
+      });
+
+      logSecurityAudit({
+        owner: { userId: ctx.user.id },
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        action: SecurityAuditLogAction.ConfigUpdated,
+        resource_type: 'agent_config',
+        resource_id: ctx.user.id,
+        before_state: beforeState,
+        after_state: {
+          autoSyncEnabled: input.autoSyncEnabled,
+          analysisMode: input.analysisMode,
+          autoDismissEnabled: input.autoDismissEnabled,
+          autoDismissConfidenceThreshold: input.autoDismissConfidenceThreshold,
+          autoAnalysisEnabled: input.autoAnalysisEnabled,
+          autoAnalysisMinSeverity: input.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: input.autoAnalysisIncludeExisting,
+          modelSlug,
+          triageModelSlug,
+          analysisModelSlug,
+          repositorySelectionMode: input.repositorySelectionMode,
+          selectedRepositoryIds: input.selectedRepositoryIds,
+          slaCriticalDays: input.slaCriticalDays,
+          slaHighDays: input.slaHighDays,
+          slaMediumDays: input.slaMediumDays,
+          slaLowDays: input.slaLowDays,
+        },
       });
 
       return { success: true };
@@ -281,6 +395,17 @@ export const securityAgentRouter = createTRPCRouter({
             syncErrors: syncResult.errors,
           });
 
+          logSecurityAudit({
+            owner: securityOwner,
+            actor_id: ctx.user.id,
+            actor_email: ctx.user.google_user_email,
+            actor_name: ctx.user.google_user_name,
+            action: SecurityAuditLogAction.ConfigEnabled,
+            resource_type: 'agent_config',
+            resource_id: ctx.user.id,
+            after_state: { isEnabled: true, repositorySelectionMode: selectionMode },
+          });
+
           return {
             success: true,
             syncResult: {
@@ -307,6 +432,19 @@ export const securityAgentRouter = createTRPCRouter({
       isEnabled: input.isEnabled,
       repositorySelectionMode: selectionMode,
       selectedRepoCount: effectiveRepoCount,
+    });
+
+    logSecurityAudit({
+      owner: securityOwner,
+      actor_id: ctx.user.id,
+      actor_email: ctx.user.google_user_email,
+      actor_name: ctx.user.google_user_name,
+      action: input.isEnabled
+        ? SecurityAuditLogAction.ConfigEnabled
+        : SecurityAuditLogAction.ConfigDisabled,
+      resource_type: 'agent_config',
+      resource_id: ctx.user.id,
+      after_state: { isEnabled: input.isEnabled, repositorySelectionMode: selectionMode },
     });
 
     return { success: true };
@@ -474,6 +612,22 @@ export const securityAgentRouter = createTRPCRouter({
         errors: result.errors,
       });
 
+      logSecurityAudit({
+        owner: securityOwner,
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        action: SecurityAuditLogAction.SyncTriggered,
+        resource_type: 'agent_config',
+        resource_id: ctx.user.id,
+        metadata: {
+          syncType: 'single_repo',
+          repoFullName: input.repoFullName,
+          synced: result.synced,
+          errors: result.errors,
+        },
+      });
+
       return {
         success: true,
         synced: result.synced,
@@ -517,6 +671,22 @@ export const securityAgentRouter = createTRPCRouter({
       repoCount: repositoriesToSync.length,
       synced: result.synced,
       errors: result.errors,
+    });
+
+    logSecurityAudit({
+      owner: securityOwner,
+      actor_id: ctx.user.id,
+      actor_email: ctx.user.google_user_email,
+      actor_name: ctx.user.google_user_name,
+      action: SecurityAuditLogAction.SyncTriggered,
+      resource_type: 'agent_config',
+      resource_id: ctx.user.id,
+      metadata: {
+        syncType: 'all_repos',
+        repoCount: repositoriesToSync.length,
+        synced: result.synced,
+        errors: result.errors,
+      },
     });
 
     return {
@@ -607,6 +777,19 @@ export const securityAgentRouter = createTRPCRouter({
         severity: finding.severity,
       });
 
+      logSecurityAudit({
+        owner: { userId: ctx.user.id },
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        action: SecurityAuditLogAction.FindingDismissed,
+        resource_type: 'security_finding',
+        resource_id: input.findingId,
+        before_state: { status: finding.status },
+        after_state: { status: 'ignored', ignoredReason: input.reason },
+        metadata: { source: finding.source, severity: finding.severity },
+      });
+
       return { success: true };
     }),
 
@@ -614,7 +797,7 @@ export const securityAgentRouter = createTRPCRouter({
    * Starts LLM analysis for a security finding using three-tier approach.
    *
    * Tier 1 (Quick Triage): Always runs first. Direct LLM call to analyze metadata.
-   * Tier 2 (Sandbox Analysis): Only runs if triage says it's needed OR forceSandbox is true.
+   * Tier 2 (Sandbox Analysis): Controlled by analysisMode — always in 'deep', never in 'shallow', triage-driven in 'auto'.
    * Tier 3 (Extraction): Extracts structured fields from sandbox analysis.
    *
    * Returns immediately - analysis runs in background.
@@ -642,7 +825,7 @@ export const securityAgentRouter = createTRPCRouter({
     // Note: Triage may trigger sandbox analysis, so we always check concurrency
     // to prevent overload when triage.needsSandboxAnalysis returns true
     const securityOwner: SecurityReviewOwner = { userId: ctx.user.id };
-    const concurrencyCheck = await canStartAnalysis(securityOwner);
+    const concurrencyCheck = await canStartAnalysis(securityOwner, SECURITY_ANALYSIS_OWNER_CAP);
 
     if (!concurrencyCheck.allowed) {
       throw new TRPCError({
@@ -661,31 +844,65 @@ export const securityAgentRouter = createTRPCRouter({
       });
     }
 
-    // Get model from input or fall back to configured model
-    let model = input.model;
-    if (!model) {
-      const config = await getSecurityAgentConfigWithStatus(owner);
-      model = config?.config.model_slug || DEFAULT_SECURITY_AGENT_MODEL;
-    }
+    // Resolve triage/analysis models with legacy fallbacks
+    const config = await getSecurityAgentConfigWithStatus(owner);
+    const triageModel =
+      input.triageModel ||
+      input.model ||
+      config?.storedConfig.triage_model_slug ||
+      config?.storedConfig.model_slug ||
+      config?.config.triage_model_slug ||
+      DEFAULT_SECURITY_AGENT_TRIAGE_MODEL;
+    const analysisModel =
+      input.analysisModel ||
+      input.model ||
+      config?.storedConfig.analysis_model_slug ||
+      config?.storedConfig.model_slug ||
+      config?.config.analysis_model_slug ||
+      DEFAULT_SECURITY_AGENT_ANALYSIS_MODEL;
+    const analysisMode = config?.config.analysis_mode ?? 'auto';
 
-    const result = await startSecurityAnalysis({
-      findingId: input.findingId,
-      user: ctx.user,
-      githubRepo: finding.repo_full_name,
-      githubToken,
-      model,
-      forceSandbox: input.forceSandbox,
-      // Personal user - no organizationId
-    });
-
-    if (!result.started) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: result.error || 'Failed to start analysis',
+    try {
+      const result = await startSecurityAnalysis({
+        findingId: input.findingId,
+        user: ctx.user,
+        githubRepo: finding.repo_full_name,
+        githubToken,
+        triageModel,
+        analysisModel,
+        analysisMode,
+        retrySandboxOnly: input.retrySandboxOnly,
+        // Personal user - no organizationId
       });
-    }
 
-    return { success: true, triageOnly: result.triageOnly };
+      if (!result.started) {
+        throw new TRPCError({
+          code: trpcCodeForAnalysisError(result.errorCode),
+          message: result.error || 'Failed to start analysis',
+        });
+      }
+
+      logSecurityAudit({
+        owner: securityOwner,
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        action: SecurityAuditLogAction.FindingAnalysisStarted,
+        resource_type: 'security_finding',
+        resource_id: input.findingId,
+        metadata: {
+          model: analysisModel,
+          triageModel,
+          analysisModel,
+          analysisMode,
+          triageOnly: result.triageOnly,
+        },
+      });
+
+      return { success: true, triageOnly: result.triageOnly };
+    } catch (error) {
+      rethrowAsPaymentRequired(error);
+    }
   }),
 
   /**
@@ -739,7 +956,7 @@ export const securityAgentRouter = createTRPCRouter({
       const total = await countSecurityFindingsWithAnalysis(securityOwner);
 
       // Get concurrency info
-      const concurrencyCheck = await canStartAnalysis(securityOwner);
+      const concurrencyCheck = await canStartAnalysis(securityOwner, SECURITY_ANALYSIS_OWNER_CAP);
 
       return {
         jobs,
@@ -794,6 +1011,17 @@ export const securityAgentRouter = createTRPCRouter({
         repoFullName: input.repoFullName,
       });
 
+      logSecurityAudit({
+        owner: securityOwner,
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        action: SecurityAuditLogAction.FindingDeleted,
+        resource_type: 'security_finding',
+        resource_id: input.repoFullName,
+        metadata: { repoFullName: input.repoFullName, deletedCount: result.deletedCount },
+      });
+
       return {
         success: true,
         deletedCount: result.deletedCount,
@@ -815,6 +1043,24 @@ export const securityAgentRouter = createTRPCRouter({
    */
   autoDismissEligible: baseProcedure.mutation(async ({ ctx }) => {
     const securityOwner: SecurityReviewOwner = { userId: ctx.user.id };
-    return await autoDismissEligibleFindings(securityOwner, ctx.user.id);
+    const result = await autoDismissEligibleFindings(securityOwner, ctx.user.id);
+
+    logSecurityAudit({
+      owner: securityOwner,
+      actor_id: ctx.user.id,
+      actor_email: ctx.user.google_user_email,
+      actor_name: ctx.user.google_user_name,
+      action: SecurityAuditLogAction.FindingAutoDismissed,
+      resource_type: 'security_finding',
+      resource_id: 'bulk',
+      metadata: {
+        source: 'bulk',
+        dismissed: result.dismissed,
+        skipped: result.skipped,
+        errors: result.errors,
+      },
+    });
+
+    return result;
   }),
 });

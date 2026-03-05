@@ -1,5 +1,5 @@
 import { db } from '@/lib/drizzle';
-import { webhook_events } from '@/db/schema';
+import { webhook_events } from '@kilocode/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import type { Owner } from '@/lib/integrations/core/types';
 
@@ -33,9 +33,16 @@ export async function logWebhookEvent(data: {
 
     return { id: event.id, isDuplicate: false };
   } catch (error) {
-    const err = error as { code?: string; constraint?: string };
+    // Drizzle wraps Postgres errors — the code/constraint may be on error itself or on error.cause
+    const err = error as {
+      code?: string;
+      constraint?: string;
+      cause?: { code?: string; constraint?: string };
+    };
+    const pgCode = err.code ?? err.cause?.code;
+    const pgConstraint = err.constraint ?? err.cause?.constraint;
     // Unique constraint violation on event_signature = duplicate
-    if (err.code === '23505' && err.constraint === 'UQ_webhook_events_signature') {
+    if (pgCode === '23505' && pgConstraint === 'UQ_webhook_events_signature') {
       console.log('Duplicate webhook event detected:', data.event_signature);
       return { isDuplicate: true };
     }

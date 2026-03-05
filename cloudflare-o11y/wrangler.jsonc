@@ -11,7 +11,9 @@
 	"observability": {
 		"enabled": true,
 	},
+	"logpush": true,
 	"compatibility_flags": ["nodejs_compat"],
+	"rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -51,8 +53,8 @@
 	 *     o11y_api_metrics_pipeline o11y_api_metrics_sink
 	 */
 	"pipelines": [
-		{ "pipeline": "a016f9db28b544f29ab5b1868be41e79", "binding": "API_METRICS_STREAM" },
-		{ "pipeline": "898bb5b1a6b44634b34f1b1a3cdcb2c6", "binding": "SESSION_METRICS_STREAM" },
+		{ "pipeline": "c596ce8db66547598879af3b5d3ef23c", "binding": "API_METRICS_STREAM" },
+		{ "pipeline": "82c1fc4073bb4830a6670e920b9823c2", "binding": "SESSION_METRICS_STREAM" },
 	],
 	/**
 	 * KV Namespace — stores alert dedup state (TTL-based cooldowns)

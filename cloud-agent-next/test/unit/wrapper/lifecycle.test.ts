@@ -3,7 +3,6 @@
  *
  * Tests timer logic with mocked state for:
  * - Inflight expiry (per-message timeout)
- * - Idle timeout (session-level cleanup)
  * - Drain period
  * - Post-completion task triggering
  */
@@ -12,7 +11,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   createLifecycleManager,
   DEFAULT_INFLIGHT_TIMEOUT_MS,
-  DEFAULT_IDLE_TIMEOUT_MS,
   type LifecycleConfig,
   type LifecycleDependencies,
   type LifecycleManager,
@@ -46,7 +44,6 @@ const createMockConnectionManager = (): ConnectionManager => ({
 
 const createDefaultConfig = (overrides: Partial<LifecycleConfig> = {}): LifecycleConfig => ({
   maxRuntimeMs: DEFAULT_INFLIGHT_TIMEOUT_MS,
-  idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
   autoCommit: false,
   condenseOnComplete: false,
   workspacePath: '/workspace',
@@ -207,105 +204,6 @@ describe('createLifecycleManager', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Idle Timeout
-  // -------------------------------------------------------------------------
-
-  describe('idle timeout', () => {
-    it('clears job after idle timeout when no inflight', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
-      state.startJob(createJobContext());
-
-      mgr.start();
-
-      // Advance past idle timeout + check interval (10 seconds)
-      await vi.advanceTimersByTimeAsync(15000);
-
-      expect(state.hasJob).toBe(false);
-    });
-
-    it('sends idle timeout error event', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
-      const sendToIngestSpy = vi.fn();
-      state.setSendToIngestFn(sendToIngestSpy);
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-      state.startJob(createJobContext());
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(15000);
-
-      expect(sendToIngestSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          streamEventType: 'error',
-          data: expect.objectContaining({
-            code: 'IDLE_TIMEOUT',
-          }),
-        })
-      );
-    });
-
-    it('sets lastError on idle timeout', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
-      state.startJob(createJobContext());
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(15000);
-
-      const error = state.getLastError();
-      expect(error).not.toBeNull();
-      expect(error?.code).toBe('IDLE_TIMEOUT');
-    });
-
-    it('does not trigger idle timeout when active', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 120000); // Long deadline
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(15000);
-
-      // Job should still exist because there's inflight
-      expect(state.hasJob).toBe(true);
-    });
-
-    it('does not trigger idle timeout without job context', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
-      // No job started
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(15000);
-
-      // Nothing should happen (no job to clear)
-      expect(connectionManager.close).not.toHaveBeenCalled();
-    });
-
-    it('resets idle timer on activity', async () => {
-      const mgr = createManager({ idleTimeoutMs: 10000 });
-      state.startJob(createJobContext());
-
-      mgr.start();
-
-      // Wait 8 seconds (less than timeout)
-      await vi.advanceTimersByTimeAsync(8000);
-
-      // Update activity
-      state.updateActivity();
-
-      // Wait another 8 seconds (total 16 seconds but activity was 8 seconds ago)
-      await vi.advanceTimersByTimeAsync(8000);
-
-      // Job should still exist (activity was only 8 seconds ago)
-      expect(state.hasJob).toBe(true);
-
-      // Wait until idle timeout from last activity
-      await vi.advanceTimersByTimeAsync(5000);
-
-      // Now job should be cleared
-      expect(state.hasJob).toBe(false);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // Message Completion
   // -------------------------------------------------------------------------
 
@@ -402,16 +300,15 @@ describe('createLifecycleManager', () => {
 
   describe('stop', () => {
     it('clears all timers', async () => {
-      const mgr = createManager({ idleTimeoutMs: 5000 });
+      const mgr = createManager();
       state.startJob(createJobContext());
 
       mgr.start();
 
-      // Stop before idle timeout
       await vi.advanceTimersByTimeAsync(3000);
       mgr.stop();
 
-      // Advance past what would have been idle timeout
+      // Advance well past any timer interval
       await vi.advanceTimersByTimeAsync(20000);
 
       // Job should still exist (timers stopped)
@@ -467,6 +364,86 @@ describe('createLifecycleManager', () => {
 
       // Auto-commit should not have been attempted
       // (We can't easily test this without more mocking, but the flag is set)
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // reset
+  // -------------------------------------------------------------------------
+
+  describe('reset', () => {
+    it('reset clears aborted flag - allows complete event after reset', async () => {
+      const mgr = createManager();
+      state.startJob(createJobContext());
+      state.addInflight('msg_1', Date.now() + 60000);
+
+      mgr.setAborted();
+      mgr.reset();
+
+      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      const sendToIngestSpy = vi.fn();
+      state.setSendToIngestFn(sendToIngestSpy);
+
+      // Completing the last inflight triggers drain
+      mgr.onMessageComplete('msg_1');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // complete event should be sent because isAborted was reset
+      expect(sendToIngestSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          streamEventType: 'complete',
+        })
+      );
+    });
+
+    it('reset clears draining flag - allows new drain after reset', async () => {
+      const mgr = createManager();
+      state.startJob(createJobContext());
+      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      // First drain
+      mgr.triggerDrainAndClose();
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(connectionManager.close).toHaveBeenCalledTimes(1);
+
+      // Reset clears isDraining so a second drain can happen
+      mgr.reset();
+
+      // Start a fresh job
+      state.clearJob();
+      state.startJob(createJobContext({ executionId: 'exc_second' }));
+      state.addInflight('msg_2', Date.now() + 60000);
+
+      // Completing last inflight triggers a new drain
+      mgr.onMessageComplete('msg_2');
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(connectionManager.close).toHaveBeenCalledTimes(2);
+    });
+
+    it('reset enables post-completion flow after previous abort', async () => {
+      const mgr = createManager({ autoCommit: false });
+      state.startJob(createJobContext());
+      state.addInflight('msg_1', Date.now() + 60000);
+
+      mgr.setAborted();
+      mgr.reset();
+
+      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      const sendToIngestSpy = vi.fn();
+      state.setSendToIngestFn(sendToIngestSpy);
+
+      mgr.onMessageComplete('msg_1');
+      mgr.signalCompletion();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      // complete event should be sent (not skipped due to stale aborted flag)
+      expect(sendToIngestSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          streamEventType: 'complete',
+        })
+      );
     });
   });
 

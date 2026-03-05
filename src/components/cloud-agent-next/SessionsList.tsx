@@ -3,13 +3,13 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Bot, Clock, Cloud, GitBranch, Puzzle, Terminal } from 'lucide-react';
 import type { StoredSession } from './types';
-import { formatDistanceToNow } from 'date-fns';
+import { TimeAgo } from '@/components/shared/TimeAgo';
 import Link from 'next/link';
 
 export type SessionsListItem = Pick<
   StoredSession,
-  'sessionId' | 'createdAt' | 'createdOnPlatform' | 'prompt' | 'repository' | 'mode'
->;
+  'sessionId' | 'createdAt' | 'createdOnPlatform' | 'prompt' | 'mode'
+> & { repository: string | null };
 
 export type SessionsListProps = {
   sessions: SessionsListItem[];
@@ -43,7 +43,6 @@ export function SessionsList({ sessions, organizationId, onSessionClick }: Sessi
     <div className="space-y-3">
       {sessions.map(session => {
         const chatUrl = `${basePath}/chat?sessionId=${session.sessionId}`;
-        const timeAgo = formatDistanceToNow(new Date(session.createdAt), { addSuffix: true });
 
         // Determine badge based on created_on_platform field
         const platform = session.createdOnPlatform;
@@ -99,10 +98,12 @@ export function SessionsList({ sessions, organizationId, onSessionClick }: Sessi
                     </CardTitle>
                     {badge}
                   </div>
-                  <CardDescription className="mt-1 flex items-center gap-2">
-                    <GitBranch className="h-3 w-3" />
-                    <span className="truncate">{session.repository}</span>
-                  </CardDescription>
+                  {session.repository && (
+                    <CardDescription className="mt-1 flex items-center gap-2">
+                      <GitBranch className="h-3 w-3" />
+                      <span className="truncate">{session.repository}</span>
+                    </CardDescription>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -110,7 +111,7 @@ export function SessionsList({ sessions, organizationId, onSessionClick }: Sessi
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <div className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  <span>{timeAgo}</span>
+                  <TimeAgo timestamp={session.createdAt} />
                 </div>
                 <div className="font-mono">ID: {truncateId(session.sessionId)}</div>
                 {session.mode && (

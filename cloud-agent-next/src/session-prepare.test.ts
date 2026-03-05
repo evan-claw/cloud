@@ -72,7 +72,6 @@ vi.mock('./session-service.js', () => ({
   ),
   runSetupCommands: vi.fn().mockResolvedValue(undefined),
   writeAuthFile: vi.fn().mockResolvedValue(undefined),
-  writeMCPSettings: vi.fn().mockResolvedValue(undefined),
   InvalidSessionMetadataError: class InvalidSessionMetadataError extends Error {
     constructor(
       public readonly userId: string,
@@ -208,7 +207,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -229,7 +228,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -249,7 +248,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -269,7 +268,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -288,7 +287,7 @@ describe('prepareSession endpoint', () => {
       const caller = appRouter.createCaller(ctx);
       const result = await caller.prepareSession({
         prompt: 'Test prompt',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         githubRepo: 'acme/repo',
         githubToken: 'ghp_token',
@@ -298,11 +297,11 @@ describe('prepareSession endpoint', () => {
       expect(result.kiloSessionId).toBe('cli-session-abc123');
       expect(doStub.prepare).toHaveBeenCalledWith(
         expect.objectContaining({
-          sessionId: expect.stringMatching(/^agent_/),
+          sessionId: expect.stringMatching(/^agent_/) as unknown,
           userId: 'test-user-123',
           kiloSessionId: 'cli-session-abc123',
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_token',
@@ -319,7 +318,7 @@ describe('prepareSession endpoint', () => {
       const caller = appRouter.createCaller(ctx);
       const result = await caller.prepareSession({
         prompt: 'Test prompt',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         gitUrl: 'https://gitlab.com/org/repo.git',
         gitToken: 'token123',
@@ -331,6 +330,29 @@ describe('prepareSession endpoint', () => {
         expect.objectContaining({
           gitUrl: 'https://gitlab.com/org/repo.git',
           gitToken: 'token123',
+        })
+      );
+    });
+
+    it('should forward variant to DO prepare', async () => {
+      const doStub = createMockDOStub({
+        prepare: vi.fn().mockResolvedValue({ success: true }),
+      });
+      const ctx = createInternalApiContext({ doStub });
+
+      const caller = appRouter.createCaller(ctx);
+      await caller.prepareSession({
+        prompt: 'Test prompt',
+        mode: 'code',
+        model: 'claude-3',
+        githubRepo: 'acme/repo',
+        githubToken: 'ghp_token',
+        variant: 'high',
+      });
+
+      expect(doStub.prepare).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: 'high',
         })
       );
     });
@@ -350,23 +372,24 @@ describe('prepareSession endpoint', () => {
         githubToken: 'ghp_test_token',
         envVars: { API_KEY: 'secret' },
         setupCommands: ['npm install'],
-        mcpServers: { test: { command: 'npx', args: ['test-server'] } },
+        mcpServers: { test: { type: 'local', command: ['npx', 'test-server'] } },
         upstreamBranch: 'feature/test-branch',
         autoCommit: true,
         kilocodeOrganizationId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
       });
 
       // Verify the DO was called with the expected configuration
-      // Note: mcpServers schema adds default values (type, timeout, alwaysAllow, disabledTools)
       expect(doStub.prepare).toHaveBeenCalledTimes(1);
-      const callArg = doStub.prepare.mock.calls[0][0];
+      const callArg = doStub.prepare.mock.calls[0][0] as Record<string, unknown>;
       expect(callArg.envVars).toEqual({ API_KEY: 'secret' });
       expect(callArg.setupCommands).toEqual(['npm install']);
       expect(callArg.upstreamBranch).toBe('feature/test-branch');
       expect(callArg.autoCommit).toBe(true);
       expect(callArg.orgId).toBe('f47ac10b-58cc-4372-a567-0e02b2c3d479');
-      expect(callArg.mcpServers.test.command).toBe('npx');
-      expect(callArg.mcpServers.test.args).toEqual(['test-server']);
+      expect((callArg.mcpServers as Record<string, unknown>).test).toEqual({
+        type: 'local',
+        command: ['npx', 'test-server'],
+      });
     });
   });
 
@@ -378,7 +401,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: '',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
         })
@@ -392,7 +415,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
         } as Parameters<typeof caller.prepareSession>[0])
       ).rejects.toThrow();
@@ -425,7 +448,7 @@ describe('prepareSession endpoint', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test prompt',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -538,6 +561,25 @@ describe('updateSession endpoint', () => {
       );
     });
 
+    it('should forward variant via tryUpdate', async () => {
+      const doStub = createMockDOStub({
+        tryUpdate: vi.fn().mockResolvedValue({ success: true }),
+      });
+      const ctx = createInternalApiContext({ doStub });
+
+      const caller = appRouter.createCaller(ctx);
+      await caller.updateSession({
+        cloudAgentSessionId: 'agent_12345678-1234-1234-1234-123456789abc' as SessionId,
+        variant: 'low',
+      });
+
+      expect(doStub.tryUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: 'low',
+        })
+      );
+    });
+
     it('should update collections with values', async () => {
       const doStub = createMockDOStub({
         tryUpdate: vi.fn().mockResolvedValue({ success: true }),
@@ -618,7 +660,7 @@ describe('DO state machine methods', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test',
-          mode: 'build',
+          mode: 'code',
           model: 'test',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',
@@ -637,7 +679,7 @@ describe('DO state machine methods', () => {
       const caller = appRouter.createCaller(ctx);
       const result = await caller.updateSession({
         cloudAgentSessionId: 'agent_12345678-1234-1234-1234-123456789abc' as SessionId,
-        mode: 'build',
+        mode: 'code',
       });
 
       expect(result.success).toBe(true);
@@ -669,7 +711,7 @@ describe('DO state machine methods', () => {
         preparedAt: Date.now() - 1000,
         initiatedAt: Date.now(),
         prompt: 'Test prompt',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         kiloSessionId: '123e4567-e89b-12d3-a456-426614174000',
         githubRepo: 'acme/repo',
@@ -692,7 +734,11 @@ describe('DO state machine methods', () => {
         }),
       });
 
-      const result = await doStub.tryInitiate();
+      const result = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data?: Record<string, unknown>;
+      };
       expect(result.success).toBe(false);
       expect(result.error).toBe('Session has not been prepared');
     });
@@ -705,7 +751,11 @@ describe('DO state machine methods', () => {
         }),
       });
 
-      const result = await doStub.tryInitiate();
+      const result = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data?: Record<string, unknown>;
+      };
       expect(result.success).toBe(false);
       expect(result.error).toBe('Session has already been initiated');
     });
@@ -738,7 +788,7 @@ describe('initiateFromKilocodeSession (prepared mode)', () => {
 describe('PrepareSessionInput schema validation', () => {
   it('should accept all valid modes', () => {
     // All valid modes including aliases
-    const modes = ['plan', 'code', 'build', 'orchestrator', 'architect', 'ask'];
+    const modes = ['code', 'plan', 'debug', 'orchestrator', 'ask', 'build', 'architect'];
     for (const mode of modes) {
       const result = schemas.PrepareSessionInput.safeParse({
         prompt: 'Test',
@@ -775,7 +825,7 @@ describe('PrepareSessionInput schema validation', () => {
     for (const repo of validRepos) {
       const result = schemas.PrepareSessionInput.safeParse({
         prompt: 'Test',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         githubRepo: repo,
       });
@@ -787,7 +837,7 @@ describe('PrepareSessionInput schema validation', () => {
     for (const repo of invalidRepos) {
       const result = schemas.PrepareSessionInput.safeParse({
         prompt: 'Test',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         githubRepo: repo,
       });
@@ -805,7 +855,7 @@ describe('PrepareSessionInput schema validation', () => {
     for (const gitUrl of validUrls) {
       const result = schemas.PrepareSessionInput.safeParse({
         prompt: 'Test',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         gitUrl,
       });
@@ -817,7 +867,7 @@ describe('PrepareSessionInput schema validation', () => {
     for (const gitUrl of invalidUrls) {
       const result = schemas.PrepareSessionInput.safeParse({
         prompt: 'Test',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         gitUrl,
       });
@@ -829,7 +879,7 @@ describe('PrepareSessionInput schema validation', () => {
     const longPrompt = 'a'.repeat(schemaLimits.Limits.MAX_PROMPT_LENGTH + 1);
     const result = schemas.PrepareSessionInput.safeParse({
       prompt: longPrompt,
-      mode: 'build',
+      mode: 'code',
       model: 'claude-3',
       githubRepo: 'acme/repo',
     });
@@ -840,7 +890,7 @@ describe('PrepareSessionInput schema validation', () => {
     const tooManyCommands = Array(schemaLimits.Limits.MAX_SETUP_COMMANDS + 1).fill('echo test');
     const result = schemas.PrepareSessionInput.safeParse({
       prompt: 'Test',
-      mode: 'build',
+      mode: 'code',
       model: 'claude-3',
       githubRepo: 'acme/repo',
       setupCommands: tooManyCommands,
@@ -852,7 +902,7 @@ describe('PrepareSessionInput schema validation', () => {
     const longCommand = 'a'.repeat(schemaLimits.Limits.MAX_SETUP_COMMAND_LENGTH + 1);
     const result = schemas.PrepareSessionInput.safeParse({
       prompt: 'Test',
-      mode: 'build',
+      mode: 'code',
       model: 'claude-3',
       githubRepo: 'acme/repo',
       setupCommands: [longCommand],
@@ -903,8 +953,17 @@ describe('UpdateSessionInput schema validation', () => {
 
   it('should validate mode values', () => {
     // All modes except 'custom' don't require appendSystemPrompt
-    // Includes aliases: architect/ask -> plan, orchestrator/build -> code
-    const modesWithoutPrompt = ['plan', 'code', 'build', 'orchestrator', 'architect', 'ask', null];
+    // Includes backward-compatible aliases: build -> code, architect -> plan
+    const modesWithoutPrompt = [
+      'code',
+      'plan',
+      'debug',
+      'orchestrator',
+      'ask',
+      'build',
+      'architect',
+      null,
+    ];
     for (const mode of modesWithoutPrompt) {
       const result = schemas.UpdateSessionInput.safeParse({
         cloudAgentSessionId: 'agent_12345678-1234-1234-1234-123456789abc',
@@ -951,7 +1010,7 @@ describe('integration flow tests', () => {
 
       const prepareResult = await prepareCaller.prepareSession({
         prompt: 'Test prompt',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         githubRepo: 'acme/repo',
         githubToken: 'ghp_test_token',
@@ -984,14 +1043,14 @@ describe('integration flow tests', () => {
 describe('MCP server count limits', () => {
   it('should reject more than MAX_MCP_SERVERS in PrepareSessionInput', () => {
     // Create an object with MAX_MCP_SERVERS + 1 servers
-    const tooManyServers: Record<string, { command: string }> = {};
+    const tooManyServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i <= schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      tooManyServers[`server${i}`] = { command: 'npx' };
+      tooManyServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.PrepareSessionInput.safeParse({
       prompt: 'Test',
-      mode: 'build',
+      mode: 'code',
       model: 'claude-3',
       githubRepo: 'acme/repo',
       mcpServers: tooManyServers,
@@ -1003,14 +1062,14 @@ describe('MCP server count limits', () => {
   });
 
   it('should accept exactly MAX_MCP_SERVERS in PrepareSessionInput', () => {
-    const maxServers: Record<string, { command: string }> = {};
+    const maxServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i < schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      maxServers[`server${i}`] = { command: 'npx' };
+      maxServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.PrepareSessionInput.safeParse({
       prompt: 'Test',
-      mode: 'build',
+      mode: 'code',
       model: 'claude-3',
       githubRepo: 'acme/repo',
       mcpServers: maxServers,
@@ -1019,9 +1078,9 @@ describe('MCP server count limits', () => {
   });
 
   it('should reject more than MAX_MCP_SERVERS in UpdateSessionInput', () => {
-    const tooManyServers: Record<string, { command: string }> = {};
+    const tooManyServers: Record<string, { type: 'local'; command: string[] }> = {};
     for (let i = 0; i <= schemaLimits.Limits.MAX_MCP_SERVERS; i++) {
-      tooManyServers[`server${i}`] = { command: 'npx' };
+      tooManyServers[`server${i}`] = { type: 'local', command: ['npx'] };
     }
 
     const result = schemas.UpdateSessionInput.safeParse({
@@ -1046,7 +1105,7 @@ describe('DO state machine edge cases', () => {
         preparedAt: Date.now() - 1000,
         initiatedAt: Date.now(),
         // Missing: prompt
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         kiloSessionId: '123e4567-e89b-12d3-a456-426614174000',
         githubRepo: 'acme/repo',
@@ -1061,7 +1120,11 @@ describe('DO state machine edge cases', () => {
 
       // The router handler should validate required fields after tryInitiate
       // This tests that the validation catches missing prompt
-      const result = await doStub.tryInitiate();
+      const result = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data: Record<string, unknown>;
+      };
       expect(result.success).toBe(true);
       expect(result.data.prompt).toBeUndefined();
     });
@@ -1075,7 +1138,7 @@ describe('DO state machine edge cases', () => {
         preparedAt: Date.now() - 1000,
         initiatedAt: Date.now(),
         prompt: 'Test prompt',
-        // Missing: mode
+        // Missing: mode (this test verifies we handle missing mode gracefully)
         model: 'claude-3',
         kiloSessionId: '123e4567-e89b-12d3-a456-426614174000',
         githubRepo: 'acme/repo',
@@ -1088,7 +1151,11 @@ describe('DO state machine edge cases', () => {
         }),
       });
 
-      const result = await doStub.tryInitiate();
+      const result = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data: Record<string, unknown>;
+      };
       expect(result.success).toBe(true);
       expect(result.data.mode).toBeUndefined();
     });
@@ -1102,7 +1169,7 @@ describe('DO state machine edge cases', () => {
         preparedAt: Date.now() - 1000,
         initiatedAt: Date.now(),
         prompt: 'Test prompt',
-        mode: 'build',
+        mode: 'code',
         model: 'claude-3',
         // Missing: kiloSessionId
         githubRepo: 'acme/repo',
@@ -1115,7 +1182,11 @@ describe('DO state machine edge cases', () => {
         }),
       });
 
-      const result = await doStub.tryInitiate();
+      const result = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data: Record<string, unknown>;
+      };
       expect(result.success).toBe(true);
       expect(result.data.kiloSessionId).toBeUndefined();
     });
@@ -1136,7 +1207,7 @@ describe('DO state machine edge cases', () => {
               preparedAt: Date.now() - 1000,
               initiatedAt: Date.now(),
               prompt: 'Test prompt',
-              mode: 'build',
+              mode: 'code',
               model: 'claude-3',
               kiloSessionId: '123e4567-e89b-12d3-a456-426614174000',
               githubRepo: 'acme/repo',
@@ -1149,11 +1220,15 @@ describe('DO state machine edge cases', () => {
       });
 
       // First call succeeds
-      const firstResult = await doStub.tryInitiate();
+      const firstResult = (await doStub.tryInitiate()) as {
+        success: boolean;
+        error?: string;
+        data?: Record<string, unknown>;
+      };
       expect(firstResult.success).toBe(true);
 
       // Second call fails
-      const secondResult = await doStub.tryInitiate();
+      const secondResult = (await doStub.tryInitiate()) as { success: boolean; error?: string };
       expect(secondResult.success).toBe(false);
       expect(secondResult.error).toBe('Session has already been initiated');
     });
@@ -1175,7 +1250,7 @@ describe('DO state machine edge cases', () => {
               preparedAt: Date.now() - 1000,
               initiatedAt: firstInitiatedAt,
               prompt: 'Test prompt',
-              mode: 'build',
+              mode: 'code',
               model: 'claude-3',
               kiloSessionId: '123e4567-e89b-12d3-a456-426614174000',
               githubRepo: 'acme/repo',
@@ -1189,17 +1264,20 @@ describe('DO state machine edge cases', () => {
       });
 
       // First call succeeds and sets initiatedAt
-      const firstResult = await doStub.tryInitiate();
+      const firstResult = (await doStub.tryInitiate()) as {
+        success: boolean;
+        data: Record<string, unknown>;
+      };
       expect(firstResult.success).toBe(true);
       expect(firstResult.data.initiatedAt).toBe(firstInitiatedAt);
 
       // Second call fails
-      const secondResult = await doStub.tryInitiate();
+      const secondResult = (await doStub.tryInitiate()) as { success: boolean; error?: string };
       expect(secondResult.success).toBe(false);
       expect(secondResult.error).toBe('Session has already been initiated');
 
       // Verify storage wasn't mutated - initiatedAt is still the first timestamp
-      const metadata = await doStub.getMetadata();
+      const metadata = (await doStub.getMetadata()) as CloudAgentSessionState | null;
       expect(metadata).not.toBeNull();
       expect(metadata!.initiatedAt).toBe(firstInitiatedAt);
     });
@@ -1328,7 +1406,7 @@ describe('DO state machine edge cases', () => {
       await expect(
         caller.prepareSession({
           prompt: 'Test',
-          mode: 'build',
+          mode: 'code',
           model: 'claude-3',
           githubRepo: 'acme/repo',
           githubToken: 'ghp_test_token',

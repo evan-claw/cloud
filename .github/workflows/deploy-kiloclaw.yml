@@ -27,7 +27,58 @@ jobs:
         working-directory: kiloclaw
         run: pnpm install --frozen-lockfile
 
-      # Build Docker image and push to Fly registry
+      # ── Compute source content hash ─────────────────────────────
+      # Hash the SOURCE FILES that are COPYed into the Docker image.
+      # This hash is used as the IMAGE TAG (a label we assign), NOT
+      # compared against Docker's image digest.
+      # Same source files → same tag name → registry has it → skip build.
+      #
+      # Files included (must match what the Dockerfile COPYs):
+      #   - Dockerfile itself (base image, apt packages, npm versions)
+      #   - controller/        (COPY controller/ → compiled to controller.js)
+      #   - start-openclaw.sh  (COPY → entrypoint script)
+      #   - openclaw-pairing-list.js, openclaw-device-pairing-list.js (COPY)
+      #   - skills/            (COPY skills/ → /root/clawd/skills/)
+      #
+      # NOT included (not in the image):
+      #   - src/               (worker code, deployed separately)
+      #   - scripts/           (dev tooling, not COPYed)
+      #   - wrangler.jsonc     (worker config)
+      - name: Compute source content hash
+        id: image-hash
+        working-directory: kiloclaw
+        run: |
+          # Validate all expected paths exist before hashing
+          for path in Dockerfile start-openclaw.sh controller skills \
+                      openclaw-pairing-list.js openclaw-device-pairing-list.js; do
+            if [ ! -e "$path" ]; then
+              echo "::error::Required path not found: $path"
+              exit 1
+            fi
+          done
+
+          CONTENT_HASH=$(
+            find Dockerfile start-openclaw.sh controller/ skills/ \
+              openclaw-pairing-list.js openclaw-device-pairing-list.js \
+              -type f \
+              | sort \
+              | xargs sha256sum \
+              | sha256sum \
+              | cut -d' ' -f1 \
+              | cut -c1-12
+          )
+
+          if [ -z "$CONTENT_HASH" ] || [ ${#CONTENT_HASH} -ne 12 ]; then
+            echo "::error::Failed to compute valid content hash"
+            exit 1
+          fi
+
+          echo "hash=${CONTENT_HASH}" >> "$GITHUB_OUTPUT"
+          echo "tag=img-${CONTENT_HASH}" >> "$GITHUB_OUTPUT"
+          echo "Source content hash → image tag: img-${CONTENT_HASH}"
+
+      # ── Docker setup ────────────────────────────────────────────
+      # Always set up Docker + login so we can check the registry.
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -38,7 +89,36 @@ jobs:
           username: x
           password: ${{ secrets.FLY_API_TOKEN }}
 
+      # ── Check if image tag already exists in registry ───────────
+      # Looks up by TAG NAME, not by digest comparison. If we previously
+      # built and pushed an image with this tag, it's already there.
+      # On error or timeout, defaults to building (safe fallback).
+      - name: Check if image tag exists in registry
+        id: check-image
+        run: |
+          IMAGE="registry.fly.io/kiloclaw-machines:${{ steps.image-hash.outputs.tag }}"
+          if timeout 15 docker manifest inspect "${IMAGE}" > /tmp/manifest.json 2>/dev/null; then
+            # Handle both manifest list (.manifests[]) and single manifest (.config.digest) formats
+            DIGEST=$(jq -r 'if .manifests then .manifests[0].digest else .config.digest end' /tmp/manifest.json 2>/dev/null || echo "")
+            if [ -n "$DIGEST" ] && [ "$DIGEST" != "null" ] && [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+              echo "✅ Image tag exists in registry (digest: ${DIGEST:0:19}...)"
+            else
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "⚠️ Image found but could not extract valid digest, will rebuild"
+            fi
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "🔨 Image tag not found or registry check failed, will build"
+          fi
+
+      # ── Conditional Docker build ────────────────────────────────
+      # Only builds if the content-hash tag doesn't already exist in
+      # the registry (or the registry check failed).
       - name: Build and push Docker image
+        id: docker-build
+        if: steps.check-image.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: kiloclaw
@@ -46,17 +126,100 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            registry.fly.io/kiloclaw-machines:${{ github.sha }}
+            registry.fly.io/kiloclaw-machines:${{ steps.image-hash.outputs.tag }}
             registry.fly.io/kiloclaw-machines:latest
+          build-args: |
+            CONTROLLER_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Deploy CF Worker with the commit SHA as the image tag.
-      # --var overrides the default FLY_IMAGE_TAG in wrangler.jsonc,
-      # so new machine creates/restarts use the exact image from this build.
+      # ── Resolve image digest ────────────────────────────────────
+      # Gets the Docker digest from whichever source is available:
+      # new build output, existing registry image, or empty.
+      - name: Resolve image digest
+        id: image-digest
+        env:
+          BUILD_DIGEST: ${{ steps.docker-build.outputs.digest }}
+          CHECK_DIGEST: ${{ steps.check-image.outputs.digest }}
+        run: |
+          if [ -n "$BUILD_DIGEST" ]; then
+            echo "digest=$BUILD_DIGEST" >> "$GITHUB_OUTPUT"
+          elif [ -n "$CHECK_DIGEST" ]; then
+            echo "digest=$CHECK_DIGEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "digest=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Extract OpenClaw version ────────────────────────────────
+      - name: Extract OpenClaw version
+        id: openclaw-version
+        run: |
+          VERSION=$(sed -n 's/.*openclaw@\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' kiloclaw/Dockerfile | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to extract OpenClaw version from Dockerfile"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # ── Deploy Worker (always runs) ─────────────────────────────
+      # Worker always deploys with the content-hash image tag.
+      # registerVersionIfNeeded() will no-op if the tag is already registered.
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: kiloclaw
-          command: deploy --var FLY_IMAGE_TAG:${{ github.sha }}
+          command: >-
+            deploy
+            --var FLY_IMAGE_TAG:${{ steps.image-hash.outputs.tag }}
+            --var OPENCLAW_VERSION:${{ steps.openclaw-version.outputs.version }}
+            --var FLY_IMAGE_DIGEST:${{ steps.image-digest.outputs.digest }}
+
+      - name: Notify Slack
+        continue-on-error: true
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.DEPLOY_NOTIFY_SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "KiloClaw Deployed"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*OpenClaw Version:*\n${{ steps.openclaw-version.outputs.version }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Image:*\n`${{ steps.image-hash.outputs.tag }}`"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Build:*\n${{ steps.check-image.outputs.exists == 'true' && 'Reused existing' || 'Built new image' }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Deployed by:*\n${{ github.actor }}"
+                    }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}> · <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Workflow>"
+                    }
+                  ]
+                }
+              ]
+            }

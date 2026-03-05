@@ -4,6 +4,7 @@ import { createContext, useContext } from 'react';
 type OrganizationContextType = {
   userRole: OrganizationRole;
   isKiloAdmin?: boolean; // Optional, can be used to indicate if the user is a Kilo admin
+  isAutoTopUpEnabled?: boolean;
 };
 
 const OrganizationContext = createContext<OrganizationContextType>({
@@ -21,4 +22,9 @@ export const useUserOrganizationRole = (): OrganizationRole => {
 export const useIsKiloAdmin = (): boolean => {
   const context = useContext(OrganizationContext);
   return context?.isKiloAdmin || false; // Fallback to false if context is not available
+};
+
+export const useIsAutoTopUpEnabled = (): boolean => {
+  const context = useContext(OrganizationContext);
+  return context?.isAutoTopUpEnabled || false;
 };

@@ -7,7 +7,6 @@ import {
   determineBranchName,
   runSetupCommands,
   writeAuthFile,
-  writeMCPSettings,
 } from '../../session-service.js';
 import { InstallationLookupService } from '../../services/installation-lookup-service.js';
 import { GitHubTokenService } from '../../services/github-token-service.js';
@@ -217,6 +216,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         githubToken: resolvedGithubToken, // Use resolved token (from input or generated from installation)
         gitUrl: input.gitUrl,
         gitToken: input.gitToken,
+        platform: input.platform,
         upstreamBranch: input.upstreamBranch,
         botId: ctx.botId,
       });
@@ -230,19 +230,35 @@ const prepareSessionHandler = internalApiProtectedProcedure
         input.model,
         input.kilocodeOrganizationId,
         input.encryptedSecrets,
-        undefined, // createdOnPlatform
-        input.appendSystemPrompt
+        input.createdOnPlatform,
+        input.appendSystemPrompt,
+        input.mcpServers
       );
 
       // 6. Clone repository
+      const cloneOptions = input.shallow ? { shallow: true } : undefined;
       logger.info('Cloning repository');
       if (input.gitUrl) {
-        await cloneGitRepo(session, workspacePath, input.gitUrl, input.gitToken);
+        await cloneGitRepo(
+          session,
+          workspacePath,
+          input.gitUrl,
+          input.gitToken,
+          undefined,
+          cloneOptions
+        );
       } else if (input.githubRepo) {
-        await cloneGitHubRepo(session, workspacePath, input.githubRepo, resolvedGithubToken, {
-          GITHUB_APP_SLUG: ctx.env.GITHUB_APP_SLUG,
-          GITHUB_APP_BOT_USER_ID: ctx.env.GITHUB_APP_BOT_USER_ID,
-        });
+        await cloneGitHubRepo(
+          session,
+          workspacePath,
+          input.githubRepo,
+          resolvedGithubToken,
+          {
+            GITHUB_APP_SLUG: ctx.env.GITHUB_APP_SLUG,
+            GITHUB_APP_BOT_USER_ID: ctx.env.GITHUB_APP_BOT_USER_ID,
+          },
+          cloneOptions
+        );
       } else {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -274,15 +290,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         await runSetupCommands(session, context, input.setupCommands, true); // fail-fast
       }
 
-      // 9. Write MCP settings
-      if (input.mcpServers && Object.keys(input.mcpServers).length > 0) {
-        logger
-          .withFields({ count: Object.keys(input.mcpServers).length })
-          .info('Writing MCP settings');
-        await writeMCPSettings(sandbox, sessionHome, input.mcpServers);
-      }
-
-      // 9b. Write auth file for session ingest
+      // 9. Write auth file for session ingest
       await writeAuthFile(sandbox, sessionHome, ctx.authToken);
 
       // 10. Start kilo server
@@ -311,7 +319,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           ctx.userId,
           ctx.env,
           input.kilocodeOrganizationId,
-          'cloud-agent'
+          input.createdOnPlatform ?? 'cloud-agent'
         );
       } catch (error) {
         logger
@@ -353,6 +361,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           prompt: input.prompt,
           mode: input.mode,
           model: input.model,
+          variant: input.variant,
           kilocodeToken: ctx.authToken,
           githubRepo: input.githubRepo,
           githubToken: input.githubToken,
@@ -360,6 +369,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           githubAppType: resolvedGithubAppType,
           gitUrl: input.gitUrl,
           gitToken: input.gitToken,
+          platform: input.platform,
           envVars: input.envVars,
           encryptedSecrets: input.encryptedSecrets,
           setupCommands: input.setupCommands,
@@ -370,6 +380,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           appendSystemPrompt: input.appendSystemPrompt,
           callbackTarget: input.callbackTarget,
           images: input.images,
+          createdOnPlatform: input.createdOnPlatform,
           // Workspace metadata
           workspacePath,
           sessionHome,
@@ -448,6 +459,7 @@ const updateSessionHandler = internalApiProtectedProcedure
       // Scalar fields - pass through as-is (undefined skips, null clears, value sets)
       setUpdateValue(updates, 'mode', input.mode);
       setUpdateValue(updates, 'model', input.model);
+      setUpdateValue(updates, 'variant', input.variant);
       setUpdateValue(updates, 'githubToken', input.githubToken);
       setUpdateValue(updates, 'gitToken', input.gitToken);
       setUpdateValue(updates, 'upstreamBranch', input.upstreamBranch);

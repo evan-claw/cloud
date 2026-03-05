@@ -5,7 +5,7 @@ import {
   createCloudAgentNextClient,
   rethrowAsPaymentRequired,
 } from '@/lib/cloud-agent-next/cloud-agent-client';
-import { generateApiToken } from '@/lib/tokens';
+import { generateCloudAgentToken } from '@/lib/tokens';
 import {
   mergeProfileConfiguration,
   ProfileNotFoundError,
@@ -30,6 +30,8 @@ import {
   baseInterruptSessionNextSchema,
   baseGetSessionNextSchema,
   baseGetSessionNextOutputSchema,
+  baseAnswerQuestionNextSchema,
+  baseRejectQuestionNextSchema,
 } from '../cloud-agent-next-schemas';
 import * as z from 'zod';
 import { PLATFORM } from '@/lib/integrations/core/constants';
@@ -54,6 +56,14 @@ const InterruptSessionInput = baseInterruptSessionNextSchema.extend({
 });
 
 const GetSessionInput = baseGetSessionNextSchema.extend({
+  organizationId: z.uuid(),
+});
+
+const AnswerQuestionInput = baseAnswerQuestionNextSchema.extend({
+  organizationId: z.uuid(),
+});
+
+const RejectQuestionInput = baseRejectQuestionNextSchema.extend({
   organizationId: z.uuid(),
 });
 
@@ -90,7 +100,7 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .input(PrepareSessionInput)
     .output(basePrepareSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       const {
@@ -165,15 +175,16 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .input(InitiateFromPreparedSessionInput)
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
-      const githubToken = await getGitHubTokenForOrganization(input.organizationId);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
+      // No token fetch needed: prepare and initiate happen back-to-back,
+      // so tokens stored during prepareSession are still fresh.
+      // The DO refreshes GitHub App installation tokens internally.
       try {
         return await client.initiateFromPreparedSession({
           cloudAgentSessionId: input.cloudAgentSessionId,
           kilocodeOrganizationId: input.organizationId,
-          githubToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
@@ -191,16 +202,33 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .input(SendMessageInput)
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
-      const githubToken = await getGitHubTokenForOrganization(input.organizationId);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
-      const { organizationId: _organizationId, ...messageInput } = input;
+      const { organizationId, ...messageInput } = input;
+
+      // Determine platform to fetch the correct token
+      const session = await client.getSession(messageInput.cloudAgentSessionId);
+      let githubToken: string | undefined;
+      let gitToken: string | undefined;
+
+      if (session.platform === 'gitlab') {
+        gitToken = await getGitLabTokenForOrganization(organizationId);
+        if (!gitToken) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No GitLab integration found. Please connect your GitLab account first.',
+          });
+        }
+      } else {
+        githubToken = await getGitHubTokenForOrganization(organizationId);
+      }
 
       try {
         return await client.sendMessage({
           ...messageInput,
           githubToken,
+          gitToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
@@ -216,16 +244,40 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .output(
       z.object({
         success: z.boolean(),
-        killedProcessIds: z.array(z.string()),
-        failedProcessIds: z.array(z.string()),
         message: z.string(),
+        processesFound: z.boolean(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       return await client.interruptSession(input.sessionId);
+    }),
+
+  answerQuestion: organizationMemberProcedure
+    .input(AnswerQuestionInput)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const authToken = generateCloudAgentToken(ctx.user);
+      const client = createCloudAgentNextClient(authToken);
+      return await client.answerQuestion({
+        sessionId: input.sessionId,
+        questionId: input.questionId,
+        answers: input.answers,
+      });
+    }),
+
+  rejectQuestion: organizationMemberProcedure
+    .input(RejectQuestionInput)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const authToken = generateCloudAgentToken(ctx.user);
+      const client = createCloudAgentNextClient(authToken);
+      return await client.rejectQuestion({
+        sessionId: input.sessionId,
+        questionId: input.questionId,
+      });
     }),
 
   /**
@@ -236,7 +288,7 @@ export const organizationCloudAgentNextRouter = createTRPCRouter({
     .input(GetSessionInput)
     .output(baseGetSessionNextOutputSchema)
     .query(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       return await client.getSession(input.cloudAgentSessionId);

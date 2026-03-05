@@ -3,11 +3,52 @@ import {
   manageBranch,
   cloneGitHubRepo,
   cloneGitRepo,
+  configureKilocode,
   checkDiskSpace,
   createSandboxUsageEvent,
+  updateGitRemoteToken,
   LOW_DISK_THRESHOLD_MB,
 } from './workspace';
 import type { ExecutionSession } from './types';
+
+describe('configureKilocode', () => {
+  it('applies read-only command policy for code-review sessions', async () => {
+    const writeFile = vi.fn().mockResolvedValue(undefined);
+    const fakeExecutor = {
+      writeFile,
+    } as unknown as ExecutionSession;
+
+    await configureKilocode(
+      fakeExecutor,
+      '/home/session-123',
+      'org-123',
+      'token-123',
+      'anthropic/claude-sonnet-4.6',
+      undefined,
+      undefined,
+      'code-review'
+    );
+
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const configJson = writeFile.mock.calls[0][1] as string;
+    const config = JSON.parse(configJson) as {
+      autoApproval?: {
+        execute?: {
+          denied?: string[];
+        };
+        write?: {
+          enabled?: boolean;
+          protected?: boolean;
+        };
+      };
+    };
+
+    expect(config.autoApproval?.execute?.denied).toContain('git commit');
+    expect(config.autoApproval?.execute?.denied).toContain('gh pr merge');
+    expect(config.autoApproval?.write?.enabled).toBe(false);
+    expect(config.autoApproval?.write?.protected).toBe(true);
+  });
+});
 
 describe('manageBranch', () => {
   let fakeSession: ExecutionSession;
@@ -85,6 +126,20 @@ describe('manageBranch', () => {
       expect(execCalls[3]?.[0]).toContain(
         "git checkout -b 'feature/remote' 'origin/feature/remote'"
       );
+    });
+
+    it('should checkout upstream branch using existing branch semantics', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0 }) // git fetch
+        .mockResolvedValueOnce({ exitCode: 1 }) // local check (does not exist)
+        .mockResolvedValueOnce({ exitCode: 0 }) // remote check (exists)
+        .mockResolvedValueOnce({ exitCode: 0 }); // checkout
+
+      await manageBranch(fakeSession, '/workspace', 'improve-setup', true);
+
+      const execCalls = mockExec.mock.calls;
+      expect(execCalls[3]?.[0]).toContain("git checkout 'improve-setup'");
+      expect(execCalls[3]?.[0]).not.toContain('checkout -b');
     });
   });
 
@@ -441,6 +496,121 @@ describe('disk space checking', () => {
         expect.any(Object)
       );
     });
+
+    it('should use oauth2 username for gitlab platform', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(
+        fakeSession,
+        '/workspace',
+        'https://gitlab.com/repo.git',
+        'test-token',
+        undefined,
+        {
+          platform: 'gitlab',
+        }
+      );
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('oauth2:test-token'),
+        expect.any(Object)
+      );
+    });
+
+    it('should use x-access-token username for github platform', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'test-token',
+        undefined,
+        {
+          platform: 'github',
+        }
+      );
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('x-access-token:test-token'),
+        expect.any(Object)
+      );
+    });
+
+    it('should use x-access-token username when platform is undefined', async () => {
+      mockExec
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // git config user.name
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // git config user.email
+
+      mockGitCheckout.mockResolvedValue({
+        success: true,
+        exitCode: 0,
+      });
+
+      await cloneGitRepo(fakeSession, '/workspace', 'https://example.com/repo.git', 'test-token');
+
+      expect(mockGitCheckout).toHaveBeenCalledWith(
+        expect.stringContaining('x-access-token:test-token'),
+        expect.any(Object)
+      );
+    });
+  });
+
+  describe('updateGitRemoteToken', () => {
+    it('should use oauth2 username for gitlab platform', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://gitlab.com/repo.git',
+        'new-token',
+        'gitlab'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('oauth2:new-token'));
+    });
+
+    it('should use x-access-token username for github platform', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'new-token',
+        'github'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('x-access-token:new-token'));
+    });
+
+    it('should use x-access-token username when platform is undefined', async () => {
+      mockExec.mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      await updateGitRemoteToken(
+        fakeSession,
+        '/workspace',
+        'https://example.com/repo.git',
+        'new-token'
+      );
+
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('x-access-token:new-token'));
+    });
   });
 
   describe('LOW_DISK_THRESHOLD_MB export', () => {
@@ -489,11 +659,11 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to main branch'),
+        message: expect.stringContaining('cannot auto-commit directly to main branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -522,7 +692,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('cannot auto-commit directly to master branch'),
+        message: expect.stringContaining('cannot auto-commit directly to master branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -551,7 +721,36 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('detached HEAD state'),
+        message: expect.stringContaining('detached HEAD state') as unknown,
+      });
+      expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
+    });
+
+    it('should fail auto-commit for unsafe branch names', async () => {
+      // Mock git branch --show-current returning unsafe shell characters
+      mockExec.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'feature/new; rm -rf /\n',
+        stderr: '',
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(2);
+      expect(events[1]).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('invalid branch name') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -580,7 +779,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('unable to determine current branch'),
+        message: expect.stringContaining('unable to determine current branch') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });
@@ -599,6 +798,12 @@ describe('autoCommitChangesStream', () => {
         .mockResolvedValueOnce({
           exitCode: 0,
           stdout: ' M file.txt\n',
+          stderr: '',
+        })
+        // Mock git log origin/feature/test..HEAD (push verification) — nothing unpushed
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
           stderr: '',
         });
 
@@ -624,18 +829,149 @@ describe('autoCommitChangesStream', () => {
       expect(events.length).toBeGreaterThan(3);
       expect(events[0]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking current branch'),
+        message: expect.stringContaining('Checking current branch') as unknown,
       });
       expect(events[1]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Checking for uncommitted changes'),
+        message: expect.stringContaining('Checking for uncommitted changes') as unknown,
       });
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('Auto-committing changes'),
+        message: expect.stringContaining('Auto-committing changes') as unknown,
       });
-      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String), {
+      expect(mockStreamKilocodeExec).toHaveBeenCalledWith('code', expect.any(String) as unknown, {
         sessionId: 'session-123',
+      });
+    });
+
+    it('should throw when programmatic push fails', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/fix\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/fix..HEAD — 1 unpushed commit
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'abc1234 fix: add error logging\n',
+          stderr: '',
+        })
+        // git push origin feature/fix — permission denied
+        .mockResolvedValueOnce({
+          exitCode: 128,
+          stdout: '',
+          stderr: 'remote: Permission denied\nfatal: unable to access',
+        });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      await expect(async () => {
+        for await (const _event of stream) {
+          // consume events
+        }
+      }).rejects.toThrow('Push failed (exit 128)');
+    });
+
+    it('should push programmatically when kilo CLI leaves unpushed commits', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/fix\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/fix..HEAD — 1 unpushed commit
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'abc1234 fix: add error logging\n',
+          stderr: '',
+        })
+        // git push origin feature/fix — succeeds
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      // Should include the "Pushing 1 unpushed commit(s)" status event
+      const pushingEvent = events.find(
+        e => 'message' in e && typeof e.message === 'string' && e.message.includes('Pushing 1')
+      );
+      expect(pushingEvent).toBeDefined();
+
+      // Should end with success
+      const lastEvent = events[events.length - 1];
+      expect(lastEvent).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('Auto-commit completed successfully') as unknown,
+      });
+    });
+
+    it('should push when remote branch does not exist yet', async () => {
+      mockExec
+        // git branch --show-current
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'feature/new-branch\n', stderr: '' })
+        // git status --porcelain — dirty
+        .mockResolvedValueOnce({ exitCode: 0, stdout: ' M auth.ts\n', stderr: '' })
+        // git log origin/feature/new-branch..HEAD — remote branch missing
+        .mockResolvedValueOnce({
+          exitCode: 128,
+          stdout: "fatal: ambiguous argument 'origin/feature/new-branch..HEAD': unknown revision",
+          stderr: '',
+        })
+        // git push origin feature/new-branch — succeeds
+        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' });
+
+      mockStreamKilocodeExec.mockImplementation(async function* () {
+        yield { streamEventType: 'status', message: 'Committing...' };
+      });
+
+      const { autoCommitChangesStream } = await import('./workspace');
+      const stream = autoCommitChangesStream(
+        fakeSession,
+        '/workspace',
+        mockStreamKilocodeExec,
+        'session-123'
+      );
+
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const pushEvent = events.find(
+        e =>
+          'message' in e &&
+          typeof e.message === 'string' &&
+          e.message.includes("Pushing branch 'feature/new-branch' to origin")
+      );
+      expect(pushEvent).toBeDefined();
+
+      const lastEvent = events[events.length - 1];
+      expect(lastEvent).toMatchObject({
+        streamEventType: 'status',
+        message: expect.stringContaining('Auto-commit completed successfully') as unknown,
       });
     });
 
@@ -670,7 +1006,7 @@ describe('autoCommitChangesStream', () => {
       expect(events).toHaveLength(3);
       expect(events[2]).toMatchObject({
         streamEventType: 'status',
-        message: expect.stringContaining('No uncommitted changes to commit'),
+        message: expect.stringContaining('No uncommitted changes to commit') as unknown,
       });
       expect(mockStreamKilocodeExec).not.toHaveBeenCalled();
     });

@@ -51,9 +51,15 @@ type Props = {
   organizationId: string;
   role: OrganizationRole;
   topupAmount: number;
+  isAutoTopUpEnabled: boolean;
 };
 
-export function OrganizationDashboard({ organizationId, role, topupAmount }: Props) {
+export function OrganizationDashboard({
+  organizationId,
+  role,
+  topupAmount,
+  isAutoTopUpEnabled,
+}: Props) {
   const [showWelcomeMessage, setShowWelcomeMessage] = useState(false);
   const [showNewOrgWelcome, setShowNewOrgWelcome] = useState(false);
   const [showTopupSuccess, setShowTopupSuccess] = useState(topupAmount !== 0);
@@ -98,7 +104,10 @@ export function OrganizationDashboard({ organizationId, role, topupAmount }: Pro
   };
 
   return (
-    <OrganizationAdminContextProvider organizationId={organizationId}>
+    <OrganizationAdminContextProvider
+      organizationId={organizationId}
+      isAutoTopUpEnabled={isAutoTopUpEnabled}
+    >
       <div className="flex w-full flex-col gap-y-6">
         <OrganizationPageHeader
           organizationId={organizationId}

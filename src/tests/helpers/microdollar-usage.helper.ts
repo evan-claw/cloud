@@ -1,4 +1,4 @@
-import type { MicrodollarUsage } from '@/db/schema';
+import type { MicrodollarUsage } from '@kilocode/db/schema';
 import {
   toInsertableDbUsageRecord,
   insertUsageRecord,
@@ -57,6 +57,9 @@ function defineDefaultContextInfo(): UsageContextInfo {
     is_user_byok: false,
     has_tools: false,
     feature: null,
+    session_id: null,
+    mode: null,
+    auto_model: null,
   };
 }
 
@@ -109,6 +112,9 @@ export function createMockUsageContext(
     user_byok: false,
     has_tools: false,
     feature: 'vscode-extension',
+    session_id: null,
+    mode: null,
+    auto_model: null,
   };
 }
 

@@ -1,4 +1,4 @@
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import type { OrganizationRole } from '@/lib/organizations/organization-types';
 import jwt from 'jsonwebtoken';
 import { logExceptInTest, warnExceptInTest } from '@/lib/utils.server';
@@ -13,7 +13,9 @@ export type JWTTokenExtraPayload = {
   organizationId?: string;
   organizationRole?: OrganizationRole;
   internalApiUse?: boolean;
+  isAdmin?: boolean;
   createdOnPlatform?: string;
+  tokenSource?: string;
 };
 
 const FIVE_YEARS_IN_SECONDS = 5 * 365 * 24 * 60 * 60;
@@ -25,6 +27,18 @@ export const TOKEN_EXPIRY = {
   thirtyDays: THIRTY_DAYS_IN_SECONDS,
   fiveMinutes: FIVE_MINUTES_IN_SECONDS,
 } as const;
+
+/**
+ * Generate a short-lived JWT for authenticating with internal Cloudflare Worker services
+ * (e.g. session-ingest). Contains only the minimal fields the workers require:
+ * kiloUserId and version. Expires in 1 hour.
+ */
+export function generateInternalServiceToken(userId: string): string {
+  return jwt.sign({ kiloUserId: userId, version: JWT_TOKEN_VERSION }, NEXTAUTH_SECRET, {
+    algorithm: jwtSigningAlgorithm,
+    expiresIn: '1h',
+  });
+}
 
 export function generateApiToken(
   { id, api_token_pepper }: User,
@@ -127,5 +141,10 @@ export function validateAuthorizationHeader(headers: Headers) {
     internalApiUse: payload.internalApiUse,
     createdOnPlatform: payload.createdOnPlatform,
     botId: payload.botId,
+    tokenSource: payload.tokenSource,
   };
+}
+
+export function generateCloudAgentToken(user: User) {
+  return generateApiToken(user, { tokenSource: 'cloud-agent' });
 }

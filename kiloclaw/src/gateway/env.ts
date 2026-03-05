@@ -13,7 +13,6 @@ export type UserConfig = {
   encryptedSecrets?: Record<string, EncryptedEnvelope>;
   kilocodeApiKey?: string | null;
   kilocodeDefaultModel?: string | null;
-  kilocodeModels?: Array<{ id: string; name: string }> | null;
   channels?: EncryptedChannelTokens;
 };
 
@@ -70,9 +69,8 @@ export async function buildEnvVars(
   // Layer 1: Worker-level defaults (non-sensitive)
   const plainEnv: Record<string, string> = {};
 
-  if (env.DEV_MODE) plainEnv.OPENCLAW_DEV_MODE = env.DEV_MODE;
   if (env.KILOCODE_API_BASE_URL) plainEnv.KILOCODE_API_BASE_URL = env.KILOCODE_API_BASE_URL;
-  plainEnv.KILOCODE_FEATURE = 'kilo-claw';
+  plainEnv.KILOCODE_FEATURE = 'kiloclaw';
 
   // Collect all sensitive values
   const sensitive: Record<string, string> = {};
@@ -116,9 +114,6 @@ export async function buildEnvVars(
     if (userConfig.kilocodeDefaultModel) {
       plainEnv.KILOCODE_DEFAULT_MODEL = userConfig.kilocodeDefaultModel;
     }
-    if (userConfig.kilocodeModels) {
-      plainEnv.KILOCODE_MODELS_JSON = JSON.stringify(userConfig.kilocodeModels);
-    }
 
     // Layer 4: Decrypt channel tokens and map to container env var names
     if (userConfig.channels && env.AGENT_ENV_VARS_PRIVATE_KEY) {
@@ -133,6 +128,7 @@ export async function buildEnvVars(
   if (env.DISCORD_DM_POLICY) plainEnv.DISCORD_DM_POLICY = env.DISCORD_DM_POLICY;
   if (env.OPENCLAW_ALLOWED_ORIGINS)
     plainEnv.OPENCLAW_ALLOWED_ORIGINS = env.OPENCLAW_ALLOWED_ORIGINS;
+  plainEnv.REQUIRE_PROXY_TOKEN = env.REQUIRE_PROXY_TOKEN ?? 'false';
 
   // Layer 5: Reserved system vars (cannot be overridden by any user config)
   sensitive.OPENCLAW_GATEWAY_TOKEN = await deriveGatewayToken(sandboxId, gatewayTokenSecret);

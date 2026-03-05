@@ -32,6 +32,7 @@ import {
 import { DEFAULT_LIST_LIMIT } from '@/lib/code-reviews/core/constants';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { tryDispatchPendingReviews } from '@/lib/code-reviews/dispatch/dispatch-pending-reviews';
+import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 
 export const codeReviewRouter = createTRPCRouter({
   /**
@@ -297,10 +298,20 @@ export const codeReviewRouter = createTRPCRouter({
         // Reset the review for retry
         await resetCodeReviewForRetry(input.reviewId);
 
-        // Build owner object for dispatch
-        const owner: Owner = review.owned_by_organization_id
-          ? { type: 'org', id: review.owned_by_organization_id, userId: ctx.user.id }
-          : { type: 'user', id: review.owned_by_user_id as string, userId: ctx.user.id };
+        // Build owner object for dispatch.
+        // For org reviews, use the bot user ID so feature flags (e.g. code-review-cloud-agent-next)
+        // evaluate consistently regardless of which human triggers the retrigger.
+        let owner: Owner;
+        if (review.owned_by_organization_id) {
+          const botUserId = await getBotUserId(review.owned_by_organization_id, 'code-review');
+          owner = {
+            type: 'org',
+            id: review.owned_by_organization_id,
+            userId: botUserId ?? ctx.user.id,
+          };
+        } else {
+          owner = { type: 'user', id: review.owned_by_user_id as string, userId: ctx.user.id };
+        }
 
         // Try to dispatch the review
         await tryDispatchPendingReviews(owner);
@@ -317,7 +328,8 @@ export const codeReviewRouter = createTRPCRouter({
     }),
 
   /**
-   * Get events for a code review (for streaming)
+   * Get events for a code review (SSE/cloud-agent flow, polling-based)
+   * Used when the review is NOT using cloud-agent-next.
    * Verifies user has access to the review:
    * - For org reviews: user must be org member
    * - For personal reviews: user must be the owner
@@ -330,7 +342,6 @@ export const codeReviewRouter = createTRPCRouter({
     )
     .query(async ({ input, ctx }) => {
       try {
-        // Get the review from database
         const review = await getCodeReviewById(input.reviewId);
 
         if (!review) {
@@ -342,10 +353,8 @@ export const codeReviewRouter = createTRPCRouter({
 
         // Authorization check based on owner type
         if (review.owned_by_organization_id) {
-          // Organization review: verify user is org member
           await ensureOrganizationAccess(ctx, review.owned_by_organization_id);
         } else if (review.owned_by_user_id) {
-          // Personal review: verify user owns it
           if (review.owned_by_user_id !== ctx.user.id) {
             throw new TRPCError({
               code: 'FORBIDDEN',
@@ -353,7 +362,6 @@ export const codeReviewRouter = createTRPCRouter({
             });
           }
         } else {
-          // Should not happen, but handle edge case
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Invalid review ownership data',
@@ -370,6 +378,65 @@ export const codeReviewRouter = createTRPCRouter({
         }
         return failureResult(
           error instanceof Error ? error.message : 'Failed to fetch review events'
+        );
+      }
+    }),
+
+  /**
+   * Get stream info for a code review (for WebSocket streaming via cloud-agent-next)
+   * Returns the cloudAgentSessionId and organizationId so the frontend can
+   * get a stream ticket and connect to cloud-agent-next's WebSocket.
+   *
+   * Verifies user has access to the review:
+   * - For org reviews: user must be org member
+   * - For personal reviews: user must be the owner
+   */
+  getReviewStreamInfo: baseProcedure
+    .input(
+      z.object({
+        reviewId: z.string().uuid(),
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      try {
+        const review = await getCodeReviewById(input.reviewId);
+
+        if (!review) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Code review not found',
+          });
+        }
+
+        // Authorization check based on owner type
+        if (review.owned_by_organization_id) {
+          await ensureOrganizationAccess(ctx, review.owned_by_organization_id);
+        } else if (review.owned_by_user_id) {
+          if (review.owned_by_user_id !== ctx.user.id) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'You do not have access to this code review',
+            });
+          }
+        } else {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Invalid review ownership data',
+          });
+        }
+
+        return successResult({
+          cloudAgentSessionId: review.session_id ?? null,
+          organizationId: review.owned_by_organization_id ?? undefined,
+          status: review.status,
+          agentVersion: review.agent_version ?? 'v1',
+        });
+      } catch (error) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        return failureResult(
+          error instanceof Error ? error.message : 'Failed to get review stream info'
         );
       }
     }),

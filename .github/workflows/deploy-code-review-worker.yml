@@ -4,13 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: "Choose an environment to deploy to: dev or prod"
+        description: 'Choose an environment to deploy to: dev or prod'
         required: true
-        default: "prod"
+        default: 'prod'
         type: choice
         options:
           - dev
           - prod
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Choose an environment to deploy to: dev or prod'
+        required: false
+        default: 'prod'
+        type: string
 
 jobs:
   deploy:
@@ -40,4 +47,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           workingDirectory: cloudflare-code-review-infra
-          command: deploy --env ${{ inputs.environment }}
+          command: ${{ inputs.environment == 'dev' && 'deploy --env dev' || 'deploy' }}

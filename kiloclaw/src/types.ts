@@ -7,7 +7,7 @@ import type { KiloClawApp } from './durable-objects/kiloclaw-app';
 export type KiloClawEnv = {
   KILOCLAW_INSTANCE: DurableObjectNamespace<KiloClawInstance>;
   KILOCLAW_APP: DurableObjectNamespace<KiloClawApp>;
-  HYPERDRIVE: Hyperdrive;
+  HYPERDRIVE?: Hyperdrive;
   KV_CLAW_CACHE: KVNamespace;
 
   // Auth secrets
@@ -18,7 +18,6 @@ export type KiloClawEnv = {
 
   // KiloCode provider configuration
   KILOCODE_API_BASE_URL?: string;
-  DEV_MODE?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
@@ -35,9 +34,12 @@ export type KiloClawEnv = {
   FLY_REGISTRY_APP?: string; // Shared app for Docker image registry
   FLY_REGION?: string;
   FLY_IMAGE_TAG?: string;
+  FLY_IMAGE_DIGEST?: string;
+  OPENCLAW_VERSION?: string;
 
   // OpenClaw gateway configuration
   OPENCLAW_ALLOWED_ORIGINS?: string;
+  REQUIRE_PROXY_TOKEN?: string;
 };
 
 /**

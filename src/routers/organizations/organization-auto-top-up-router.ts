@@ -4,7 +4,7 @@ import {
   OrganizationIdInputSchema,
 } from '@/routers/organizations/utils';
 import { db } from '@/lib/drizzle';
-import { auto_top_up_configs, organizations } from '@/db/schema';
+import { auto_top_up_configs, organizations } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
@@ -103,7 +103,7 @@ export const organizationAutoTopUpRouter = createTRPCRouter({
   changePaymentMethod: organizationOwnerProcedure
     .input(
       OrganizationIdInputSchema.extend({
-        amountCents: z.number().optional(),
+        amountCents: OrgAutoTopUpAmountCentsSchema.optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {

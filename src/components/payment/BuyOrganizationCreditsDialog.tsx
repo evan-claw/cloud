@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import CreditPurchaseOptions from './CreditPurchaseOptions';
 import { OrganizationAutoTopUpToggle } from '@/components/organizations/OrganizationAutoTopUpToggle';
 import { RefreshCw } from 'lucide-react';
-import { useIsKiloAdmin } from '@/components/organizations/OrganizationContext';
+import { useIsAutoTopUpEnabled } from '@/components/organizations/OrganizationContext';
 
 type BuyOrganizationCreditsDialogProps = {
   organizationId: string;
@@ -23,7 +23,7 @@ export default function BuyOrganizationCreditsDialog({
   amounts = DEFAULT_ORG_AMOUNTS,
 }: BuyOrganizationCreditsDialogProps) {
   const [buyCreditsOpen, setBuyCreditsOpen] = useState(false);
-  const isKiloAdmin = useIsKiloAdmin();
+  const isAutoTopUpEnabled = useIsAutoTopUpEnabled();
 
   return (
     <>
@@ -39,7 +39,7 @@ export default function BuyOrganizationCreditsDialog({
           </DialogHeader>
           <div className="space-y-4">
             <CreditPurchaseOptions amounts={amounts} organizationId={organizationId} />
-            {isKiloAdmin && (
+            {isAutoTopUpEnabled && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base font-semibold">

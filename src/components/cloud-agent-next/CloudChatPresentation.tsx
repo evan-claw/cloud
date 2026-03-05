@@ -8,7 +8,7 @@
 
 import React, { memo, type RefObject } from 'react';
 import { OrgContextModal } from './OrgContextModal';
-import { ResumeConfigModal, type ResumeConfig, VALID_MODE_VALUES } from './ResumeConfigModal';
+import { ResumeConfigModal, type ResumeConfig } from './ResumeConfigModal';
 import { OldSessionBanner } from './OldSessionBanner';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatHeader } from './ChatHeader';
@@ -16,14 +16,19 @@ import { ChatInput } from './ChatInput';
 import { ErrorBanner } from './ErrorBanner';
 import { MessageErrorBoundary } from './MessageErrorBoundary';
 import { MessageBubble } from './MessageBubble';
+import { MaybeAutocommitStatus } from './AutocommitStatus';
+import { SessionStatusIndicator } from './SessionStatusIndicator';
+import type { SessionStatusIndicator as SessionStatusIndicatorType } from './store/atoms';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ArrowDown, RefreshCw } from 'lucide-react';
 import type { AgentMode, SessionConfig, StoredSession, StoredMessage } from './types';
 import { isMessageStreaming } from './types';
 import type { DbSessionDetails, IndexedDbSessionData } from './store/db-session-atoms';
+import type { StandaloneQuestion } from './store/atoms';
 import type { ModelOption } from '@/components/shared/ModelCombobox';
 import type { SlashCommand } from '@/lib/cloud-agent/slash-commands';
+import { QuestionToolCard } from './QuestionToolCard';
 
 // V2: No conversion needed - StoredMessage format is used directly by MessageBubble
 
@@ -44,6 +49,7 @@ const StaticMessages = memo(
         {messages.map(msg => (
           <MessageErrorBoundary key={msg.info.id}>
             <MessageBubble message={msg} getChildMessages={getChildMessages} />
+            <MaybeAutocommitStatus msg={msg} />
           </MessageErrorBoundary>
         ))}
       </>
@@ -75,6 +81,7 @@ function DynamicMessages({
               isStreaming={streaming}
               getChildMessages={getChildMessages}
             />
+            <MaybeAutocommitStatus msg={msg} />
           </MessageErrorBoundary>
         );
       })}
@@ -114,7 +121,8 @@ export type CloudChatPresentationProps = {
   showResumeModal: boolean;
   pendingSessionForOrgContext: IndexedDbSessionData | null;
   pendingResumeSession: DbSessionDetails | null;
-  pendingGitState: { branch?: string } | null;
+  /** Whether the current session is non-resumable (CLI session without git_url/git_branch) */
+  isNonResumableSession: boolean;
 
   // Config state
   needsResumeConfig: boolean;
@@ -134,12 +142,8 @@ export type CloudChatPresentationProps = {
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   messagesEndRef: RefObject<HTMLDivElement | null>;
 
-  // Stream resume config (for input enabling)
-  streamResumeConfig: {
-    mode: string;
-    model: string;
-    githubRepo: string;
-  } | null;
+  // Persisted resume config (for input enabling)
+  persistedResumeConfig: ResumeConfig | null;
 
   // Child session messages function
   getChildMessages?: (sessionId: string) => StoredMessage[];
@@ -163,14 +167,23 @@ export type CloudChatPresentationProps = {
   onMenuClick: () => void;
   onMobileSheetOpenChange: (open: boolean) => void;
 
+  /** Session status indicator for recoverable errors, reconnections, interrupts */
+  sessionStatusIndicator?: SessionStatusIndicatorType | null;
+
   // Old session handling
   isOldSession?: boolean;
+
+  // Standalone question (not associated with a tool call)
+  standaloneQuestion?: StandaloneQuestion | null;
 
   // Input toolbar state and callbacks
   inputMode?: AgentMode;
   inputModel?: string;
   onInputModeChange?: (mode: AgentMode) => void;
   onInputModelChange?: (model: string) => void;
+
+  /** Pre-populate the ChatInput textarea (e.g. to restore text after a failed send) */
+  chatInputInitialValue?: string;
 };
 
 /**
@@ -199,7 +212,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   showResumeModal,
   pendingSessionForOrgContext,
   pendingResumeSession,
-  pendingGitState,
+  isNonResumableSession,
   needsResumeConfig,
   resumeConfigPersisting,
   resumeConfigFailed,
@@ -210,7 +223,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   availableCommands,
   scrollContainerRef,
   messagesEndRef,
-  streamResumeConfig,
+  persistedResumeConfig,
   onSendMessage,
   onStopExecution,
   onRefresh,
@@ -228,12 +241,15 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   onToggleSound,
   onMenuClick,
   onMobileSheetOpenChange,
+  sessionStatusIndicator,
   isOldSession = false,
   getChildMessages,
+  standaloneQuestion,
   inputMode,
   inputModel,
   onInputModeChange,
   onInputModelChange,
+  chatInputInitialValue,
 }: CloudChatPresentationProps) {
   // Show chat interface when we have:
   // 1. An active streaming session (currentSessionId + sessionConfig)
@@ -257,26 +273,10 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
           isOpen={showResumeModal}
           onClose={onResumeClose}
           onConfirm={onResumeConfirm}
-          session={{
-            session_id: pendingResumeSession.session_id,
-            git_url: pendingResumeSession.git_url ?? null,
-            title: pendingResumeSession.title,
-          }}
-          gitState={pendingGitState}
+          session={pendingResumeSession}
           modelOptions={modelOptions}
           isLoadingModels={isLoadingModels}
-          defaultMode={
-            pendingResumeSession.last_mode &&
-            (VALID_MODE_VALUES as readonly string[]).includes(pendingResumeSession.last_mode)
-              ? (pendingResumeSession.last_mode as ResumeConfig['mode'])
-              : undefined
-          }
-          defaultModel={
-            pendingResumeSession.last_model &&
-            modelOptions.some(m => m.id === pendingResumeSession.last_model)
-              ? pendingResumeSession.last_model
-              : defaultModel
-          }
+          orgDefaultModel={defaultModel}
         />
       )}
 
@@ -321,7 +321,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
             <ChatHeader
               cloudAgentSessionId={currentSessionId || 'Starting session...'}
               kiloSessionId={currentDbSessionId || undefined}
-              repository={sessionConfig?.repository || 'Loading...'}
+              repository={sessionConfig?.repository ?? ''}
               branch={currentSessionId || undefined}
               model={sessionConfig?.model}
               isStreaming={isStreaming}
@@ -368,6 +368,13 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
               </div>
             )}
 
+            {/* Non-resumable session banner */}
+            {isNonResumableSession && (
+              <div className="flex items-center justify-center gap-2 border-b border-gray-500/50 bg-gray-800/50 p-3 text-center text-sm text-gray-300">
+                <span>This session cannot be resumed (no repository information).</span>
+              </div>
+            )}
+
             {/* Config persistence status */}
             {resumeConfigPersisting && (
               <div className="flex items-center justify-center gap-2 border-b border-blue-500/50 bg-blue-500/20 p-3 text-center text-sm">
@@ -400,6 +407,23 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
                 {/* Dynamic messages - re-render during streaming */}
                 <DynamicMessages messages={dynamicMessages} getChildMessages={getChildMessages} />
 
+                {/* Standalone question (not attached to a tool call) */}
+                {standaloneQuestion && (
+                  <div className="my-4 ml-12">
+                    <QuestionToolCard
+                      key={standaloneQuestion.requestId}
+                      questions={standaloneQuestion.questions}
+                      requestId={standaloneQuestion.requestId}
+                      status="running"
+                    />
+                  </div>
+                )}
+
+                {/* Session status indicator (recoverable errors, reconnection, interrupts) */}
+                {sessionStatusIndicator && (
+                  <SessionStatusIndicator indicator={sessionStatusIndicator} />
+                )}
+
                 {/* Invisible anchor for auto-scroll */}
                 <div ref={messagesEndRef} />
               </div>
@@ -427,25 +451,30 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
                 isStreaming ||
                 needsResumeConfig ||
                 isOldSession ||
+                isNonResumableSession ||
                 // Disable while a prepared session is auto-initiating (prevents dropped messages)
                 (cloudAgentSessionId && !isSessionInitiated) ||
                 // Allow sending if:
                 // 1. We have an active cloud session (currentSessionId), OR
-                // 2. We have streamResumeConfig ready for CLI sessions, OR
+                // 2. We have persistedResumeConfig ready for CLI sessions, OR
                 // 3. We have cloudAgentSessionId for web sessions (ready for initiateFromKilocodeSession)
-                (!currentSessionId && !streamResumeConfig && !cloudAgentSessionId)
+                (!currentSessionId && !persistedResumeConfig && !cloudAgentSessionId)
               }
               isStreaming={isStreaming}
               placeholder={
                 isOldSession
                   ? 'This session uses a legacy format. Please start a new session.'
-                  : cloudAgentSessionId && !isSessionInitiated
-                    ? 'Initializing session...'
-                    : needsResumeConfig
-                      ? 'Configure session to continue...'
-                      : isStreaming
-                        ? 'Streaming...'
-                        : 'Type your message... (/ for commands)'
+                  : isNonResumableSession
+                    ? 'This session cannot be resumed (no repository information).'
+                    : cloudAgentSessionId && !isSessionInitiated
+                      ? 'Initializing session...'
+                      : needsResumeConfig
+                        ? 'Configure session to continue...'
+                        : isStreaming
+                          ? 'Streaming...'
+                          : sessionStatusIndicator?.type === 'error'
+                            ? 'Send a message to continue...'
+                            : 'Type your message... (/ for commands)'
               }
               slashCommands={availableCommands}
               mode={inputMode}
@@ -455,6 +484,7 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
               onModeChange={onInputModeChange}
               onModelChange={onInputModelChange}
               showToolbar={Boolean(currentDbSessionId) && !needsResumeConfig}
+              initialValue={chatInputInitialValue}
             />
 
             {/* Banner for sessions needing configuration */}

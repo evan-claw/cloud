@@ -6,7 +6,7 @@
  */
 
 import * as z from 'zod';
-import type { AutoFixTicket } from '@/db/schema';
+import type { AutoFixTicket } from '@kilocode/db/schema';
 
 // ============================================================================
 // Constants
@@ -59,9 +59,18 @@ export const OwnerSchema = z.discriminatedUnion('type', [
  * Auto fix agent configuration schema
  * Used for storing configuration in agent_configs table
  */
+/**
+ * Trigger source for fix tickets
+ */
+export const TriggerSourceSchema = z.enum(['label', 'review_comment']);
+
 export const AutoFixAgentConfigSchema = z
   .object({
     enabled_for_issues: z.boolean().describe('Enable auto fix for GitHub issues'),
+    enabled_for_review_comments: z
+      .boolean()
+      .default(false)
+      .describe('Enable auto fix for PR review comment @kilo mentions'),
     repository_selection_mode: z
       .enum(['all', 'selected'])
       .describe('Whether to fix all repositories or only selected ones'),
@@ -120,6 +129,7 @@ export const SaveAutoFixConfigSchema = z
   .object({
     organizationId: z.string().uuid(),
     enabled_for_issues: z.boolean(),
+    enabled_for_review_comments: z.boolean().optional(),
     repository_selection_mode: z.enum(['all', 'selected']),
     selected_repository_ids: z.array(z.number().int().positive()).optional(),
     skip_labels: z.array(z.string()).optional(),
@@ -203,6 +213,15 @@ export const CreateFixTicketParamsSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
   intentSummary: z.string().optional(),
   relatedFiles: z.array(z.string()).optional(),
+  // Trigger source (defaults to 'label')
+  triggerSource: TriggerSourceSchema.optional(),
+  // Review comment context (for review_comment trigger)
+  reviewCommentId: z.number().int().positive().optional(),
+  reviewCommentBody: z.string().optional(),
+  filePath: z.string().optional(),
+  lineNumber: z.number().int().positive().optional(),
+  diffHunk: z.string().optional(),
+  prHeadRef: z.string().optional(),
 });
 
 /**
@@ -338,6 +357,7 @@ export const DispatchFixRequestSchema = z.object({
   ticketId: z.string().uuid(),
   authToken: z.string(),
   owner: OwnerSchema,
+  triggerSource: TriggerSourceSchema.optional(),
   sessionInput: z.object({
     repoFullName: z.string(),
     issueNumber: z.number().int().positive(),
@@ -359,6 +379,13 @@ export const DispatchFixRequestSchema = z.object({
     prTitleTemplate: z.string(),
     prBodyTemplate: z.string().nullable().optional(),
     prBaseBranch: z.string(),
+    // Review comment context (for review_comment trigger)
+    upstreamBranch: z.string().optional(),
+    reviewCommentId: z.number().int().positive().optional(),
+    reviewCommentBody: z.string().optional(),
+    filePath: z.string().optional(),
+    lineNumber: z.number().int().positive().optional(),
+    diffHunk: z.string().optional(),
   }),
 });
 
@@ -381,6 +408,7 @@ export type ListFixTicketsParams = z.infer<typeof ListFixTicketsParamsSchema>;
 export type FixStatusUpdate = z.infer<typeof FixStatusUpdateSchema>;
 export type DispatchFixRequest = z.infer<typeof DispatchFixRequestSchema>;
 export type IssueLabeledPayload = z.infer<typeof IssueLabeledPayloadSchema>;
+export type TriggerSource = z.infer<typeof TriggerSourceSchema>;
 
 /**
  * Response type for list fix tickets

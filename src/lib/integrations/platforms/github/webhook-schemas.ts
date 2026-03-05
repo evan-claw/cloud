@@ -26,7 +26,7 @@ const GitHubInstallationSchema = z.object({
   created_at: z.string(),
 });
 
-const GitHubSenderSchema = z.object({
+export const GitHubSenderSchema = z.object({
   login: z.string(),
 });
 
@@ -103,7 +103,7 @@ export const PushEventPayloadSchema = z.object({
 });
 
 // pull_request webhook payload
-const GitHubRepositorySchema = z.object({
+export const GitHubRepositorySchema = z.object({
   id: z.number(),
   name: z.string(),
   full_name: z.string(),
@@ -189,6 +189,55 @@ export const IssuePayloadSchema = z.object({
   }),
 });
 
+// GitHub author_association values from webhook payloads
+export const GitHubAuthorAssociationSchema = z.enum([
+  'COLLABORATOR',
+  'CONTRIBUTOR',
+  'FIRST_TIMER',
+  'FIRST_TIME_CONTRIBUTOR',
+  'MANNEQUIN',
+  'MEMBER',
+  'NONE',
+  'OWNER',
+]);
+
+// pull_request_review_comment webhook payload
+export const PullRequestReviewCommentPayloadSchema = z.object({
+  action: z.string(),
+  comment: z.object({
+    id: z.number().int(),
+    body: z.string(),
+    user: z.object({
+      login: z.string(),
+    }),
+    html_url: z.string(),
+    path: z.string(),
+    line: z.number().nullable().optional(),
+    diff_hunk: z.string(),
+    author_association: GitHubAuthorAssociationSchema,
+  }),
+  pull_request: z.object({
+    number: z.number(),
+    title: z.string(),
+    html_url: z.string().optional(),
+    user: z.object({
+      login: z.string(),
+    }),
+    head: z.object({
+      sha: z.string(),
+      ref: z.string(),
+    }),
+    base: z.object({
+      ref: z.string(),
+    }),
+  }),
+  repository: GitHubRepositorySchema,
+  installation: z.object({
+    id: z.number(),
+  }),
+  sender: GitHubSenderSchema.optional(),
+});
+
 // Type exports for use in the webhook handler
 export type InstallationCreatedPayload = z.infer<typeof InstallationCreatedPayloadSchema>;
 export type InstallationDeletedPayload = z.infer<typeof InstallationDeletedPayloadSchema>;
@@ -198,3 +247,5 @@ export type InstallationRepositoriesPayload = z.infer<typeof InstallationReposit
 export type PushEventPayload = z.infer<typeof PushEventPayloadSchema>;
 export type PullRequestPayload = z.infer<typeof PullRequestPayloadSchema>;
 export type IssuePayload = z.infer<typeof IssuePayloadSchema>;
+export type PullRequestReviewCommentPayload = z.infer<typeof PullRequestReviewCommentPayloadSchema>;
+export type GitHubAuthorAssociation = z.infer<typeof GitHubAuthorAssociationSchema>;

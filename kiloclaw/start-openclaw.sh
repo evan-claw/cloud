@@ -4,7 +4,7 @@
 # 1. Decrypts KILOCLAW_ENC_* environment variables (if encryption key is present)
 # 2. Runs openclaw onboard --non-interactive to configure from env vars (first run only)
 # 3. Patches config for features onboard doesn't cover (channels, gateway auth)
-# 4. Starts the gateway
+# 4. Starts the controller (which supervises the gateway)
 
 set -e
 
@@ -118,29 +118,37 @@ if [ -z "$KILOCODE_API_KEY" ]; then
     exit 1
 fi
 
+KILOCLAW_FRESH_INSTALL=false
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, running openclaw onboard..."
 
     openclaw onboard --non-interactive --accept-risk \
         --mode local \
-        --gateway-port 18789 \
-        --gateway-bind lan \
+        --gateway-port 3001 \
+        --gateway-bind loopback \
         --skip-channels \
         --skip-skills \
-        --skip-health
+        --skip-health \
+        --kilocode-api-key "$KILOCODE_API_KEY"
 
+    KILOCLAW_FRESH_INSTALL=true
     echo "Onboard completed"
 else
-    echo "Using existing config"
+    echo "Using existing config, running doctor..."
+    openclaw doctor --fix --non-interactive
 fi
+export KILOCLAW_FRESH_INSTALL
 
 # ============================================================
-# PATCH CONFIG (channels, gateway auth, trusted proxies)
+# PATCH CONFIG (channels, gateway auth, exec policy)
 # ============================================================
-# openclaw onboard handles provider/model config, but we need to patch in:
-# - Channel config (Telegram, Discord, Slack)
+# openclaw onboard handles provider/model config natively (kilocode provider,
+# default model, model catalog). We still need to patch in:
 # - Gateway token auth
-# - KiloCode provider + model config
+# - Channel config (Telegram, Discord, Slack)
+# - Exec policy (no Docker sandbox on Fly machines)
+# - Control UI settings (allowed origins, insecure auth for dev)
+# - Base URL override for local dev (see note below)
 node << 'EOFPATCH'
 const fs = require('fs');
 
@@ -154,14 +162,35 @@ try {
     console.log('Starting with empty config');
 }
 
+// Migration: remove stale manually-managed kilocode provider config.
+// Pre-upgrade instances have a models.providers.kilocode entry with the old
+// /api/openrouter/ base URL and a flat model list (just {id, name}).
+// OpenClaw 2026.2.24+ has a built-in kilocode provider with the correct
+// /api/gateway/ URL and richer model definitions. Removing the stale entry
+// lets the built-in provider take over. The KILOCODE_API_BASE_URL override
+// below re-adds a minimal entry only when needed (local dev).
+if (config.models && config.models.providers && config.models.providers.kilocode) {
+    var staleBaseUrl = config.models.providers.kilocode.baseUrl || '';
+    if (staleBaseUrl.includes('/api/openrouter/') || staleBaseUrl === 'https://api.kilo.ai/api/gateway/') {
+        delete config.models.providers.kilocode;
+        console.log('Removed stale kilocode provider config (baseUrl: ' + staleBaseUrl + ')');
+        // Clean up empty providers/models objects
+        if (Object.keys(config.models.providers).length === 0) {
+            delete config.models.providers;
+        }
+        if (Object.keys(config.models).length === 0) {
+            delete config.models;
+        }
+    }
+}
+
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
 
 // Gateway configuration
-config.gateway.port = 18789;
+config.gateway.port = 3001;
 config.gateway.mode = 'local';
-// Set bind to loopback so agent tools connect via 127.0.0.1 (auto-approved for pairing).
-// The actual server bind is controlled by --bind lan on the command line, not this config.
+// Bind to loopback only. External traffic is handled by the controller proxy.
 config.gateway.bind = 'loopback';
 
 if (process.env.OPENCLAW_GATEWAY_TOKEN) {
@@ -169,14 +198,11 @@ if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
 }
 
-if (process.env.OPENCLAW_DEV_MODE === 'true') {
-    config.gateway.controlUi = config.gateway.controlUi || {};
-    config.gateway.controlUi.allowInsecureAuth = true;
-}
-
-// Multi-tenant: auto-approve devices so users don't need to pair.
-// Worker-level JWT auth is the real access control -- each user's machine
-// is only reachable via their signed token.
+// Allow Control UI connections from localhost without WebCrypto device identity.
+// This is a fallback for insecure HTTP contexts where SubtleCrypto is unavailable.
+// It does NOT bypass device pairing -- pairing is handled separately via the
+// controller proxy's loopback headers (auto-approve for local connections) and
+// the device pairing approval UI for role-upgrade scenarios.
 if (process.env.AUTO_APPROVE_DEVICES === 'true') {
     config.gateway.controlUi = config.gateway.controlUi || {};
     config.gateway.controlUi.allowInsecureAuth = true;
@@ -192,64 +218,54 @@ if (process.env.OPENCLAW_ALLOWED_ORIGINS) {
         .map(function(s) { return s.trim(); });
 }
 
-// KiloCode provider configuration (required)
-const providerName = 'kilocode';
-const baseUrl = process.env.KILOCODE_API_BASE_URL || 'https://api.kilo.ai/api/openrouter/';
-const defaultModel =
-    process.env.KILOCODE_DEFAULT_MODEL || providerName + '/anthropic/claude-opus-4.5';
-const modelsPath = '/root/.openclaw/kilocode-models.json';
-const defaultModels = [
-    { id: 'anthropic/claude-opus-4.5', name: 'Anthropic: Claude Opus 4.5' },
-    { id: 'minimax/minimax-m2.1:free', name: 'Minimax: Minimax M2.1' },
-    { id: 'z-ai/glm-4.7:free', name: 'GLM-4.7 (Free - Exclusive to Kilo)' },
-];
-let models = defaultModels;
-
-// Prefer KILOCODE_MODELS_JSON env var (set by buildEnvVars from DO config).
-// Falls back to file-based override for manual use, then baked-in defaults.
-if (process.env.KILOCODE_MODELS_JSON) {
-    try {
-        const parsed = JSON.parse(process.env.KILOCODE_MODELS_JSON);
-        models = Array.isArray(parsed) ? parsed : defaultModels;
-        console.log('Using model list from KILOCODE_MODELS_JSON (' + models.length + ' models)');
-    } catch (error) {
-        console.warn('Failed to parse KILOCODE_MODELS_JSON, using defaults:', error);
-    }
-} else if (fs.existsSync(modelsPath)) {
-    const rawModels = fs.readFileSync(modelsPath, 'utf8');
-    if (rawModels.trim().length === 0) {
-        models = [];
-    } else {
-        try {
-            const parsed = JSON.parse(rawModels);
-            models = Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-            console.warn('Failed to parse KiloCode models file, using empty list:', error);
-            models = [];
-        }
-    }
+// KiloCode provider base URL override (local dev only).
+// OpenClaw's native kilocode provider hardcodes https://api.kilo.ai/api/gateway/.
+// In local dev, Fly machines need to route through a Cloudflare tunnel back to
+// localhost, so we override the base URL when KILOCODE_API_BASE_URL is set.
+// TODO: Upstream KILOCODE_API_BASE_URL env var support into OpenClaw's kilocode
+// provider so this config patch can be removed entirely.
+if (process.env.KILOCODE_API_BASE_URL) {
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers.kilocode = config.models.providers.kilocode || {};
+    config.models.providers.kilocode.baseUrl = process.env.KILOCODE_API_BASE_URL;
+    // Provider entries require a models array per OpenClaw's strict zod schema.
+    // Empty array is valid — the built-in kilocode provider fills in its catalog.
+    config.models.providers.kilocode.models = config.models.providers.kilocode.models || [];
+    console.log('Overriding kilocode base URL: ' + process.env.KILOCODE_API_BASE_URL);
 }
 
-config.models = config.models || {};
-config.models.providers = config.models.providers || {};
-config.models.providers[providerName] = {
-    baseUrl: baseUrl,
-    apiKey: process.env.KILOCODE_API_KEY,
-    api: 'openai-completions',
-    models: models,
-};
+// User-selected default model override.
+// OpenClaw onboard sets kilocode/anthropic/claude-opus-4.6 as the default.
+// If the user picked a different model in the UI, override it here.
+if (process.env.KILOCODE_DEFAULT_MODEL) {
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: process.env.KILOCODE_DEFAULT_MODEL };
+    console.log('Overriding default model: ' + process.env.KILOCODE_DEFAULT_MODEL);
+}
 
-config.agents = config.agents || {};
-config.agents.defaults = config.agents.defaults || {};
-config.agents.defaults.model = { primary: defaultModel };
-console.log('KiloCode provider configured with base URL ' + baseUrl);
+// Remove the agents.defaults.models allowlist that `openclaw onboard` creates.
+// When non-empty it restricts visible models to only those listed, hiding the
+// rest of the kilocode catalog. KiloClaw users should see all available models.
+if (config.agents && config.agents.defaults && config.agents.defaults.models) {
+    delete config.agents.defaults.models;
+}
 
-// Explicitly lock down exec tool security (defense-in-depth).
-// OpenClaw defaults to these values, but pinning them here prevents
-// silent regression if upstream defaults change in a future version.
+// Tool profile: on fresh install, override the onboard default ("messaging")
+// with "full" so agents have access to all tools. On subsequent boots,
+// leave the user's choice untouched.
 config.tools = config.tools || {};
+if (process.env.KILOCLAW_FRESH_INSTALL === 'true') {
+    config.tools.profile = 'full';
+}
+
+// Exec: KiloClaw machines have no Docker sandbox, so exec must target the
+// gateway host directly. Allowlist mode gates unknown commands via the
+// Control UI approval dialog; safe bins auto-allow without approval.
 config.tools.exec = config.tools.exec || {};
-config.tools.exec.security = 'deny';
+config.tools.exec.host = 'gateway';
+config.tools.exec.security = 'allowlist';
 config.tools.exec.ask = 'on-miss';
 
 // Telegram configuration
@@ -313,20 +329,24 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
-# START GATEWAY
+# START CONTROLLER
 # ============================================================
-echo "Starting OpenClaw Gateway..."
-echo "Gateway will be available on port 18789"
+# Tell the gateway it's running under a supervisor. On SIGUSR1 restart,
+# the gateway will exit cleanly (code 0) instead of spawning a detached
+# child process. The controller's supervisor detects the clean exit and
+# respawns the gateway immediately without backoff.
+export INVOCATION_ID=1
 
-rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
-rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+echo 'Starting KiloClaw controller...'
 
-echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
+# Build gateway args as a JSON array (safe quoting through node serialization).
+KILOCLAW_GATEWAY_ARGS=$(node -e "
+  const args = ['--port', '3001', '--verbose', '--allow-unconfigured', '--bind', 'loopback'];
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) {
+    args.push('--token', process.env.OPENCLAW_GATEWAY_TOKEN);
+  }
+  console.log(JSON.stringify(args));
+")
+export KILOCLAW_GATEWAY_ARGS
 
-if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
-    echo "Starting gateway with token auth..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN"
-else
-    echo "Starting gateway with device pairing (no token)..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
-fi
+exec node /usr/local/bin/kiloclaw-controller.js

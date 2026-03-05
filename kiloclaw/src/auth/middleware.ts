@@ -1,9 +1,10 @@
 import type { Context, Next } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { timingSafeEqual } from '@kilocode/encryption';
 import type { AppEnv } from '../types';
 import { KILOCLAW_AUTH_COOKIE } from '../config';
 import { validateKiloToken } from './jwt';
-import { createDatabaseConnection, UserStore } from '../db';
+import { getWorkerDb, findPepperByUserId } from '../db';
 
 /**
  * Auth middleware for user-facing routes.
@@ -13,16 +14,8 @@ import { createDatabaseConnection, UserStore } from '../db';
  * 3. Verify HS256 with NEXTAUTH_SECRET; check version and env
  * 4. Validate apiTokenPepper against DB via Hyperdrive
  * 5. Set ctx.userId, ctx.authToken on context
- * 6. DEV_MODE bypass: synthetic userId 'dev@kilocode.ai'
  */
 export async function authMiddleware(c: Context<AppEnv>, next: Next) {
-  // DEV_MODE bypass
-  if (c.env.DEV_MODE === 'true') {
-    c.set('userId', 'dev@kilocode.ai');
-    c.set('authToken', 'dev-token');
-    return next();
-  }
-
   const secret = c.env.NEXTAUTH_SECRET;
   if (!secret) {
     console.error('[auth] NEXTAUTH_SECRET not configured');
@@ -46,7 +39,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
   const result = await validateKiloToken(token, secret, c.env.WORKER_ENV);
   if (!result.success) {
     console.warn('[auth] Token validation failed:', result.error);
-    return c.json({ error: result.error }, 401);
+    return c.json({ error: 'Authentication failed' }, 401);
   }
 
   // Validate pepper against DB via Hyperdrive.
@@ -61,9 +54,8 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
   }
 
   try {
-    const db = createDatabaseConnection(c.env.HYPERDRIVE.connectionString);
-    const userStore = new UserStore(db);
-    const user = await userStore.findPepperByUserId(result.userId);
+    const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
+    const user = await findPepperByUserId(db, result.userId);
     if (!user) {
       console.warn('[auth] User not found in DB:', result.userId);
       return c.json({ error: 'User not found' }, 401);
@@ -109,17 +101,4 @@ export async function internalApiMiddleware(c: Context<AppEnv>, next: Next) {
   }
 
   return next();
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const encoder = new TextEncoder();
-  const aBytes = encoder.encode(a);
-  const bBytes = encoder.encode(b);
-
-  if (aBytes.length !== bBytes.length) {
-    // Compare a against itself so the timing is constant regardless of length mismatch
-    crypto.subtle.timingSafeEqual(aBytes, aBytes);
-    return false;
-  }
-  return crypto.subtle.timingSafeEqual(aBytes, bBytes);
 }

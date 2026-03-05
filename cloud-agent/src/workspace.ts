@@ -6,7 +6,7 @@ import type {
   SystemStatusEvent,
 } from './types.js';
 import { logger } from './logger.js';
-import { withTimeout } from './utils/timeout.js';
+import { withTimeout } from '@kilocode/worker-utils';
 
 /**
  * Sanitize a string for use in filesystem paths by replacing forbidden characters with dashes.
@@ -36,6 +36,104 @@ const CLI_DIR = `${KILOCODE_DIR}/cli`;
 const CLI_CONFIG_PATH = `${CLI_DIR}/config.json`;
 const CLI_GLOBAL_TASKS_PATH = `${CLI_DIR}/global/tasks`;
 const CLI_LOGS_PATH = `${CLI_DIR}/logs`;
+
+const DEFAULT_ALLOWED_COMMANDS = [
+  'ls',
+  'cat',
+  'echo',
+  'pwd',
+  'find',
+  'grep',
+  'node',
+  'npm',
+  'git',
+  'whoami',
+  'date',
+  'python3',
+  'head',
+  'tail',
+  'cd',
+  'mkdir',
+  'touch',
+];
+
+const DEFAULT_DENIED_COMMAND_PATTERNS = ['rm -rf', 'sudo rm', 'mkfs', 'dd if='];
+
+// Keep in sync with: cloud-agent-next/src/session-service.ts, cloudflare-code-review-infra/src/code-review-orchestrator.ts
+// mkdir and touch are intentionally allowed for agent scratch space during analysis
+const CODE_REVIEW_ALLOWED_COMMANDS = [
+  'ls',
+  'cat',
+  'echo',
+  'pwd',
+  'find',
+  'grep',
+  'git',
+  'gh',
+  'whoami',
+  'date',
+  'head',
+  'tail',
+  'cd',
+  'mkdir',
+  'touch',
+];
+
+const CODE_REVIEW_DENIED_COMMAND_PATTERNS = [
+  'git add',
+  'git commit',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git cherry-pick',
+  'git reset',
+  'git checkout',
+  'git switch',
+  'git stash',
+  'git tag',
+  'git am',
+  'git apply',
+  'git remote set-url',
+  'gh pr merge',
+  'gh pr review',
+  'gh pr create',
+  'gh pr close',
+  'gh pr edit',
+  'gh issue',
+  'gh repo create',
+  'gh repo fork',
+  'npm test',
+  'pnpm test',
+  'bun test',
+  'yarn test',
+  'pytest',
+  'vitest',
+];
+
+type CommandPolicy = {
+  allowed: string[];
+  denied: string[];
+  policyName: string;
+  isReadOnly: boolean;
+};
+
+function getCommandPolicy(createdOnPlatform?: string): CommandPolicy {
+  if (createdOnPlatform === 'code-review') {
+    return {
+      allowed: CODE_REVIEW_ALLOWED_COMMANDS,
+      denied: [...DEFAULT_DENIED_COMMAND_PATTERNS, ...CODE_REVIEW_DENIED_COMMAND_PATTERNS],
+      policyName: 'code-review-read-only',
+      isReadOnly: true,
+    };
+  }
+
+  return {
+    allowed: DEFAULT_ALLOWED_COMMANDS,
+    denied: DEFAULT_DENIED_COMMAND_PATTERNS,
+    policyName: 'default',
+    isReadOnly: false,
+  };
+}
 
 export function getBaseWorkspacePath(
   kilocodeOrganizationId: string | undefined,
@@ -98,8 +196,11 @@ export interface SessionPaths {
 function buildKilocodeConfig(
   kilocodeOrganizationId: string | undefined,
   kilocodeToken: string,
-  kilocodeModel: string
+  kilocodeModel: string,
+  commandPolicy: CommandPolicy
 ) {
+  const isReadOnly = commandPolicy.isReadOnly;
+
   const providerConfig: {
     id: string;
     provider: string;
@@ -127,7 +228,7 @@ function buildKilocodeConfig(
     autoApproval: {
       enabled: true,
       read: { enabled: true, outside: false },
-      write: { enabled: true, outside: false, protected: false },
+      write: { enabled: !isReadOnly, outside: false, protected: isReadOnly },
       browser: { enabled: false },
       retry: { enabled: false, delay: 10 },
       mcp: { enabled: true },
@@ -135,26 +236,8 @@ function buildKilocodeConfig(
       subtasks: { enabled: true },
       execute: {
         enabled: true,
-        allowed: [
-          'ls',
-          'cat',
-          'echo',
-          'pwd',
-          'find',
-          'grep',
-          'node',
-          'npm',
-          'git',
-          'whoami',
-          'date',
-          'python3',
-          'head',
-          'tail',
-          'cd',
-          'mkdir',
-          'touch',
-        ],
-        denied: ['rm -rf', 'sudo rm', 'mkfs', 'dd if='],
+        allowed: commandPolicy.allowed,
+        denied: commandPolicy.denied,
       },
       question: { enabled: false, timeout: 60 },
       todo: { enabled: true },
@@ -172,7 +255,8 @@ export async function configureKilocode(
   kilocodeToken: string,
   kilocodeModel: string,
   overrideToken?: string,
-  overrideOrgId?: string
+  overrideOrgId?: string,
+  createdOnPlatform?: string
 ): Promise<void> {
   // Use override values if provided, otherwise use original values
   const effectiveToken = overrideToken ?? kilocodeToken;
@@ -182,7 +266,21 @@ export async function configureKilocode(
     throw new Error('KILOCODE_TOKEN is missing or empty. Cannot configure Kilocode CLI.');
   }
 
-  const configJson = buildKilocodeConfig(effectiveOrgId, effectiveToken, kilocodeModel);
+  const commandPolicy = getCommandPolicy(createdOnPlatform);
+  logger
+    .withFields({
+      createdOnPlatform: createdOnPlatform ?? 'cloud-agent',
+      commandPolicy: commandPolicy.policyName,
+      deniedCommandPatterns: commandPolicy.denied.length,
+    })
+    .info('Applying Kilocode command policy');
+
+  const configJson = buildKilocodeConfig(
+    effectiveOrgId,
+    effectiveToken,
+    kilocodeModel,
+    commandPolicy
+  );
   const configPath = getKilocodeConfigPath(sessionHome);
 
   try {
@@ -202,7 +300,8 @@ export async function setupWorkspace(
   kilocodeModel: string,
   sessionId: string,
   overrideToken?: string,
-  overrideOrgId?: string
+  overrideOrgId?: string,
+  createdOnPlatform?: string
 ): Promise<SessionPaths> {
   const sessionWorkspacePath = getSessionWorkspacePath(kilocodeOrganizationId, userId, sessionId);
   const sessionHome = getSessionHomePath(sessionId);
@@ -234,7 +333,8 @@ export async function setupWorkspace(
       kilocodeToken,
       kilocodeModel,
       overrideToken,
-      overrideOrgId
+      overrideOrgId,
+      createdOnPlatform
     );
   } catch (error) {
     throw new Error(
@@ -412,14 +512,14 @@ export async function cloneGitRepo(
   gitUrl: string,
   gitToken?: string,
   gitAuthor?: GitAuthorConfig,
-  options?: { shallow?: boolean }
+  options?: { shallow?: boolean; platform?: 'github' | 'gitlab' }
 ): Promise<void> {
   // Build URL with token if available (for private repos)
-  // Use x-access-token format which works across most git providers
+  // GitLab OAuth tokens require username 'oauth2'; all other providers use 'x-access-token'
   let repoUrl = gitUrl;
   if (gitToken) {
     const url = new URL(gitUrl);
-    url.username = 'x-access-token';
+    url.username = options?.platform === 'gitlab' ? 'oauth2' : 'x-access-token';
     url.password = gitToken;
     repoUrl = url.toString();
   }
@@ -467,22 +567,23 @@ export async function cloneGitRepo(
 /**
  * Update the git remote origin URL to include a new token.
  * This is needed when the git token changes and we need to push/pull.
- * Uses the same x-access-token format as cloneGitRepo() for consistency.
  *
  * @param session - Execution session
  * @param workspacePath - Path to the git repository
  * @param gitUrl - Full git URL (e.g., https://github.com/org/repo.git)
  * @param gitToken - New git token for authentication
+ * @param platform - Git platform; GitLab requires 'oauth2' as the username
  */
 export async function updateGitRemoteToken(
   session: ExecutionSession,
   workspacePath: string,
   gitUrl: string,
-  gitToken: string
+  gitToken: string,
+  platform?: 'github' | 'gitlab'
 ): Promise<void> {
-  // Build new URL with token embedded (same format as cloneGitRepo)
+  // Build new URL with token embedded (GitLab uses 'oauth2', others use 'x-access-token')
   const newUrl = new URL(gitUrl);
-  newUrl.username = 'x-access-token';
+  newUrl.username = platform === 'gitlab' ? 'oauth2' : 'x-access-token';
   newUrl.password = gitToken;
 
   const sanitizedGitUrl = sanitizeGitUrlForLogging(gitUrl);
@@ -510,6 +611,26 @@ async function gitFetch(session: ExecutionSession, workspacePath: string): Promi
   if (result.exitCode !== 0) {
     logger.withFields({ stderr: result.stderr }).warn('Git fetch failed');
   }
+}
+
+const SAFE_GIT_BRANCH_PATTERN = /^(?!-)[A-Za-z0-9._/-]+$/;
+
+function ensureSafeGitBranchName(branchName: string): string {
+  const isSafeFormat =
+    SAFE_GIT_BRANCH_PATTERN.test(branchName) &&
+    !branchName.startsWith('/') &&
+    !branchName.endsWith('/') &&
+    !branchName.endsWith('.') &&
+    !branchName.endsWith('.lock') &&
+    !branchName.includes('//') &&
+    !branchName.includes('..') &&
+    !branchName.includes('@{');
+
+  if (!isSafeFormat) {
+    throw new Error(`Unsafe git branch name: ${branchName}`);
+  }
+
+  return branchName;
 }
 
 async function branchExistsLocally(
@@ -620,7 +741,7 @@ async function fetchPullRefAndCheckout(
  *
  * Upstream branches (isUpstreamBranch=true):
  * - MUST exist remotely (error if not found)
- * - Fetch + checkout (creates tracking branch if needed) *
+ * - Fetch + checkout existing branch semantics (no explicit new-branch creation)
  * Session branches (isUpstreamBranch=false):
  * - Try remote first, create fresh if not found
  * - Checkout + lenient pull to sync with remote
@@ -637,7 +758,9 @@ export async function manageBranch(
   branchName: string,
   isUpstreamBranch: boolean = false
 ): Promise<string> {
-  logger.setTags({ branchName, workspacePath });
+  const safeBranchName = ensureSafeGitBranchName(branchName);
+
+  logger.setTags({ branchName: safeBranchName, workspacePath });
   logger.withTags({ isUpstream: isUpstreamBranch }).info('Managing branch');
 
   // Fetch latest refs from remote
@@ -645,8 +768,8 @@ export async function manageBranch(
 
   // Check branch existence in parallel
   const [existsLocally, existsRemotely] = await Promise.all([
-    branchExistsLocally(session, workspacePath, branchName),
-    branchExistsRemotely(session, workspacePath, branchName),
+    branchExistsLocally(session, workspacePath, safeBranchName),
+    branchExistsRemotely(session, workspacePath, safeBranchName),
   ]);
 
   logger.withTags({ existsLocally, existsRemotely }).debug('Branch status');
@@ -654,38 +777,46 @@ export async function manageBranch(
   // Four explicit cases
   if (existsLocally && existsRemotely) {
     // Case 1: Exists in both places - checkout and sync
-    await checkoutExistingBranch(session, workspacePath, branchName);
+    await checkoutExistingBranch(session, workspacePath, safeBranchName);
 
     // Only pull for session branches, not upstream
     if (!isUpstreamBranch) {
-      await pullLatestChangesLenient(session, workspacePath, branchName);
+      await pullLatestChangesLenient(session, workspacePath, safeBranchName);
     }
     // For upstream: fetch already happened, checkout is done, leave as-is
   } else if (existsLocally && !existsRemotely) {
     // Case 2: Only exists locally - just checkout
-    await checkoutExistingBranch(session, workspacePath, branchName);
+    await checkoutExistingBranch(session, workspacePath, safeBranchName);
   } else if (!existsLocally && existsRemotely) {
-    // Case 3: Only exists remotely - create tracking branch
-    await createTrackingBranch(session, workspacePath, branchName);
+    // Case 3: Only exists remotely
+    if (isUpstreamBranch) {
+      // For upstream branches (review comment flows), use plain checkout semantics.
+      // This avoids explicit branch creation commands while still checking out
+      // the remote branch after fetch.
+      await checkoutExistingBranch(session, workspacePath, safeBranchName);
+    } else {
+      // Session branches still use explicit tracking branch creation.
+      await createTrackingBranch(session, workspacePath, safeBranchName);
+    }
   } else {
     // Case 4: Doesn't exist anywhere
     if (isUpstreamBranch) {
-      if (GITHUB_PULL_REF_PATTERN.test(branchName)) {
-        await fetchPullRefAndCheckout(session, workspacePath, branchName);
-        logger.withTags({ pullRef: branchName }).info('Checked out GitHub pull ref');
+      if (GITHUB_PULL_REF_PATTERN.test(safeBranchName)) {
+        await fetchPullRefAndCheckout(session, workspacePath, safeBranchName);
+        logger.withTags({ pullRef: safeBranchName }).info('Checked out GitHub pull ref');
         logger.debug('Successfully on branch');
-        return branchName;
+        return safeBranchName;
       }
 
       throw new Error(
-        `Branch "${branchName}" not found in repository. Please ensure the branch exists remotely.`
+        `Branch "${safeBranchName}" not found in repository. Please ensure the branch exists remotely.`
       );
     }
-    await createNewBranch(session, workspacePath, branchName);
+    await createNewBranch(session, workspacePath, safeBranchName);
   }
 
   logger.debug('Successfully on branch');
-  return branchName;
+  return safeBranchName;
 }
 
 /**
@@ -801,6 +932,20 @@ export async function* autoCommitChangesStream(
     return;
   }
 
+  let safeCurrentBranch: string;
+  try {
+    safeCurrentBranch = ensureSafeGitBranchName(currentBranch);
+  } catch (error) {
+    logger
+      .withFields({
+        currentBranch,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      .error('Invalid current branch name for auto-commit');
+    yield createStatusEvent('Auto-commit failed: invalid branch name', sessionId);
+    return;
+  }
+
   // If upstreamBranch is explicitly set, bypass all protection
   const hasExplicitUpstreamBranch = upstreamBranch !== undefined;
 
@@ -835,8 +980,6 @@ export async function* autoCommitChangesStream(
     // Use dynamic prompt - omit protection warning if upstreamBranch is set
     const prompt = buildAutoCommitPrompt(hasExplicitUpstreamBranch);
     yield* streamKilocodeExec('code', prompt, { sessionId });
-
-    yield createStatusEvent('Auto-commit completed successfully', sessionId);
   } catch (error) {
     logger
       .withFields({
@@ -845,5 +988,64 @@ export async function* autoCommitChangesStream(
       .warn('Auto-commit execution failed');
 
     yield createStatusEvent('Auto-commit failed', sessionId);
+    return;
   }
+
+  // Safety net: verify push happened, push programmatically if not.
+  // This is outside the try/catch above so push failures propagate as
+  // hard errors to callers (triggering callback with status: 'failed').
+  const unpushed = await session.exec(
+    `cd ${workspacePath} && git log origin/${safeCurrentBranch}..HEAD --oneline 2>&1`
+  );
+  const unpushedOutput = unpushed.stdout.trim();
+  // stderr is already merged into stdout via 2>&1, so just use stdout
+  const verificationOutput = unpushedOutput;
+  const remoteBranchMissing =
+    unpushed.exitCode !== 0 &&
+    /(unknown revision|ambiguous argument|bad revision|does not match any|not a valid object name)/i.test(
+      verificationOutput
+    );
+  const hasUnpushedCommits = unpushed.exitCode === 0 && unpushedOutput.length > 0;
+
+  if (unpushed.exitCode !== 0 && !remoteBranchMissing) {
+    throw new Error(
+      `Failed to verify push status (exit ${unpushed.exitCode}): ${verificationOutput || 'unknown git error'}`
+    );
+  }
+
+  if (remoteBranchMissing || hasUnpushedCommits) {
+    const commitCount = hasUnpushedCommits ? unpushedOutput.split('\n').length : undefined;
+    const pushReason = remoteBranchMissing
+      ? 'Remote branch missing'
+      : `${commitCount ?? 0} unpushed commit(s)`;
+
+    logger
+      .withFields({ currentBranch, unpushedOutput, commitCount, pushReason })
+      .warn('Kilo CLI did not push — pushing programmatically');
+
+    if (commitCount !== undefined) {
+      yield createStatusEvent(`Pushing ${commitCount} unpushed commit(s)...`, sessionId);
+    } else {
+      yield createStatusEvent(`Pushing branch '${safeCurrentBranch}' to origin...`, sessionId);
+    }
+
+    const pushResult = await session.exec(
+      `cd ${workspacePath} && git push origin ${safeCurrentBranch}`
+    );
+    if (pushResult.exitCode !== 0) {
+      const pushStderr = pushResult.stderr?.trim() || 'Unknown push error';
+      logger
+        .withFields({
+          exitCode: pushResult.exitCode,
+          stderr: pushStderr,
+          stdout: pushResult.stdout?.trim(),
+        })
+        .error('Programmatic git push failed');
+      throw new Error(`Push failed (exit ${pushResult.exitCode}): ${pushStderr}`);
+    }
+
+    logger.withFields({ currentBranch, commitCount }).info('Programmatic git push succeeded');
+  }
+
+  yield createStatusEvent('Auto-commit completed successfully', sessionId);
 }

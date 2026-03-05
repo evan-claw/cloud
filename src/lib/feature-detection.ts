@@ -25,8 +25,11 @@ export const FEATURE_VALUES = [
   'agent-manager',
   'security-agent',
   'slack',
+  'discord',
+  'bot',
   'webhook',
-  'kilo-claw',
+  'kiloclaw',
+  'openclaw',
   'direct-gateway',
 ] as const;
 

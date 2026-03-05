@@ -1,10 +1,18 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { SecurityFindingsCard } from './SecurityFindingsCard';
 import { FindingDetailDialog } from './FindingDetailDialog';
 import { DismissFindingDialog, type DismissReason } from './DismissFindingDialog';
@@ -23,31 +31,26 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { SecurityFinding } from '@/db/schema';
+import type { SecurityFinding } from '@kilocode/db/schema';
 import Link from 'next/link';
+import { isGitHubIntegrationError } from '@/lib/security-agent/core/error-display';
 
 type SecurityAgentPageClientProps = {
   organizationId?: string;
-  isAdmin: boolean;
 };
 
 const PAGE_SIZE = 20;
 
-// Helper to detect GitHub integration errors from error messages
-function isGitHubIntegrationError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes('GitHub token') ||
-    message.includes('GitHub installation') ||
-    message.includes('installation_id') ||
-    message.includes('Bad credentials') ||
-    message.includes('Not Found') || // GitHub API returns 404 for uninstalled apps
-    message.includes('Forbidden') || // GitHub API returns 403 for permission issues
-    message.includes('Resource not accessible') // GitHub returns this for missing permissions
-  );
+function getOptionalStringField(source: unknown, key: string): string | undefined {
+  if (typeof source !== 'object' || source === null) {
+    return undefined;
+  }
+
+  const value = Reflect.get(source, key);
+  return typeof value === 'string' ? value : undefined;
 }
 
-export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAgentPageClientProps) {
+export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageClientProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
@@ -67,6 +70,8 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
   const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
   const [startingAnalysisId, setStartingAnalysisId] = useState<string | null>(null);
   const [gitHubError, setGitHubError] = useState<string | null>(null);
+  const configHasChanges = useRef(false);
+  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
 
   // Determine which router to use based on organizationId
   const isOrg = !!organizationId;
@@ -401,23 +406,8 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
       })
     );
 
-  // Refresh installation mutations - Organization
-  const { mutate: orgRefreshMutate, isPending: isOrgRefreshPending } = useMutation(
-    trpc.organizations.githubApps.refreshInstallation.mutationOptions({
-      onSuccess: () => {
-        toast.success('Permissions refreshed', {
-          description: 'GitHub App permissions have been updated from GitHub.',
-        });
-        void queryClient.invalidateQueries();
-      },
-      onError: error => {
-        toast.error('Failed to refresh permissions', { description: error.message });
-      },
-    })
-  );
-
-  // Refresh installation mutations - Personal
-  const { mutate: personalRefreshMutate, isPending: isPersonalRefreshPending } = useMutation(
+  // Refresh installation mutation (unified - works for both org and personal)
+  const { mutate: refreshMutate, isPending: isRefreshPending } = useMutation(
     trpc.githubApps.refreshInstallation.mutationOptions({
       onSuccess: () => {
         toast.success('Permissions refreshed', {
@@ -425,7 +415,7 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
         });
         void queryClient.invalidateQueries();
       },
-      onError: error => {
+      onError: (error: { message: string }) => {
         toast.error('Failed to refresh permissions', { description: error.message });
       },
     })
@@ -475,11 +465,23 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
       config: SlaConfig & {
         repositorySelectionMode: 'all' | 'selected';
         selectedRepositoryIds: number[];
-        modelSlug: string;
+        triageModelSlug: string;
+        analysisModelSlug: string;
+        modelSlug?: string;
+        analysisMode: 'auto' | 'shallow' | 'deep';
         autoDismissEnabled: boolean;
         autoDismissConfidenceThreshold: 'high' | 'medium' | 'low';
+        autoAnalysisEnabled: boolean;
+        autoAnalysisMinSeverity: 'critical' | 'high' | 'medium' | 'all';
+        autoAnalysisIncludeExisting: boolean;
       }
     ) => {
+      const modelConfigPayload = {
+        triageModelSlug: config.triageModelSlug,
+        analysisModelSlug: config.analysisModelSlug,
+        modelSlug: config.modelSlug,
+      };
+
       if (isOrg && organizationId) {
         orgSaveConfigMutate({
           organizationId,
@@ -489,9 +491,13 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
           slaLowDays: config.low,
           repositorySelectionMode: config.repositorySelectionMode,
           selectedRepositoryIds: config.selectedRepositoryIds,
-          modelSlug: config.modelSlug,
+          analysisMode: config.analysisMode,
           autoDismissEnabled: config.autoDismissEnabled,
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
+          autoAnalysisEnabled: config.autoAnalysisEnabled,
+          autoAnalysisMinSeverity: config.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: config.autoAnalysisIncludeExisting,
+          ...modelConfigPayload,
         });
       } else if (!isOrg) {
         personalSaveConfigMutate({
@@ -501,9 +507,13 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
           slaLowDays: config.low,
           repositorySelectionMode: config.repositorySelectionMode,
           selectedRepositoryIds: config.selectedRepositoryIds,
-          modelSlug: config.modelSlug,
+          analysisMode: config.analysisMode,
           autoDismissEnabled: config.autoDismissEnabled,
           autoDismissConfidenceThreshold: config.autoDismissConfidenceThreshold,
+          autoAnalysisEnabled: config.autoAnalysisEnabled,
+          autoAnalysisMinSeverity: config.autoAnalysisMinSeverity,
+          autoAnalysisIncludeExisting: config.autoAnalysisIncludeExisting,
+          ...modelConfigPayload,
         });
       }
     },
@@ -547,12 +557,12 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
   }, []);
 
   const handleStartAnalysis = useCallback(
-    (findingId: string) => {
+    (findingId: string, { retrySandboxOnly }: { retrySandboxOnly?: boolean } = {}) => {
       setStartingAnalysisId(findingId);
       if (isOrg && organizationId) {
-        orgStartAnalysisMutate({ organizationId, findingId });
+        orgStartAnalysisMutate({ organizationId, findingId, retrySandboxOnly });
       } else {
-        personalStartAnalysisMutate({ findingId });
+        personalStartAnalysisMutate({ findingId, retrySandboxOnly });
       }
     },
     [isOrg, organizationId, orgStartAnalysisMutate, personalStartAnalysisMutate]
@@ -571,11 +581,11 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
 
   const handleRefreshPermissions = useCallback(() => {
     if (isOrg && organizationId) {
-      orgRefreshMutate({ organizationId });
+      refreshMutate({ organizationId });
     } else {
-      personalRefreshMutate();
+      refreshMutate(undefined);
     }
-  }, [isOrg, organizationId, orgRefreshMutate, personalRefreshMutate]);
+  }, [isOrg, organizationId, refreshMutate]);
 
   // Check integration and permissions
   const hasIntegration = permissionData?.hasIntegration ?? false;
@@ -631,6 +641,8 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
   const allRepositories = reposData ?? [];
   const repositorySelectionMode = configData?.repositorySelectionMode ?? 'selected';
   const selectedRepositoryIds = configData?.selectedRepositoryIds ?? [];
+  const triageModelSlug = getOptionalStringField(configData, 'triageModelSlug');
+  const analysisModelSlug = getOptionalStringField(configData, 'analysisModelSlug');
 
   // For the findings tab, only show repositories that are selected for security reviews
   const filteredRepositories =
@@ -644,7 +656,7 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
   const isSavingConfig = isOrg ? isOrgSaveConfigPending : isPersonalSaveConfigPending;
   const isTogglingEnabled = isOrg ? isOrgSetEnabledPending : isPersonalSetEnabledPending;
   const isDeletingFindings = isOrg ? isOrgDeleteFindingsPending : isPersonalDeleteFindingsPending;
-  const isRefreshing = isOrg ? isOrgRefreshPending : isPersonalRefreshPending;
+  const isRefreshing = isRefreshPending;
 
   // Orphaned repositories data
   const orphanedRepositories = orphanedReposData ?? [];
@@ -661,7 +673,7 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <h1 className="text-3xl font-bold">Security Agent</h1>
-          <Badge variant="new">new</Badge>
+          <Badge variant="beta">Beta</Badge>
         </div>
         <p className="text-muted-foreground">
           Monitor and manage Dependabot security alerts for your repositories
@@ -759,8 +771,48 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
         </Alert>
       )}
 
+      {/* Unsaved Changes Confirmation Dialog */}
+      <Dialog
+        open={pendingTabChange !== null}
+        onOpenChange={open => !open && setPendingTabChange(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Unsaved Changes</DialogTitle>
+            <DialogDescription>
+              You have unsaved configuration changes. Do you want to discard them?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingTabChange(null)}>
+              Go Back
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const tab = pendingTabChange;
+                setPendingTabChange(null);
+                if (tab) setActiveTab(tab);
+              }}
+            >
+              Discard Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Tabs - only show config and jobs tabs when GitHub integration is available */}
-      <Tabs value={effectiveTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs
+        value={effectiveTab}
+        onValueChange={tab => {
+          if (effectiveTab === 'config' && tab !== 'config' && configHasChanges.current) {
+            setPendingTabChange(tab);
+          } else {
+            setActiveTab(tab);
+          }
+        }}
+        className="w-full"
+      >
         <TabsList
           className={`grid w-full max-w-lg ${hasIntegration ? 'grid-cols-3' : 'grid-cols-1'}`}
         >
@@ -804,7 +856,6 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
             lastSyncTime={lastSyncData?.lastSyncTime}
             onStartAnalysis={handleStartAnalysis}
             startingAnalysisId={startingAnalysisId}
-            isAdmin={isAdmin}
           />
         </TabsContent>
 
@@ -819,16 +870,26 @@ export function SecurityAgentPageClient({ organizationId, isAdmin }: SecurityAge
         {hasIntegration && (
           <TabsContent value="config" className="space-y-6">
             <SecurityConfigForm
+              organizationId={organizationId}
               enabled={isEnabled}
               slaConfig={slaConfig}
               repositorySelectionMode={configData?.repositorySelectionMode ?? 'selected'}
               selectedRepositoryIds={configData?.selectedRepositoryIds ?? []}
-              modelSlug={configData?.modelSlug ?? ''}
+              modelSlug={configData?.modelSlug}
+              triageModelSlug={triageModelSlug}
+              analysisModelSlug={analysisModelSlug}
+              analysisMode={configData?.analysisMode ?? 'auto'}
               autoDismissEnabled={configData?.autoDismissEnabled ?? false}
               autoDismissConfidenceThreshold={configData?.autoDismissConfidenceThreshold ?? 'high'}
+              autoAnalysisEnabled={configData?.autoAnalysisEnabled ?? false}
+              autoAnalysisMinSeverity={configData?.autoAnalysisMinSeverity ?? 'high'}
+              autoAnalysisIncludeExisting={configData?.autoAnalysisIncludeExisting ?? false}
               repositories={allRepositories}
               onSave={handleSaveConfig}
               onToggleEnabled={handleToggleEnabled}
+              onHasChangesChange={v => {
+                configHasChanges.current = v;
+              }}
               isSaving={isSavingConfig}
               isToggling={isTogglingEnabled}
             />

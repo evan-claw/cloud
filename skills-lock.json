@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "chat-sdk": {
+      "source": "vercel/chat",
+      "sourceType": "github",
+      "computedHash": "dd43b1cf55f7a481732655011e121140143db3c1280b7ed502fa6be8180fb057"
+    },
+    "sentry-cli": {
+      "source": "cli.sentry.dev",
+      "sourceType": "well-known",
+      "computedHash": "1f8a1c8028f01fe9c94753ed521e4b20b450c51442bd753e6ce8d9317aad52ab"
+    }
+  }
+}

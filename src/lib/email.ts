@@ -1,4 +1,4 @@
-import type { Organization } from '@/db/schema';
+import type { Organization } from '@kilocode/db/schema';
 import { getMagicLinkUrl, type MagicLinkTokenWithPlaintext } from '@/lib/auth/magic-link-tokens';
 import { EMAIL_PROVIDER, NEXTAUTH_URL } from '@/lib/config.server';
 import { sendViaCustomerIo } from '@/lib/email-customerio';
@@ -139,13 +139,19 @@ export async function sendMagicLinkEmail(
 
   return send(mailRequest);
 }
-export async function sendAutoTopUpFailedEmail(to: string, props: { reason: string }) {
+export async function sendAutoTopUpFailedEmail(
+  to: string,
+  props: { reason: string; organizationId?: string }
+) {
+  const credits_url = props.organizationId
+    ? `${NEXTAUTH_URL}/organizations/${props.organizationId}/payment-details`
+    : `${NEXTAUTH_URL}/credits?show-auto-top-up`;
   return send({
     transactional_message_id: templates.autoTopUpFailed,
     to,
     message_data: {
       reason: props.reason,
-      credits_url: `${NEXTAUTH_URL}/credits?show-auto-top-up`,
+      credits_url,
     },
     identifiers: {
       email: to,

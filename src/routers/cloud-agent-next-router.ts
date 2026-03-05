@@ -5,7 +5,7 @@ import {
   createCloudAgentNextClient,
   rethrowAsPaymentRequired,
 } from '@/lib/cloud-agent-next/cloud-agent-client';
-import { generateApiToken } from '@/lib/tokens';
+import { generateCloudAgentToken } from '@/lib/tokens';
 import {
   mergeProfileConfiguration,
   ProfileNotFoundError,
@@ -29,6 +29,8 @@ import {
   baseInterruptSessionNextSchema,
   baseGetSessionNextSchema,
   baseGetSessionNextOutputSchema,
+  baseAnswerQuestionNextSchema,
+  baseRejectQuestionNextSchema,
 } from './cloud-agent-next-schemas';
 import * as z from 'zod';
 import { PLATFORM } from '@/lib/integrations/core/constants';
@@ -56,7 +58,7 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .input(basePrepareSessionNextSchema)
     .output(basePrepareSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       const { envVars, setupCommands, profileName, gitlabProject, githubRepo, ...restInput } =
@@ -123,14 +125,15 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .input(baseInitiateFromPreparedSessionNextSchema)
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
-      const githubToken = await getGitHubTokenForUser(ctx.user.id);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
+      // No token fetch needed: prepare and initiate happen back-to-back,
+      // so tokens stored during prepareSession are still fresh.
+      // The DO refreshes GitHub App installation tokens internally.
       try {
         return await client.initiateFromPreparedSession({
           cloudAgentSessionId: input.cloudAgentSessionId,
-          githubToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
@@ -148,14 +151,31 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .input(baseSendMessageNextSchema)
     .output(baseInitiateSessionNextOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
-      const githubToken = await getGitHubTokenForUser(ctx.user.id);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
+
+      // Determine platform to fetch the correct token
+      const session = await client.getSession(input.cloudAgentSessionId);
+      let githubToken: string | undefined;
+      let gitToken: string | undefined;
+
+      if (session.platform === 'gitlab') {
+        gitToken = await getGitLabTokenForUser(ctx.user.id);
+        if (!gitToken) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No GitLab integration found. Please connect your GitLab account first.',
+          });
+        }
+      } else {
+        githubToken = await getGitHubTokenForUser(ctx.user.id);
+      }
 
       try {
         return await client.sendMessage({
           ...input,
           githubToken,
+          gitToken,
         });
       } catch (error) {
         rethrowAsPaymentRequired(error);
@@ -171,16 +191,33 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .output(
       z.object({
         success: z.boolean(),
-        killedProcessIds: z.array(z.string()),
-        failedProcessIds: z.array(z.string()),
         message: z.string(),
+        processesFound: z.boolean(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       return await client.interruptSession(input.sessionId);
+    }),
+
+  answerQuestion: baseProcedure
+    .input(baseAnswerQuestionNextSchema)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const authToken = generateCloudAgentToken(ctx.user);
+      const client = createCloudAgentNextClient(authToken);
+      return await client.answerQuestion(input);
+    }),
+
+  rejectQuestion: baseProcedure
+    .input(baseRejectQuestionNextSchema)
+    .output(z.object({ success: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const authToken = generateCloudAgentToken(ctx.user);
+      const client = createCloudAgentNextClient(authToken);
+      return await client.rejectQuestion(input);
     }),
 
   /**
@@ -191,7 +228,7 @@ export const cloudAgentNextRouter = createTRPCRouter({
     .input(baseGetSessionNextSchema)
     .output(baseGetSessionNextOutputSchema)
     .query(async ({ ctx, input }) => {
-      const authToken = generateApiToken(ctx.user);
+      const authToken = generateCloudAgentToken(ctx.user);
       const client = createCloudAgentNextClient(authToken);
 
       return await client.getSession(input.cloudAgentSessionId);

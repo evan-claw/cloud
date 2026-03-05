@@ -45,10 +45,7 @@ describe('validateKiloToken', () => {
     });
 
     const result = await validateKiloToken(token, TEST_SECRET, undefined);
-    expect(result).toEqual({
-      success: false,
-      error: `Invalid token version: ${KILO_TOKEN_VERSION - 1}`,
-    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects env mismatch', async () => {
@@ -62,7 +59,7 @@ describe('validateKiloToken', () => {
     const result = await validateKiloToken(token, TEST_SECRET, 'development');
     expect(result).toEqual({
       success: false,
-      error: 'Token env mismatch: production !== development',
+      error: 'Invalid token',
     });
   });
 

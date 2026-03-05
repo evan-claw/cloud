@@ -1,0 +1,48 @@
+{
+  "name": "cloudflare-gastown",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Gastown: AI agent orchestration via Durable Objects",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "container:prepare": "node scripts/prepare-container.mjs",
+    "deploy:prod": "pnpm container:prepare && wrangler deploy --env=\"\"",
+    "deploy:dev": "pnpm container:prepare && wrangler deploy --env dev",
+    "dev": "pnpm container:prepare && wrangler dev --env dev --ip 0.0.0.0",
+    "start": "pnpm container:prepare && wrangler dev --env dev --ip 0.0.0.0",
+    "types": "wrangler types",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.workers.config.ts",
+    "test:integration:watch": "vitest --config vitest.workers.config.ts",
+    "typecheck": "tsgo --noEmit --incremental false",
+    "build:types": "tsgo -p tsconfig.types.json || true",
+    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.1.0",
+    "@hono/trpc-server": "^0.4.2",
+    "@kilocode/db": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "jose": "catalog:",
+    "pg": "^8.16.3",
+    "@kilocode/worker-utils": "workspace:*",
+    "@trpc/server": "^11.0.0",
+    "hono": "catalog:",
+    "itty-time": "^1.0.6",
+    "jsonwebtoken": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.8",
+    "@kilocode/eslint-config": "workspace:*",
+    "@types/jsonwebtoken": "catalog:",
+    "@types/node": "^22",
+    "@typescript/native-preview": "7.0.0-dev.20251019.1",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4",
+    "wrangler": "catalog:"
+  }
+}

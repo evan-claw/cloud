@@ -90,6 +90,7 @@ export type InitializeContext = {
   githubAppType?: 'standard' | 'lite';
   /** Git platform type for correct token/env var handling */
   platform?: 'github' | 'gitlab';
+  createdOnPlatform?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -113,6 +114,7 @@ type InitiateExecutionRequest = BaseExecutionRequest & {
   prompt: string;
   mode: ExecutionMode;
   model: string;
+  variant?: string;
   githubRepo?: string;
   githubToken?: string;
   gitUrl?: string;
@@ -127,6 +129,7 @@ type InitiateExecutionRequest = BaseExecutionRequest & {
   orgId?: string;
   /** Git platform type for correct token/env var handling */
   platform?: 'github' | 'gitlab';
+  createdOnPlatform?: string;
 };
 
 /**
@@ -145,6 +148,7 @@ type FollowupExecutionRequest = BaseExecutionRequest & {
   prompt: string;
   mode?: ExecutionMode;
   model?: string;
+  variant?: string;
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
   tokenOverrides?: {
@@ -247,6 +251,7 @@ export type InitContext = {
   githubAppType?: 'lite' | 'standard';
   /** Git platform type for correct token/env var handling */
   platform?: 'github' | 'gitlab';
+  createdOnPlatform?: string;
 };
 
 /**
@@ -303,6 +308,7 @@ export type WrapperPlan = {
   kiloSessionId?: string;
   kiloSessionTitle?: string;
   model?: ModelConfig;
+  variant?: string;
   autoCommit?: boolean;
   condenseOnComplete?: boolean;
 };

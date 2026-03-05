@@ -85,7 +85,7 @@ describe('addCacheBreakpoints', () => {
     expect(hasCacheBreakpoint(messages[3])).toBe(true);
   });
 
-  it('sets cache breakpoint on the user/tool message before the last assistant message', () => {
+  it('does not set cache breakpoint on earlier user messages', () => {
     const messages: Message[] = [
       msg('system', 'system prompt'),
       msg('user', 'first question'),
@@ -94,10 +94,9 @@ describe('addCacheBreakpoints', () => {
     ];
     addCacheBreakpoints(messages);
 
-    // "first question" is the user message before the last assistant message
-    expect(hasCacheBreakpoint(messages[1])).toBe(true);
-    // system and last user should also be marked
+    // only system and last user should be marked, not earlier user messages
     expect(hasCacheBreakpoint(messages[0])).toBe(true);
+    expect(messages[1].content).toBe('first question');
     expect(hasCacheBreakpoint(messages[3])).toBe(true);
   });
 
@@ -109,7 +108,7 @@ describe('addCacheBreakpoints', () => {
     expect(hasCacheBreakpoint(messages[1])).toBe(true);
   });
 
-  it('does not set a second-to-last breakpoint when there is no assistant message', () => {
+  it('does not set breakpoint on non-last user messages', () => {
     const messages: Message[] = [
       msg('system', 'system prompt'),
       msg('user', 'first'),
@@ -123,7 +122,7 @@ describe('addCacheBreakpoints', () => {
     expect(hasCacheBreakpoint(messages[2])).toBe(true);
   });
 
-  it('does not duplicate breakpoints when the same message is both last-user and second-to-last', () => {
+  it('sets breakpoint on the last user message even when followed by assistant', () => {
     const messages: Message[] = [
       msg('system', 'system prompt'),
       msg('user', 'only user message'),
@@ -131,7 +130,6 @@ describe('addCacheBreakpoints', () => {
     ];
     addCacheBreakpoints(messages);
 
-    // "only user message" is both lastUser and previousUser — should still work
     expect(hasCacheBreakpoint(messages[0])).toBe(true);
     expect(hasCacheBreakpoint(messages[1])).toBe(true);
   });

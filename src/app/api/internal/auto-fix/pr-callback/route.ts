@@ -8,14 +8,16 @@
  * 1. Receive callback with sessionId and status
  * 2. Find ticket by sessionId
  * 3. If failed/interrupted: Update ticket status and post comment
- * 4. If successful: Just acknowledge (PR creation happens in worker)
+ * 4. If successful:
+ *    - review_comment trigger: notify on original review thread
+ *    - label trigger: create GitHub PR and update ticket
  * 5. Trigger dispatch for pending fixes
  *
  * URL: POST /api/internal/auto-fix/pr-callback
  * Protected by internal API secret
  *
- * Note: This callback is invoked by Cloud Agent BEFORE the PR is created.
- * The actual PR creation happens in the Auto Fix worker after this callback.
+ * Note: This callback is invoked by Cloud Agent when execution reaches a terminal state.
+ * For label-triggered tickets, this endpoint creates the PR.
  */
 
 import type { NextRequest } from 'next/server';
@@ -29,30 +31,61 @@ import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { postIssueComment } from '@/lib/auto-fix/github/post-comment';
 import { generateGitHubInstallationToken } from '@/lib/integrations/platforms/github/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
+import {
+  handleCommentReply,
+  sanitizePublicErrorMessage,
+} from '@/lib/auto-fix/github/handle-comment-reply';
+import { handleCreateIssuePR } from '@/lib/auto-fix/github/handle-create-issue-pr';
+import { z } from 'zod';
 
-interface CallbackPayload {
-  sessionId: string;
-  status: 'completed' | 'failed' | 'interrupted';
+const callbackStatusEnum = z.enum(['completed', 'failed', 'interrupted']);
+
+const CallbackPayloadSchema = z
+  .object({
+    sessionId: z.string().optional(),
+    cloudAgentSessionId: z.string().optional(),
+    status: callbackStatusEnum,
+    errorMessage: z.string().optional(),
+    lastSeenBranch: z.string().optional(),
+  })
+  .refine(data => data.sessionId || data.cloudAgentSessionId, {
+    message: 'Either sessionId or cloudAgentSessionId is required',
+  });
+
+function normalizePayload(raw: z.infer<typeof CallbackPayloadSchema>): {
+  sessionId?: string;
+  status: z.infer<typeof callbackStatusEnum>;
   errorMessage?: string;
+  lastSeenBranch?: string;
+} {
+  return {
+    sessionId: raw.sessionId ?? raw.cloudAgentSessionId,
+    status: raw.status,
+    errorMessage: raw.errorMessage,
+    lastSeenBranch: raw.lastSeenBranch,
+  };
 }
 
 export async function POST(req: NextRequest) {
   try {
     // Validate internal API secret
     const secret = req.headers.get('X-Internal-Secret');
-    if (secret !== INTERNAL_API_SECRET) {
+    if (!INTERNAL_API_SECRET || secret !== INTERNAL_API_SECRET) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const payload: CallbackPayload = await req.json();
-    const { sessionId, status, errorMessage } = payload;
-
-    // Validate payload
-    if (!sessionId || !status) {
+    const raw: unknown = await req.json();
+    const parsed = CallbackPayloadSchema.safeParse(raw);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: 'Missing required fields: sessionId, status' },
+        { error: 'Invalid payload', issues: parsed.error.issues },
         { status: 400 }
       );
+    }
+    const { sessionId, status, errorMessage, lastSeenBranch } = normalizePayload(parsed.data);
+
+    if (!sessionId) {
+      return NextResponse.json({ error: 'Missing required fields: sessionId' }, { status: 400 });
     }
 
     logExceptInTest('[auto-fix-pr-callback] Received callback', {
@@ -70,49 +103,84 @@ export async function POST(req: NextRequest) {
     }
 
     const ticketId = ticket.id;
+    const isTerminalState =
+      ticket.status === 'completed' || ticket.status === 'failed' || ticket.status === 'cancelled';
+
+    if (isTerminalState) {
+      logExceptInTest(
+        '[auto-fix-pr-callback] Ticket already in terminal state, skipping callback',
+        {
+          ticketId,
+          sessionId,
+          currentStatus: ticket.status,
+          requestedStatus: status,
+        }
+      );
+      return NextResponse.json({ success: true, message: 'Ticket already terminal' });
+    }
 
     // Handle failure/interruption
     if (status === 'failed' || status === 'interrupted') {
-      logExceptInTest('[auto-fix-pr-callback] PR creation failed', {
+      logExceptInTest('[auto-fix-pr-callback] Auto-fix execution failed', {
         ticketId,
         sessionId,
         status,
         errorMessage,
       });
 
-      // Update ticket to failed
-      await updateFixTicketStatus(ticketId, 'failed', {
-        errorMessage: errorMessage || `PR creation ${status}`,
-        completedAt: new Date(),
-      });
-
-      // Post comment on issue explaining failure
-      try {
-        if (ticket.platform_integration_id) {
-          const integration = await getIntegrationById(ticket.platform_integration_id);
-
-          if (integration?.platform_installation_id) {
-            const tokenData = await generateGitHubInstallationToken(
-              integration.platform_installation_id
-            );
-
-            await postIssueComment({
-              repoFullName: ticket.repo_full_name,
-              issueNumber: ticket.issue_number,
-              body: `🤖 **Auto-Fix Update**\n\nI attempted to create a pull request to fix this issue, but encountered an error:\n\n\`\`\`\n${errorMessage || 'Unknown error'}\n\`\`\`\n\nThis issue may require manual attention.`,
-              githubToken: tokenData.token,
-            });
-
-            logExceptInTest('[auto-fix-pr-callback] Posted failure comment', { ticketId });
-          }
-        }
-      } catch (commentError) {
-        errorExceptInTest('[auto-fix-pr-callback] Failed to post failure comment:', commentError);
-        captureException(commentError, {
-          tags: { operation: 'auto-fix-pr-callback', step: 'post-failure-comment' },
-          extra: { ticketId, sessionId },
+      if (ticket.trigger_source === 'review_comment') {
+        const replyResult = await handleCommentReply({
+          ticketId,
+          sessionId,
+          outcome: 'failed',
+          errorMessage: errorMessage || `Auto-fix execution ${status}`,
         });
-        // Continue - comment failure is not critical
+
+        if (!replyResult.ok) {
+          await updateFixTicketStatus(ticketId, 'failed', {
+            errorMessage: `Failed to post review-comment failure reply: ${replyResult.error}`,
+            completedAt: new Date(),
+          });
+          throw new Error(`Failed to post review-comment failure reply: ${replyResult.error}`);
+        }
+      } else {
+        // Update ticket to failed
+        await updateFixTicketStatus(ticketId, 'failed', {
+          errorMessage: errorMessage || `Auto-fix execution ${status}`,
+          completedAt: new Date(),
+        });
+      }
+
+      // Post issue-level failure comment only for issue-triggered tickets.
+      // Review-comment-triggered tickets are notified on their original review thread.
+      if (ticket.trigger_source !== 'review_comment') {
+        try {
+          if (ticket.platform_integration_id) {
+            const integration = await getIntegrationById(ticket.platform_integration_id);
+
+            if (integration?.platform_installation_id) {
+              const tokenData = await generateGitHubInstallationToken(
+                integration.platform_installation_id
+              );
+
+              await postIssueComment({
+                repoFullName: ticket.repo_full_name,
+                issueNumber: ticket.issue_number,
+                body: `🤖 **Auto-Fix Update**\n\nI attempted to create a pull request to fix this issue, but encountered an error:\n\n\`\`\`\n${sanitizePublicErrorMessage(errorMessage || 'Unknown error')}\n\`\`\`\n\nThis issue may require manual attention.`,
+                githubToken: tokenData.token,
+              });
+
+              logExceptInTest('[auto-fix-pr-callback] Posted failure comment', { ticketId });
+            }
+          }
+        } catch (commentError) {
+          errorExceptInTest('[auto-fix-pr-callback] Failed to post failure comment:', commentError);
+          captureException(commentError, {
+            tags: { operation: 'auto-fix-pr-callback', step: 'post-failure-comment' },
+            extra: { ticketId, sessionId },
+          });
+          // Continue - comment failure is not critical
+        }
       }
 
       // Trigger dispatch for pending fixes
@@ -133,12 +201,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true });
     }
 
-    // Handle success - Cloud Agent completed successfully
-    // Note: PR creation happens in the worker AFTER this callback
+    // Handle success
     logExceptInTest('[auto-fix-pr-callback] Cloud Agent session completed successfully', {
       ticketId,
       sessionId,
     });
+
+    if (ticket.trigger_source === 'review_comment') {
+      const replyResult = await handleCommentReply({
+        ticketId,
+        sessionId,
+        outcome: 'success',
+        prBranch: lastSeenBranch,
+      });
+
+      if (!replyResult.ok) {
+        await updateFixTicketStatus(ticketId, 'failed', {
+          errorMessage: `Failed to post review-comment success reply: ${replyResult.error}`,
+          completedAt: new Date(),
+        });
+        throw new Error(`Failed to post review-comment success reply: ${replyResult.error}`);
+      }
+    } else {
+      const prResult = await handleCreateIssuePR({
+        ticketId,
+        sessionId,
+        branchName: lastSeenBranch,
+      });
+      if (!prResult.ok) {
+        throw new Error(prResult.error);
+      }
+    }
 
     // Trigger dispatch for pending fixes
     try {

@@ -1,11 +1,19 @@
 import {
-  createCloudAgentClient,
-  type InitiateSessionInput,
-} from '@/lib/cloud-agent/cloud-agent-client';
+  createCloudAgentNextClient,
+  type PrepareSessionInput,
+} from '@/lib/cloud-agent-next/cloud-agent-client';
+import { runSessionToCompletion } from '@/lib/cloud-agent-next/run-session';
 import {
   getGitHubTokenForUser,
   getGitHubTokenForOrganization,
 } from '@/lib/cloud-agent/github-integration-helpers';
+import {
+  getGitLabTokenForUser,
+  getGitLabTokenForOrganization,
+  getGitLabInstanceUrlForUser,
+  getGitLabInstanceUrlForOrganization,
+  buildGitLabCloneUrl,
+} from '@/lib/cloud-agent/gitlab-integration-helpers';
 import type OpenAI from 'openai';
 import type { Owner } from '@/lib/integrations/core/types';
 import {
@@ -14,12 +22,16 @@ import {
   getModel,
   getAccessTokenFromInstallation,
 } from '@/lib/integrations/slack-service';
-import type { PlatformIntegration } from '@/db/schema';
-import { sendProxiedChatCompletion } from '@/lib/llm-proxy-helpers';
+import type { PlatformIntegration } from '@kilocode/db/schema';
+import { runBot } from '@/lib/bots/core/run-bot';
 import {
   formatGitHubRepositoriesForPrompt,
   getGitHubRepositoryContext,
 } from '@/lib/slack-bot/github-repository-context';
+import {
+  formatGitLabRepositoriesForPrompt,
+  getGitLabRepositoryContext,
+} from '@/lib/slack-bot/gitlab-repository-context';
 import {
   formatSlackConversationContextForPrompt,
   getSlackConversationContext,
@@ -65,23 +77,29 @@ const KILO_BOT_SYSTEM_PROMPT = `You are Kilo Bot, a helpful AI assistant integra
 Additional context may be appended to this prompt:
 - Slack conversation context (recent messages, thread context)
 - Available GitHub repositories for this Slack integration
+- Available GitLab projects for this Slack integration
 
-Treat this context as authoritative. Prefer selecting a repo from the provided repository list. If the user requests work on a repo that isn’t in the list, ask them to confirm the exact owner/repo and ensure it’s accessible to the integration. Never invent repository names.
+Treat this context as authoritative. Prefer selecting a repo from the provided repository list. If the user requests work on a repo that isn't in the list, ask them to confirm the exact owner/repo (or group/project for GitLab) and ensure it's accessible to the integration. Never invent repository names.
 
 ## Tool: spawn_cloud_agent
-You can call the tool "spawn_cloud_agent" to run a Cloud Agent session for coding work on a GitHub repository.
+You can call the tool "spawn_cloud_agent" to run a Cloud Agent session for coding work on a GitHub repository or GitLab project.
 
 ### When to use it
 Use spawn_cloud_agent when the user asks you to:
 - change code, fix bugs, implement features, or refactor
 - review/analyze code in a repo beyond a quick, high-level answer
-- do any task where you must inspect files, run tests, or open a PR
+- do any task where you must inspect files, run tests, or open a PR/MR
 
 If the user is only asking a question you can answer directly (conceptual, small snippet, explanation), do not call the tool.
 
 ### How to use it
-Provide:
-- githubRepo: "owner/repo"
+Provide exactly ONE of:
+- githubRepo: "owner/repo" — for GitHub repositories
+- gitlabProject: "group/project" or "group/subgroup/project" — for GitLab projects
+
+Determine which platform to use based on the repository context provided below. If the user mentions a repo that appears in the GitHub list, use githubRepo. If it appears in the GitLab list, use gitlabProject.
+
+Also provide:
 - mode:
   - code: implement changes
   - debug: investigate failures, flaky tests, production issues
@@ -91,14 +109,14 @@ Provide:
 - prompt: a clear, specific task with constraints and success criteria
 
 Your prompt to the agent should usually include:
-- the desired outcome (what “done” looks like)
+- the desired outcome (what "done" looks like)
 - any constraints (keep changes minimal, follow existing patterns, etc.)
-- a request to open a PR and return the PR URL
+- a request to open a PR (GitHub) or MR (GitLab) and return the URL
 
 ## Accuracy & safety
-- Don’t claim you ran tools, changed code, or created a PR unless the tool results confirm it.
-- Don’t fabricate links (including PR URLs).
-- If you can’t proceed (missing repo, missing details, permissions), say what’s missing and what you need next.`;
+- Don't claim you ran tools, changed code, or created a PR/MR unless the tool results confirm it.
+- Don't fabricate links (including PR/MR URLs).
+- If you can't proceed (missing repo, missing details, permissions), say what's missing and what you need next.`;
 
 /**
  * Tool definition for spawning Cloud Agent sessions
@@ -108,7 +126,7 @@ const SPAWN_CLOUD_AGENT_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
   function: {
     name: 'spawn_cloud_agent',
     description:
-      'Spawn a Cloud Agent session to perform coding tasks on a GitHub repository. The agent can make code changes, fix bugs, implement features, and more.',
+      'Spawn a Cloud Agent session to perform coding tasks on a GitHub repository or GitLab project. Provide exactly one of githubRepo or gitlabProject.',
     parameters: {
       type: 'object',
       properties: {
@@ -116,6 +134,12 @@ const SPAWN_CLOUD_AGENT_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
           type: 'string',
           description: 'The GitHub repository in owner/repo format (e.g., "facebook/react")',
           pattern: '^[-a-zA-Z0-9_.]+/[-a-zA-Z0-9_.]+$',
+        },
+        gitlabProject: {
+          type: 'string',
+          description:
+            'The GitLab project path in group/project format (e.g., "mygroup/myproject"). May include nested groups (e.g., "group/subgroup/project").',
+          pattern: '^[-a-zA-Z0-9_.]+(/[-a-zA-Z0-9_.]+)+$',
         },
         prompt: {
           type: 'string',
@@ -130,7 +154,7 @@ const SPAWN_CLOUD_AGENT_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
           default: 'code',
         },
       },
-      required: ['githubRepo', 'prompt'],
+      required: ['prompt'],
     },
   },
 };
@@ -212,125 +236,139 @@ async function getSlackRequesterInfo(
 }
 
 /**
- * Spawn a Cloud Agent session and collect the results
+ * Spawn a Cloud Agent session and collect the results.
+ * Supports both GitHub (githubRepo) and GitLab (gitlabProject) repositories.
+ * Delegates to the shared runSessionToCompletion helper.
  */
 async function spawnCloudAgentSession(
   args: {
-    githubRepo: string;
+    githubRepo?: string;
+    gitlabProject?: string;
     prompt: string;
     mode?: string;
   },
   owner: Owner,
   model: string,
   authToken: string,
+  ticketUserId: string,
   requesterInfo?: SlackRequesterInfo
 ): Promise<SpawnCloudAgentResult> {
   console.log('[SlackBot] spawnCloudAgentSession called with args:', JSON.stringify(args, null, 2));
   console.log('[SlackBot] Owner:', JSON.stringify(owner, null, 2));
 
-  let githubToken: string | undefined;
-  let kilocodeOrganizationId: string | undefined;
-
-  // Handle organization-owned integrations
-  if (owner.type === 'org') {
-    // Get GitHub token for the organization
-    githubToken = await getGitHubTokenForOrganization(owner.id);
-
-    // Set the organization ID for cloud agent usage attribution
-    kilocodeOrganizationId = owner.id;
-  } else {
-    // Get GitHub token for the user
-    githubToken = await getGitHubTokenForUser(owner.id);
+  if (args.githubRepo && args.gitlabProject) {
+    return {
+      response: 'Error: Both githubRepo and gitlabProject were specified. Provide exactly one.',
+    };
   }
 
-  // Skip balance check for Slackbot users - Slack integration has its own billing model
-  const cloudAgentClient = createCloudAgentClient(authToken, { skipBalanceCheck: true });
+  if (!args.githubRepo && !args.gitlabProject) {
+    return {
+      response: 'Error: No repository specified. Provide either githubRepo or gitlabProject.',
+    };
+  }
 
-  // Append PR signature to the prompt if we have requester info
+  // Validate the repo identifier has at least "owner/repo" shape (non-empty segments around a slash)
+  const repoIdentifier = args.githubRepo ?? args.gitlabProject;
+  if (!repoIdentifier || !/\/./.test(repoIdentifier)) {
+    return {
+      response: `Error: Invalid repository identifier "${repoIdentifier ?? ''}". Expected format like "owner/repo".`,
+    };
+  }
+
+  let kilocodeOrganizationId: string | undefined;
+  if (owner.type === 'org') {
+    kilocodeOrganizationId = owner.id;
+  }
+
+  // Append PR/MR signature to the prompt if we have requester info
   const promptWithSignature = requesterInfo
     ? args.prompt + buildPrSignature(requesterInfo)
     : args.prompt;
 
-  const input: InitiateSessionInput = {
-    githubRepo: args.githubRepo,
-    prompt: promptWithSignature,
-    mode: (args.mode as InitiateSessionInput['mode']) || 'code',
-    model: model,
-    githubToken,
-    kilocodeOrganizationId,
-    createdOnPlatform: 'slack',
-  };
+  // Build platform-specific prepareInput and initiateInput
+  let prepareInput: PrepareSessionInput;
+  let initiateInput: { kilocodeOrganizationId?: string };
 
-  const statusMessages: string[] = [];
-  let completionResult: string | undefined;
-  let sessionId: string | undefined;
-  let hasError = false;
+  if (args.gitlabProject) {
+    // GitLab path: get token + instance URL, build clone URL, use gitUrl/gitToken
+    const gitlabToken =
+      owner.type === 'org'
+        ? await getGitLabTokenForOrganization(owner.id)
+        : await getGitLabTokenForUser(owner.id);
 
-  try {
-    console.log('[SlackBot] Starting to stream events from Cloud Agent...');
-    for await (const event of cloudAgentClient.initiateSessionStream(input)) {
-      if (event.sessionId) sessionId = event.sessionId;
-
-      switch (event.streamEventType) {
-        case 'complete':
-          statusMessages.push(
-            `Session completed in ${event.metadata.executionTimeMs}ms with exit code ${event.exitCode}`
-          );
-          break;
-        case 'error':
-          statusMessages.push(`Error: ${event.error}`);
-          hasError = true;
-          break;
-        case 'kilocode': {
-          const payload = event.payload;
-          if (payload.say === 'completion_result' && typeof payload.content === 'string') {
-            completionResult = payload.content;
-          }
-          break;
-        }
-        case 'output':
-          if (event.source === 'stderr') {
-            statusMessages.push(`[stderr] ${event.content}`);
-            hasError = true;
-            console.log('[SlackBot] Error flag set to true');
-          }
-          break;
-        case 'interrupted':
-          statusMessages.push(`Session interrupted: ${event.reason}`);
-          hasError = true;
-          console.log('[SlackBot] Error flag set to true');
-          break;
-      }
+    if (!gitlabToken) {
+      return {
+        response:
+          'Error: No GitLab token available. Please ensure a GitLab integration is connected in your Kilo Code settings.',
+      };
     }
+
+    const instanceUrl =
+      owner.type === 'org'
+        ? await getGitLabInstanceUrlForOrganization(owner.id)
+        : await getGitLabInstanceUrlForUser(owner.id);
+
+    const gitUrl = buildGitLabCloneUrl(args.gitlabProject, instanceUrl);
+
+    const isSelfHosted = !/^https?:\/\/(www\.)?gitlab\.com(\/|$)/i.test(instanceUrl);
     console.log(
-      `[SlackBot] Stream completed. Total status messages: ${statusMessages.length}, Has completion result: ${!!completionResult}`
+      '[SlackBot] GitLab session - project:',
+      args.gitlabProject,
+      'instance:',
+      isSelfHosted ? 'self-hosted' : 'gitlab.com'
     );
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('[SlackBot] Error during stream:', errorMessage, error);
-    return { response: `Error spawning Cloud Agent: ${errorMessage}`, sessionId };
+
+    prepareInput = {
+      prompt: promptWithSignature,
+      mode: (args.mode as PrepareSessionInput['mode']) || 'code',
+      model,
+      gitUrl,
+      gitToken: gitlabToken,
+      platform: 'gitlab',
+      kilocodeOrganizationId,
+      createdOnPlatform: 'slack',
+    };
+    initiateInput = { kilocodeOrganizationId };
+  } else {
+    // GitHub path: get token, use githubRepo/githubToken
+    const githubToken =
+      owner.type === 'org'
+        ? await getGitHubTokenForOrganization(owner.id)
+        : await getGitHubTokenForUser(owner.id);
+
+    if (!githubToken) {
+      return {
+        response:
+          'Error: No GitHub token available. Please ensure a GitHub integration is connected in your Kilo Code settings.',
+      };
+    }
+
+    prepareInput = {
+      githubRepo: args.githubRepo,
+      prompt: promptWithSignature,
+      mode: (args.mode as PrepareSessionInput['mode']) || 'code',
+      model,
+      githubToken,
+      kilocodeOrganizationId,
+      createdOnPlatform: 'slack',
+    };
+    initiateInput = { kilocodeOrganizationId };
   }
 
-  if (hasError) {
-    const errorResult = `Cloud Agent session ${sessionId || 'unknown'} encountered errors:\n${statusMessages.join('\n')}`;
-    console.log('[SlackBot] Returning error result:', errorResult);
-    return { response: errorResult, sessionId };
-  }
+  const result = await runSessionToCompletion({
+    client: createCloudAgentNextClient(authToken, { skipBalanceCheck: true }),
+    prepareInput,
+    initiateInput,
+    ticketPayload: {
+      userId: ticketUserId,
+      organizationId: owner.type === 'org' ? owner.id : undefined,
+    },
+    logPrefix: '[SlackBot]',
+  });
 
-  // Return the completion result if available, otherwise show status messages
-  if (completionResult) {
-    const successResult = `Cloud Agent session ${sessionId || 'unknown'} completed:\n\n${completionResult}`;
-    console.log('[SlackBot] Returning success result');
-    return { response: successResult, sessionId };
-  }
-
-  const fallbackResult = `Cloud Agent session ${sessionId || 'unknown'} completed successfully.\n\nStatus:\n${statusMessages.slice(-5).join('\n')}`;
-  console.log('[SlackBot] Returning fallback result:', fallbackResult);
-  return { response: fallbackResult, sessionId };
+  return { response: result.response, sessionId: result.sessionId };
 }
-
-type ChatMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type ChatCompletionResponse = OpenAI.Chat.Completions.ChatCompletion;
 
 /**
  * Process a Kilo Bot message and return the response with metadata.
@@ -347,7 +385,6 @@ export async function processKiloBotMessage(
   console.log('[SlackBot] Looking up Slack integration for team:', teamId);
 
   // Track metadata for logging
-  const toolCallsMade: string[] = [];
   let cloudAgentSessionId: string | undefined;
 
   // Look up the Slack integration to find the owner
@@ -405,7 +442,7 @@ export async function processKiloBotMessage(
   // For organization-owned integrations, use bot user for auth token
   // This ensures usage is tracked at the organization level, not individual users
   const authResult = await getSlackbotAuthTokenForOwner(owner, slackUserEmail);
-  if (!authResult.authToken) {
+  if ('error' in authResult) {
     return {
       response: `Error: ${authResult.error}`,
       modelUsed: '',
@@ -415,6 +452,7 @@ export async function processKiloBotMessage(
     };
   }
   const authToken = authResult.authToken;
+  const authUserId = authResult.userId;
 
   let slackContextForPrompt = '';
   if (slackEventContext) {
@@ -431,181 +469,89 @@ export async function processKiloBotMessage(
     ? await getSlackRequesterInfo(installation, slackEventContext)
     : undefined;
 
-  // Get repository context (no extra requests; uses the same integration row)
-  const repoContext = await getGitHubRepositoryContext(owner);
-  const repoCount = repoContext.repositories ? repoContext.repositories.length : 0;
-  console.log('[SlackBot] Found', repoCount, 'available repositories');
+  // Get repository context (no extra requests; uses the same integration rows)
+  const githubRepoContext = await getGitHubRepositoryContext(owner);
+  const gitlabRepoContext = await getGitLabRepositoryContext(owner);
+  const githubRepoCount = githubRepoContext.repositories
+    ? githubRepoContext.repositories.length
+    : 0;
+  const gitlabRepoCount = gitlabRepoContext.repositories
+    ? gitlabRepoContext.repositories.length
+    : 0;
+  console.log(
+    '[SlackBot] Found',
+    githubRepoCount,
+    'GitHub and',
+    gitlabRepoCount,
+    'GitLab repositories'
+  );
 
-  // Build system prompt with Slack context + repository context
+  // Build system prompt with Slack context + repository context for both platforms
   const systemPrompt =
-    KILO_BOT_SYSTEM_PROMPT + slackContextForPrompt + formatGitHubRepositoriesForPrompt(repoContext);
+    KILO_BOT_SYSTEM_PROMPT +
+    slackContextForPrompt +
+    formatGitHubRepositoriesForPrompt(githubRepoContext) +
+    formatGitLabRepositoriesForPrompt(gitlabRepoContext);
 
-  // Build initial messages array
-  const messages: ChatMessage[] = [
-    {
-      role: 'system',
-      content: systemPrompt,
-    },
-    {
-      role: 'user',
-      content: userMessage,
-    },
-  ];
-
-  // Tool calling loop - keep calling until we get a final response
-  let finalResponse: string | null = null;
-  let errorMessage: string | undefined;
-  const maxIterations = 5; // Prevent infinite loops
-  let iteration = 0;
-
-  while (finalResponse === null && iteration < maxIterations) {
-    iteration++;
-    console.log(`[SlackBot] Tool loop iteration ${iteration}/${maxIterations}`);
-
-    console.log('[SlackBot] Sending request to chat completions endpoint...');
-    const result = await sendProxiedChatCompletion<ChatCompletionResponse>({
-      authToken,
+  const runResult = await runBot({
+    authToken,
+    model: selectedModel,
+    systemPrompt,
+    userMessage,
+    tools: [SPAWN_CLOUD_AGENT_TOOL],
+    logPrefix: '[SlackBot]',
+    requestOptions: {
       version: SLACK_BOT_VERSION,
       userAgent: SLACK_BOT_USER_AGENT,
-      body: {
-        model: selectedModel,
-        messages,
-        tools: [SPAWN_CLOUD_AGENT_TOOL],
-        tool_choice: 'auto',
-      },
       organizationId: owner.type === 'org' ? owner.id : undefined,
       feature: 'slack',
-    });
-
-    if (!result.ok) {
-      console.error('[SlackBot] API error response:', result.error);
-      finalResponse = `Sorry, there was an error calling the AI service (${result.status}): ${result.error.slice(0, 200)}`;
-      break;
-    }
-
-    const responseBody = result.data;
-    console.log('[SlackBot] Response body parsed, choices count:', responseBody.choices?.length);
-    const choice = responseBody.choices?.[0];
-
-    if (!choice) {
-      console.log('[SlackBot] No choice in response, response body:', JSON.stringify(responseBody));
-      finalResponse = 'Sorry, I could not generate a response.';
-      errorMessage = 'No choice in OpenRouter response';
-      break;
-    }
-
-    const message = choice.message;
-    console.log(
-      '[SlackBot] Message received - content length:',
-      message.content?.length,
-      'tool_calls:',
-      message.tool_calls?.length || 0
-    );
-    console.log('[SlackBot] Message content preview:', message.content?.slice(0, 200));
-
-    // Check if the assistant wants to call a tool
-    if (message.tool_calls && message.tool_calls.length > 0) {
-      console.log('[SlackBot] Tool calls detected:', message.tool_calls.length);
-
-      // Add assistant message to conversation history
-      messages.push({
-        role: 'assistant',
-        content: message.content,
-        tool_calls: message.tool_calls,
-      });
-      console.log(
-        '[SlackBot] Added assistant message to history, total messages:',
-        messages.length
-      );
-
-      // Process each tool call
-      for (const toolCall of message.tool_calls) {
-        console.log(
-          '[SlackBot] Processing tool call:',
-          toolCall.type,
-          toolCall.type === 'function' ? toolCall.function.name : 'N/A'
-        );
-
-        // Skip non-function tool calls
-        if (toolCall.type !== 'function') {
-          console.log('[SlackBot] Skipping non-function tool call');
-          continue;
-        }
-
-        // Track the tool call
-        toolCallsMade.push(toolCall.function.name);
-
-        if (toolCall.function.name === 'spawn_cloud_agent') {
-          console.log(
-            '[SlackBot] spawn_cloud_agent tool call - arguments:',
-            toolCall.function.arguments
-          );
-          try {
-            const args = JSON.parse(toolCall.function.arguments);
-            console.log('[SlackBot] Parsed tool arguments:', JSON.stringify(args, null, 2));
-
-            console.log('[SlackBot] Calling spawnCloudAgentSession...');
-            const toolResult = await spawnCloudAgentSession(
-              args,
-              owner,
-              selectedModel,
-              authToken,
-              slackRequesterInfo
-            );
-            console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
-            console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
-
-            // Track the cloud agent session ID
-            if (toolResult.sessionId) {
-              cloudAgentSessionId = toolResult.sessionId;
-            }
-
-            // Add tool result to conversation history
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: toolResult.response,
-            });
-            console.log(
-              '[SlackBot] Added tool result to history, total messages:',
-              messages.length
-            );
-          } catch (error) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            console.error('[SlackBot] Error executing tool:', errMsg, error);
-            errorMessage = errMsg;
-            messages.push({
-              role: 'tool',
-              tool_call_id: toolCall.id,
-              content: `Error executing tool: ${errMsg}`,
-            });
-          }
-        } else {
-          console.log('[SlackBot] Unknown tool:', toolCall.function.name);
-        }
+    },
+    toolExecutor: async toolCall => {
+      if (toolCall.type !== 'function') {
+        console.log('[SlackBot] Skipping non-function tool call');
+        return { content: 'Skipped non-function tool call.' };
       }
-    } else {
-      // No tool calls - we have the final response
-      console.log('[SlackBot] No tool calls, setting final response');
-      finalResponse = message.content ?? 'Sorry, I could not generate a response.';
-    }
-  }
 
-  if (finalResponse === null) {
-    console.log('[SlackBot] Max iterations reached, setting timeout message');
-    finalResponse = 'Sorry, the request took too long to process.';
-    errorMessage = 'Max iterations reached';
-  }
+      if (toolCall.function.name !== 'spawn_cloud_agent') {
+        console.log('[SlackBot] Unknown tool:', toolCall.function.name);
+        return { content: `Error executing tool: Unknown tool ${toolCall.function.name}` };
+      }
 
-  console.log('[SlackBot] Final response length:', finalResponse.length);
-  console.log('[SlackBot] Final response preview:', finalResponse.slice(0, 500));
+      console.log(
+        '[SlackBot] spawn_cloud_agent tool call - arguments:',
+        toolCall.function.arguments
+      );
+      const args = JSON.parse(toolCall.function.arguments);
+      console.log('[SlackBot] Parsed tool arguments:', JSON.stringify(args, null, 2));
+
+      console.log('[SlackBot] Calling spawnCloudAgentSession...');
+      const toolResult = await spawnCloudAgentSession(
+        args,
+        owner,
+        selectedModel,
+        authToken,
+        authUserId,
+        slackRequesterInfo
+      );
+      console.log('[SlackBot] Tool result received, length:', toolResult.response.length);
+      console.log('[SlackBot] Tool result preview:', toolResult.response.slice(0, 100));
+      if (toolResult.sessionId) {
+        cloudAgentSessionId = toolResult.sessionId;
+      }
+
+      return {
+        content: toolResult.response,
+        metadata: toolResult.sessionId ? { cloudAgentSessionId: toolResult.sessionId } : undefined,
+      };
+    },
+  });
 
   return {
-    response: finalResponse,
+    response: runResult.response,
     modelUsed: selectedModel,
-    toolCallsMade,
+    toolCallsMade: runResult.toolCallsMade,
     cloudAgentSessionId,
-    error: errorMessage,
+    error: runResult.error,
     installation,
   };
 }

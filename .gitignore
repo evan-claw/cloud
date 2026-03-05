@@ -35,6 +35,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+/.dev-logs/
+/dev/.dev-logs/
+/dev/*/.dev-logs/
+/dev/fixtures/
+/dev/*/fixtures/
 
 # env files (can opt-in for committing if needed)
 .env*.local*
@@ -80,3 +85,14 @@ run-milvus-test.sh
 # Cloudflare
 .wrangler/
 .env*.local
+/.superset
+
+# Git worktrees
+.worktrees/
+
+supabase/.temp
+
+# Husky generated hook shims
+.husky/_/
+
+.dev-logs/

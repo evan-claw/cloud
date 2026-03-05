@@ -6,19 +6,26 @@
  *
  * Architecture:
  * - POST /review - Create and start a code review (returns 202 immediately)
+ * - GET /reviews/:reviewId/events - Get events for a review (SSE flow only)
+ * - POST /reviews/:reviewId/cancel - Cancel a running review
  * - GET /health - Health check endpoint
  *
  * Features:
- * - Durable Objects maintain long-lived SSE connections
+ * - Durable Objects support two execution modes (feature-flagged):
+ *   - Default: cloud-agent SSE streaming (initiateSessionAsync)
+ *   - cloud-agent-next: prepareSession + initiateFromKilocodeSessionV2 with callback
  * - Concurrency control handled in Next.js (dispatch logic)
  * - Fire-and-forget from Next.js dispatch
  */
 
 import { Hono, type Context } from 'hono';
-import { HTTPException } from 'hono/http-exception';
-import { bearerAuth } from 'hono/bearer-auth';
 import type { Env, CodeReviewRequest, CodeReviewResponse } from './types';
-import { withDORetry } from './utils/do-retry';
+import {
+  withDORetry,
+  backendAuthMiddleware,
+  createErrorHandler,
+  createNotFoundHandler,
+} from '@kilocode/worker-utils';
 
 // Import base Durable Object
 import { CodeReviewOrchestrator as CodeReviewOrchestratorBase } from './code-review-orchestrator';
@@ -31,26 +38,10 @@ type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
 
 // Authentication middleware
-app.use('*', async (c: Context<HonoEnv>, next): Promise<Response> => {
-  const authToken = c.env.BACKEND_AUTH_TOKEN;
-
-  // Fail if auth token is not configured
-  if (!authToken || authToken.trim() === '') {
-    return c.json({ error: 'Unauthorized' }, 401) as Response;
-  }
-
-  // Use Hono's bearer auth middleware with error handling
-  const authMiddleware = bearerAuth({ token: authToken });
-  try {
-    return (await authMiddleware(c, next)) as Response;
-  } catch (error) {
-    // Handle HTTPException from bearer auth
-    if (error instanceof HTTPException) {
-      return c.json({ error: 'Unauthorized' }, 401) as Response;
-    }
-    throw error;
-  }
-});
+app.use(
+  '*',
+  backendAuthMiddleware<HonoEnv>(c => c.env.BACKEND_AUTH_TOKEN)
+);
 
 // Route: POST /review
 app.post('/review', async (c: Context<HonoEnv>) => {
@@ -75,6 +66,7 @@ app.post('/review', async (c: Context<HonoEnv>) => {
   console.log('[POST /review] Received review request', {
     reviewId: body.reviewId,
     owner: body.owner,
+    agentVersion: body.agentVersion,
   });
 
   // Create DO name from reviewId (concurrency controlled by Next.js dispatch)
@@ -98,12 +90,13 @@ app.post('/review', async (c: Context<HonoEnv>) => {
         sessionInput: body.sessionInput,
         owner: body.owner,
         skipBalanceCheck: body.skipBalanceCheck,
+        agentVersion: body.agentVersion,
       }),
     'start'
   );
 
   // Fire-and-forget: trigger review execution via HTTP context (no 15-min wall time limit)
-  // This runs the SSE stream processing without blocking the response
+  // Routes to cloud-agent SSE or cloud-agent-next based on useCloudAgentNext flag
   c.executionCtx.waitUntil(
     withDORetry(
       () => c.env.CODE_REVIEW_ORCHESTRATOR.get(id),
@@ -132,7 +125,7 @@ app.post('/review', async (c: Context<HonoEnv>) => {
   return c.json(response, 202);
 });
 
-// Route: GET /reviews/:reviewId/events
+// Route: GET /reviews/:reviewId/events (used by SSE/cloud-agent flow for event polling)
 app.get('/reviews/:reviewId/events', async (c: Context<HonoEnv>) => {
   const reviewId = c.req.param('reviewId');
 
@@ -192,20 +185,9 @@ app.get('/health', (c: Context<HonoEnv>) => {
 });
 
 // Global error handler
-app.onError((err: Error, c: Context<HonoEnv>) => {
-  console.error('[Worker] Error:', err);
-  return c.json(
-    {
-      error: 'Internal server error',
-      message: err.message || 'Unknown error',
-    },
-    500
-  );
-});
+app.onError(createErrorHandler());
 
 // 404 handler
-app.notFound((c: Context<HonoEnv>) => {
-  return c.json({ error: 'Not found' }, 404);
-});
+app.notFound(createNotFoundHandler());
 
 export default app;

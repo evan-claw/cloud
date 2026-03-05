@@ -3,7 +3,7 @@
  *
  * Handles:
  * - Inflight expiry (per-message timeout)
- * - Idle timeout (session-level cleanup)
+ * - SSE health monitoring (inactivity and initial connection timeouts)
  * - Drain period (grace period before closing connections)
  * - Auto-commit and condense on completion
  */
@@ -22,20 +22,17 @@ import { logToFile } from './utils.js';
 /** Interval for checking inflight expiry (5 seconds) */
 const INFLIGHT_CHECK_INTERVAL_MS = 5_000;
 
-/** Interval for checking idle timeout (10 seconds) */
-const IDLE_CHECK_INTERVAL_MS = 10_000;
-
 /** Grace period before closing connections after inflight hits 0 (250ms) */
 const DRAIN_DELAY_MS = 250;
 
-/** Default per-message timeout if MAX_RUNTIME_MS not set (20 minutes) */
-export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_200_000;
-
-/** Default idle timeout if IDLE_TIMEOUT_MS not set (2 minutes) */
-export const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+/** Default per-message timeout if MAX_RUNTIME_MS not set (30 minutes) */
+export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_800_000;
 
 /** SSE inactivity timeout - if no SSE events for this long while active, assume broken (2 minutes) */
 const SSE_INACTIVITY_TIMEOUT_MS = 120_000;
+
+/** Overall timeout for auto-commit operation (2 minutes) */
+const AUTO_COMMIT_TIMEOUT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,8 +41,6 @@ const SSE_INACTIVITY_TIMEOUT_MS = 120_000;
 export type LifecycleConfig = {
   /** Per-message deadline timeout (from MAX_RUNTIME_MS env var) */
   maxRuntimeMs: number;
-  /** Session-level idle timeout (from IDLE_TIMEOUT_MS env var) */
-  idleTimeoutMs: number;
   /** Enable auto-commit on completion */
   autoCommit: boolean;
   /** Enable condense on completion */
@@ -79,6 +74,8 @@ export type LifecycleManager = {
   signalCompletion: () => void;
   /** Set the aborted flag to prevent post-completion tasks from running */
   setAborted: () => void;
+  /** Reset lifecycle state for a new execution (clears isAborted, isDraining, etc.) */
+  reset: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -92,7 +89,6 @@ export function createLifecycleManager(
   const { state, kiloClient, connectionManager } = deps;
 
   let inflightCheckInterval: ReturnType<typeof setInterval> | null = null;
-  let idleCheckInterval: ReturnType<typeof setInterval> | null = null;
   let drainTimeout: ReturnType<typeof setTimeout> | null = null;
   let isDraining = false;
   let isAborted = false;
@@ -142,9 +138,9 @@ export function createLifecycleManager(
   }
 
   /**
-   * Check for idle timeout and cleanup stale job context.
+   * Check SSE connection health while active.
    */
-  function checkIdleTimeout(): void {
+  function checkSseHealth(): void {
     // Only check when has job context
     if (!state.hasJob) return;
 
@@ -231,39 +227,6 @@ export function createLifecycleManager(
         }
       }
     }
-
-    // Check idle timeout when not active (inflight == 0)
-    if (state.isIdle) {
-      const idleMs = state.getIdleMs(now);
-
-      if (idleMs >= config.idleTimeoutMs) {
-        logToFile(`idle timeout: ${idleMs / 1000}s`);
-
-        // Send idle timeout event if connected
-        if (connectionManager.isConnected()) {
-          state.sendToIngest({
-            streamEventType: 'error',
-            data: {
-              error: `Session idle for ${idleMs / 1000}s`,
-              fatal: false,
-              code: 'IDLE_TIMEOUT',
-            },
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        // Cache error in state
-        state.setLastError({
-          code: 'IDLE_TIMEOUT',
-          message: `Session idle for ${idleMs / 1000}s`,
-          timestamp: now,
-        });
-
-        // Close connection and clear job
-        void connectionManager.close();
-        state.clearJob();
-      }
-    }
   }
 
   /**
@@ -285,7 +248,45 @@ export function createLifecycleManager(
     const job = state.currentJob;
     if (!job) return;
 
-    // Use the shared completion state for waiting on post-processing commands
+    // Run auto-commit if enabled
+    if (config.autoCommit) {
+      logToFile('running auto-commit');
+      try {
+        const autoCommitPromise = runAutoCommit({
+          workspacePath: config.workspacePath,
+          upstreamBranch: config.upstreamBranch,
+          onEvent: event => state.sendToIngest(event),
+          kiloClient,
+          messageId: state.lastAssistantMessageId ?? undefined,
+        });
+        const timeoutPromise = new Promise<'timeout'>(resolve =>
+          setTimeout(() => resolve('timeout'), AUTO_COMMIT_TIMEOUT_MS)
+        );
+        const result = await Promise.race([autoCommitPromise, timeoutPromise]);
+        if (result === 'timeout') {
+          logToFile('auto-commit timed out');
+          state.sendToIngest({
+            streamEventType: 'error',
+            data: { error: 'Auto-commit timed out', fatal: false },
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          logToFile(
+            `auto-commit complete: success=${result.success} skipped=${result.skipped ?? false} error=${result.error ?? '(none)'}`
+          );
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        logToFile(`auto-commit error: ${msg}`);
+        state.sendToIngest({
+          streamEventType: 'error',
+          data: { error: `Auto-commit failed: ${msg}`, fatal: false },
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Completion/abort helpers are only needed for condense (which still uses the prompt-based approach)
     const expectCompletion = () => {
       postProcessingCompleted = false;
       postProcessingResolve = null;
@@ -299,33 +300,6 @@ export function createLifecycleManager(
     };
 
     const wasAborted = () => isAborted;
-
-    // Run auto-commit if enabled
-    if (config.autoCommit) {
-      logToFile('running auto-commit');
-      try {
-        await runAutoCommit({
-          workspacePath: config.workspacePath,
-          upstreamBranch: config.upstreamBranch,
-          model: config.model,
-          onEvent: event => state.sendToIngest(event),
-          kiloClient,
-          kiloSessionId: job.kiloSessionId,
-          expectCompletion,
-          waitForCompletion,
-          wasAborted,
-        });
-        logToFile('auto-commit complete');
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        logToFile(`auto-commit error: ${msg}`);
-        state.sendToIngest({
-          streamEventType: 'error',
-          data: { error: `Auto-commit failed: ${msg}`, fatal: false },
-          timestamp: new Date().toISOString(),
-        });
-      }
-    }
 
     // Run condense if enabled
     if (config.condenseOnComplete) {
@@ -356,7 +330,7 @@ export function createLifecycleManager(
 
   /**
    * Trigger drain period and close connections.
-   * Sends complete event (unless aborted), runs post-completion tasks, then closes after drain delay.
+   * Runs post-completion tasks (auto-commit, condense), sends complete event, then closes after drain delay.
    */
   function triggerDrainAndClose(): void {
     if (isDraining) return;
@@ -364,32 +338,48 @@ export function createLifecycleManager(
 
     logToFile(`starting drain period (isAborted=${isAborted})`);
 
-    // Send complete event to ingest so DO can update execution status and trigger callbacks
-    // BUT only if not aborted - fatal errors already sent their own terminal event
-    const job = state.currentJob;
-    if (job && !isAborted) {
-      logToFile(`sending complete event for executionId=${job.executionId}`);
-      state.sendToIngest({
-        streamEventType: 'complete',
-        data: {
-          exitCode: 0,
-          executionId: job.executionId,
-          kiloSessionId: job.kiloSessionId,
-        },
-        timestamp: new Date().toISOString(),
-      });
-    } else if (job && isAborted) {
-      logToFile(`skipping complete event - execution was aborted`);
-    }
-
-    // Run post-completion tasks, then drain and close
-    runPostCompletionTasks()
+    // Run post-completion tasks first (auto-commit, condense), THEN send the complete event.
+    // The complete event must be sent after post-completion tasks so that clients don't
+    // disconnect before autocommit output is streamed.
+    void runPostCompletionTasks()
       .catch(err =>
         logToFile(
           `post-completion tasks failed: ${err instanceof Error ? err.message : String(err)}`
         )
       )
+      .then(async () => {
+        // Final log upload before closing
+        const uploader = state.logUploader;
+        if (uploader) {
+          await uploader
+            .uploadNow()
+            .catch(err =>
+              logToFile(
+                `final log upload failed: ${err instanceof Error ? err.message : String(err)}`
+              )
+            );
+          uploader.stop();
+        }
+      })
       .finally(() => {
+        // Send complete event to ingest so DO can update execution status and trigger callbacks
+        // BUT only if not aborted - fatal errors already sent their own terminal event
+        const job = state.currentJob;
+        if (job && !isAborted) {
+          logToFile(`sending complete event for executionId=${job.executionId}`);
+          state.sendToIngest({
+            streamEventType: 'complete',
+            data: {
+              exitCode: 0,
+              executionId: job.executionId,
+              kiloSessionId: job.kiloSessionId,
+            },
+            timestamp: new Date().toISOString(),
+          });
+        } else if (job && isAborted) {
+          logToFile(`skipping complete event - execution was aborted`);
+        }
+
         drainTimeout = setTimeout(() => {
           logToFile('drain complete, closing connections');
           connectionManager
@@ -426,8 +416,10 @@ export function createLifecycleManager(
   return {
     start: () => {
       logToFile('starting lifecycle timers');
-      inflightCheckInterval = setInterval(checkInflightExpiry, INFLIGHT_CHECK_INTERVAL_MS);
-      idleCheckInterval = setInterval(checkIdleTimeout, IDLE_CHECK_INTERVAL_MS);
+      inflightCheckInterval = setInterval(() => {
+        checkInflightExpiry();
+        checkSseHealth();
+      }, INFLIGHT_CHECK_INTERVAL_MS);
     },
 
     stop: () => {
@@ -437,11 +429,6 @@ export function createLifecycleManager(
       if (inflightCheckInterval) {
         clearInterval(inflightCheckInterval);
         inflightCheckInterval = null;
-      }
-
-      if (idleCheckInterval) {
-        clearInterval(idleCheckInterval);
-        idleCheckInterval = null;
       }
 
       if (drainTimeout) {
@@ -456,9 +443,19 @@ export function createLifecycleManager(
 
     setAborted: () => {
       isAborted = true;
-      logToFile('abort flag set - post-completion tasks will be skipped');
     },
 
     getMaxRuntimeMs: () => config.maxRuntimeMs,
+
+    reset: () => {
+      isAborted = false;
+      isDraining = false;
+      postProcessingCompleted = false;
+      postProcessingResolve = null;
+      if (drainTimeout) {
+        clearTimeout(drainTimeout);
+        drainTimeout = null;
+      }
+    },
   };
 }

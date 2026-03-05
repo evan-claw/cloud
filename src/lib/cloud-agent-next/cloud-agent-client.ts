@@ -19,37 +19,24 @@ import { INTERNAL_API_SECRET } from '@/lib/config.server';
 // TODO: Update this URL when the new cloud-agent-next worker is deployed
 const CLOUD_AGENT_NEXT_API_URL = getEnvVariable('CLOUD_AGENT_NEXT_API_URL') || '';
 
-// MCP server config types (local definition to avoid importing from cloud-agent)
-// Supports three transport types: stdio, sse, and streamable-http
-type MCPServerBaseConfig = {
-  disabled?: boolean;
+// MCP server config types — CLI-native local/remote format
+type MCPLocalServerConfig = {
+  type: 'local';
+  command: string[];
+  environment?: Record<string, string>;
+  enabled?: boolean;
   timeout?: number;
-  alwaysAllow?: string[];
-  watchPaths?: string[];
-  disabledTools?: string[];
 };
 
-type MCPStdioServerConfig = MCPServerBaseConfig & {
-  type?: 'stdio';
-  command: string;
-  args?: string[];
-  cwd?: string;
-  env?: Record<string, string>;
-};
-
-type MCPSseServerConfig = MCPServerBaseConfig & {
-  type: 'sse';
+type MCPRemoteServerConfig = {
+  type: 'remote';
   url: string;
   headers?: Record<string, string>;
+  enabled?: boolean;
+  timeout?: number;
 };
 
-type MCPStreamableHttpServerConfig = MCPServerBaseConfig & {
-  type: 'streamable-http';
-  url: string;
-  headers?: Record<string, string>;
-};
-
-type MCPServerConfig = MCPStdioServerConfig | MCPSseServerConfig | MCPStreamableHttpServerConfig;
+type MCPServerConfig = MCPLocalServerConfig | MCPRemoteServerConfig;
 
 /**
  * Type definitions for cloud-agent-next API procedures
@@ -63,17 +50,26 @@ export type CallbackTarget = {
 
 /**
  * Agent modes accepted by the API.
- * - plan, architect, ask: Planning/analysis mode
- * - code, build, orchestrator: Code generation mode
+ * - code, plan, debug, orchestrator, ask: CLI agent modes
+ * - build, architect: Backward-compatible aliases (build → code, architect → plan)
  * - custom: Custom mode (requires appendSystemPrompt)
  */
-export type AgentMode = 'plan' | 'code' | 'build' | 'orchestrator' | 'architect' | 'ask' | 'custom';
+export type AgentMode =
+  | 'code'
+  | 'plan'
+  | 'debug'
+  | 'orchestrator'
+  | 'ask'
+  | 'build'
+  | 'architect'
+  | 'custom';
 
 /** Input for prepareSession procedure */
 export type PrepareSessionInput = {
   prompt: string;
   mode: AgentMode;
   model: string;
+  variant?: string;
   // GitHub-specific params
   githubRepo?: string;
   /** GitHub Personal Access Token for private repositories */
@@ -98,6 +94,8 @@ export type PrepareSessionInput = {
   images?: Images;
   /** Callback configuration for execution completion events */
   callbackTarget?: CallbackTarget;
+  /** Platform that created this session (e.g. 'security-agent', 'slack', 'app-builder') */
+  createdOnPlatform?: string;
 };
 
 /** Output from prepareSession procedure */
@@ -110,15 +108,15 @@ export type PrepareSessionOutput = {
 export type InitiateFromPreparedSessionInput = {
   cloudAgentSessionId: string;
   kilocodeOrganizationId?: string;
-  githubToken?: string;
 };
 
 /** Input for sendMessage procedure (V2 - uses cloudAgentSessionId) */
 export type SendMessageInput = {
   cloudAgentSessionId: string;
   prompt: string;
-  mode: 'plan' | 'build';
+  mode: 'code' | 'plan' | 'debug' | 'orchestrator' | 'ask';
   model: string;
+  variant?: string;
   autoCommit?: boolean;
   githubToken?: string;
   gitToken?: string;
@@ -173,6 +171,7 @@ export type GetSessionOutput = {
   // Repository info (no tokens)
   githubRepo?: string;
   gitUrl?: string;
+  platform?: 'github' | 'gitlab';
 
   // Execution params
   prompt?: string;
@@ -214,6 +213,7 @@ export type UpdateSessionInput = {
   // Scalar fields - null to clear, value to set, undefined to skip
   mode?: AgentMode | null;
   model?: string | null;
+  variant?: string | null;
   githubToken?: string | null;
   gitToken?: string | null;
   upstreamBranch?: string | null;
@@ -236,9 +236,19 @@ export type UpdateSessionOutput = {
 /** Result of interrupting a session */
 export type InterruptResult = {
   success: boolean;
-  killedProcessIds: string[];
-  failedProcessIds: string[];
   message: string;
+  processesFound: boolean;
+};
+
+export type AnswerQuestionInput = {
+  sessionId: string;
+  questionId: string;
+  answers: string[][];
+};
+
+export type RejectQuestionInput = {
+  sessionId: string;
+  questionId: string;
 };
 
 /** Output from health procedure */
@@ -291,6 +301,20 @@ function isInsufficientCreditsError(err: unknown): boolean {
   return false;
 }
 
+function normalizeCloudAgentProtocolError(error: unknown): unknown {
+  if (!(error instanceof Error)) {
+    return error;
+  }
+
+  if (!error.message.includes('is not valid JSON')) {
+    return error;
+  }
+
+  const normalized = new Error('Cloud agent returned a non-JSON error response', { cause: error });
+  normalized.name = 'CloudAgentProtocolError';
+  return normalized;
+}
+
 /**
  * Minimal TRPC client interface for cloud-agent-next API
  * Note: This uses only V2 procedures (WebSocket streaming)
@@ -320,6 +344,12 @@ type CloudAgentNextTRPCClient = {
   };
   sendMessageV2: {
     mutate: (input: SendMessageInput) => Promise<InitiateSessionOutput>;
+  };
+  answerQuestion: {
+    mutate: (input: AnswerQuestionInput) => Promise<{ success: boolean }>;
+  };
+  rejectQuestion: {
+    mutate: (input: RejectQuestionInput) => Promise<{ success: boolean }>;
   };
 };
 
@@ -462,21 +492,23 @@ export class CloudAgentNextClient {
       });
       return result;
     } catch (error) {
+      const normalizedError = normalizeCloudAgentProtocolError(error);
+
       console.log('[CloudAgentNextClient.prepareSession] Request failed', {
         elapsed: Date.now() - startTime,
-        error: error instanceof Error ? error.message : String(error),
+        error: normalizedError instanceof Error ? normalizedError.message : String(normalizedError),
       });
 
       // Check for insufficient credits error
-      if (isInsufficientCreditsError(error)) {
+      if (isInsufficientCreditsError(normalizedError)) {
         throw new InsufficientCreditsError();
       }
 
-      captureException(error, {
+      captureException(normalizedError, {
         tags: { source: 'cloud-agent-next-client', endpoint: 'prepareSession' },
         extra: { input },
       });
-      throw error;
+      throw normalizedError;
     }
   }
 
@@ -512,16 +544,18 @@ export class CloudAgentNextClient {
     try {
       return await this.client.initiateFromKilocodeSessionV2.mutate(input);
     } catch (error) {
+      const normalizedError = normalizeCloudAgentProtocolError(error);
+
       // Check for insufficient credits error
-      if (isInsufficientCreditsError(error)) {
+      if (isInsufficientCreditsError(normalizedError)) {
         throw new InsufficientCreditsError();
       }
 
-      captureException(error, {
+      captureException(normalizedError, {
         tags: { source: 'cloud-agent-next-client', endpoint: 'initiateFromPreparedSession' },
         extra: { input },
       });
-      throw error;
+      throw normalizedError;
     }
   }
 
@@ -535,14 +569,40 @@ export class CloudAgentNextClient {
     try {
       return await this.client.sendMessageV2.mutate(input);
     } catch (error) {
+      const normalizedError = normalizeCloudAgentProtocolError(error);
+
       // Check for insufficient credits error
-      if (isInsufficientCreditsError(error)) {
+      if (isInsufficientCreditsError(normalizedError)) {
         throw new InsufficientCreditsError();
       }
 
-      captureException(error, {
+      captureException(normalizedError, {
         tags: { source: 'cloud-agent-next-client', endpoint: 'sendMessage' },
         extra: { input },
+      });
+      throw normalizedError;
+    }
+  }
+
+  async answerQuestion(input: AnswerQuestionInput): Promise<{ success: boolean }> {
+    try {
+      return await this.client.answerQuestion.mutate(input);
+    } catch (error) {
+      captureException(error, {
+        tags: { source: 'cloud-agent-next-client', endpoint: 'answerQuestion' },
+        extra: { sessionId: input.sessionId, questionId: input.questionId },
+      });
+      throw error;
+    }
+  }
+
+  async rejectQuestion(input: RejectQuestionInput): Promise<{ success: boolean }> {
+    try {
+      return await this.client.rejectQuestion.mutate(input);
+    } catch (error) {
+      captureException(error, {
+        tags: { source: 'cloud-agent-next-client', endpoint: 'rejectQuestion' },
+        extra: { sessionId: input.sessionId, questionId: input.questionId },
       });
       throw error;
     }

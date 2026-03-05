@@ -3,14 +3,22 @@ import { z } from 'zod';
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import * as slackService from '@/lib/integrations/slack-service';
 import { TRPCError } from '@trpc/server';
+import {
+  resolveOwner,
+  resolveAuthorizedOwner,
+  optionalOrgInput,
+} from '@/lib/integrations/resolve-owner';
+import { ensureOrganizationAccess } from '@/routers/organizations/utils';
+import { createAuditLog } from '@/lib/organizations/organization-audit-logs';
 
 export const slackRouter = createTRPCRouter({
-  // Get Slack installation status for the current user
-  getInstallation: baseProcedure.query(async ({ ctx }) => {
-    const integration = await slackService.getInstallation({
-      type: 'user',
-      id: ctx.user.id,
-    });
+  // Get Slack installation status
+  getInstallation: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
+    const integration = await slackService.getInstallation(owner);
 
     if (!integration) {
       return {
@@ -19,10 +27,7 @@ export const slackRouter = createTRPCRouter({
       };
     }
 
-    // Only return installed: true if the integration status is 'active'
     const isInstalled = integration.integration_status === 'active';
-
-    // Extract model from metadata
     const metadata = integration.metadata as { model_slug?: string } | null;
 
     return {
@@ -38,43 +43,88 @@ export const slackRouter = createTRPCRouter({
   }),
 
   // Get OAuth URL for initiating Slack OAuth flow
-  getOAuthUrl: baseProcedure.query(({ ctx }) => {
-    const state = `user_${ctx.user.id}`;
+  getOAuthUrl: baseProcedure.input(optionalOrgInput).query(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const state = input?.organizationId ? `org_${input.organizationId}` : `user_${ctx.user.id}`;
     return {
       url: slackService.getSlackOAuthUrl(state),
     };
   }),
 
-  // Uninstall Slack integration for the current user
-  uninstallApp: baseProcedure.mutation(async ({ ctx }) => {
-    return slackService.uninstallApp({ type: 'user', id: ctx.user.id });
+  // Uninstall Slack integration
+  uninstallApp: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
+    const result = await slackService.uninstallApp(owner);
+
+    if (input?.organizationId) {
+      await createAuditLog({
+        organization_id: input.organizationId,
+        action: 'organization.settings.change',
+        actor_id: ctx.user.id,
+        actor_email: ctx.user.google_user_email,
+        actor_name: ctx.user.google_user_name,
+        message: 'Disconnected Slack integration',
+      });
+    }
+
+    return result;
   }),
 
   // Test Slack connection
-  testConnection: baseProcedure.mutation(async ({ ctx }) => {
-    return slackService.testConnection({ type: 'user', id: ctx.user.id });
+  testConnection: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
+    return slackService.testConnection(owner);
   }),
 
   // Send a test message to Slack
-  sendTestMessage: baseProcedure.mutation(async ({ ctx }) => {
-    return slackService.sendTestMessage({ type: 'user', id: ctx.user.id });
+  sendTestMessage: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
+    if (input?.organizationId) {
+      await ensureOrganizationAccess(ctx, input.organizationId);
+    }
+    const owner = resolveOwner(ctx, input?.organizationId);
+    return slackService.sendTestMessage(owner);
   }),
 
   // Update the model for Slack integration
   updateModel: baseProcedure
-    .input(z.object({ modelSlug: z.string() }))
+    .input(
+      z.object({
+        organizationId: z.string().uuid().optional(),
+        modelSlug: z.string(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
-      return slackService.updateModel({ type: 'user', id: ctx.user.id }, input.modelSlug);
+      const owner = await resolveAuthorizedOwner(ctx, input.organizationId);
+      const result = await slackService.updateModel(owner, input.modelSlug);
+
+      if (input.organizationId) {
+        await createAuditLog({
+          organization_id: input.organizationId,
+          action: 'organization.settings.change',
+          actor_id: ctx.user.id,
+          actor_email: ctx.user.google_user_email,
+          actor_name: ctx.user.google_user_name,
+          message: `Updated Slack integration model to ${input.modelSlug}`,
+        });
+      }
+
+      return result;
     }),
 
   // Dev-only: Remove only the database row without revoking the Slack token
-  devRemoveDbRowOnly: baseProcedure.mutation(async ({ ctx }) => {
+  devRemoveDbRowOnly: baseProcedure.input(optionalOrgInput).mutation(async ({ ctx, input }) => {
     if (process.env.NODE_ENV !== 'development') {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'This endpoint is only available in development mode',
       });
     }
-    return slackService.removeDbRowOnly({ type: 'user', id: ctx.user.id });
+    const owner = await resolveAuthorizedOwner(ctx, input?.organizationId);
+    return slackService.removeDbRowOnly(owner);
   }),
 });

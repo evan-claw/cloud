@@ -1,17 +1,15 @@
 import { getEnvVariable } from '@/lib/dotenvx';
 import 'server-only';
 
-import { safeDeleteStripeCustomer } from './stripe-client';
 import { captureException } from '@sentry/nextjs';
-import type { User } from '@/db/schema';
+import type { User } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
-import { cliSessions, sharedCliSessions, cli_sessions_v2 } from '@/db/schema';
+import { cliSessions, sharedCliSessions, cli_sessions_v2 } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 import { deleteBlobs, type FileName } from '@/lib/r2/cli-sessions';
 import { errorExceptInTest, logExceptInTest, warnExceptInTest } from '@/lib/utils.server';
-import jwt from 'jsonwebtoken';
-import { NEXTAUTH_SECRET, SESSION_INGEST_WORKER_URL } from '@/lib/config.server';
-import { JWT_TOKEN_VERSION } from '@/lib/tokens';
+import { SESSION_INGEST_WORKER_URL } from '@/lib/config.server';
+import { generateInternalServiceToken } from '@/lib/tokens';
 
 /**
  * Delete user from Customer.io
@@ -127,24 +125,6 @@ async function deleteCliSessionBlobs(userId: string): Promise<void> {
   }
 }
 
-/**
- * Generate a minimal JWT token for internal GDPR deletion operations.
- * This token only contains the fields required by the session ingest worker.
- */
-function generateGdprDeletionToken(userId: string): string {
-  return jwt.sign(
-    {
-      kiloUserId: userId,
-      version: JWT_TOKEN_VERSION,
-    },
-    NEXTAUTH_SECRET,
-    {
-      algorithm: 'HS256',
-      expiresIn: '1h',
-    }
-  );
-}
-
 const V2_SESSION_DELETE_CONCURRENCY = 10;
 
 /**
@@ -172,7 +152,7 @@ async function deleteCliSessionV2Blobs(userId: string): Promise<void> {
     }
 
     // Generate a token for the user to authenticate with the session ingest worker
-    const token = generateGdprDeletionToken(userId);
+    const token = generateInternalServiceToken(userId);
 
     // Delete sessions in concurrent batches
     let successCount = 0;
@@ -229,17 +209,22 @@ async function deleteCliSessionV2Blobs(userId: string): Promise<void> {
 }
 
 /**
- * Delete user from all external services (Stripe, Customer.io, R2 blob storage).
+ * Clean up external services as part of user soft-delete.
+ *
+ * Removes the user from marketing systems (Customer.io) and deletes
+ * CLI session blobs from R2/Durable Objects (conversation data is PII).
+ *
+ * NOTE: The Stripe customer is intentionally preserved so that the
+ * billing link remains intact for financial record-keeping.
  *
  * All service deletions run concurrently via Promise.allSettled for performance.
  * Each individual service handler is resilient - errors are caught and logged
  * to Sentry but don't prevent other services from being cleaned up.
  */
-export async function deleteUserFromExternalServices(user: User): Promise<void> {
-  logExceptInTest(`Deleting user from external services: ${user.id}`);
+export async function softDeleteUserExternalServices(user: User): Promise<void> {
+  logExceptInTest(`Soft-deleting user from external services: ${user.id}`);
 
   const results = await Promise.allSettled([
-    safeDeleteStripeCustomer(user.stripe_customer_id),
     deleteUserFromCustomerIO(user.google_user_email),
     deleteCliSessionBlobs(user.id),
     deleteCliSessionV2Blobs(user.id),
@@ -251,11 +236,11 @@ export async function deleteUserFromExternalServices(user: User): Promise<void> 
       const message = `Unexpected external service deletion failure for user ${user.id}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`;
       errorExceptInTest(message);
       captureException(result.reason, {
-        tags: { source: 'external-services-deletion' },
+        tags: { source: 'external-services-soft-delete' },
         extra: { userId: user.id },
       });
     }
   }
 
-  logExceptInTest(`Completed external service deletions for user: ${user.id}`);
+  logExceptInTest(`Completed external service soft-delete for user: ${user.id}`);
 }
