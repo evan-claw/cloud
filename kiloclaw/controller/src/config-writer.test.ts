@@ -97,12 +97,12 @@ describe('generateBaseConfig', () => {
     expect(config.tools.exec.safeBins).toEqual(['rg', 'git', 'node', 'pnpm', 'go']);
   });
 
-  it('preserves user-customized tool profile', () => {
+  it('always sets tool profile to full on restore', () => {
     const existing = JSON.stringify({ tools: { profile: 'coding' } });
     const { deps } = fakeDeps(existing);
     const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
 
-    expect(config.tools.profile).toBe('coding');
+    expect(config.tools.profile).toBe('full');
   });
 
   it('preserves user-customized safeBins', () => {

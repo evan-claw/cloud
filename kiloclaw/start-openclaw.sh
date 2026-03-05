@@ -118,6 +118,7 @@ if [ -z "$KILOCODE_API_KEY" ]; then
     exit 1
 fi
 
+KILOCLAW_FRESH_INSTALL=false
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, running openclaw onboard..."
 
@@ -130,11 +131,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
         --skip-health \
         --kilocode-api-key "$KILOCODE_API_KEY"
 
+    KILOCLAW_FRESH_INSTALL=true
     echo "Onboard completed"
 else
     echo "Using existing config, running doctor..."
     openclaw doctor --fix --non-interactive
 fi
+export KILOCLAW_FRESH_INSTALL
 
 # ============================================================
 # PATCH CONFIG (channels, gateway auth, exec policy)
@@ -249,12 +252,13 @@ if (config.agents && config.agents.defaults && config.agents.defaults.models) {
     delete config.agents.defaults.models;
 }
 
-// Tool profile: default to "full" (all tools) on first boot. The onboard
-// default "messaging" only allows session/message tools, which leaves agents
-// without file, shell, or web access. Don't overwrite if the user has
-// customized their profile.
+// Tool profile: on fresh install, override the onboard default ("messaging")
+// with "full" so agents have access to all tools. On subsequent boots,
+// leave the user's choice untouched.
 config.tools = config.tools || {};
-config.tools.profile = config.tools.profile || 'full';
+if (process.env.KILOCLAW_FRESH_INSTALL === 'true') {
+    config.tools.profile = 'full';
+}
 
 // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
 // gateway host directly. Allowlist mode gates unknown commands via the
