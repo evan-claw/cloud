@@ -79,5 +79,15 @@ export async function GET(request: Request) {
     });
   }
 
-  return new Response(`Installed for team ${teamId} and ${state}!`);
+  return new Response(
+    `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Slack Installed</title></head>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<div style="text-align:center">
+  <h1>Slack app installed</h1>
+  <p>Kilo has been installed to your workspace. You can close this tab.</p>
+</div>
+</body></html>`,
+    { headers: { 'content-type': 'text/html; charset=utf-8' } }
+  );
 }
