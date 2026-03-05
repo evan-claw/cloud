@@ -94,7 +94,7 @@ describe('generateBaseConfig', () => {
     expect(config.tools.exec.ask).toBe('on-miss');
 
     // Safe bins
-    expect(config.tools.exec.safeBins).toEqual(['rg', 'git', 'node', 'pnpm', 'go']);
+    expect(config.tools.exec.safeBins).toEqual(['rg', 'git', 'gh', 'node', 'pnpm', 'go']);
   });
 
   it('always sets tool profile to full on restore', () => {

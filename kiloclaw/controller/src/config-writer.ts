@@ -173,7 +173,14 @@ export function generateBaseConfig(
   config.tools.exec.ask = 'on-miss';
   // Pre-approved CLIs for allowlist mode. Only set when absent; user
   // customizations via the Control UI are preserved.
-  config.tools.exec.safeBins = config.tools.exec.safeBins ?? ['rg', 'git', 'node', 'pnpm', 'go'];
+  config.tools.exec.safeBins = config.tools.exec.safeBins ?? [
+    'rg',
+    'git',
+    'gh',
+    'node',
+    'pnpm',
+    'go',
+  ];
 
   // Telegram
   if (env.TELEGRAM_BOT_TOKEN) {
