@@ -9,7 +9,8 @@ import { getFixTicketById } from '@/lib/auto-fix/db/fix-tickets';
 import type { AutoFixTicket } from '@kilocode/db/schema';
 import { getAgentConfigForOwner } from '@/lib/agent-config/db/agent-configs';
 import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';
-import { captureException } from '@sentry/nextjs';
+import { captureException, captureMessage } from '@sentry/nextjs';
+import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 import { generateGitHubInstallationToken } from '@/lib/integrations/platforms/github/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
 import { AutoFixAgentConfigSchema } from '@/lib/auto-fix/core/schemas';
@@ -77,17 +78,33 @@ export async function getFixConfig(ticketId: string): Promise<GetFixConfigResult
 
   const ownerId = ticket.owned_by_organization_id ?? ticket.owned_by_user_id;
   // ownerId is guaranteed non-null by the guard above, but TS can't narrow across two fields.
-  const owner: Owner = ticket.owned_by_organization_id
-    ? {
-        type: 'org',
-        id: ticket.owned_by_organization_id,
-        userId: ticket.owned_by_organization_id,
-      }
-    : {
-        type: 'user',
-        id: ownerId ?? '',
-        userId: ownerId ?? '',
-      };
+  let owner: Owner;
+  if (ticket.owned_by_organization_id) {
+    const botUserId = await getBotUserId(ticket.owned_by_organization_id, 'auto-fix');
+    if (!botUserId) {
+      errorExceptInTest('[auto-fix-config] Bot user not found for organization', {
+        ticketId,
+        organizationId: ticket.owned_by_organization_id,
+      });
+      captureMessage('Bot user missing for organization auto fix config', {
+        level: 'error',
+        tags: { source: 'auto-fix-config' },
+        extra: { organizationId: ticket.owned_by_organization_id, ticketId },
+      });
+      return { ok: false, error: 'Bot user not found for organization', status: 500 };
+    }
+    owner = {
+      type: 'org',
+      id: ticket.owned_by_organization_id,
+      userId: botUserId,
+    };
+  } else {
+    owner = {
+      type: 'user',
+      id: ownerId ?? '',
+      userId: ownerId ?? '',
+    };
+  }
 
   const agentConfig = await getAgentConfigForOwner(owner, 'auto_fix', 'github');
 
