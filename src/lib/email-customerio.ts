@@ -8,16 +8,15 @@ export type { SendEmailRequestOptions };
 export function sendViaCustomerIo(mailRequest: SendEmailRequestOptions) {
   if (!CUSTOMERIO_EMAIL_API_KEY) {
     const message = 'CUSTOMERIO_EMAIL_API_KEY is not set - cannot send email';
-    console.warn(message, { to: mailRequest.to });
+    console.warn(message);
 
     captureMessage(message, {
       level: 'warning',
       tags: { source: 'email_service' },
-      extra: { to: mailRequest.to },
     });
     return;
   }
-  console.log('sending email with customerio:', { to: mailRequest.to });
+  console.log('sending email with customerio');
   const client = new APIClient(CUSTOMERIO_EMAIL_API_KEY);
   const request = new SendEmailRequest(mailRequest);
   return client.sendEmail(request);
