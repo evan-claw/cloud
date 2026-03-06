@@ -3,7 +3,6 @@ import { db } from '@/lib/drizzle';
 import { bot_requests, kilocode_users, organizations } from '@kilocode/db/schema';
 import * as z from 'zod';
 import { sql, desc, eq, gte, count } from 'drizzle-orm';
-import type { BotRequestStep } from '@kilocode/db/schema';
 
 const bigIntToNumber = (value: unknown): number => {
   if (value === null || value === undefined) return 0;
@@ -181,7 +180,7 @@ export const adminBotRequestsRouter = createTRPCRouter({
       status: row.status ?? 'pending',
       errorMessage: row.errorMessage,
       modelUsed: row.modelUsed,
-      steps: row.steps as BotRequestStep[] | null,
+      steps: row.steps,
       cloudAgentSessionId: row.cloudAgentSessionId,
       responseTimeMs: row.responseTimeMs,
       createdAt: row.createdAt,
