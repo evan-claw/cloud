@@ -1,6 +1,6 @@
 import { db } from '@/lib/drizzle';
 import { security_findings } from '@kilocode/db/schema';
-import { eq, and, desc, count, sql, max, or } from 'drizzle-orm';
+import { eq, and, desc, count, sql, max, or, type SQL } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type { SecurityFinding, NewSecurityFinding } from '@kilocode/db/schema';
 import type {
@@ -290,7 +290,8 @@ type ListFindingsParams = {
   repoFullName?: string;
   packageName?: string;
   outcomeFilter?: OutcomeFilter;
-  sortBy?: 'severity_desc' | 'severity_asc';
+  overdue?: boolean;
+  sortBy?: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc';
 };
 
 export async function listSecurityFindings(
@@ -306,6 +307,7 @@ export async function listSecurityFindings(
       repoFullName,
       packageName,
       outcomeFilter,
+      overdue,
       sortBy,
     } = params;
     const ownerConverted = toOwner(owner);
@@ -335,6 +337,11 @@ export async function listSecurityFindings(
     }
     if (packageName) {
       conditions.push(eq(security_findings.package_name, packageName));
+    }
+    if (overdue) {
+      conditions.push(
+        sql`${security_findings.sla_due_at} IS NOT NULL AND ${security_findings.sla_due_at} < now()`
+      );
     }
     if (outcomeFilter && outcomeFilter !== 'all') {
       switch (outcomeFilter) {
@@ -431,10 +438,18 @@ export async function listSecurityFindings(
       ELSE 0
     END`;
 
-    const orderByClause =
-      sortBy === 'severity_asc'
-        ? [severityOrderReversed, desc(security_findings.created_at)]
-        : [severityOrder, desc(security_findings.created_at)];
+    let orderByClause: SQL[];
+    if (sortBy === 'sla_due_at_asc') {
+      orderByClause = [
+        sql`${security_findings.sla_due_at} ASC NULLS LAST`,
+        severityOrder,
+        desc(security_findings.created_at),
+      ];
+    } else if (sortBy === 'severity_asc') {
+      orderByClause = [severityOrderReversed, desc(security_findings.created_at)];
+    } else {
+      orderByClause = [severityOrder, desc(security_findings.created_at)];
+    }
 
     // Run paginated query and count query in parallel
     const [findings, countResult] = await Promise.all([

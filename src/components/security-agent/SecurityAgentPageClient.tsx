@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,6 @@ import { ClearFindingsCard } from './ClearFindingsCard';
 import { useTRPC } from '@/lib/trpc/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ExternalLink, ListChecks, Settings2, RefreshCw } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import type { SecurityFinding } from '@kilocode/db/schema';
 import {
@@ -64,14 +56,17 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
   const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
   const [startingAnalysisIds, setStartingAnalysisIds] = useState<Set<string>>(new Set());
   const [gitHubError, setGitHubError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'severity_desc' | 'severity_asc'>('severity_desc');
-  const configHasChanges = useRef(false);
-  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'severity_desc' | 'severity_asc' | 'sla_due_at_asc'>(
+    'severity_desc'
+  );
 
-  const handleSortByChange = useCallback((newSortBy: 'severity_desc' | 'severity_asc') => {
-    setSortBy(newSortBy);
-    setPage(1);
-  }, []);
+  const handleSortByChange = useCallback(
+    (newSortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc') => {
+      setSortBy(newSortBy);
+      setPage(1);
+    },
+    []
+  );
 
   // Determine which router to use based on organizationId
   const isOrg = !!organizationId;
@@ -757,17 +752,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
         </Alert>
       )}
 
-      <Tabs
-        value={effectiveTab}
-        onValueChange={tab => {
-          if (effectiveTab === 'config' && tab !== 'config' && configHasChanges.current) {
-            setPendingTabChange(tab);
-          } else {
-            setActiveTab(tab);
-          }
-        }}
-        className="w-full"
-      >
+      <Tabs value={effectiveTab} onValueChange={setActiveTab} className="w-full">
         {hasIntegration && (
           <TabsList className="grid w-full max-w-lg grid-cols-2">
             <TabsTrigger value="findings" className="flex items-center gap-2">
@@ -836,9 +821,6 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
               onToggleEnabled={handleToggleEnabled}
               isSaving={isSavingConfig}
               isToggling={isTogglingEnabled}
-              onHasChangesChange={v => {
-                configHasChanges.current = v;
-              }}
             />
             {/* Clear Orphaned Findings Card - only shown when there are orphaned repos */}
             <ClearFindingsCard
@@ -868,38 +850,6 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
         onDismiss={handleDismiss}
         isLoading={isDismissing}
       />
-
-      {/* Unsaved config changes confirmation */}
-      <Dialog
-        open={pendingTabChange !== null}
-        onOpenChange={open => {
-          if (!open) setPendingTabChange(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Unsaved Changes</DialogTitle>
-            <DialogDescription>
-              You have unsaved configuration changes. Do you want to discard them?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingTabChange(null)}>
-              Go Back
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                const tab = pendingTabChange;
-                setPendingTabChange(null);
-                if (tab) setActiveTab(tab);
-              }}
-            >
-              Discard Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

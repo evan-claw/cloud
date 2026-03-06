@@ -41,6 +41,9 @@ export const securityAgentRouter = createTRPCRouter({
     .input(handlers.getFinding.inputSchema)
     .query(handlers.getFinding.handler),
   getStats: baseProcedure.query(handlers.getStats),
+  getDashboardStats: baseProcedure
+    .input(handlers.getDashboardStats.inputSchema)
+    .query(handlers.getDashboardStats.handler),
   getLastSyncTime: baseProcedure
     .input(handlers.getLastSyncTime.inputSchema)
     .query(handlers.getLastSyncTime.handler),

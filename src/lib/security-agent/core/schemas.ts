@@ -57,7 +57,8 @@ export const ListFindingsInputSchema = z.object({
   status: SecurityFindingStatusSchema.optional(),
   severity: SecuritySeveritySchema.optional(),
   outcomeFilter: OutcomeFilterSchema.optional(),
-  sortBy: z.enum(['severity_desc', 'severity_asc']).default('severity_desc'),
+  overdue: z.boolean().optional(),
+  sortBy: z.enum(['severity_desc', 'severity_asc', 'sla_due_at_asc']).default('severity_desc'),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
 });
@@ -147,6 +148,10 @@ export const DeleteFindingsByRepoInputSchema = z.object({
   repoFullName: z.string().min(1),
 });
 
+export const GetDashboardStatsInputSchema = z.object({
+  repoFullName: z.string().optional(),
+});
+
 export type SaveSecurityConfigInput = z.infer<typeof SaveSecurityConfigInputSchema>;
 export type ListFindingsInput = z.infer<typeof ListFindingsInputSchema>;
 export type TriggerSyncInput = z.infer<typeof TriggerSyncInputSchema>;
@@ -162,3 +167,4 @@ export type SecurityFindingSandboxAnalysisResponse = z.infer<
 export type StartAnalysisInput = z.infer<typeof StartAnalysisInputSchema>;
 export type GetAnalysisInput = z.infer<typeof GetAnalysisInputSchema>;
 export type DeleteFindingsByRepoInput = z.infer<typeof DeleteFindingsByRepoInputSchema>;
+export type GetDashboardStatsInput = z.infer<typeof GetDashboardStatsInputSchema>;

@@ -19,6 +19,7 @@ import {
   getOrphanedRepositoriesWithFindingCounts,
   deleteFindingsByRepository as deleteFindingsByRepositoryDb,
 } from '@/lib/security-agent/db/security-findings';
+import { getDashboardStats } from '@/lib/security-agent/db/dashboard-stats';
 import { canStartAnalysis } from '@/lib/security-agent/db/security-analysis';
 import {
   hasSecurityReviewPermissions,
@@ -48,6 +49,7 @@ import {
   StartAnalysisInputSchema,
   GetAnalysisInputSchema,
   DeleteFindingsByRepoInputSchema,
+  GetDashboardStatsInputSchema,
   type SaveSecurityConfigInput,
   type ListFindingsInput,
   type TriggerSyncInput,
@@ -57,6 +59,7 @@ import {
   type StartAnalysisInput,
   type GetAnalysisInput,
   type DeleteFindingsByRepoInput,
+  type GetDashboardStatsInput,
 } from '@/lib/security-agent/core/schemas';
 import {
   DEFAULT_SECURITY_AGENT_TRIAGE_MODEL,
@@ -531,6 +534,7 @@ export function createSecurityAgentHandlers<TExtra = {}>(deps: SecurityAgentDeps
           status: input.status,
           severity: input.severity,
           outcomeFilter: input.outcomeFilter,
+          overdue: input.overdue,
           sortBy: input.sortBy,
           limit: input.limit,
           offset: input.offset,
@@ -1148,6 +1152,39 @@ export function createSecurityAgentHandlers<TExtra = {}>(deps: SecurityAgentDeps
         skipped: result.skipped,
         errors: result.errors,
       };
+    },
+
+    // -----------------------------------------------------------------------
+    // 18. getDashboardStats
+    // -----------------------------------------------------------------------
+    getDashboardStats: {
+      inputSchema: GetDashboardStatsInputSchema,
+      handler: async ({
+        ctx,
+        input: rawInput,
+      }: {
+        ctx: TRPCContext;
+        input: GetDashboardStatsInput & TExtra;
+      }) => {
+        const input = rawInput;
+        const securityOwner = deps.resolveSecurityOwner(ctx, input);
+        const owner = deps.resolveOwner(ctx, input);
+
+        // Get config for SLA targets
+        const config = await getSecurityAgentConfigWithStatus(owner);
+        const slaConfig = {
+          slaCriticalDays: config?.config.sla_critical_days ?? 15,
+          slaHighDays: config?.config.sla_high_days ?? 30,
+          slaMediumDays: config?.config.sla_medium_days ?? 45,
+          slaLowDays: config?.config.sla_low_days ?? 90,
+        };
+
+        return getDashboardStats({
+          owner: securityOwner,
+          repoFullName: input.repoFullName,
+          slaConfig,
+        });
+      },
     },
   };
 }

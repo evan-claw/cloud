@@ -82,8 +82,8 @@ type SecurityFindingsCardProps = {
   startingAnalysisIds?: Set<string>;
   runningCount?: number;
   concurrencyLimit?: number;
-  sortBy: 'severity_desc' | 'severity_asc';
-  onSortByChange: (sortBy: 'severity_desc' | 'severity_asc') => void;
+  sortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc';
+  onSortByChange: (sortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc') => void;
 };
 
 // Outcome filters that imply their own status constraint in the DB query.

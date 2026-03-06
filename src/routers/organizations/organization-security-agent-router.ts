@@ -46,6 +46,9 @@ export const organizationSecurityAgentRouter = createTRPCRouter({
     .input(OrganizationIdInputSchema.merge(handlers.getFinding.inputSchema))
     .query(handlers.getFinding.handler),
   getStats: organizationMemberProcedure.query(handlers.getStats),
+  getDashboardStats: organizationMemberProcedure
+    .input(OrganizationIdInputSchema.merge(handlers.getDashboardStats.inputSchema))
+    .query(handlers.getDashboardStats.handler),
   getLastSyncTime: organizationMemberProcedure
     .input(OrganizationIdInputSchema.merge(handlers.getLastSyncTime.inputSchema))
     .query(handlers.getLastSyncTime.handler),
