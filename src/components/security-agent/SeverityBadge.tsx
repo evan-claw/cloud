@@ -44,7 +44,6 @@ export function SeverityBadge({ severity, size = 'md', className }: SeverityBadg
         className
       )}
     >
-      <span className="mr-1">{config.icon}</span>
       {config.label}
     </Badge>
   );

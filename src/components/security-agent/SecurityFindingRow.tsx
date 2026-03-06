@@ -1,17 +1,157 @@
 'use client';
 
 import { differenceInDays, differenceInHours, differenceInMinutes, isPast } from 'date-fns';
-import { Brain, CheckCircle2, ChevronRight, Clock, Package } from 'lucide-react';
+import {
+  Brain,
+  CheckCircle2,
+  ChevronRight,
+  Eye,
+  Loader2,
+  Package,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  XCircle,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SecurityFinding } from '@kilocode/db/schema';
 import { cn } from '@/lib/utils';
-import { AnalysisStatusBadge } from './AnalysisStatusBadge';
-import { FindingStatusBadge } from './FindingStatusBadge';
 import { SeverityBadge } from './SeverityBadge';
 
-type Severity = 'critical' | 'high' | 'medium' | 'low';
+type Outcome = {
+  icon: typeof CheckCircle2;
+  label: string;
+  className: string;
+  spin: boolean;
+  tooltip: string | null;
+};
 
+function getOutcome(finding: SecurityFinding): Outcome | null {
+  // Resolved findings: the finding status takes precedence over analysis results
+  if (finding.status === 'fixed') {
+    const fixedAgo = finding.fixed_at
+      ? `Fixed ${formatCompactDistance(new Date(finding.fixed_at))} ago`
+      : null;
+    return {
+      icon: CheckCircle2,
+      label: 'Fixed',
+      className: 'text-green-400',
+      spin: false,
+      tooltip: fixedAgo,
+    };
+  }
+  if (finding.status === 'ignored') {
+    const reason = finding.ignored_reason ? finding.ignored_reason.replace(/_/g, ' ') : null;
+    return {
+      icon: XCircle,
+      label: 'Dismissed',
+      className: 'text-muted-foreground',
+      spin: false,
+      tooltip: reason,
+    };
+  }
+
+  // In-progress / failed analysis
+  if (finding.analysis_status === 'pending') {
+    return {
+      icon: Loader2,
+      label: 'Analyzing',
+      className: 'text-yellow-400',
+      spin: true,
+      tooltip: 'Analysis is queued',
+    };
+  }
+  if (finding.analysis_status === 'running') {
+    return {
+      icon: Loader2,
+      label: 'Analyzing',
+      className: 'text-yellow-400',
+      spin: true,
+      tooltip: 'Analysis is running',
+    };
+  }
+  if (finding.analysis_status === 'failed') {
+    return {
+      icon: XCircle,
+      label: 'Analysis Failed',
+      className: 'text-red-400',
+      spin: false,
+      tooltip: finding.analysis_error || 'Unknown error',
+    };
+  }
+
+  // Completed analysis — show the result
+  if (finding.analysis_status === 'completed') {
+    const sandbox = finding.analysis?.sandboxAnalysis;
+    const triage = finding.analysis?.triage;
+    if (sandbox?.isExploitable === true) {
+      return {
+        icon: ShieldAlert,
+        label: 'Exploitable',
+        className: 'text-red-400',
+        spin: false,
+        tooltip: sandbox.summary || 'Codebase analysis confirmed this vulnerability is exploitable',
+      };
+    }
+    if (sandbox?.isExploitable === false) {
+      return {
+        icon: ShieldCheck,
+        label: 'Not Exploitable',
+        className: 'text-green-400',
+        spin: false,
+        tooltip: sandbox.summary || 'Codebase analysis determined this is not exploitable',
+      };
+    }
+    if (triage?.suggestedAction === 'dismiss') {
+      return {
+        icon: ShieldX,
+        label: 'Safe to Dismiss',
+        className: 'text-green-400',
+        spin: false,
+        tooltip: triage.needsSandboxReasoning || 'Triage determined this can be safely dismissed',
+      };
+    }
+    if (triage?.suggestedAction === 'manual_review') {
+      return {
+        icon: Eye,
+        label: 'Needs Review',
+        className: 'text-yellow-400',
+        spin: false,
+        tooltip: triage.needsSandboxReasoning || 'Triage flagged this for manual review',
+      };
+    }
+    return {
+      icon: Shield,
+      label: triage ? 'Triage Complete' : 'Analyzed',
+      className: 'text-muted-foreground',
+      spin: false,
+      tooltip: triage?.needsSandboxReasoning || null,
+    };
+  }
+  return null;
+}
+
+function OutcomeLabel({ outcome }: { outcome: Outcome }) {
+  const content = (
+    <span className={cn('flex items-center gap-1.5', outcome.className)}>
+      <outcome.icon className={cn('h-3.5 w-3.5', outcome.spin && 'animate-spin')} />
+      {outcome.label}
+    </span>
+  );
+  if (!outcome.tooltip) return content;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{content}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4} className="max-w-xs">
+        {outcome.tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+type Severity = 'critical' | 'high' | 'medium' | 'low';
 function isSeverity(value: string): value is Severity {
   return ['critical', 'high', 'medium', 'low'].includes(value);
 }
@@ -33,29 +173,6 @@ function formatCompactDistance(date: Date) {
   return `${minutes}m`;
 }
 
-function getSlaStatus(slaDueAt: string | null, status: string) {
-  if (status !== 'open' || !slaDueAt) return null;
-
-  const dueDate = new Date(slaDueAt);
-  const compact = formatCompactDistance(dueDate);
-
-  if (isPast(dueDate)) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-red-400">
-        <Clock className="h-3 w-3" />
-        {compact} overdue
-      </span>
-    );
-  }
-
-  return (
-    <span className="text-muted-foreground flex items-center gap-1 text-xs">
-      <Clock className="h-3 w-3" />
-      Due {compact}
-    </span>
-  );
-}
-
 export function SecurityFindingRow({
   finding,
   onClick,
@@ -63,6 +180,7 @@ export function SecurityFindingRow({
   isStartingAnalysis,
 }: SecurityFindingRowProps) {
   const severity: Severity = isSeverity(finding.severity) ? finding.severity : 'medium';
+
   const canStartAnalysis =
     finding.status === 'open' &&
     (!finding.analysis_status || finding.analysis_status === 'failed') &&
@@ -77,6 +195,10 @@ export function SecurityFindingRow({
     }
   };
 
+  const outcome = getOutcome(finding);
+  const isHighlighted =
+    finding.status === 'open' && !!finding.sla_due_at && isPast(new Date(finding.sla_due_at));
+
   return (
     <div
       role="button"
@@ -89,10 +211,8 @@ export function SecurityFindingRow({
         }
       }}
       className={cn(
-        'hover:bg-muted/50 grid w-full cursor-pointer grid-cols-[96px_1fr_80px_100px_16px] items-center gap-x-1.5 px-4 py-3 text-left transition-colors',
-        finding.status === 'open' && finding.sla_due_at && isPast(new Date(finding.sla_due_at))
-          ? 'bg-red-500/5'
-          : ''
+        'hover:bg-muted/50 grid w-full cursor-pointer grid-cols-[72px_1fr_140px_80px_16px] items-center gap-x-1.5 px-4 py-3 text-left transition-colors',
+        isHighlighted ? 'bg-red-500/5' : ''
       )}
     >
       {/* Severity */}
@@ -109,21 +229,26 @@ export function SecurityFindingRow({
         </span>
       </div>
 
-      {/* Status + SLA/Fixed */}
+      {/* Outcome */}
       <div className="text-xs">
-        <FindingStatusBadge status={finding.status} />
-        <div className="mt-1">
-          {getSlaStatus(finding.sla_due_at, finding.status)}
-          {finding.status === 'fixed' && finding.fixed_at && (
-            <span className="flex items-center gap-1 text-xs text-green-400">
-              <CheckCircle2 className="h-3 w-3" />
-              {formatCompactDistance(new Date(finding.fixed_at))} ago
-            </span>
-          )}
-        </div>
+        {outcome ? (
+          <OutcomeLabel outcome={outcome} />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-muted-foreground/50 flex items-center gap-1.5">
+                <Shield className="h-3.5 w-3.5" />
+                Not Analyzed
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={4}>
+              Click Analyze to assess this vulnerability
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
-      {/* Analysis */}
+      {/* Action */}
       <div className="flex items-center justify-end">
         {canStartAnalysis ? (
           finding.analysis_status === 'failed' ? (
@@ -134,7 +259,7 @@ export function SecurityFindingRow({
                   size="sm"
                   onClick={handleStartAnalysis}
                   disabled={isStartingAnalysis}
-                  className="gap-1 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
+                  className="gap-1"
                 >
                   <Brain className="h-3 w-3" />
                   Retry
@@ -158,9 +283,23 @@ export function SecurityFindingRow({
               Analyze
             </Button>
           )
-        ) : (
-          <AnalysisStatusBadge status={finding.analysis_status} isStarting={isStartingAnalysis} />
-        )}
+        ) : isStartingAnalysis ? (
+          <Button variant="outline" size="sm" disabled className="gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Starting
+          </Button>
+        ) : finding.analysis?.triage?.suggestedAction === 'manual_review' &&
+          finding.status === 'open' ? (
+          <Button variant="outline" size="sm" onClick={onClick} className="gap-1">
+            <Eye className="h-3 w-3" />
+            Review
+          </Button>
+        ) : finding.status === 'fixed' || finding.status === 'ignored' ? (
+          <Button variant="outline" size="sm" onClick={onClick} className="gap-1">
+            <Eye className="h-3 w-3" />
+            View Details
+          </Button>
+        ) : null}
       </div>
 
       {/* Detail chevron */}

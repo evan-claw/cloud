@@ -268,9 +268,18 @@ export async function getSecurityFindingById(findingId: string): Promise<Securit
   }
 }
 
-type ExploitabilityFilter = 'all' | 'exploitable' | 'not_exploitable';
-type SuggestedActionFilter = 'all' | 'dismissable';
-type AnalysisStatusFilter = 'all' | 'not_analyzed' | 'pending' | 'running' | 'completed' | 'failed';
+type OutcomeFilter =
+  | 'all'
+  | 'not_analyzed'
+  | 'analyzing'
+  | 'failed'
+  | 'exploitable'
+  | 'not_exploitable'
+  | 'safe_to_dismiss'
+  | 'needs_review'
+  | 'triage_complete'
+  | 'fixed'
+  | 'dismissed';
 
 type ListFindingsParams = {
   owner: SecurityReviewOwner;
@@ -280,12 +289,13 @@ type ListFindingsParams = {
   severity?: SecuritySeverity;
   repoFullName?: string;
   packageName?: string;
-  exploitability?: ExploitabilityFilter;
-  suggestedAction?: SuggestedActionFilter;
-  analysisStatus?: AnalysisStatusFilter;
+  outcomeFilter?: OutcomeFilter;
+  sortBy?: 'severity_desc' | 'severity_asc';
 };
 
-export async function listSecurityFindings(params: ListFindingsParams): Promise<SecurityFinding[]> {
+export async function listSecurityFindings(
+  params: ListFindingsParams
+): Promise<{ findings: SecurityFinding[]; totalCount: number }> {
   try {
     const {
       owner,
@@ -295,9 +305,8 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
       severity,
       repoFullName,
       packageName,
-      exploitability,
-      suggestedAction,
-      analysisStatus,
+      outcomeFilter,
+      sortBy,
     } = params;
     const ownerConverted = toOwner(owner);
 
@@ -327,37 +336,85 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
     if (packageName) {
       conditions.push(eq(security_findings.package_name, packageName));
     }
-    if (exploitability && exploitability !== 'all') {
-      if (exploitability === 'exploitable') {
-        // isExploitable === true
-        conditions.push(
-          sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable')::boolean = true`
-        );
-      } else if (exploitability === 'not_exploitable') {
-        // isExploitable === false
-        conditions.push(
-          sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable')::boolean = false`
-        );
-      }
-    }
-    if (suggestedAction && suggestedAction !== 'all') {
-      if (suggestedAction === 'dismissable') {
-        conditions.push(
-          or(
-            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'dismiss'`,
-            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'suggestedAction') = 'dismiss'`
-          )
-        );
-      }
-    }
-    if (analysisStatus && analysisStatus !== 'all') {
-      if (analysisStatus === 'not_analyzed') {
-        conditions.push(sql`${security_findings.analysis_status} IS NULL`);
-      } else {
-        conditions.push(eq(security_findings.analysis_status, analysisStatus));
+    if (outcomeFilter && outcomeFilter !== 'all') {
+      switch (outcomeFilter) {
+        case 'not_analyzed':
+          conditions.push(sql`${security_findings.analysis_status} IS NULL`);
+          break;
+        case 'analyzing':
+          conditions.push(
+            or(
+              eq(security_findings.analysis_status, 'pending'),
+              eq(security_findings.analysis_status, 'running')
+            )
+          );
+          break;
+        case 'failed':
+          conditions.push(eq(security_findings.analysis_status, 'failed'));
+          break;
+        case 'exploitable':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'true'`
+          );
+          break;
+        case 'not_exploitable':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'false'`
+          );
+          break;
+        case 'safe_to_dismiss':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'dismiss'`
+          );
+          // Exclude findings where sandbox has a definitive result, since
+          // getOutcome() gives sandbox priority over triage. Without this a
+          // finding triaged as "dismiss" but sandbox-confirmed as exploitable
+          // would appear under "Safe to Dismiss" yet display as "Exploitable".
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown'`
+          );
+          break;
+        case 'needs_review':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'manual_review'`
+          );
+          // Same as safe_to_dismiss: exclude findings where sandbox overrides triage.
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown'`
+          );
+          break;
+        case 'triage_complete':
+          // Triage done but no sandbox analysis yet; matches TriageSuggestedActionSchema = 'analyze_codebase'.
+          // Coupled with OutcomeFilterSchema and getOutcome() in SecurityFindingRow.tsx.
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`((${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown')`
+          );
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'analyze_codebase'`
+          );
+          break;
+        case 'fixed':
+          conditions.push(eq(security_findings.status, 'fixed'));
+          break;
+        case 'dismissed':
+          conditions.push(eq(security_findings.status, 'ignored'));
+          break;
       }
     }
 
+    const whereClause = and(...conditions);
+
+    // Sort order
     const severityOrder = sql`CASE ${security_findings.severity}
       WHEN 'critical' THEN 1
       WHEN 'high' THEN 2
@@ -366,15 +423,32 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
       ELSE 5
     END`;
 
-    const findings = await db
-      .select()
-      .from(security_findings)
-      .where(and(...conditions))
-      .orderBy(severityOrder, desc(security_findings.created_at))
-      .limit(limit)
-      .offset(offset);
+    const severityOrderReversed = sql`CASE ${security_findings.severity}
+      WHEN 'low' THEN 1
+      WHEN 'medium' THEN 2
+      WHEN 'high' THEN 3
+      WHEN 'critical' THEN 4
+      ELSE 0
+    END`;
 
-    return findings;
+    const orderByClause =
+      sortBy === 'severity_asc'
+        ? [severityOrderReversed, desc(security_findings.created_at)]
+        : [severityOrder, desc(security_findings.created_at)];
+
+    // Run paginated query and count query in parallel
+    const [findings, countResult] = await Promise.all([
+      db
+        .select()
+        .from(security_findings)
+        .where(whereClause)
+        .orderBy(...orderByClause)
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(security_findings).where(whereClause),
+    ]);
+
+    return { findings, totalCount: countResult[0]?.count ?? 0 };
   } catch (error) {
     captureException(error, {
       tags: { operation: 'listSecurityFindings' },
