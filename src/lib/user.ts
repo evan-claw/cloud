@@ -38,6 +38,7 @@ import {
   auto_triage_tickets,
   auto_fix_tickets,
   slack_bot_requests,
+  bot_requests,
   cloud_agent_code_reviews,
   kiloclaw_instances,
   kiloclaw_access_codes,
@@ -438,7 +439,7 @@ export class SoftDeletePreconditionError extends Error {
  *   cloud_agent_webhook_triggers, agent_environment_profiles,
  *   security_findings, security_analysis_owner_state,
  *   security_analysis_queue (via cascade when security_findings are deleted),
- *   auto_triage/fix_tickets, slack_bot_requests,
+ *   auto_triage/fix_tickets, slack_bot_requests, bot_requests,
  *   cloud_agent_code_reviews, device_auth_requests, auto_top_up_configs,
  *   kiloclaw_instances/access_codes, user_period_cache,
  *   kilo_pass_scheduled_changes)
@@ -541,6 +542,7 @@ export async function softDeleteUser(userId: string) {
     await tx.delete(auto_fix_tickets).where(eq(auto_fix_tickets.owned_by_user_id, userId));
     await tx.delete(auto_triage_tickets).where(eq(auto_triage_tickets.owned_by_user_id, userId));
     await tx.delete(slack_bot_requests).where(eq(slack_bot_requests.owned_by_user_id, userId));
+    await tx.delete(bot_requests).where(eq(bot_requests.created_by, userId));
     await tx
       .delete(cloud_agent_code_reviews)
       .where(eq(cloud_agent_code_reviews.owned_by_user_id, userId));

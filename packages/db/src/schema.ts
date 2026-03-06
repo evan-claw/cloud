@@ -3406,3 +3406,62 @@ export const kiloclaw_earlybird_purchases = pgTable('kiloclaw_earlybird_purchase
 });
 
 export type KiloClawEarlybirdPurchase = typeof kiloclaw_earlybird_purchases.$inferSelect;
+
+// Bot Request Logs — tracks each message handled by the new bot (src/lib/bot.ts).
+// Rows are created as 'pending' on receipt and updated as processing progresses.
+export type BotRequestStatus = 'pending' | 'completed' | 'error';
+
+export type BotRequestStep = {
+  stepNumber: number;
+  finishReason: string;
+  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  toolResults?: Array<{ name: string; result: unknown }>;
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+};
+
+export const bot_requests = pgTable(
+  'bot_requests',
+  {
+    id: idPrimaryKeyColumn,
+
+    created_by: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' }),
+    organization_id: uuid().references(() => organizations.id, { onDelete: 'cascade' }),
+
+    platform_integration_id: uuid().references(() => platform_integrations.id, {
+      onDelete: 'set null',
+    }),
+
+    platform: text().notNull(),
+    platform_thread_id: text().notNull(),
+    platform_message_id: text(),
+
+    user_message: text().notNull(),
+
+    status: text().notNull().$type<BotRequestStatus>().default('pending'),
+    error_message: text(),
+    model_used: text(),
+
+    steps: jsonb().$type<BotRequestStep[]>(),
+
+    cloud_agent_session_id: text(),
+    response_time_ms: integer(),
+
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => sql`now()`),
+  },
+  table => [
+    index('IDX_bot_requests_created_at').on(table.created_at),
+    index('IDX_bot_requests_created_by').on(table.created_by),
+    index('IDX_bot_requests_organization_id').on(table.organization_id),
+    index('IDX_bot_requests_platform_integration_id').on(table.platform_integration_id),
+    index('IDX_bot_requests_status').on(table.status),
+  ]
+);
+
+export type BotRequest = typeof bot_requests.$inferSelect;
+export type NewBotRequest = typeof bot_requests.$inferInsert;
