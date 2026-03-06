@@ -21,11 +21,18 @@ function truncate(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 1) + '…';
 }
 
+/** Strip characters that could break XML-like structural delimiters. */
+function sanitizeForDelimiters(text: string): string {
+  return text.replace(/[<>]/g, '');
+}
+
 function formatMessage(msg: Message): FormattedMessage {
   const collapsed = msg.text.replace(/\s+/g, ' ').trim();
   return {
-    authorName: msg.author.fullName || msg.author.userName || msg.author.userId,
-    text: truncate(collapsed, MAX_MESSAGE_TEXT_LENGTH),
+    authorName: sanitizeForDelimiters(
+      msg.author.fullName || msg.author.userName || msg.author.userId
+    ),
+    text: sanitizeForDelimiters(truncate(collapsed, MAX_MESSAGE_TEXT_LENGTH)),
   };
 }
 
@@ -100,7 +107,7 @@ export async function getConversationContext(
  * system prompt. Returns an empty string when there is nothing to add.
  */
 export function formatConversationContextForPrompt(ctx: ConversationContext): string {
-  const lines: string[] = ['\n\nConversation context:'];
+  const lines: string[] = ['Conversation context:'];
 
   // Channel info — some adapters (e.g. Slack) include a leading '#' in the
   // channel name already, so strip it before re-adding to avoid '##general'.
@@ -115,11 +122,12 @@ export function formatConversationContextForPrompt(ctx: ConversationContext): st
     lines.push(`- Channel purpose: ${truncate(ctx.channelPurpose, MAX_MESSAGE_TEXT_LENGTH)}`);
   }
 
-  // Channel messages (most recent first)
+  // Channel messages (most recent first), wrapped in delimiters to
+  // distinguish user-generated content from system instructions.
   if (ctx.recentChannelMessages.length > 0) {
     lines.push('\nRecent channel messages (most recent first):');
     for (const msg of ctx.recentChannelMessages) {
-      lines.push(`- ${msg.authorName}: ${msg.text}`);
+      lines.push(`<user_message author="${msg.authorName}">${msg.text}</user_message>`);
     }
   }
 
@@ -127,7 +135,7 @@ export function formatConversationContextForPrompt(ctx: ConversationContext): st
   if (ctx.recentThreadMessages.length > 0) {
     lines.push('\nThread messages (oldest first):');
     for (const msg of ctx.recentThreadMessages) {
-      lines.push(`- ${msg.authorName}: ${msg.text}`);
+      lines.push(`<user_message author="${msg.authorName}">${msg.text}</user_message>`);
     }
   }
 
