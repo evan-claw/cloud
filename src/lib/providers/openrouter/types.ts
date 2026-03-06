@@ -10,6 +10,7 @@ import type { AwsCredentials } from '@/lib/providers/openrouter/inference-provid
 export type OpenRouterProviderConfig = {
   order?: string[];
   only?: string[];
+  ignore?: string[];
   data_collection?: 'allow' | 'deny';
   zdr?: boolean;
 };

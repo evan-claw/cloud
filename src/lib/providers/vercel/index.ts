@@ -63,6 +63,13 @@ export async function shouldRouteToVercel(
     return false;
   }
 
+  if ((request.provider?.ignore?.length ?? 0) > 0) {
+    console.debug(
+      `[shouldRouteToVercel] not routing to Vercel because provider.ignore is not supported`
+    );
+    return false;
+  }
+
   if (!isLikelyAvailableOnAllGateways(requestedModel)) {
     console.debug(`[shouldRouteToVercel] model not available on all gateways`);
     return false;

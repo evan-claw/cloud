@@ -242,7 +242,11 @@ export function applyProviderSpecificLogic(
   if (kiloFreeModel) {
     requestToMutate.model = kiloFreeModel.internal_id;
     if (kiloFreeModel.inference_provider) {
-      requestToMutate.provider = { only: [kiloFreeModel.inference_provider] };
+      if (requestToMutate.provider) {
+        requestToMutate.provider.only = [kiloFreeModel.inference_provider];
+      } else {
+        requestToMutate.provider = { only: [kiloFreeModel.inference_provider] };
+      }
     }
   }
 

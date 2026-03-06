@@ -12,7 +12,7 @@ import { WebClient } from '@slack/web-api';
 import type { OAuthV2Response } from '@slack/oauth';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Slack integrations - separate from the global platform default
@@ -478,9 +478,10 @@ export async function updateModel(
   if (owner.type === 'org') {
     const organization = await getOrganizationById(owner.id);
     if (organization) {
-      const modelAllowList = organization.settings?.model_allow_list || [];
-      if (modelAllowList.length > 0) {
-        const isAllowed = createProviderAwareModelAllowPredicate(modelAllowList);
+      const modelDenyList = organization.settings?.model_deny_list || [];
+      const providerDenyList = organization.settings?.provider_deny_list || [];
+      if (modelDenyList.length > 0 || providerDenyList.length > 0) {
+        const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
         if (!(await isAllowed(modelSlug))) {
           return { success: false, error: 'Model is not allowed by organization policy' };
         }
