@@ -1,3 +1,4 @@
+import type { Phase } from '@/lib/custom-llm/schemas';
 import type { FileAnnotation } from './provider-metadata';
 import type { ReasoningDetailUnion } from './reasoning-details';
 
@@ -86,6 +87,7 @@ export interface ChatCompletionAssistantMessageParam {
   annotations?: FileAnnotation[];
   tool_calls?: Array<ChatCompletionMessageToolCall>;
   cache_control?: OpenRouterCacheControl;
+  phase?: Phase | null;
 }
 
 export interface ChatCompletionMessageToolCall {

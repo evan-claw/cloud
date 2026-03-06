@@ -2,9 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useTRPC } from '@/lib/trpc/utils';
-import type { inferRouterOutputs } from '@trpc/server';
-import type { RootRouter } from '@/routers/root-router';
+import { useGastownTRPC } from '@/lib/gastown/trpc';
+import type { GastownOutputs } from '@/lib/gastown/trpc';
 import { formatDistanceToNow } from 'date-fns';
 import {
   Activity,
@@ -42,9 +41,8 @@ const EVENT_COLORS: Record<string, string> = {
   mail_sent: 'text-sky-500',
 };
 
-type RouterOutputs = inferRouterOutputs<RootRouter>;
-type TownEvent = RouterOutputs['gastown']['getTownEvents'][number];
-type BeadEvent = RouterOutputs['gastown']['getBeadEvents'][number];
+type TownEvent = GastownOutputs['gastown']['getTownEvents'][number];
+type BeadEvent = GastownOutputs['gastown']['getBeadEvents'][number];
 
 function eventDescription(event: {
   event_type: string;
@@ -103,7 +101,7 @@ export function ActivityFeedView({
   isLoading,
   onEventClick,
 }: ActivityFeedViewProps) {
-  const trpc = useTRPC();
+  const trpc = useGastownTRPC();
   const query = useQuery({
     ...trpc.gastown.getTownEvents.queryOptions({ townId, limit: 50 }),
     refetchInterval: 5000,
@@ -148,7 +146,7 @@ export function ActivityFeedView({
     );
   }
 
-  // Newest first — events from the API come oldest-first, so reverse.
+  // Ensure newest-first ordering (API returns DESC but defensive sort).
   const sorted = [...effectiveEvents].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
@@ -216,12 +214,24 @@ export function ActivityFeedView({
 
 export type { TownEvent };
 
+/**
+ * Extract a safe PR URL from bead metadata.
+ * Only allows https:// URLs to prevent XSS via javascript: protocol injection.
+ */
+export function extractPrUrl(metadata: unknown): string | null {
+  if (metadata && typeof metadata === 'object' && 'pr_url' in metadata) {
+    const url = metadata.pr_url;
+    if (typeof url === 'string' && url.startsWith('https://')) return url;
+  }
+  return null;
+}
+
 export function ActivityFeed({ townId }: { townId: string }) {
   return <ActivityFeedView townId={townId} />;
 }
 
 export function BeadEventTimeline({ rigId, beadId }: { rigId: string; beadId: string }) {
-  const trpc = useTRPC();
+  const trpc = useGastownTRPC();
   const { data: events, isLoading } = useQuery({
     ...trpc.gastown.getBeadEvents.queryOptions({ rigId, beadId }),
     refetchInterval: 5000,

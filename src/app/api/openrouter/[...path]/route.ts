@@ -376,13 +376,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   );
 
   const response = customLlm
-    ? await customLlmRequest(
-        customLlm,
-        requestBodyParsed,
-        user.id,
-        taskId,
-        isRooCodeBasedClient(fraudHeaders)
-      )
+    ? await customLlmRequest(customLlm, requestBodyParsed, isRooCodeBasedClient(fraudHeaders))
     : await openRouterRequest({
         path,
         search: url.search,

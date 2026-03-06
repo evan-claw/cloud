@@ -158,8 +158,15 @@ export function generateBaseConfig(
     delete config.agents.defaults.models;
   }
 
-  // Exec tool settings
+  // Tool profile: always set to "full" on config restore. The onboard
+  // default "messaging" only allows session/message tools, which leaves
+  // agents without file, shell, or web access.
   config.tools = config.tools ?? {};
+  config.tools.profile = 'full';
+
+  // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
+  // gateway host directly. Allowlist mode gates unknown commands via the
+  // Control UI approval dialog; safe bins auto-allow without approval.
   config.tools.exec = config.tools.exec ?? {};
   config.tools.exec.host = 'gateway';
   config.tools.exec.security = 'allowlist';

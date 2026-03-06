@@ -21,7 +21,7 @@ function extractFullPrompts(body: OpenRouterChatCompletionRequest): {
   systemPrompt: string | null;
   userPrompt: string | null;
 } {
-  const messages = body.messages ?? [];
+  const messages = Array.isArray(body.messages) ? body.messages : [];
 
   const systemPrompt =
     messages

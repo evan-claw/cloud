@@ -142,65 +142,6 @@
       }
     },
     {
-      "id": "moonshotai/kimi-k2.5:free",
-      "canonical_slug": "moonshotai/kimi-k2.5:free",
-      "hugging_face_id": "",
-      "name": "MoonshotAI: Kimi K2.5 (free)",
-      "created": 1756238927,
-      "description": "Kimi K2.5 is Moonshot AI's native multimodal model, delivering state-of-the-art visual coding capability and a self-directed agent swarm paradigm. Built on Kimi K2 with continued pretraining over approximately 15T mixed visual and text tokens, it delivers strong performance in general reasoning, visual coding, and agentic tool-calling.",
-      "context_length": 262144,
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": [
-          "text",
-          "image"
-        ],
-        "output_modalities": [
-          "text"
-        ],
-        "tokenizer": "Other",
-        "instruct_type": null
-      },
-      "pricing": {
-        "prompt": "0.0000000",
-        "completion": "0.0000000",
-        "request": "0",
-        "image": "0",
-        "web_search": "0",
-        "internal_reasoning": "0",
-        "input_cache_read": "0.00000000"
-      },
-      "top_provider": {
-        "context_length": 262144,
-        "max_completion_tokens": 65536,
-        "is_moderated": false
-      },
-      "per_request_limits": null,
-      "supported_parameters": [
-        "max_tokens",
-        "temperature",
-        "tools",
-        "reasoning",
-        "include_reasoning"
-      ],
-      "default_parameters": {},
-      "preferredIndex": 3,
-      "opencode": {
-        "variants": {
-          "instant": {
-            "reasoning": {
-              "enabled": false
-            }
-          },
-          "thinking": {
-            "reasoning": {
-              "enabled": true
-            }
-          }
-        }
-      }
-    },
-    {
       "id": "giga-potato-thinking",
       "canonical_slug": "giga-potato-thinking",
       "hugging_face_id": "",

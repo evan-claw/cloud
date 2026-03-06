@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { cors } from 'hono/cors';
 import { getTownContainerStub } from './dos/TownContainer.do';
 import { resError } from './util/res.util';
 import { dashboardHtml } from './ui/dashboard.ui';
-import { withCloudflareAccess, validateCfAccessRequest } from './middleware/cf-access.middleware';
 import {
   authMiddleware,
   agentOnlyMiddleware,
   townIdMiddleware,
   type AuthVariables,
 } from './middleware/auth.middleware';
+import { kiloAuthMiddleware } from './middleware/kilo-auth.middleware';
+import { trpcServer } from '@hono/trpc-server';
+import { wrappedGastownRouter } from './trpc/router';
 import {
   handleCreateBead,
   handleListBeads,
@@ -116,17 +119,29 @@ app.use('*', async (c, next) => {
   console.log(`${WORKER_LOG} <-- ${method} ${path} ${c.res.status} (${elapsed}ms)`);
 });
 
-// ── Cloudflare Access ───────────────────────────────────────────────────
-// Validate Cloudflare Access JWT for all requests; skip in development.
+// ── CORS ────────────────────────────────────────────────────────────────
+// Allow browser requests from the main Kilo app. In development, allow
+// localhost origins for the Next.js dev server.
 
-app.use('*', async (c: Context<GastownEnv, string>, next) =>
-  c.env.ENVIRONMENT === 'development'
-    ? next()
-    : withCloudflareAccess({
-        team: c.env.CF_ACCESS_TEAM,
-        audience: c.env.CF_ACCESS_AUD,
-      })(c, next)
-);
+const corsMiddleware = cors({
+  origin: (origin, c: Context<GastownEnv>) => {
+    if (c.env.ENVIRONMENT === 'development') {
+      // Allow any localhost origin in dev
+      if (origin.startsWith('http://localhost:')) return origin;
+    }
+    // Production origins
+    const allowed = ['https://app.kilo.ai', 'https://kilo.ai'];
+    return allowed.includes(origin) ? origin : '';
+  },
+  allowHeaders: ['Content-Type', 'Authorization'],
+  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  exposeHeaders: ['Content-Length'],
+  maxAge: 3600,
+  credentials: true,
+});
+
+app.use('/api/*', corsMiddleware);
+app.use('/trpc/*', corsMiddleware);
 
 // ── Dashboard UI ────────────────────────────────────────────────────────
 
@@ -247,6 +262,30 @@ app.post('/api/towns/:townId/rigs/:rigId/escalations', c =>
   handleCreateEscalation(c, c.req.param())
 );
 
+// ── Kilo User Auth ──────────────────────────────────────────────────────
+// Validate Kilo user JWT (signed with NEXTAUTH_SECRET) for dashboard/user
+// routes. Skip in development. Container→worker routes use the agent JWT
+// middleware instead (authMiddleware above).
+
+app.use('/api/users/*', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+app.use('/api/towns/:townId/convoys/*', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+app.use('/api/towns/:townId/escalations/*', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+app.use('/api/towns/:townId/config', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+app.use('/api/towns/:townId/container/*', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+app.use('/api/towns/:townId/mayor/*', async (c: Context<GastownEnv, string>, next) =>
+  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+);
+
 // ── Towns & Rigs ────────────────────────────────────────────────────────
 // Town DO instances are keyed by owner_user_id. The userId path param routes
 // to the correct DO instance so each user's towns are isolated.
@@ -353,6 +392,28 @@ app.get('/api/mayor/:townId/tools/rigs/:rigId/agents', c =>
 );
 app.post('/api/mayor/:townId/tools/mail', c => handleMayorSendMail(c, c.req.param()));
 
+// ── tRPC ────────────────────────────────────────────────────────────────
+// Serve the gastown tRPC router directly. The frontend tRPC client
+// connects here instead of going through the Next.js proxy layer.
+
+app.use('/trpc/*', kiloAuthMiddleware);
+app.use(
+  '/trpc/*',
+  trpcServer({
+    router: wrappedGastownRouter,
+    endpoint: '/trpc',
+    createContext: (_opts: unknown, c: Context<GastownEnv>) => ({
+      env: c.env,
+      userId: c.get('kiloUserId') ?? '',
+      isAdmin: c.get('kiloIsAdmin') ?? false,
+      apiTokenPepper: c.get('kiloApiTokenPepper') ?? null,
+    }),
+    onError: ({ error, path }: { error: Error; path?: string }) => {
+      console.error(`[gastown-trpc] error on ${path ?? 'unknown'}:`, error.message);
+    },
+  })
+);
+
 // ── Error handling ──────────────────────────────────────────────────────
 
 app.notFound(c => c.json(resError('Not found'), 404));
@@ -377,22 +438,10 @@ export default {
     // Must bypass Hono — the DO returns a 101 + WebSocketPair that the
     // runtime handles directly.
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      // Validate CF Access JWT before forwarding — WebSocket upgrades
-      // bypass Hono middleware so we must check auth inline.
-      if (env.ENVIRONMENT !== 'development') {
-        try {
-          await validateCfAccessRequest(request, {
-            team: env.CF_ACCESS_TEAM,
-            audience: env.CF_ACCESS_AUD,
-          });
-        } catch (e) {
-          console.warn(
-            `[gastown-worker] WS CF Access auth failed: ${e instanceof Error ? e.message : 'unknown'}`
-          );
-          return new Response('Unauthorized', { status: 401 });
-        }
-      }
-
+      // WebSocket upgrades use capability-token auth, not JWT headers.
+      // Browsers cannot send custom headers on WebSocket connections.
+      // The stream endpoint uses a ticket obtained via authenticated POST,
+      // and PTY uses a session ID obtained via authenticated POST.
       const url = new URL(request.url);
 
       // Agent event stream
