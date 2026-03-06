@@ -136,7 +136,7 @@ Submitting sends a test email using hardcoded representative fixture data for th
 
 ### Environment Variables
 
-- `EMAIL_PROVIDER` — Which email backend to use: `customerio` or `mailgun`. **Must be explicitly set in every environment** — `getEnvVariable` returns `''` (not `undefined`) when unset, so omitting it will throw at startup. Defaults to `customerio` via `||` fallback in `config.server.ts`.
+- `EMAIL_PROVIDER` — Which email backend to use: `customerio` or `mailgun`. Defaults to `customerio` when unset. Setting an unrecognised value will throw at startup.
 - `MAILGUN_API_KEY` — Mailgun API key (starts with `key-...`)
 - `MAILGUN_DOMAIN` — Mailgun sending domain (`app.kilocode.ai`)
 
