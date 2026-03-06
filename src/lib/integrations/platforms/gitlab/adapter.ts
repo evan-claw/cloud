@@ -2233,3 +2233,81 @@ export async function validatePersonalAccessToken(
     warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
+
+// ============================================================================
+// Commit Status API (MR gate checks)
+// ============================================================================
+
+/**
+ * GitLab commit status states.
+ * @see https://docs.gitlab.com/ee/api/commits.html#set-the-pipeline-status-of-a-commit
+ */
+export type GitLabCommitStatusState = 'pending' | 'running' | 'success' | 'failed' | 'canceled';
+
+/**
+ * Sets (creates or updates) a commit status on a GitLab commit.
+ *
+ * GitLab commit statuses are idempotent by (sha, name): posting the same
+ * name+sha combination updates the existing status rather than creating
+ * a duplicate. This means we don't need to track a status ID like GitHub.
+ *
+ * The status appears in the MR pipeline widget and can be configured as
+ * a required external approval in merge request approval rules.
+ *
+ * @param accessToken - OAuth or Project Access Token
+ * @param projectId - GitLab project ID or path
+ * @param sha - The commit SHA to attach the status to
+ * @param state - Status state
+ * @param options - Additional options (targetUrl, description)
+ * @param instanceUrl - GitLab instance URL
+ */
+export async function setCommitStatus(
+  accessToken: string,
+  projectId: string | number,
+  sha: string,
+  state: GitLabCommitStatusState,
+  options: {
+    targetUrl?: string;
+    description?: string;
+  } = {},
+  instanceUrl: string = DEFAULT_GITLAB_URL
+): Promise<void> {
+  const encodedProjectId =
+    typeof projectId === 'string' ? encodeURIComponent(projectId) : projectId;
+
+  const response = await fetch(
+    `${instanceUrl}/api/v4/projects/${encodedProjectId}/statuses/${sha}`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        state,
+        name: 'kilo/code-review',
+        ...(options.targetUrl ? { target_url: options.targetUrl } : {}),
+        ...(options.description ? { description: options.description } : {}),
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    logExceptInTest('[setCommitStatus] Failed to set commit status', {
+      status: response.status,
+      error,
+      projectId,
+      sha: sha.substring(0, 8),
+      state,
+    });
+    throw new Error(`GitLab set commit status failed: ${response.status} - ${error}`);
+  }
+
+  logExceptInTest('[setCommitStatus] Set commit status', {
+    projectId,
+    sha: sha.substring(0, 8),
+    state,
+    description: options.description,
+  });
+}
