@@ -634,6 +634,133 @@
         "family": "gpt",
         "prompt": "codex"
       }
+    },
+    {
+      "id": "kilo/auto",
+      "name": "[DEPRECATED] use kilo-auto/frontier instead",
+      "created": 0,
+      "description": "Automatically routes your request to the best model for the task.",
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other"
+      },
+      "top_provider": {
+        "is_moderated": false,
+        "context_length": 1000000,
+        "max_completion_tokens": 128000
+      },
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "context_length": 1000000,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "opencode": {
+        "family": "claude",
+        "prompt": "anthropic"
+      }
+    },
+    {
+      "id": "kilo/auto-free",
+      "name": "[DEPRECATED] use kilo-auto/free instead",
+      "created": 0,
+      "description": "Automatically routes your request to a free model.",
+      "architecture": {
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other"
+      },
+      "top_provider": {
+        "is_moderated": false,
+        "context_length": 204800,
+        "max_completion_tokens": 131072
+      },
+      "pricing": {
+        "prompt": "0",
+        "completion": "0",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "context_length": 204800,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "settings": {
+        "included_tools": [
+          "search_and_replace"
+        ],
+        "excluded_tools": [
+          "apply_diff",
+          "edit_file"
+        ]
+      }
+    },
+    {
+      "id": "kilo/auto-small",
+      "name": "[DEPRECATED] use kilo-auto/small instead",
+      "created": 0,
+      "description": "Automatically routes your request to a small model.",
+      "architecture": {
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other"
+      },
+      "top_provider": {
+        "is_moderated": false,
+        "context_length": 400000,
+        "max_completion_tokens": 128000
+      },
+      "pricing": {
+        "prompt": "0.00000005",
+        "completion": "0.0000004",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "context_length": 400000,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools",
+        "reasoning",
+        "include_reasoning"
+      ],
+      "opencode": {
+        "family": "gpt",
+        "prompt": "codex"
+      }
     }
   ]
 }
