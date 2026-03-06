@@ -6,6 +6,7 @@ import { captureException } from '@sentry/nextjs';
 import { resolveKiloUserId, unlinkKiloUser } from '@/lib/bot-identity';
 import { getPlatformIdentity, getPlatformIntegration } from '@/lib/bot/platform-helpers';
 import { LINK_ACCOUNT_ACTION_PREFIX, promptLinkAccount } from '@/lib/bot/link-account';
+import { createBotRequest, updateBotRequest } from '@/lib/bot/request-logging';
 import { findUserById } from '@/lib/user';
 import { processMessage } from '@/lib/bot/run';
 
@@ -54,13 +55,32 @@ bot.onNewMention(async function handleIncomingMessage(
     return;
   }
 
+  const platform = thread.id.split(':')[0];
+  const botRequestId = await createBotRequest({
+    createdBy: user.id,
+    organizationId: platformIntegration.owned_by_organization_id ?? null,
+    platformIntegrationId: platformIntegration.id,
+    platform,
+    platformThreadId: thread.id,
+    platformMessageId: message.id,
+    userMessage: message.text,
+    modelUsed: undefined,
+  });
+
   const received = thread.createSentMessageFromMessage(message);
   await received.addReaction(emoji.eyes);
 
   try {
-    await processMessage({ thread, message, platformIntegration, user });
+    await processMessage({ thread, message, platformIntegration, user, botRequestId });
   } catch (error) {
     console.error('[Bot] Unhandled error in message handler:', error);
+    if (botRequestId) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      updateBotRequest(botRequestId, {
+        status: 'error',
+        errorMessage: errMsg.slice(0, 2000),
+      });
+    }
     await thread.post({ markdown: 'Sorry, something went wrong while processing your message.' });
   } finally {
     await Promise.all([received.removeReaction(emoji.eyes), received.addReaction(emoji.check)]);

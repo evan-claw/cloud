@@ -1,6 +1,6 @@
 {
-  "id": "447fa05d-72f6-4b31-97df-b522f25198e7",
-  "prevId": "6ea09fb6-67d7-4602-b561-2a3e838ee660",
+  "id": "205370ee-6c2a-433a-900d-0dd79db4c014",
+  "prevId": "447fa05d-72f6-4b31-97df-b522f25198e7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3399,6 +3399,12 @@
           "primaryKey": false,
           "notNull": false,
           "default": "'v1'"
+        },
+        "check_run_id": {
+          "name": "check_run_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         },
         "model": {
           "name": "model",

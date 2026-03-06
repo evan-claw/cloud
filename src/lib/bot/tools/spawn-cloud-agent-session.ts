@@ -33,10 +33,10 @@ const sharedFields = {
       'The task description for the Cloud Agent. Be specific about what changes or analysis you want.'
     ),
   mode: z
-    .enum(['code', 'plan', 'debug', 'orchestrator', 'ask', 'build', 'architect', 'custom'])
+    .enum(['code', 'ask'])
     .default('code')
     .describe(
-      'The agent mode: "code" for making changes, "plan" for design tasks, "ask" for questions, "debug" for troubleshooting, "orchestrator" for complex multi-step tasks. "build" and "architect" are backward-compatible aliases for "code" and "plan".'
+      'The agent mode: "code" for making changes (creates a PR/MR), "ask" for questions and explanations about existing code.'
     ),
 };
 
@@ -83,6 +83,15 @@ export default async function spawnCloudAgentSession(
   let initiateInput: { githubToken?: string; kilocodeOrganizationId?: string };
   const mode: AgentMode = args.mode ?? 'code';
 
+  const isGitLab = 'gitlabProject' in args;
+  const prompt =
+    mode === 'code'
+      ? args.prompt +
+        (isGitLab
+          ? '\n\nOpen a merge request with your changes and return the MR URL.'
+          : '\n\nOpen a pull request with your changes and return the PR URL.')
+      : args.prompt;
+
   if ('gitlabProject' in args) {
     // GitLab path: get token + instance URL, build clone URL, use gitUrl/gitToken
     const gitlabToken =
@@ -113,7 +122,7 @@ export default async function spawnCloudAgentSession(
     );
 
     prepareInput = {
-      prompt: args.prompt,
+      prompt,
       mode,
       model,
       gitUrl,
@@ -139,7 +148,7 @@ export default async function spawnCloudAgentSession(
 
     prepareInput = {
       githubRepo: args.githubRepo,
-      prompt: args.prompt,
+      prompt,
       mode,
       model,
       githubToken,

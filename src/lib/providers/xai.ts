@@ -5,7 +5,7 @@ import type {
   OpenRouterChatCompletionRequest,
 } from '@/lib/providers/openrouter/types';
 
-export const grok_code_fast_1_optimized_free_model = {
+export const grok_code_fast_1_optimized_free_model: KiloFreeModel = {
   public_id: 'x-ai/grok-code-fast-1:optimized:free',
   display_name: 'xAI: Grok Code Fast 1 Optimized (experimental, free)',
   description:
@@ -16,8 +16,8 @@ export const grok_code_fast_1_optimized_free_model = {
   flags: ['reasoning', 'prompt_cache'],
   gateway: 'martian',
   internal_id: 'x-ai/grok-code-fast-1:optimized',
-  inference_providers: ['stealth'],
-} satisfies KiloFreeModel;
+  inference_provider: 'stealth',
+};
 
 export function isXaiModel(requestedModel: string) {
   return requestedModel.startsWith('x-ai/');

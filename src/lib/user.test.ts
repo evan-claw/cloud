@@ -30,6 +30,7 @@ import {
   security_analysis_queue,
   security_analysis_owner_state,
   kiloclaw_earlybird_purchases,
+  bot_requests,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
@@ -71,6 +72,7 @@ describe('User', () => {
     await db.delete(cloud_agent_feedback);
     await db.delete(user_admin_notes);
     await db.delete(magic_link_tokens);
+    await db.delete(bot_requests);
     await db.delete(stytch_fingerprints);
     await db.delete(organizations);
     await db.delete(kilocode_users);
@@ -511,6 +513,45 @@ describe('User', () => {
           .select({ count: count() })
           .from(security_analysis_queue)
           .where(eq(security_analysis_queue.finding_id, finding2.id))
+          .then(r => r[0].count)
+      ).toBe(1);
+    });
+
+    it('should delete bot_requests for the user', async () => {
+      const user1 = await insertTestUser();
+      const user2 = await insertTestUser();
+
+      await db.insert(bot_requests).values([
+        {
+          created_by: user1.id,
+          platform: 'slack',
+          platform_thread_id: 'slack:T123:C456:thread1',
+          user_message: 'Hello from user1',
+          status: 'completed',
+        },
+        {
+          created_by: user2.id,
+          platform: 'slack',
+          platform_thread_id: 'slack:T123:C456:thread2',
+          user_message: 'Hello from user2',
+          status: 'completed',
+        },
+      ]);
+
+      await softDeleteUser(user1.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(bot_requests)
+          .where(eq(bot_requests.created_by, user1.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+      expect(
+        await db
+          .select({ count: count() })
+          .from(bot_requests)
+          .where(eq(bot_requests.created_by, user2.id))
           .then(r => r[0].count)
       ).toBe(1);
     });

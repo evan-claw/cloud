@@ -20,8 +20,8 @@ type AutoModel = {
 };
 
 export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
-  id: 'kilo/auto',
-  name: 'Kilo: Auto',
+  id: 'kilo-auto/frontier',
+  name: 'Kilo Auto: Frontier',
   description: 'Automatically routes your request to the best model for the task.',
   context_length: 1_000_000,
   max_completion_tokens: 128_000,
@@ -36,8 +36,8 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
 };
 
 export const KILO_AUTO_FREE_MODEL: AutoModel = {
-  id: 'kilo/auto-free',
-  name: 'Kilo: Auto Free',
+  id: 'kilo-auto/free',
+  name: 'Kilo Auto: Free',
   description: 'Automatically routes your request to a free model.',
   context_length: minimax_m25_free_model.context_length,
   max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
@@ -52,8 +52,8 @@ export const KILO_AUTO_FREE_MODEL: AutoModel = {
 };
 
 export const KILO_AUTO_SMALL_MODEL: AutoModel = {
-  id: 'kilo/auto-small',
-  name: 'Kilo: Auto Small',
+  id: 'kilo-auto/small',
+  name: 'Kilo Auto: Small',
   description: 'Automatically routes your request to a small model.',
   context_length: 400_000,
   max_completion_tokens: 128_000,
@@ -70,7 +70,7 @@ export const KILO_AUTO_SMALL_MODEL: AutoModel = {
 export const AUTO_MODELS = [KILO_AUTO_FRONTIER_MODEL, KILO_AUTO_FREE_MODEL, KILO_AUTO_SMALL_MODEL];
 
 export function isKiloAutoModel(model: string) {
-  return AUTO_MODELS.some(m => m.id === model);
+  return AUTO_MODELS.some(m => m.id === model) || legacyMapping[model] !== undefined;
 }
 
 type ResolvedAutoModel = {
@@ -85,7 +85,7 @@ const CODE_MODEL: ResolvedAutoModel = {
   verbosity: 'low',
 };
 
-// Mode → model mappings for kilo/auto routing.
+// Mode → model mappings for kilo-auto/frontier routing.
 // Add/remove/modify entries here to change routing behavior.
 const MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   // Opus modes (planning, reasoning, orchestration, debugging)
@@ -122,11 +122,18 @@ const MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   ['code', CODE_MODEL],
 ]);
 
+const legacyMapping: Record<string, string | undefined> = {
+  'kilo/auto': KILO_AUTO_FRONTIER_MODEL.id,
+  'kilo/auto-free': KILO_AUTO_FREE_MODEL.id,
+  'kilo/auto-small': KILO_AUTO_SMALL_MODEL.id,
+};
+
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
-  if (model === KILO_AUTO_FREE_MODEL.id) {
+  const mappedModel = legacyMapping[model] ?? model;
+  if (mappedModel === KILO_AUTO_FREE_MODEL.id) {
     return { model: minimax_m25_free_model.public_id };
   }
-  if (model === KILO_AUTO_SMALL_MODEL.id) {
+  if (mappedModel === KILO_AUTO_SMALL_MODEL.id) {
     return { model: 'openai/gpt-5-nano' };
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';

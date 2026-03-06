@@ -1,7 +1,7 @@
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
 
-export const giga_potato_model = {
+export const giga_potato_model: KiloFreeModel = {
   public_id: 'giga-potato',
   display_name: 'Giga Potato (free)',
   description:
@@ -14,15 +14,15 @@ export const giga_potato_model = {
   flags: ['prompt_cache', 'vision'],
   gateway: 'gigapotato',
   internal_id: 'ep-20260109111813-hztxv',
-  inference_providers: ['stealth'],
-} as KiloFreeModel;
+  inference_provider: 'stealth',
+};
 
-export const giga_potato_thinking_model = {
+export const giga_potato_thinking_model: KiloFreeModel = {
   ...giga_potato_model,
   public_id: 'giga-potato-thinking',
   display_name: 'Giga Potato Thinking (free)',
   flags: giga_potato_model.flags.concat(['reasoning']),
-} as KiloFreeModel;
+};
 
 export function applyGigaPotatoProviderSettings(
   requestedModel: string,

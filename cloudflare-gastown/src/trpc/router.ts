@@ -318,7 +318,7 @@ export const gastownRouter = router({
         rigId: z.string().uuid(),
         title: z.string().min(1),
         body: z.string().optional(),
-        model: z.string().default('kilo/auto'),
+        model: z.string().default('kilo/kilo-auto/frontier'),
       })
     )
     .output(RpcSlingResultOutput)
