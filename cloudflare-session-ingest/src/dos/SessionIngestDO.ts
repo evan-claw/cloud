@@ -100,6 +100,13 @@ export class SessionIngestDO extends DurableObject<Env> {
       .where(eq(ingestMeta.key, 'deleted'))
       .get();
     if (deletedRow?.value === 'true') {
+      // Clean up any R2 blobs the caller uploaded for this now-deleted session
+      if (r2References) {
+        const keys = Object.values(r2References);
+        if (keys.length > 0) {
+          await this.env.SESSION_INGEST_R2.delete(keys);
+        }
+      }
       return { changes: [] };
     }
 
@@ -263,12 +270,13 @@ export class SessionIngestDO extends DurableObject<Env> {
           }
 
           // --- messages ---
+          const CURSOR_BATCH = 30;
           controller.enqueue(encoder.encode(',"messages":['));
           let msgCursor = 0;
           let firstMsg = true;
 
           while (true) {
-            const msgRow = db
+            const msgBatch = db
               .select({
                 id: ingestItems.id,
                 item_id: ingestItems.item_id,
@@ -278,56 +286,60 @@ export class SessionIngestDO extends DurableObject<Env> {
               .from(ingestItems)
               .where(and(eq(ingestItems.item_type, 'message'), gt(ingestItems.id, msgCursor)))
               .orderBy(ingestItems.id)
-              .limit(1)
-              .get();
+              .limit(CURSOR_BATCH)
+              .all();
 
-            if (!msgRow) break;
-            msgCursor = msgRow.id;
+            if (msgBatch.length === 0) break;
+            msgCursor = msgBatch[msgBatch.length - 1].id;
 
-            if (!firstMsg) controller.enqueue(encoder.encode(','));
-            firstMsg = false;
+            for (const msgRow of msgBatch) {
+              if (!firstMsg) controller.enqueue(encoder.encode(','));
+              firstMsg = false;
 
-            // message info
-            controller.enqueue(encoder.encode('{"info":'));
-            await enqueueItemData(controller, msgRow, r2, encoder);
+              // message info
+              controller.enqueue(encoder.encode('{"info":'));
+              await enqueueItemData(controller, msgRow, r2, encoder);
 
-            // parts for this message: item_id = '{msgId}/{partId}'
-            const msgId = msgRow.item_id.slice('message/'.length);
-            // Escape LIKE wildcards (% and _) so they match literally, with ESCAPE clause
-            const likePattern = msgId.replace(/[%_\\]/g, '\\$&') + '/%';
-            controller.enqueue(encoder.encode(',"parts":['));
-            let partCursor = 0;
-            let firstPart = true;
+              // parts for this message: item_id = '{msgId}/{partId}'
+              const msgId = msgRow.item_id.slice('message/'.length);
+              // Escape LIKE wildcards (% and _) so they match literally, with ESCAPE clause
+              const likePattern = msgId.replace(/[%_\\]/g, '\\$&') + '/%';
+              controller.enqueue(encoder.encode(',"parts":['));
+              let partCursor = 0;
+              let firstPart = true;
 
-            while (true) {
-              const partRow = db
-                .select({
-                  id: ingestItems.id,
-                  item_data: ingestItems.item_data,
-                  item_data_r2_key: ingestItems.item_data_r2_key,
-                })
-                .from(ingestItems)
-                .where(
-                  and(
-                    eq(ingestItems.item_type, 'part'),
-                    sql`${ingestItems.item_id} LIKE ${likePattern} ESCAPE '\\'`,
-                    gt(ingestItems.id, partCursor)
+              while (true) {
+                const partBatch = db
+                  .select({
+                    id: ingestItems.id,
+                    item_data: ingestItems.item_data,
+                    item_data_r2_key: ingestItems.item_data_r2_key,
+                  })
+                  .from(ingestItems)
+                  .where(
+                    and(
+                      eq(ingestItems.item_type, 'part'),
+                      sql`${ingestItems.item_id} LIKE ${likePattern} ESCAPE '\\'`,
+                      gt(ingestItems.id, partCursor)
+                    )
                   )
-                )
-                .orderBy(ingestItems.id)
-                .limit(1)
-                .get();
+                  .orderBy(ingestItems.id)
+                  .limit(CURSOR_BATCH)
+                  .all();
 
-              if (!partRow) break;
-              partCursor = partRow.id;
+                if (partBatch.length === 0) break;
+                partCursor = partBatch[partBatch.length - 1].id;
 
-              if (!firstPart) controller.enqueue(encoder.encode(','));
-              firstPart = false;
+                for (const partRow of partBatch) {
+                  if (!firstPart) controller.enqueue(encoder.encode(','));
+                  firstPart = false;
 
-              await enqueueItemData(controller, partRow, r2, encoder);
+                  await enqueueItemData(controller, partRow, r2, encoder);
+                }
+              }
+
+              controller.enqueue(encoder.encode(']}'));
             }
-
-            controller.enqueue(encoder.encode(']}'));
           }
 
           controller.enqueue(encoder.encode(']}'));

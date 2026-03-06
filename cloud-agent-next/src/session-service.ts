@@ -1473,7 +1473,7 @@ export class SessionService {
     await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
     await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
-    // Fetch snapshot via HTTP streaming endpoint (avoids buffering large payloads in the worker).
+    // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
     const internalSecret = await env.INTERNAL_SERVICE_SECRET.get();
     const response = await env.SESSION_INGEST.fetch(
       new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {

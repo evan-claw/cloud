@@ -292,7 +292,7 @@ describe('SessionIngestDO integration', () => {
 
       // Pre-store item data in R2
       const itemData = JSON.stringify({ id: 'msg_r2', role: 'user', content: 'stored in R2' });
-      const r2Key = `items/${kiloUserId}/${sessionId}/message:msg_r2/1000`;
+      const r2Key = `items/${kiloUserId}/${sessionId}/message/msg_r2/1000`;
       await env.SESSION_INGEST_R2.put(r2Key, itemData);
 
       // Ingest with R2 reference — DO stores '{}' locally, points to R2
@@ -305,7 +305,7 @@ describe('SessionIngestDO integration', () => {
         sessionId,
         1,
         1000,
-        { 'message:msg_r2': r2Key }
+        { 'message/msg_r2': r2Key }
       );
 
       const raw = await stub.getAllStream().then(s => new Response(s).text());
