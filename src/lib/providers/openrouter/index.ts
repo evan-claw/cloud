@@ -64,10 +64,10 @@ function enhancedModelList(models: OpenRouterModel[]) {
       const preferredIndex = preferredModels.indexOf(model.id);
       const ageDays = (Date.now() / 1_000 - model.created) / (24 * 3600);
       const isNew = preferredIndex >= 0 && ageDays >= 0 && ageDays < 7;
-      const nameEndsWithParen = model.name.endsWith(')');
+      const skipSuffix = model.name.endsWith(')') || /\bfree\b/i.test(model.name);
       return {
         ...model,
-        name: nameEndsWithParen
+        name: skipSuffix
           ? model.name
           : isFreeModel(model.id)
             ? model.name + ' (free)'
