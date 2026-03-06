@@ -22,7 +22,7 @@ import {
   updateCheckRunId,
 } from '@/lib/code-reviews/db/code-reviews';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
-import { createCheckRun } from '@/lib/integrations/platforms/github/adapter';
+import { createCheckRun, updateCheckRun } from '@/lib/integrations/platforms/github/adapter';
 import { setCommitStatus } from '@/lib/integrations/platforms/gitlab/adapter';
 import {
   getValidGitLabToken,
@@ -66,7 +66,8 @@ async function recreatePRGateCheck(review: CloudAgentCodeReview) {
     if (appType === 'lite') return;
 
     const [repoOwner, repoName] = review.repo_full_name.split('/');
-    const checkRunId = await createCheckRun(
+    let checkRunId: bigint | undefined;
+    checkRunId = await createCheckRun(
       integration.platform_installation_id,
       repoOwner,
       repoName,
@@ -77,7 +78,26 @@ async function recreatePRGateCheck(review: CloudAgentCodeReview) {
       },
       appType
     );
-    await updateCheckRunId(review.id, checkRunId);
+    try {
+      await updateCheckRunId(review.id, checkRunId);
+    } catch (dbError) {
+      // Cancel the orphaned check run so it doesn't block merging
+      try {
+        await updateCheckRun(
+          integration.platform_installation_id,
+          repoOwner,
+          repoName,
+          checkRunId,
+          { status: 'completed', conclusion: 'cancelled' }
+        );
+        logExceptInTest(
+          `[retrigger] Cancelled orphaned check run ${checkRunId.toString()} for ${review.repo_full_name}#${review.pr_number}`
+        );
+      } catch (cancelError) {
+        logExceptInTest('[retrigger] Failed to cancel orphaned check run:', cancelError);
+      }
+      throw dbError;
+    }
     logExceptInTest(
       `[retrigger] Created check run ${checkRunId.toString()} for ${review.repo_full_name}#${review.pr_number}`
     );
