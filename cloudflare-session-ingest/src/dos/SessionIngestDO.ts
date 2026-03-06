@@ -509,6 +509,9 @@ async function enqueueItemData(
         controller.enqueue(result.value);
       }
     } else {
+      console.error('R2 blob missing during export, falling back to empty object', {
+        r2Key: ref.item_data_r2_key,
+      });
       controller.enqueue(encoder.encode('{}'));
     }
   } else {
