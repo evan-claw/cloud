@@ -47,7 +47,7 @@ import {
 } from '../websocket/ingest.js';
 import type { StoredEvent } from '../websocket/types.js';
 import type { WrapperCommand } from '../shared/protocol.js';
-import { STALE_THRESHOLD_MS } from '../core/lease.js';
+import { STALE_THRESHOLD_MS, SANDBOX_SLEEP_AFTER_SECONDS } from '../core/lease.js';
 import { ExecutionOrchestrator, type OrchestratorDeps } from '../execution/orchestrator.js';
 import type {
   ExecutionMode,
@@ -247,6 +247,10 @@ export class CloudAgentSession extends DurableObject {
         },
         updateHeartbeat: async (executionId: string, timestamp: number) => {
           await this.executionQueries.updateHeartbeat(executionId as ExecutionId, timestamp);
+          // Reset the sandbox container's sleep timer alongside the heartbeat.
+          // The wrapper heartbeat travels over an outbound WebSocket that
+          // bypasses containerFetch(), so the idle timer never refreshes otherwise.
+          void this.keepContainerAlive();
         },
         updateExecutionStatus: async (
           executionId: string,
@@ -1232,6 +1236,36 @@ export class CloudAgentSession extends DurableObject {
     }
   }
 
+  /**
+   * Reset the sandbox container's sleep timer so it stays alive during an
+   * active execution.
+   *
+   * The wrapper heartbeat travels over an outbound WebSocket that bypasses
+   * `containerFetch()`, so it never calls `renewActivityTimeout()`.  Calling
+   * `setSleepAfter()` with the same value is a lightweight RPC that resets
+   * the timer without changing the configuration.
+   *
+   * Called from the DO context's `updateHeartbeat` callback (debounced
+   * to every 30 s by the ingest handler) while an execution is running.
+   */
+  private async keepContainerAlive(): Promise<void> {
+    try {
+      const metadata = await this.getMetadata();
+      if (!metadata) return;
+
+      const sandboxId = await generateSandboxId(metadata.orgId, metadata.userId, metadata.botId);
+      const sandbox = getSandbox((this.env as unknown as WorkerEnv).Sandbox, sandboxId);
+      await sandbox.setSleepAfter(SANDBOX_SLEEP_AFTER_SECONDS);
+    } catch (error) {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Failed to reset sandbox sleep timer');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Execution Management RPC Methods
   // ---------------------------------------------------------------------------
@@ -1492,7 +1526,9 @@ export class CloudAgentSession extends DurableObject {
     if (!this.orchestrator) {
       const deps: OrchestratorDeps = {
         getSandbox: async (sandboxId: string) =>
-          getSandbox((this.env as unknown as WorkerEnv).Sandbox, sandboxId, { sleepAfter: 900 }),
+          getSandbox((this.env as unknown as WorkerEnv).Sandbox, sandboxId, {
+            sleepAfter: SANDBOX_SLEEP_AFTER_SECONDS,
+          }),
         getSessionStub: (userId, sessionId) => {
           const doKey = `${userId}:${sessionId}`;
           const id = (this.env as unknown as WorkerEnv).CLOUD_AGENT_SESSION.idFromName(doKey);
