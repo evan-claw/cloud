@@ -3,10 +3,10 @@ import {
   security_findings,
   security_analysis_queue,
   security_analysis_owner_state,
+  type SecurityFinding,
 } from '@kilocode/db/schema';
 import { eq, and, sql, count, isNotNull, desc, or, isNull } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
-import type { SecurityFinding } from '@kilocode/db/schema';
 import type {
   AutoAnalysisMinSeverity,
   SecurityFindingStatus,

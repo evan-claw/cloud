@@ -7,11 +7,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { SeverityBadge } from './SeverityBadge';
-import { AnalysisStatusBadge } from './AnalysisStatusBadge';
-import { AnalysisResultCard } from './AnalysisResultCard';
 import { FindingStatusBadge } from './FindingStatusBadge';
 import { ExploitabilityBadge } from './ExploitabilityBadge';
 import { MarkdownProse } from './MarkdownProse';
@@ -22,10 +21,9 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
-  FileCode,
-  GitBranch,
   Brain,
   Loader2,
+  Zap,
 } from 'lucide-react';
 import type { SecurityFinding } from '@kilocode/db/schema';
 import { useTRPC } from '@/lib/trpc/utils';
@@ -36,6 +34,27 @@ type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 function isSeverity(value: string): value is Severity {
   return ['critical', 'high', 'medium', 'low'].includes(value);
+}
+
+function AnalysisStatusIcon({
+  status,
+  fallback,
+}: {
+  status: string | null | undefined;
+  fallback: React.ReactNode;
+}) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />;
+    case 'failed':
+      return <XCircle className="h-3.5 w-3.5 text-red-400" />;
+    case 'running':
+      return <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-400" />;
+    case 'pending':
+      return <Loader2 className="h-3.5 w-3.5 animate-spin text-yellow-400" />;
+    default:
+      return <>{fallback}</>;
+  }
 }
 
 type FindingDetailDialogProps = {
@@ -59,31 +78,29 @@ export function FindingDetailDialog({
   const queryClient = useQueryClient();
   const isOrg = !!organizationId;
 
-  // Poll for analysis status when running
-  const { data: analysisData } = useQuery({
-    ...(isOrg
-      ? trpc.organizations.securityAgent.getAnalysis.queryOptions({
-          organizationId: organizationId,
-          findingId: finding?.id ?? '',
-        })
-      : trpc.securityAgent.getAnalysis.queryOptions({
-          findingId: finding?.id ?? '',
-        })),
-    // Enable query whenever dialog is open so we can transition to polling immediately
-    // after starting analysis (without depending on the parent `finding` prop updating).
-    enabled: open && !!finding,
-    refetchInterval: query => {
-      const data = query.state.data;
-      // Stop polling when completed or failed
-      if (data?.status === 'completed' || data?.status === 'failed') {
-        return false;
-      }
-      if (data?.status === 'pending' || data?.status === 'running') {
-        return 3000; // Poll every 3 seconds
-      }
-      return false;
-    },
+  // Poll for analysis status when running.
+  // Two separate queries for org/personal to avoid type-union issues with useQuery.
+  const pollWhileActive = (query: { state: { data?: { status?: string | null } } }) => {
+    const status = query.state.data?.status;
+    if (status === 'pending' || status === 'running') return 3000;
+    return false as const;
+  };
+  const orgAnalysisQuery = useQuery({
+    ...trpc.organizations.securityAgent.getAnalysis.queryOptions({
+      organizationId: organizationId ?? '',
+      findingId: finding?.id ?? '',
+    }),
+    enabled: open && !!finding && isOrg,
+    refetchInterval: pollWhileActive,
   });
+  const personalAnalysisQuery = useQuery({
+    ...trpc.securityAgent.getAnalysis.queryOptions({
+      findingId: finding?.id ?? '',
+    }),
+    enabled: open && !!finding && !isOrg,
+    refetchInterval: pollWhileActive,
+  });
+  const analysisData = isOrg ? orgAnalysisQuery.data : personalAnalysisQuery.data;
 
   // Start analysis mutation (organization)
   const startOrgAnalysisMutation = useMutation(
@@ -118,8 +135,9 @@ export function FindingDetailDialog({
 
   const handleStartAnalysis = ({ retrySandboxOnly }: { retrySandboxOnly?: boolean } = {}) => {
     if (isOrg) {
+      if (!organizationId) return;
       startOrgAnalysisMutation.mutate({
-        organizationId: organizationId,
+        organizationId,
         findingId: finding.id,
         retrySandboxOnly,
       });
@@ -135,172 +153,197 @@ export function FindingDetailDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-4xl overflow-x-hidden overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <SeverityBadge severity={severity} />
-            <FindingStatusBadge status={finding.status} />
-            <ExploitabilityBadge analysis={analysis} />
-          </div>
-          <DialogTitle className="text-xl">{finding.title}</DialogTitle>
-          <DialogDescription className="flex items-center gap-2">
-            <Package className="h-4 w-4" />
-            {finding.package_name} ({finding.package_ecosystem})
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="min-w-0 space-y-6">
-          <div className="flex flex-wrap gap-2">
-            {finding.cve_id && (
-              <Badge variant="secondary" className="font-mono">
-                {finding.cve_id}
-              </Badge>
-            )}
-            {finding.ghsa_id && (
-              <Badge variant="secondary" className="font-mono">
-                {finding.ghsa_id}
-              </Badge>
-            )}
-          </div>
-
-          <div className="min-w-0">
-            <h4 className="mb-2 font-medium">Description</h4>
-            <MarkdownProse markdown={finding.description ?? ''} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <h4 className="mb-1 text-sm font-medium">Vulnerable Versions</h4>
-              <p className="text-muted-foreground font-mono text-sm">
-                {finding.vulnerable_version_range || 'Unknown'}
-              </p>
-            </div>
-            <div>
-              <h4 className="mb-1 text-sm font-medium">Patched Version</h4>
-              <p className="text-muted-foreground font-mono text-sm">
-                {finding.patched_version || 'No patch available'}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <h4 className="mb-1 flex items-center gap-1 text-sm font-medium">
-                <GitBranch className="h-4 w-4" />
-                Repository
-              </h4>
-              <p className="text-muted-foreground text-sm">{finding.repo_full_name}</p>
-            </div>
-            <div>
-              <h4 className="mb-1 flex items-center gap-1 text-sm font-medium">
-                <FileCode className="h-4 w-4" />
-                Manifest
-              </h4>
-              <p className="text-muted-foreground font-mono text-sm">
-                {finding.manifest_path || 'Unknown'}
-              </p>
-            </div>
-          </div>
-
-          {finding.status === 'open' && finding.sla_due_at && (
-            <div
-              className={`rounded-lg border p-3 ${isOverdue ? 'border-red-500/30 bg-red-500/10' : 'border-yellow-500/30 bg-yellow-500/10'}`}
-            >
-              <div className="flex items-center gap-2">
-                <Clock className={`h-4 w-4 ${isOverdue ? 'text-red-400' : 'text-yellow-400'}`} />
-                <span
-                  className={`text-sm font-medium ${isOverdue ? 'text-red-400' : 'text-yellow-400'}`}
-                >
-                  {isOverdue
-                    ? `SLA overdue by ${formatDistanceToNow(new Date(finding.sla_due_at))}`
-                    : `SLA due in ${formatDistanceToNow(new Date(finding.sla_due_at))}`}
-                </span>
+        <div className="flex items-start gap-6">
+          {/* Left: title, repo, package */}
+          <DialogHeader className="min-w-0 flex-1">
+            <DialogTitle className="text-xl">{finding.title}</DialogTitle>
+            <div className="text-muted-foreground text-sm">
+              <code className="rounded bg-gray-800 px-1.5 py-0.5 font-mono text-xs">
+                {finding.repo_full_name}
+              </code>
+              <div className="mt-1 flex gap-3 text-xs">
+                <span>Detected {format(new Date(finding.first_detected_at), 'PPP')}</span>
+                <span>Synced {format(new Date(finding.last_synced_at), 'PPP')}</span>
               </div>
-              <p className="text-muted-foreground mt-1 text-xs">
-                Due: {format(new Date(finding.sla_due_at), 'PPP')}
-              </p>
             </div>
-          )}
+            <DialogDescription className="sr-only">
+              {finding.package_name} ({finding.package_ecosystem})
+            </DialogDescription>
+          </DialogHeader>
 
-          {finding.status === 'fixed' && finding.fixed_at && (
-            <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-green-400" />
-                <span className="text-sm font-medium text-green-400">
+          {/* Right: status badges + SLA */}
+          <div className="flex shrink-0 flex-col items-end gap-2 pt-4">
+            <div className="flex items-center gap-2">
+              <SeverityBadge severity={severity} />
+              <FindingStatusBadge status={finding.status} />
+              <ExploitabilityBadge analysis={analysis} />
+            </div>
+            {finding.status === 'open' && finding.sla_due_at && (
+              <div className="text-right text-xs">
+                <div className="flex items-center justify-end gap-1.5">
+                  <Clock
+                    className={`h-3.5 w-3.5 ${isOverdue ? 'text-red-400' : 'text-yellow-400'}`}
+                  />
+                  <span className={isOverdue ? 'text-red-400' : 'text-yellow-400'}>
+                    SLA{' '}
+                    {isOverdue
+                      ? `overdue by ${formatDistanceToNow(new Date(finding.sla_due_at))}`
+                      : `due in ${formatDistanceToNow(new Date(finding.sla_due_at))}`}
+                  </span>
+                </div>
+                <div className="text-muted-foreground mt-0.5">
+                  {format(new Date(finding.sla_due_at), 'PPP')}
+                </div>
+              </div>
+            )}
+            {finding.status === 'fixed' && finding.fixed_at && (
+              <div className="text-right text-xs">
+                <div className="flex items-center justify-end gap-1.5 text-green-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
                   Fixed {formatDistanceToNow(new Date(finding.fixed_at), { addSuffix: true })}
-                </span>
+                </div>
+                <div className="text-muted-foreground mt-0.5">
+                  {format(new Date(finding.fixed_at), 'PPP')}
+                </div>
               </div>
-              <p className="text-muted-foreground mt-1 text-xs">
-                {format(new Date(finding.fixed_at), 'PPP')}
-              </p>
-            </div>
-          )}
-
-          {finding.status === 'ignored' && finding.ignored_reason && (
-            <div className="rounded-lg border border-gray-500/30 bg-gray-500/10 p-3">
-              <div className="flex items-center gap-2">
-                <XCircle className="text-muted-foreground h-4 w-4" />
-                <span className="text-muted-foreground text-sm font-medium">
-                  Dismissed: {finding.ignored_reason.replace(/_/g, ' ')}
-                </span>
+            )}
+            {finding.status === 'ignored' && finding.ignored_reason && (
+              <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                <XCircle className="h-3.5 w-3.5" />
+                Dismissed: {finding.ignored_reason.replace(/_/g, ' ')}
               </div>
-            </div>
-          )}
+            )}
+          </div>
+        </div>
 
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h4 className="flex items-center gap-2 font-medium">
-                <Brain className="h-4 w-4" />
-                AI Analysis
-              </h4>
-              <AnalysisStatusBadge status={analysisStatus} />
+        <Tabs key={finding.id} defaultValue="details" className="min-w-0">
+          <TabsList className="grid w-full max-w-md grid-cols-3">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="triage" className="flex items-center gap-1.5">
+              <AnalysisStatusIcon
+                status={analysis?.triage ? 'completed' : analysisStatus}
+                fallback={<Zap className="h-3.5 w-3.5" />}
+              />
+              Triage
+            </TabsTrigger>
+            <TabsTrigger value="analysis" className="flex items-center gap-1.5">
+              <AnalysisStatusIcon
+                status={
+                  analysis?.sandboxAnalysis && analysisStatus === 'completed'
+                    ? 'completed'
+                    : analysisStatus
+                }
+                fallback={<Brain className="h-3.5 w-3.5" />}
+              />
+              Analysis
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="details" className="space-y-6 pt-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-white">
+              <Package className="h-4 w-4" />
+              {finding.package_name} ({finding.package_ecosystem})
             </div>
 
-            {analysis ? (
-              <>
-                {/* Show analysis card with sandbox reasoning when tier 2 is running */}
-                <AnalysisResultCard
-                  analysis={analysis}
-                  showSandboxReasoning={analysisStatus === 'running'}
-                />
-                {/* Show error + retry when triage succeeded but sandbox analysis failed */}
-                {analysisStatus === 'failed' && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
-                    <p className="text-sm text-red-400">
-                      Codebase analysis failed: {analysisError || 'Unknown error'}
-                    </p>
-                    <Button
+            {/* Metadata band */}
+            <div className="flex flex-wrap gap-x-6 gap-y-3 rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-3 text-sm">
+              {finding.cve_id && (
+                <div>
+                  <div className="text-muted-foreground text-xs">CVE</div>
+                  <div className="font-mono">{finding.cve_id}</div>
+                </div>
+              )}
+              {finding.ghsa_id && (
+                <div>
+                  <div className="text-muted-foreground text-xs">GHSA</div>
+                  <div className="font-mono">{finding.ghsa_id}</div>
+                </div>
+              )}
+              <div>
+                <div className="text-muted-foreground text-xs">Vulnerable</div>
+                <div className="font-mono">{finding.vulnerable_version_range || 'Unknown'}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">Patched</div>
+                <div className="font-mono">{finding.patched_version || 'No patch available'}</div>
+              </div>
+              {finding.manifest_path && (
+                <div>
+                  <div className="text-muted-foreground text-xs">Manifest</div>
+                  <div className="font-mono">{finding.manifest_path}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <h4 className="mb-2 font-medium">Description</h4>
+              <MarkdownProse markdown={finding.description ?? ''} />
+              {finding.dependabot_html_url && (
+                <Button variant="outline" size="sm" asChild className="mt-3">
+                  <a href={finding.dependabot_html_url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    View on GitHub
+                  </a>
+                </Button>
+              )}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="triage" className="space-y-4 pt-2">
+            {analysis?.triage ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {analysis.triage.suggestedAction === 'dismiss' && (
+                    <Badge
                       variant="outline"
-                      size="sm"
-                      onClick={() => handleStartAnalysis({ retrySandboxOnly: true })}
-                      disabled={isAnalyzing}
-                      className="mt-2"
+                      className="border-green-500/50 bg-green-500/10 text-green-400"
                     >
-                      Retry Analysis
-                    </Button>
-                  </div>
-                )}
-                {cliSessionId && (
-                  <div className="mt-2">
-                    <Link
-                      href={
-                        organizationId
-                          ? `/organizations/${organizationId}/cloud/chat?sessionId=${cliSessionId}`
-                          : `/cloud/chat?sessionId=${cliSessionId}`
-                      }
-                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm transition-colors"
+                      <CheckCircle2 className="mr-1 h-3 w-3" />
+                      Safe to Dismiss
+                    </Badge>
+                  )}
+                  {analysis.triage.suggestedAction === 'analyze_codebase' && (
+                    <Badge
+                      variant="outline"
+                      className="border-yellow-500/50 bg-yellow-500/10 text-yellow-400"
                     >
-                      <ExternalLink className="h-4 w-4" />
-                      {analysisStatus === 'running'
-                        ? 'Watch analysis in Cloud Agent'
-                        : 'Continue conversation in Cloud Agent'}
-                    </Link>
-                  </div>
+                      Needs Analysis
+                    </Badge>
+                  )}
+                  {analysis.triage.suggestedAction === 'manual_review' && (
+                    <Badge
+                      variant="outline"
+                      className="border-red-500/50 bg-red-500/10 text-red-400"
+                    >
+                      Manual Review
+                    </Badge>
+                  )}
+                  {analysis.triage.confidence && (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      {analysis.triage.confidence} confidence
+                    </Badge>
+                  )}
+                </div>
+                {analysis.triage.needsSandboxReasoning && (
+                  <MarkdownProse
+                    markdown={analysis.triage.needsSandboxReasoning}
+                    className="text-muted-foreground text-sm"
+                  />
                 )}
-              </>
+              </div>
+            ) : analysisStatus === 'running' || analysisStatus === 'pending' ? (
+              <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-yellow-400" />
+                  <p className="text-sm text-yellow-400">
+                    {analysisStatus === 'pending' ? 'Queued...' : 'Triage in progress...'}
+                  </p>
+                </div>
+              </div>
             ) : analysisStatus === 'failed' ? (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
                 <p className="text-sm text-red-400">
-                  Analysis failed: {analysisError || 'Unknown error'}
+                  Triage failed: {analysisError || 'Unknown error'}
                 </p>
                 <Button
                   variant="outline"
@@ -309,8 +352,112 @@ export function FindingDetailDialog({
                   disabled={isAnalyzing}
                   className="mt-2"
                 >
-                  Retry Analysis
+                  Retry
                 </Button>
+              </div>
+            ) : (
+              <div className="rounded-lg border p-3">
+                <p className="text-muted-foreground mb-2 text-sm">
+                  Run triage to quickly assess if this vulnerability needs attention.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleStartAnalysis()}
+                  disabled={isAnalyzing}
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  Start Triage
+                </Button>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="analysis" className="space-y-4 pt-2">
+            {analysis?.sandboxAnalysis && analysisStatus === 'completed' ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {analysis.sandboxAnalysis.isExploitable === true && (
+                    <Badge
+                      variant="outline"
+                      className="border-red-500/50 bg-red-500/10 text-red-400"
+                    >
+                      <XCircle className="mr-1 h-3 w-3" />
+                      Exploitable
+                    </Badge>
+                  )}
+                  {analysis.sandboxAnalysis.isExploitable === false && (
+                    <Badge
+                      variant="outline"
+                      className="border-green-500/50 bg-green-500/10 text-green-400"
+                    >
+                      <CheckCircle2 className="mr-1 h-3 w-3" />
+                      Not Exploitable
+                    </Badge>
+                  )}
+                </div>
+                {analysis.sandboxAnalysis.summary && (
+                  <p className="text-muted-foreground text-sm">
+                    {analysis.sandboxAnalysis.summary}
+                  </p>
+                )}
+                {analysis.sandboxAnalysis.usageLocations &&
+                  analysis.sandboxAnalysis.usageLocations.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground text-xs font-medium">
+                        Usage locations:
+                      </span>
+                      <ul className="text-muted-foreground mt-1 list-inside list-disc text-xs">
+                        {/* usageLocations may contain duplicates, so index is needed for uniqueness */}
+                        {analysis.sandboxAnalysis.usageLocations
+                          .slice(0, 5)
+                          .map((loc: string, i: number) => (
+                            <li key={`${loc}-${i}`} className="truncate">
+                              {loc}
+                            </li>
+                          ))}
+                        {analysis.sandboxAnalysis.usageLocations.length > 5 && (
+                          <li className="text-muted-foreground/70">
+                            ...and {analysis.sandboxAnalysis.usageLocations.length - 5} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                {analysis.sandboxAnalysis.suggestedFix && (
+                  <div>
+                    <span className="text-muted-foreground text-xs font-medium">
+                      Suggested fix:
+                    </span>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      {analysis.sandboxAnalysis.suggestedFix}
+                    </p>
+                  </div>
+                )}
+                {analysis.sandboxAnalysis.rawMarkdown && (
+                  <MarkdownProse
+                    markdown={analysis.sandboxAnalysis.rawMarkdown}
+                    className="text-muted-foreground"
+                  />
+                )}
+                {cliSessionId && (
+                  <Link
+                    href={
+                      organizationId
+                        ? `/organizations/${organizationId}/cloud/chat?sessionId=${cliSessionId}`
+                        : `/cloud/chat?sessionId=${cliSessionId}`
+                    }
+                    className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm transition-colors"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Continue conversation in Cloud Agent
+                  </Link>
+                )}
+              </div>
+            ) : analysisStatus === 'completed' && analysis?.rawMarkdown ? (
+              // Legacy analysis: completed with top-level rawMarkdown but no sandboxAnalysis
+              <div className="space-y-4">
+                <MarkdownProse markdown={analysis.rawMarkdown} className="text-muted-foreground" />
               </div>
             ) : analysisStatus === 'running' || analysisStatus === 'pending' ? (
               <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
@@ -318,8 +465,8 @@ export function FindingDetailDialog({
                   <Loader2 className="h-4 w-4 animate-spin text-yellow-400" />
                   <p className="text-sm text-yellow-400">
                     {analysisStatus === 'pending'
-                      ? 'Analysis queued...'
-                      : 'Analysis in progress...'}
+                      ? 'Queued...'
+                      : 'Codebase analysis in progress...'}
                   </p>
                 </div>
                 <p className="text-muted-foreground mt-1 text-xs">
@@ -341,11 +488,31 @@ export function FindingDetailDialog({
                   </div>
                 )}
               </div>
-            ) : (
+            ) : analysisStatus === 'failed' ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                <p className="text-sm text-red-400">
+                  Codebase analysis failed: {analysisError || 'Unknown error'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleStartAnalysis({ retrySandboxOnly: !!analysis?.triage })}
+                  disabled={isAnalyzing}
+                  className="mt-2"
+                >
+                  Retry Analysis
+                </Button>
+              </div>
+            ) : analysis?.triage?.needsSandboxAnalysis === false ? (
+              <div className="rounded-lg border p-3">
+                <p className="text-muted-foreground text-sm">
+                  Triage determined codebase analysis is not needed for this finding.
+                </p>
+              </div>
+            ) : !analysis ? (
               <div className="rounded-lg border p-3">
                 <p className="text-muted-foreground mb-2 text-sm">
-                  Run AI analysis to determine if this vulnerability is relevant and exploitable in
-                  your codebase.
+                  Deep codebase analysis to verify exploitability. Requires triage to run first.
                 </p>
                 <Button
                   variant="outline"
@@ -357,28 +524,18 @@ export function FindingDetailDialog({
                   Start Analysis
                 </Button>
               </div>
+            ) : (
+              <div className="rounded-lg border p-3">
+                <p className="text-muted-foreground text-sm">
+                  Codebase analysis has not been run yet. It will start automatically if triage
+                  determines it is needed.
+                </p>
+              </div>
             )}
-          </div>
+          </TabsContent>
 
-          <div className="text-muted-foreground border-t pt-4 text-xs">
-            <div className="flex justify-between">
-              <span>First detected: {format(new Date(finding.first_detected_at), 'PPP')}</span>
-              <span>Last synced: {format(new Date(finding.last_synced_at), 'PPP')}</span>
-            </div>
-          </div>
-
-          <div className="flex justify-between border-t pt-4">
-            <div className="flex gap-2">
-              {finding.dependabot_html_url && (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={finding.dependabot_html_url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    View on GitHub
-                  </a>
-                </Button>
-              )}
-            </div>
-            <div className="flex gap-2">
+          <div className="mt-6 flex justify-end border-t pt-4">
+            <div className="flex items-stretch gap-2">
               {canDismiss && finding.status === 'open' && (
                 <Button variant="destructive" size="sm" onClick={onDismiss}>
                   <XCircle className="mr-2 h-4 w-4" />
@@ -390,7 +547,7 @@ export function FindingDetailDialog({
               </Button>
             </div>
           </div>
-        </div>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

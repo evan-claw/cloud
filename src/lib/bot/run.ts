@@ -3,6 +3,7 @@ import {
   BOT_VERSION,
   DEFAULT_BOT_MODEL,
   MAX_ITERATIONS,
+  SUMMARY_MODEL,
 } from '@/lib/bot/constants';
 import {
   getConversationContext,
@@ -24,11 +25,13 @@ import {
   formatGitLabRepositoriesForPrompt,
   getGitLabRepositoryContext,
 } from '@/lib/slack-bot/gitlab-repository-context';
+import { isFreeModel } from '@/lib/models';
 import { generateApiToken } from '@/lib/tokens';
+import { captureException } from '@sentry/nextjs';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { PlatformIntegration, User } from '@kilocode/db';
 import type { BotRequestStep } from '@kilocode/db/schema';
-import { ToolLoopAgent, stepCountIs, tool } from 'ai';
+import { ToolLoopAgent, generateText, stepCountIs, tool } from 'ai';
 import type { StepResult, ToolSet } from 'ai';
 import { Actions, Card, CardText, LinkButton, Section } from 'chat';
 import type { Thread, Message } from 'chat';
@@ -157,7 +160,14 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
             user.id,
             ({ kiloSessionId }) => {
               const sessionUrl = buildSessionUrl(kiloSessionId, owner);
-              postSessionLinkEphemeral(thread, message, sessionUrl);
+              void postSessionLinkEphemeral(
+                thread,
+                message,
+                sessionUrl,
+                args.prompt,
+                provider,
+                modelSlug
+              );
 
               if (botRequestId) {
                 updateBotRequest(botRequestId, { cloudAgentSessionId: kiloSessionId });
@@ -204,13 +214,45 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
   }
 }
 
-function postSessionLinkEphemeral(thread: Thread, message: Message, sessionUrl: string): void {
+function pickSummaryModel(modelSlug: string): string {
+  // If the bot uses a free model, summarize with it too to avoid charges
+  return isFreeModel(modelSlug) ? modelSlug : SUMMARY_MODEL;
+}
+
+async function summarizePrompt(
+  provider: ReturnType<typeof createOpenAICompatible>,
+  modelSlug: string,
+  prompt: string
+): Promise<string> {
+  const result = await generateText({
+    model: provider.chatModel(pickSummaryModel(modelSlug)),
+    prompt: `Summarize the following task in at most 10 words. Output only the summary, nothing else.\n\n${prompt}`,
+  });
+  return result.text.trim();
+}
+
+async function postSessionLinkEphemeral(
+  thread: Thread,
+  message: Message,
+  sessionUrl: string,
+  prompt: string,
+  provider: ReturnType<typeof createOpenAICompatible>,
+  modelSlug: string
+): Promise<void> {
+  let description = 'A Cloud Agent session has been started for this task.';
+  try {
+    const summary = await summarizePrompt(provider, modelSlug, prompt);
+    if (summary) description = `Cloud Agent session started: ${summary}`;
+  } catch (error) {
+    captureException(error, { tags: { component: 'kilo-bot', op: 'summarize-prompt' } });
+  }
+
   thread
     .postEphemeral(
       message.author,
       Card({
         children: [
-          Section([CardText('A Cloud Agent session has been started for this task.')]),
+          Section([CardText(description)]),
           Actions([LinkButton({ label: 'View Session', url: sessionUrl, style: 'primary' })]),
         ],
       }),

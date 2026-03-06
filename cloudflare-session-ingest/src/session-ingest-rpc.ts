@@ -8,7 +8,7 @@ import type { Env } from './env';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from './dos/SessionAccessCacheDO';
 import { withDORetry } from '@kilocode/worker-utils';
-import { getSessionExport } from './services/session-export';
+import { getSessionExport, getSessionWithDiffExport } from './services/session-export';
 
 const sessionIdSchema = z.string().startsWith('ses_').length(30);
 
@@ -29,6 +29,28 @@ export class SessionIngestRPC extends WorkerEntrypoint<Env> {
       .parse(params);
 
     return getSessionExport(this.env, parsed.sessionId, parsed.kiloUserId);
+  }
+
+  /**
+   * RPC method: export session snapshot with aggregated
+   * file-level diff in a single call. Reduces wire traffic and avoids
+   * double-reading message rows during cold-start resume.
+   *
+   * Returns the raw JSON string of `{ snapshot, diff }`, or null if the session
+   * does not exist, does not belong to the given user, or has no data.
+   */
+  async exportSessionWithDiff(params: {
+    sessionId: string;
+    kiloUserId: string;
+  }): Promise<string | null> {
+    const parsed = z
+      .object({
+        sessionId: sessionIdSchema,
+        kiloUserId: z.string().min(1),
+      })
+      .parse(params);
+
+    return getSessionWithDiffExport(this.env, parsed.sessionId, parsed.kiloUserId);
   }
 
   /**

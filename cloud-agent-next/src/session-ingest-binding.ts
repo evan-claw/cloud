@@ -29,5 +29,5 @@ export type ExportSessionParams = {
 export type SessionIngestBinding = Fetcher & {
   createSessionForCloudAgent(params: CreateSessionForCloudAgentParams): Promise<void>;
   deleteSessionForCloudAgent(params: DeleteSessionForCloudAgentParams): Promise<void>;
-  exportSession(params: ExportSessionParams): Promise<string | null>;
+  exportSessionWithDiff(params: ExportSessionParams): Promise<string | null>;
 };

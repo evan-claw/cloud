@@ -7,6 +7,28 @@ import { getSessionIngestDO } from '../dos/SessionIngestDO';
 import { withDORetry } from '@kilocode/worker-utils';
 
 /**
+ * Verify that the session exists in `cli_sessions_v2` and belongs to the
+ * given user.
+ */
+async function verifySessionOwnership(
+  env: Env,
+  sessionId: string,
+  kiloUserId: string
+): Promise<boolean> {
+  const db = getWorkerDb(env.HYPERDRIVE.connectionString);
+
+  const rows = await db
+    .select({ session_id: cli_sessions_v2.session_id })
+    .from(cli_sessions_v2)
+    .where(
+      and(eq(cli_sessions_v2.session_id, sessionId), eq(cli_sessions_v2.kilo_user_id, kiloUserId))
+    )
+    .limit(1);
+
+  return !!rows[0];
+}
+
+/**
  * Fetch the full session export payload from the SessionIngestDO.
  *
  * Verifies that the session exists in `cli_sessions_v2` and belongs to the
@@ -20,17 +42,8 @@ export async function getSessionExport(
   sessionId: string,
   kiloUserId: string
 ): Promise<string | null> {
-  const db = getWorkerDb(env.HYPERDRIVE.connectionString);
-
-  const rows = await db
-    .select({ session_id: cli_sessions_v2.session_id })
-    .from(cli_sessions_v2)
-    .where(
-      and(eq(cli_sessions_v2.session_id, sessionId), eq(cli_sessions_v2.kilo_user_id, kiloUserId))
-    )
-    .limit(1);
-
-  if (!rows[0]) {
+  const owned = await verifySessionOwnership(env, sessionId, kiloUserId);
+  if (!owned) {
     return null;
   }
 
@@ -38,5 +51,31 @@ export async function getSessionExport(
     () => getSessionIngestDO(env, { kiloUserId, sessionId }),
     stub => stub.getAll(),
     'SessionIngestDO.getAll'
+  );
+}
+
+/**
+ * Fetch the combined session snapshot and aggregated
+ * file-level diff from the SessionIngestDO in a single RPC call.
+ *
+ * Verifies session ownership before reading the DO.
+ *
+ * @returns The raw JSON string of `{ snapshot, diff }`, or `null`
+ *          if the session does not exist or does not belong to the user.
+ */
+export async function getSessionWithDiffExport(
+  env: Env,
+  sessionId: string,
+  kiloUserId: string
+): Promise<string | null> {
+  const owned = await verifySessionOwnership(env, sessionId, kiloUserId);
+  if (!owned) {
+    return null;
+  }
+
+  return withDORetry(
+    () => getSessionIngestDO(env, { kiloUserId, sessionId }),
+    stub => stub.getSessionExportWithDiff(),
+    'SessionIngestDO.getSessionExportWithDiff'
   );
 }

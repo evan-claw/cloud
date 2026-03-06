@@ -23,7 +23,16 @@ import {
   POST_CLOSE_DRAIN_MS,
   type TerminationReason,
 } from './session-metrics';
+import { z } from 'zod';
 import migrations from '../../drizzle/migrations';
+
+const fileDiffSchema = z.object({
+  file: z.string(),
+  after: z.string().default(''),
+  status: z.string().default('modified'),
+});
+
+type FileDiff = z.infer<typeof fileDiffSchema>;
 
 type IngestMetaKey =
   | ExtractableMetaKey
@@ -178,7 +187,8 @@ export class SessionIngestDO extends DurableObject<Env> {
     };
   }
 
-  async getAll(): Promise<string> {
+  /** Read and parse all non-session_diff items from the DB. */
+  private readItems(): IngestBatch {
     const rows = this.db
       .select({
         item_id: ingestItems.item_id,
@@ -205,8 +215,51 @@ export class SessionIngestDO extends DurableObject<Env> {
       }
     }
 
-    const snapshot = buildSharedSessionSnapshot(items);
+    return items;
+  }
+
+  async getAll(): Promise<string> {
+    const snapshot = buildSharedSessionSnapshot(this.readItems());
     return JSON.stringify(snapshot);
+  }
+
+  /**
+   * Aggregate last-write-wins file diffs from the given items' `summary.diffs`.
+   * Returns null when no diffs exist.
+   */
+  private static collectDiffs(items: IngestBatch): FileDiff[] | null {
+    const messageDiffsSchema = z.object({
+      summary: z.object({ diffs: z.array(z.unknown()) }).optional(),
+    });
+
+    const byFile = new Map<string, FileDiff>();
+
+    for (const item of items) {
+      if (item.type !== 'message') continue;
+      const parsed = messageDiffsSchema.safeParse(item.data);
+      const diffs = parsed.data?.summary?.diffs;
+      if (!diffs) continue;
+
+      for (const d of diffs) {
+        const result = fileDiffSchema.safeParse(d);
+        if (!result.success) continue;
+        byFile.set(result.data.file, result.data);
+      }
+    }
+
+    if (byFile.size === 0) return null;
+    return [...byFile.values()];
+  }
+
+  /**
+   * Combined export: returns the session snapshot and aggregated file-level
+   * diff in a single call, reading items from the DB only once.
+   */
+  async getSessionExportWithDiff(): Promise<string> {
+    const items = this.readItems();
+    const snapshot = buildSharedSessionSnapshot(items);
+    const diff = SessionIngestDO.collectDiffs(items);
+    return JSON.stringify({ snapshot, diff });
   }
 
   /**
