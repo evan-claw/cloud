@@ -1,7 +1,7 @@
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
 
-export const corethink_free_model = {
+export const corethink_free_model: KiloFreeModel = {
   public_id: 'corethink:free',
   display_name: 'CoreThink (free)',
   description:
@@ -12,8 +12,8 @@ export const corethink_free_model = {
   flags: [],
   gateway: 'corethink',
   internal_id: 'corethink',
-  inference_providers: ['corethink'],
-} as KiloFreeModel;
+  inference_provider: 'corethink',
+};
 
 export function applyCoreThinkProviderSettings(requestToMutate: OpenRouterChatCompletionRequest) {
   delete requestToMutate.transforms;

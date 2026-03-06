@@ -4,7 +4,7 @@ export function isZaiModel(model: string) {
   return model.startsWith('z-ai/');
 }
 
-export const zai_glm5_free_model = {
+export const zai_glm5_free_model: KiloFreeModel = {
   public_id: 'z-ai/glm-5:free',
   display_name: 'Z.ai: GLM 5 (free)',
   description:
@@ -15,5 +15,5 @@ export const zai_glm5_free_model = {
   flags: ['reasoning', 'prompt_cache'],
   gateway: 'openrouter',
   internal_id: 'z-ai/glm-5',
-  inference_providers: [],
-} as KiloFreeModel;
+  inference_provider: null,
+};

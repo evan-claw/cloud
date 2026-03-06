@@ -12,7 +12,7 @@ export const kimi_k25_free_model: KiloFreeModel = {
   flags: ['reasoning', 'prompt_cache', 'vision'],
   gateway: 'openrouter',
   internal_id: 'moonshotai/kimi-k2.5',
-  inference_providers: [],
+  inference_provider: null,
 };
 
 export function isMoonshotModel(model: string) {

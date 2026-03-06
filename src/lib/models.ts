@@ -64,9 +64,7 @@ export const kiloFreeModels = [
 ] as KiloFreeModel[];
 
 export function isKiloStealthModel(model: string): boolean {
-  return kiloFreeModels.some(
-    m => m.public_id === model && m.inference_providers.includes('stealth')
-  );
+  return kiloFreeModels.some(m => m.public_id === model && m.inference_provider === 'stealth');
 }
 
 function isOpenRouterStealthModel(model: string): boolean {
