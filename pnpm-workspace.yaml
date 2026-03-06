@@ -43,6 +43,7 @@ packages:
   - 'cloudflare-security-sync'
   - 'cloudflare-security-auto-analysis'
   - 'kiloclaw'
+  - 'kiloclaw/packages/secret-catalog'
   - 'cloudflare-gastown'
   - 'cloudflare-gastown/container'
 
