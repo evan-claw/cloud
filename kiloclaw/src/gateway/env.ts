@@ -1,3 +1,4 @@
+import { ALL_SECRET_ENV_VARS } from '@kilocode/kiloclaw-secret-catalog';
 import type { KiloClawEnv } from '../types';
 import type { EncryptedEnvelope, EncryptedChannelTokens } from '../schemas/instance-config';
 import { deriveGatewayToken } from '../auth/gateway-token';
@@ -30,14 +31,13 @@ export type EnvVarsBuild = {
 /**
  * Env var names that are always classified as sensitive.
  * Values for these keys go into the `sensitive` bucket.
+ *
+ * Derived from the secret catalog to automatically include all channel/secret env vars.
  */
 const SENSITIVE_KEYS = new Set([
   'KILOCODE_API_KEY',
   'OPENCLAW_GATEWAY_TOKEN',
-  'TELEGRAM_BOT_TOKEN',
-  'DISCORD_BOT_TOKEN',
-  'SLACK_BOT_TOKEN',
-  'SLACK_APP_TOKEN',
+  ...ALL_SECRET_ENV_VARS,
 ]);
 
 /**

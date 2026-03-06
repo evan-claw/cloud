@@ -11,6 +11,7 @@
  */
 
 import { createDecipheriv, privateDecrypt, constants } from 'crypto';
+import { FIELD_KEY_TO_ENV_VAR } from '@kilocode/kiloclaw-secret-catalog';
 import type { EncryptedEnvelope, EncryptedChannelTokens } from '../schemas/instance-config';
 
 export class EncryptionConfigurationError extends Error {
@@ -146,20 +147,16 @@ export function mergeEnvVarsWithSecrets(
 }
 
 /**
- * Channel token env var mapping.
- * Maps channel config keys to the container env var names expected by start-openclaw.sh.
- */
-const CHANNEL_ENV_MAP: Record<keyof EncryptedChannelTokens, string> = {
-  telegramBotToken: 'TELEGRAM_BOT_TOKEN',
-  discordBotToken: 'DISCORD_BOT_TOKEN',
-  slackBotToken: 'SLACK_BOT_TOKEN',
-  slackAppToken: 'SLACK_APP_TOKEN',
-};
-
-/**
  * Decrypt encrypted channel tokens and map to container env var names.
  *
+ * Uses FIELD_KEY_TO_ENV_VAR from the secret catalog to map channel config keys
+ * to the container env var names expected by start-openclaw.sh.
+ *
  * Example: channels.telegramBotToken -> TELEGRAM_BOT_TOKEN
+ *
+ * Unknown keys (e.g. stale DO state from a rolled-back schema change) are
+ * skipped with a console.warn rather than throwing, so a single unrecognised
+ * key does not prevent the machine from starting.
  */
 export function decryptChannelTokens(
   channels: EncryptedChannelTokens,
@@ -167,10 +164,21 @@ export function decryptChannelTokens(
 ): Record<string, string> {
   const result: Record<string, string> = {};
 
-  for (const channelKey of Object.keys(CHANNEL_ENV_MAP) as (keyof EncryptedChannelTokens)[]) {
+  for (const channelKey of Object.keys(channels) as (keyof EncryptedChannelTokens)[]) {
     const envelope = channels[channelKey];
     if (envelope) {
-      result[CHANNEL_ENV_MAP[channelKey]] = decryptWithPrivateKey(envelope, privateKeyPem);
+      const envVarName = FIELD_KEY_TO_ENV_VAR.get(channelKey);
+      if (!envVarName) {
+        // Gracefully skip unknown keys rather than hard-failing.
+        // This can happen if DO state contains a key that was removed from the
+        // catalog (e.g. after a schema rollback) or added to EncryptedChannelTokens
+        // before the catalog was updated.
+        console.warn(
+          `[decryptChannelTokens] Unknown channel key '${channelKey}' — not in secret catalog. Skipping.`
+        );
+        continue;
+      }
+      result[envVarName] = decryptWithPrivateKey(envelope, privateKeyPem);
     }
   }
 
