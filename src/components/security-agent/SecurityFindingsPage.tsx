@@ -48,18 +48,18 @@ export function SecurityFindingsPage() {
     const severity = searchParams.get('severity') ?? undefined;
     const repoFullName = searchParams.get('repoFullName') ?? undefined;
     const outcomeFilter = searchParams.get('outcomeFilter') ?? undefined;
-    const overdue = searchParams.get('overdue');
+    const overdue = searchParams.get('overdue') === 'true';
 
     const outcomeImpliesStatus = outcomeFilter === 'fixed' || outcomeFilter === 'dismissed';
 
-    const status =
-      overdue === 'true' ? 'open' : outcomeImpliesStatus ? undefined : (statusParam ?? 'open');
+    const status = overdue ? 'open' : outcomeImpliesStatus ? undefined : (statusParam ?? 'open');
 
     return {
       status: status || undefined,
       severity,
       repoFullName,
       outcomeFilter,
+      overdue: overdue || undefined,
     };
   }, [searchParams]);
 
@@ -75,6 +75,7 @@ export function SecurityFindingsPage() {
     severity?: string;
     repoFullName?: string;
     outcomeFilter?: string;
+    overdue?: boolean;
   }>(initialFilters);
   const [sortBy, setSortBy] = useState<'severity_desc' | 'severity_asc' | 'sla_due_at_asc'>(
     initialSortBy
@@ -83,8 +84,20 @@ export function SecurityFindingsPage() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
 
-  // Auto-open finding detail if findingId param is present
+  // Fetch a specific finding by ID for deep-link support, so the dialog opens
+  // even when the finding isn't on the current page.
   const findingIdParam = searchParams.get('findingId');
+  const { data: deepLinkedFinding } = useQuery({
+    ...(isOrg
+      ? trpc.organizations.securityAgent.getFinding.queryOptions({
+          organizationId: organizationId ?? '',
+          id: findingIdParam ?? '',
+        })
+      : trpc.securityAgent.getFinding.queryOptions({
+          id: findingIdParam ?? '',
+        })),
+    enabled: !!findingIdParam,
+  });
 
   const handleSortByChange = useCallback(
     (newSortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc') => {
@@ -103,6 +116,7 @@ export function SecurityFindingsPage() {
       status: parsedStatus.success ? parsedStatus.data : undefined,
       severity: parsedSeverity.success ? parsedSeverity.data : undefined,
       outcomeFilter: parsedOutcome.success ? parsedOutcome.data : undefined,
+      overdue: filters.overdue,
       sortBy,
       repoFullName: filters.repoFullName,
       limit: PAGE_SIZE,
@@ -196,16 +210,13 @@ export function SecurityFindingsPage() {
     setDetailDialogOpen(true);
   }, []);
 
-  // Auto-open finding from URL param
+  // Auto-open finding from URL param using the dedicated query
   useEffect(() => {
-    if (findingIdParam && findings.length > 0 && !selectedFinding) {
-      const finding = findings.find(f => f.id === findingIdParam);
-      if (finding) {
-        setSelectedFinding(finding);
-        setDetailDialogOpen(true);
-      }
+    if (deepLinkedFinding && !selectedFinding) {
+      setSelectedFinding(deepLinkedFinding);
+      setDetailDialogOpen(true);
     }
-  }, [findingIdParam, findings, selectedFinding]);
+  }, [deepLinkedFinding, selectedFinding]);
 
   const handleOpenDismissDialog = useCallback(() => {
     setDetailDialogOpen(false);

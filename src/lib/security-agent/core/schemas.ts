@@ -57,6 +57,7 @@ export const ListFindingsInputSchema = z.object({
   status: SecurityFindingStatusSchema.optional(),
   severity: SecuritySeveritySchema.optional(),
   outcomeFilter: OutcomeFilterSchema.optional(),
+  overdue: z.boolean().optional(),
   sortBy: z.enum(['severity_desc', 'severity_asc', 'sla_due_at_asc']).default('severity_desc'),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),

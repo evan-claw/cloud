@@ -290,6 +290,7 @@ type ListFindingsParams = {
   repoFullName?: string;
   packageName?: string;
   outcomeFilter?: OutcomeFilter;
+  overdue?: boolean;
   sortBy?: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc';
 };
 
@@ -306,6 +307,7 @@ export async function listSecurityFindings(
       repoFullName,
       packageName,
       outcomeFilter,
+      overdue,
       sortBy,
     } = params;
     const ownerConverted = toOwner(owner);
@@ -335,6 +337,11 @@ export async function listSecurityFindings(
     }
     if (packageName) {
       conditions.push(eq(security_findings.package_name, packageName));
+    }
+    if (overdue) {
+      conditions.push(
+        sql`${security_findings.sla_due_at} IS NOT NULL AND ${security_findings.sla_due_at} < now()`
+      );
     }
     if (outcomeFilter && outcomeFilter !== 'all') {
       switch (outcomeFilter) {

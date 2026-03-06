@@ -534,6 +534,7 @@ export function createSecurityAgentHandlers<TExtra = {}>(deps: SecurityAgentDeps
           status: input.status,
           severity: input.severity,
           outcomeFilter: input.outcomeFilter,
+          overdue: input.overdue,
           sortBy: input.sortBy,
           limit: input.limit,
           offset: input.offset,
