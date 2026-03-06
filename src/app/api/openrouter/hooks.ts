@@ -131,13 +131,11 @@ export function useOpenRouterModelsAndProviders() {
     queryFn: async (): Promise<Pick<OpenRouterData, 'providers'>> => {
       const response = await fetch('/api/openrouter/models-by-provider');
       if (!response.ok) {
-        console.error(`Failed to fetch: ${response.status} ${response.statusText}`);
-        return { providers: [] };
+        throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
       }
       const parsedResponse = NormalizedOpenRouterResponse.safeParse(await response.json());
       if (!parsedResponse.success) {
-        console.error('Failed to parse response', z.prettifyError(parsedResponse.error));
-        return { providers: [] };
+        throw new Error('Failed to parse response:\n' + z.prettifyError(parsedResponse.error));
       }
       return parsedResponse.data;
     },
