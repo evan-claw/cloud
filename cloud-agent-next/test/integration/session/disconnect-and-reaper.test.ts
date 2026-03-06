@@ -244,6 +244,63 @@ describe('Disconnect handling & reaper', () => {
     expect(result.activeExecId).toBeNull();
   });
 
+  it('reaper recovers stale running execution when active marker is missing', async () => {
+    const userId = 'user_reaper_5';
+    const sessionId = 'agent_reaper_5';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const excId = 'exc_missing_active_marker' as ExecutionId;
+      await instance.addExecution({
+        executionId: excId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: excId,
+      });
+
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'running',
+      });
+
+      // Simulate the prod failure mode: the execution remains non-terminal
+      // but active_execution_id has already been cleared.
+      await instance.updateExecutionHeartbeat(excId, now - 11 * 60 * 1000);
+
+      await instance.alarm();
+
+      const execution = await instance.getExecution(excId);
+
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
+      const events = eventQueries.findByFilters({ executionIds: [excId] });
+      const errorEvents = events.filter(e => e.stream_event_type === 'error');
+
+      const activeExecId = await instance.getActiveExecutionId();
+
+      return { execution, errorEvents, activeExecId };
+    });
+
+    expect(result.execution?.status).toBe('failed');
+    expect(result.execution?.error).toContain('no heartbeat');
+    expect(result.activeExecId).toBeNull();
+    expect(result.errorEvents).toHaveLength(1);
+
+    const payload = JSON.parse(result.errorEvents[0].payload);
+    expect(payload.fatal).toBe(true);
+    expect(payload.error).toContain('no heartbeat');
+  });
+
   // ---------------------------------------------------------------------------
   // Fix 5: Dynamic alarm scheduling — 2-min interval when active, 5-min idle
   // ---------------------------------------------------------------------------

@@ -983,9 +983,13 @@ export class CloudAgentSession extends DurableObject {
    * Marks them as failed and clears the active execution.
    */
   private async cleanupStaleExecutions(now: number): Promise<void> {
-    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    let activeExecutionId = await this.executionQueries.getActiveExecutionId();
 
-    if (!activeExecutionId) return;
+    if (!activeExecutionId) {
+      const recoveredExecution = await this.recoverExecutionWithoutActiveMarker();
+      if (!recoveredExecution) return;
+      activeExecutionId = recoveredExecution.executionId;
+    }
 
     // Get the execution metadata
     const execution = await this.executionQueries.get(activeExecutionId);
@@ -1101,6 +1105,47 @@ export class CloudAgentSession extends DurableObject {
         });
       }
     }
+  }
+
+  /**
+   * Recover a non-terminal execution when the active execution marker is missing.
+   *
+   * This keeps the reaper authoritative even if some other code path cleared
+   * active_execution_id before the execution reached a terminal state.
+   */
+  private async recoverExecutionWithoutActiveMarker(): Promise<ExecutionMetadata | null> {
+    const executions = await this.executionQueries.getAll();
+    const candidates = executions
+      .filter(execution => execution.status === 'running' || execution.status === 'pending')
+      .sort((a, b) => b.startedAt - a.startedAt);
+
+    const recoveredExecution = candidates[0] ?? null;
+    if (!recoveredExecution) {
+      return null;
+    }
+
+    logger
+      .withFields({
+        sessionId: this.sessionId,
+        executionId: recoveredExecution.executionId,
+        candidateCount: candidates.length,
+      })
+      .warn('Recovered non-terminal execution without active marker');
+
+    const setActiveResult = await this.executionQueries.setActiveExecution(
+      recoveredExecution.executionId
+    );
+    if (!setActiveResult.ok) {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: recoveredExecution.executionId,
+          error: setActiveResult.error,
+        })
+        .warn('Failed to restore active execution marker');
+    }
+
+    return recoveredExecution;
   }
 
   /**
