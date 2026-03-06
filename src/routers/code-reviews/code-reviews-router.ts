@@ -44,7 +44,7 @@ import { DEFAULT_LIST_LIMIT } from '@/lib/code-reviews/core/constants';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { tryDispatchPendingReviews } from '@/lib/code-reviews/dispatch/dispatch-pending-reviews';
 import { getBotUserId } from '@/lib/bot-users/bot-user-service';
-import type { CloudAgentCodeReview, PlatformIntegration } from '@kilocode/db/schema';
+import type { CloudAgentCodeReview } from '@kilocode/db/schema';
 
 /**
  * Re-creates the PR gate check (GitHub Check Run / GitLab commit status)
@@ -66,8 +66,7 @@ async function recreatePRGateCheck(review: CloudAgentCodeReview) {
     if (appType === 'lite') return;
 
     const [repoOwner, repoName] = review.repo_full_name.split('/');
-    let checkRunId: bigint | undefined;
-    checkRunId = await createCheckRun(
+    const checkRunId = await createCheckRun(
       integration.platform_installation_id,
       repoOwner,
       repoName,
