@@ -58,7 +58,7 @@ export function CondensedProviderAndModelsList({
   }
 
   if (!selections || providersWithSelections.length === 0) {
-    return <div className="text-muted-foreground text-sm">No providers selected</div>;
+    return null;
   }
 
   return (

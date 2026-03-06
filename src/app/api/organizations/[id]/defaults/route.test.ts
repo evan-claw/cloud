@@ -8,6 +8,7 @@ import { createOrganization } from '@/lib/organizations/organizations';
 import { db } from '@/lib/drizzle';
 import { kilocode_users, organization_memberships, organizations } from '@kilocode/db/schema';
 import type { OpenRouterModel } from '@/lib/organizations/organization-types';
+import { PRIMARY_DEFAULT_MODEL } from '@/lib/models';
 
 jest.mock('@/lib/organizations/organization-auth');
 jest.mock('@/lib/providers/openrouter');
@@ -57,7 +58,7 @@ describe('GET /api/organizations/[id]/defaults', () => {
     await db.delete(kilocode_users);
   });
 
-  test('wildcard-only allow list returns an allowed preferred model (does not fall back to a disallowed global default)', async () => {
+  test('no deny list returns PRIMARY_DEFAULT_MODEL without calling OpenRouter', async () => {
     const user = await insertTestUser();
     const organization = await createOrganization('Test Org', user.id);
 
@@ -69,9 +70,7 @@ describe('GET /api/organizations/[id]/defaults', () => {
         user: { ...user, role: 'owner' },
         organization: {
           ...organization,
-          settings: {
-            model_allow_list: ['openai/*'],
-          },
+          settings: {},
         },
       },
     });
@@ -82,20 +81,19 @@ describe('GET /api/organizations/[id]/defaults', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-
-    // The response must be a concrete model id (not the disallowed global default).
-    expect(body.defaultModel).toMatch(/^openai\//);
+    expect(body.defaultModel).toBe(PRIMARY_DEFAULT_MODEL);
     expect(mockedGetEnhancedOpenRouterModels).not.toHaveBeenCalled();
   });
 
-  test('wildcard-only allow list falls back to the first allowed OpenRouter model when no preferred model matches', async () => {
+  test('deny list blocking PRIMARY_DEFAULT_MODEL falls back to first non-denied model from OpenRouter', async () => {
     const user = await insertTestUser();
     const organization = await createOrganization('Test Org', user.id);
 
     mockedGetEnhancedOpenRouterModels.mockResolvedValue({
       data: [
+        makeOpenRouterModel(PRIMARY_DEFAULT_MODEL),
+        makeOpenRouterModel('openai/gpt-4o'),
         makeOpenRouterModel('example-provider/model-1'),
-        makeOpenRouterModel('some-other/model-2'),
       ],
     });
 
@@ -106,7 +104,7 @@ describe('GET /api/organizations/[id]/defaults', () => {
         organization: {
           ...organization,
           settings: {
-            model_allow_list: ['example-provider/*'],
+            model_deny_list: [PRIMARY_DEFAULT_MODEL],
           },
         },
       },
@@ -118,16 +116,15 @@ describe('GET /api/organizations/[id]/defaults', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.defaultModel).toBe('example-provider/model-1');
-    expect(mockedGetEnhancedOpenRouterModels).toHaveBeenCalledTimes(1);
+    // Should return the first non-denied model from OpenRouter
+    expect(body.defaultModel).toBe('openai/gpt-4o');
   });
 
-  test('falls back to the first concrete allow-list entry when no global default is allowed', async () => {
+  test('org-configured default model is returned when not in deny list', async () => {
     const user = await insertTestUser();
     const organization = await createOrganization('Test Org', user.id);
 
     mockedGetEnhancedOpenRouterModels.mockRejectedValue(new Error('should not be called'));
-
     mockedGetAuthorizedOrgContext.mockResolvedValue({
       success: true,
       data: {
@@ -135,7 +132,8 @@ describe('GET /api/organizations/[id]/defaults', () => {
         organization: {
           ...organization,
           settings: {
-            model_allow_list: ['openai/gpt-5.2', 'openai/*'],
+            default_model: 'openai/gpt-4o',
+            model_deny_list: ['anthropic/claude-3-opus'],
           },
         },
       },
@@ -147,11 +145,11 @@ describe('GET /api/organizations/[id]/defaults', () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body.defaultModel).toBe('openai/gpt-5.2');
+    expect(body.defaultModel).toBe('openai/gpt-4o');
     expect(mockedGetEnhancedOpenRouterModels).not.toHaveBeenCalled();
   });
 
-  test('returns 409 when allow list exists but no models are allowed by it', async () => {
+  test('returns 409 when all models are denied', async () => {
     const user = await insertTestUser();
     const organization = await createOrganization('Test Org', user.id);
 
@@ -164,7 +162,7 @@ describe('GET /api/organizations/[id]/defaults', () => {
         organization: {
           ...organization,
           settings: {
-            model_allow_list: ['no-such-provider/*'],
+            model_deny_list: [PRIMARY_DEFAULT_MODEL],
           },
         },
       },
@@ -177,8 +175,8 @@ describe('GET /api/organizations/[id]/defaults', () => {
     expect(response.status).toBe(409);
     const body = await response.json();
     expect(body).toEqual({
-      error: "No valid models are allowed by this organization's allow list.",
+      error:
+        "No valid models are available — all models are blocked by this organization's deny list.",
     });
-    expect(mockedGetEnhancedOpenRouterModels).toHaveBeenCalledTimes(1);
   });
 });

@@ -11,8 +11,8 @@ describe('providersAndModelsAllowListsReducer', () => {
 
     state = providersAndModelsAllowListsReducer(state, {
       type: 'INIT_FROM_SERVER',
-      modelAllowList: ['openai/gpt-4.1'],
-      providerAllowList: [],
+      modelDenyList: ['openai/gpt-4.1'],
+      providerDenyList: [],
     });
 
     if (state.status !== 'ready') {
@@ -21,10 +21,8 @@ describe('providersAndModelsAllowListsReducer', () => {
 
     state = providersAndModelsAllowListsReducer(state, {
       type: 'TOGGLE_MODEL',
-      modelId: 'openai/gpt-4.1',
+      modelId: 'anthropic/claude-3-opus',
       nextAllowed: false,
-      allModelIds: ['openai/gpt-4.1'],
-      providerSlugsForModelId: ['openai'],
     });
 
     state = providersAndModelsAllowListsReducer(state, { type: 'RESET_TO_INITIAL' });
@@ -33,8 +31,8 @@ describe('providersAndModelsAllowListsReducer', () => {
       throw new Error('expected ready state');
     }
 
-    expect(state.draftModelAllowList).toEqual(state.initialModelAllowList);
-    expect(state.draftProviderAllowList).toEqual(state.initialProviderAllowList);
+    expect(state.draftModelDenyList).toEqual(state.initialModelDenyList);
+    expect(state.draftProviderDenyList).toEqual(state.initialProviderDenyList);
   });
 
   test('init -> toggle -> mark saved marks clean (draft becomes initial)', () => {
@@ -42,8 +40,8 @@ describe('providersAndModelsAllowListsReducer', () => {
 
     state = providersAndModelsAllowListsReducer(state, {
       type: 'INIT_FROM_SERVER',
-      modelAllowList: [],
-      providerAllowList: [],
+      modelDenyList: [],
+      providerDenyList: [],
     });
 
     if (state.status !== 'ready') {
@@ -54,7 +52,6 @@ describe('providersAndModelsAllowListsReducer', () => {
       type: 'TOGGLE_PROVIDER',
       providerSlug: 'openai',
       nextEnabled: false,
-      allProviderSlugsWithEndpoints: ['openai', 'anthropic'],
     });
 
     state = providersAndModelsAllowListsReducer(state, { type: 'MARK_SAVED' });
@@ -63,7 +60,7 @@ describe('providersAndModelsAllowListsReducer', () => {
       throw new Error('expected ready state');
     }
 
-    expect(state.initialProviderAllowList).toEqual(state.draftProviderAllowList);
-    expect(state.initialModelAllowList).toEqual(state.draftModelAllowList);
+    expect(state.initialProviderDenyList).toEqual(state.draftProviderDenyList);
+    expect(state.initialModelDenyList).toEqual(state.draftModelDenyList);
   });
 });

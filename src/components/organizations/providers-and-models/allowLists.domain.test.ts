@@ -1,84 +1,76 @@
 import { describe, expect, test } from '@jest/globals';
 import {
-  buildModelProvidersIndex,
-  canonicalizeModelAllowList,
+  canonicalizeDenyList,
   computeAllowedModelIds,
   computeEnabledProviderSlugs,
-  toggleAllowFutureModelsForProvider,
   toggleModelAllowed,
   toggleProviderEnabled,
 } from '@/components/organizations/providers-and-models/allowLists.domain';
 
 describe('allowLists.domain', () => {
-  test('`[]` provider_allow_list means all providers enabled', () => {
+  test('empty provider_deny_list means all providers enabled', () => {
     const enabled = computeEnabledProviderSlugs([], ['a', 'b']);
     expect([...enabled].sort()).toEqual(['a', 'b']);
   });
 
-  test('`[]` model_allow_list means all models allowed (normalized)', () => {
-    const openRouterModels = [{ slug: 'openai/gpt-4.1:free' }, { slug: 'openai/gpt-4.1' }];
-    const openRouterProviders = [
-      {
-        slug: 'openai',
-        models: [{ slug: 'openai/gpt-4.1', endpoint: {} }],
-      },
-    ];
+  test('non-empty provider_deny_list excludes denied providers', () => {
+    const enabled = computeEnabledProviderSlugs(['a'], ['a', 'b']);
+    expect([...enabled].sort()).toEqual(['b']);
+  });
 
-    const allowed = computeAllowedModelIds([], openRouterModels, openRouterProviders);
+  test('empty model_deny_list means all models allowed (normalized)', () => {
+    const openRouterModels = [{ slug: 'openai/gpt-4.1:free' }, { slug: 'openai/gpt-4.1' }];
+
+    const allowed = computeAllowedModelIds([], openRouterModels);
     expect([...allowed].sort()).toEqual(['openai/gpt-4.1']);
   });
 
-  test('canonicalizeModelAllowList normalizes :free and dedupes', () => {
-    expect(canonicalizeModelAllowList(['openai/gpt-4.1:free', 'openai/gpt-4.1'])).toEqual([
+  test('non-empty model_deny_list excludes denied models', () => {
+    const openRouterModels = [{ slug: 'openai/gpt-4.1' }, { slug: 'anthropic/claude-3-opus' }];
+
+    const allowed = computeAllowedModelIds(['anthropic/claude-3-opus'], openRouterModels);
+    expect([...allowed]).toEqual(['openai/gpt-4.1']);
+  });
+
+  test('canonicalizeDenyList normalizes :free and dedupes', () => {
+    expect(canonicalizeDenyList(['openai/gpt-4.1:free', 'openai/gpt-4.1'])).toEqual([
       'openai/gpt-4.1',
     ]);
   });
 
-  test('toggleProviderEnabled(disable) removes provider wildcard from model allow list', () => {
-    const { nextModelAllowList, nextProviderAllowList } = toggleProviderEnabled({
-      providerSlug: 'cerebras',
+  test('toggleProviderEnabled(disable) adds provider to deny list', () => {
+    const next = toggleProviderEnabled({
+      providerSlug: 'openai',
       nextEnabled: false,
-      draftProviderAllowList: [],
-      draftModelAllowList: ['cerebras/*', 'openai/gpt-4.1'],
-      allProviderSlugsWithEndpoints: ['cerebras', 'openai'],
-      hadAllProvidersInitially: true,
+      draftProviderDenyList: [],
     });
-
-    expect(nextModelAllowList).toEqual(['openai/gpt-4.1']);
-    expect(nextProviderAllowList.sort()).toEqual(['openai']);
+    expect(next).toEqual(['openai']);
   });
 
-  test('toggleAllowFutureModelsForProvider enables provider and adds provider wildcard', () => {
-    const { nextModelAllowList, nextProviderAllowList } = toggleAllowFutureModelsForProvider({
-      providerSlug: 'cerebras',
-      nextAllowed: true,
-      draftModelAllowList: ['openai/gpt-4.1'],
-      draftProviderAllowList: ['openai'],
-      allProviderSlugsWithEndpoints: ['cerebras', 'openai'],
-      hadAllProvidersInitially: false,
+  test('toggleProviderEnabled(enable) removes provider from deny list', () => {
+    const next = toggleProviderEnabled({
+      providerSlug: 'openai',
+      nextEnabled: true,
+      draftProviderDenyList: ['openai', 'anthropic'],
     });
-
-    expect(nextModelAllowList.sort()).toEqual(['cerebras/*', 'openai/gpt-4.1']);
-    expect(nextProviderAllowList.sort()).toEqual(['cerebras', 'openai']);
+    expect(next).toEqual(['anthropic']);
   });
 
-  test('toggleModelAllowed(disable) removes provider wildcards for providers offering the model', () => {
-    const providerIndex = buildModelProvidersIndex([
-      {
-        slug: 'cerebras',
-        models: [{ slug: 'z-ai/glm4.6', endpoint: {} }],
-      },
-    ]);
-
+  test('toggleModelAllowed(disallow) adds model to deny list', () => {
     const next = toggleModelAllowed({
-      modelId: 'z-ai/glm4.6',
+      modelId: 'openai/gpt-4.1',
       nextAllowed: false,
-      draftModelAllowList: ['cerebras/*', 'z-ai/glm4.6'],
-      allModelIds: ['z-ai/glm4.6'],
-      providerSlugsForModelId: [...(providerIndex.get('z-ai/glm4.6') ?? [])],
-      hadAllModelsInitially: false,
+      draftModelDenyList: [],
     });
+    expect(next).toEqual(['openai/gpt-4.1']);
+  });
 
-    expect(next).toEqual([]);
+  test('toggleModelAllowed(allow) removes model from deny list', () => {
+    const next = toggleModelAllowed({
+      modelId: 'openai/gpt-4.1',
+      nextAllowed: true,
+      draftModelDenyList: ['openai/gpt-4.1', 'anthropic/claude-3-opus'],
+    });
+    expect(next).toEqual(['anthropic/claude-3-opus']);
   });
 });

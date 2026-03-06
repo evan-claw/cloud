@@ -2,14 +2,12 @@ import { useCallback, useMemo, useReducer } from 'react';
 import { normalizeModelId } from '@/lib/model-utils';
 import {
   buildModelProvidersIndex,
-  canonicalizeModelAllowList,
-  canonicalizeProviderAllowList,
+  canonicalizeDenyList,
   computeAllowedModelIds,
   computeAllProviderSlugsWithEndpoints,
   computeEnabledProviderSlugs,
   sortUniqueStrings,
   stringListsEqual,
-  toggleAllowFutureModelsForProvider,
   toggleModelAllowed,
   toggleProviderEnabled,
   type OpenRouterModelSlugSnapshot,
@@ -20,10 +18,10 @@ export type ProviderPolicyFilter = 'all' | 'yes' | 'no';
 
 export type ProvidersAndModelsAllowListsReadyState = {
   status: 'ready';
-  draftModelAllowList: string[];
-  draftProviderAllowList: string[];
-  initialModelAllowList: string[];
-  initialProviderAllowList: string[];
+  draftModelDenyList: string[];
+  draftProviderDenyList: string[];
+  initialModelDenyList: string[];
+  initialProviderDenyList: string[];
   modelSearch: string;
   modelSelectedOnly: boolean;
   infoModelId: string | null;
@@ -53,27 +51,18 @@ export type ProvidersAndModelsAllowListsState =
 export type ProvidersAndModelsAllowListsAction =
   | {
       type: 'INIT_FROM_SERVER';
-      modelAllowList: ReadonlyArray<string>;
-      providerAllowList: ReadonlyArray<string>;
+      modelDenyList: ReadonlyArray<string>;
+      providerDenyList: ReadonlyArray<string>;
     }
   | {
       type: 'TOGGLE_PROVIDER';
       providerSlug: string;
       nextEnabled: boolean;
-      allProviderSlugsWithEndpoints: ReadonlyArray<string>;
     }
   | {
       type: 'TOGGLE_MODEL';
       modelId: string;
       nextAllowed: boolean;
-      allModelIds: ReadonlyArray<string>;
-      providerSlugsForModelId: ReadonlyArray<string> | undefined;
-    }
-  | {
-      type: 'TOGGLE_PROVIDER_WILDCARD';
-      providerSlug: string;
-      nextAllowed: boolean;
-      allProviderSlugsWithEndpoints: ReadonlyArray<string>;
     }
   | {
       type: 'RESET_TO_INITIAL';
@@ -139,14 +128,14 @@ export function providersAndModelsAllowListsReducer(
 ): ProvidersAndModelsAllowListsState {
   switch (action.type) {
     case 'INIT_FROM_SERVER': {
-      const nextModelAllowList = canonicalizeModelAllowList(action.modelAllowList);
-      const nextProviderAllowList = canonicalizeProviderAllowList(action.providerAllowList);
+      const nextModelDenyList = canonicalizeDenyList(action.modelDenyList);
+      const nextProviderDenyList = canonicalizeDenyList(action.providerDenyList);
       return {
         status: 'ready',
-        draftModelAllowList: nextModelAllowList,
-        draftProviderAllowList: nextProviderAllowList,
-        initialModelAllowList: nextModelAllowList,
-        initialProviderAllowList: nextProviderAllowList,
+        draftModelDenyList: nextModelDenyList,
+        draftProviderDenyList: nextProviderDenyList,
+        initialModelDenyList: nextModelDenyList,
+        initialProviderDenyList: nextProviderDenyList,
         modelSearch: state.modelSearch,
         modelSelectedOnly: state.modelSelectedOnly,
         infoModelId: state.infoModelId,
@@ -161,53 +150,27 @@ export function providersAndModelsAllowListsReducer(
 
     case 'TOGGLE_PROVIDER': {
       if (state.status !== 'ready') return state;
-      const { nextModelAllowList, nextProviderAllowList } = toggleProviderEnabled({
+      const nextProviderDenyList = toggleProviderEnabled({
         providerSlug: action.providerSlug,
         nextEnabled: action.nextEnabled,
-        draftProviderAllowList: state.draftProviderAllowList,
-        draftModelAllowList: state.draftModelAllowList,
-        allProviderSlugsWithEndpoints: action.allProviderSlugsWithEndpoints,
-        hadAllProvidersInitially: state.initialProviderAllowList.length === 0,
+        draftProviderDenyList: state.draftProviderDenyList,
       });
       return {
         ...state,
-        draftModelAllowList: nextModelAllowList,
-        draftProviderAllowList: nextProviderAllowList,
+        draftProviderDenyList: nextProviderDenyList,
       };
     }
 
     case 'TOGGLE_MODEL': {
       if (state.status !== 'ready') return state;
-      const nextModelAllowList = toggleModelAllowed({
+      const nextModelDenyList = toggleModelAllowed({
         modelId: action.modelId,
         nextAllowed: action.nextAllowed,
-        draftModelAllowList: state.draftModelAllowList,
-        allModelIds: action.allModelIds,
-        providerSlugsForModelId: action.providerSlugsForModelId,
-        hadAllModelsInitially: state.initialModelAllowList.length === 0,
+        draftModelDenyList: state.draftModelDenyList,
       });
       return {
         ...state,
-        draftModelAllowList: nextModelAllowList,
-      };
-    }
-
-    case 'TOGGLE_PROVIDER_WILDCARD': {
-      if (state.status !== 'ready') return state;
-
-      const { nextModelAllowList, nextProviderAllowList } = toggleAllowFutureModelsForProvider({
-        providerSlug: action.providerSlug,
-        nextAllowed: action.nextAllowed,
-        draftModelAllowList: state.draftModelAllowList,
-        draftProviderAllowList: state.draftProviderAllowList,
-        allProviderSlugsWithEndpoints: action.allProviderSlugsWithEndpoints,
-        hadAllProvidersInitially: state.initialProviderAllowList.length === 0,
-      });
-
-      return {
-        ...state,
-        draftModelAllowList: nextModelAllowList,
-        draftProviderAllowList: nextProviderAllowList,
+        draftModelDenyList: nextModelDenyList,
       };
     }
 
@@ -215,8 +178,8 @@ export function providersAndModelsAllowListsReducer(
       if (state.status !== 'ready') return state;
       return {
         ...state,
-        draftModelAllowList: state.initialModelAllowList,
-        draftProviderAllowList: state.initialProviderAllowList,
+        draftModelDenyList: state.initialModelDenyList,
+        draftProviderDenyList: state.initialProviderDenyList,
       };
     }
 
@@ -224,8 +187,8 @@ export function providersAndModelsAllowListsReducer(
       if (state.status !== 'ready') return state;
       return {
         ...state,
-        initialModelAllowList: state.draftModelAllowList,
-        initialProviderAllowList: state.draftProviderAllowList,
+        initialModelDenyList: state.draftModelDenyList,
+        initialProviderDenyList: state.draftProviderDenyList,
       };
     }
 
@@ -268,12 +231,11 @@ export function useProvidersAndModelsAllowListsState(params: {
   selectors: ProvidersAndModelsAllowListsSelectors;
   actions: {
     initFromServer: (params: {
-      modelAllowList: ReadonlyArray<string>;
-      providerAllowList: ReadonlyArray<string>;
+      modelDenyList: ReadonlyArray<string>;
+      providerDenyList: ReadonlyArray<string>;
     }) => void;
     toggleProvider: (params: { providerSlug: string; nextEnabled: boolean }) => void;
     toggleModel: (params: { modelId: string; nextAllowed: boolean }) => void;
-    toggleProviderWildcard: (params: { providerSlug: string; nextAllowed: boolean }) => void;
     resetToInitial: () => void;
     markSaved: () => void;
     setModelSearch: (value: string) => void;
@@ -295,10 +257,10 @@ export function useProvidersAndModelsAllowListsState(params: {
     createProvidersAndModelsAllowListsInitialState
   );
 
-  const draftProviderAllowList = state.status === 'ready' ? state.draftProviderAllowList : null;
-  const draftModelAllowList = state.status === 'ready' ? state.draftModelAllowList : null;
-  const initialProviderAllowList = state.status === 'ready' ? state.initialProviderAllowList : null;
-  const initialModelAllowList = state.status === 'ready' ? state.initialModelAllowList : null;
+  const draftProviderDenyList = state.status === 'ready' ? state.draftProviderDenyList : null;
+  const draftModelDenyList = state.status === 'ready' ? state.draftModelDenyList : null;
+  const initialProviderDenyList = state.status === 'ready' ? state.initialProviderDenyList : null;
+  const initialModelDenyList = state.status === 'ready' ? state.initialModelDenyList : null;
 
   const allProviderSlugsWithEndpoints = useMemo(() => {
     return computeAllProviderSlugsWithEndpoints(openRouterProviders);
@@ -313,85 +275,56 @@ export function useProvidersAndModelsAllowListsState(params: {
   }, [openRouterProviders]);
 
   const enabledProviderSlugs = useMemo(() => {
-    if (!draftProviderAllowList) return new Set<string>();
-    return computeEnabledProviderSlugs(draftProviderAllowList, allProviderSlugsWithEndpoints);
-  }, [allProviderSlugsWithEndpoints, draftProviderAllowList]);
+    if (!draftProviderDenyList) return new Set<string>();
+    return computeEnabledProviderSlugs(draftProviderDenyList, allProviderSlugsWithEndpoints);
+  }, [allProviderSlugsWithEndpoints, draftProviderDenyList]);
 
   const allowedModelIds = useMemo(() => {
-    if (!draftModelAllowList) return new Set<string>();
-    return computeAllowedModelIds(draftModelAllowList, openRouterModels, openRouterProviders);
-  }, [draftModelAllowList, openRouterModels, openRouterProviders]);
+    if (!draftModelDenyList) return new Set<string>();
+    return computeAllowedModelIds(draftModelDenyList, openRouterModels);
+  }, [draftModelDenyList, openRouterModels]);
 
   const hasUnsavedChanges = useMemo(() => {
     if (
-      !draftModelAllowList ||
-      !draftProviderAllowList ||
-      !initialModelAllowList ||
-      !initialProviderAllowList
+      !draftModelDenyList ||
+      !draftProviderDenyList ||
+      !initialModelDenyList ||
+      !initialProviderDenyList
     ) {
       return false;
     }
     return (
-      !stringListsEqual(draftModelAllowList, initialModelAllowList) ||
-      !stringListsEqual(draftProviderAllowList, initialProviderAllowList)
+      !stringListsEqual(draftModelDenyList, initialModelDenyList) ||
+      !stringListsEqual(draftProviderDenyList, initialProviderDenyList)
     );
-  }, [
-    draftModelAllowList,
-    draftProviderAllowList,
-    initialModelAllowList,
-    initialProviderAllowList,
-  ]);
+  }, [draftModelDenyList, draftProviderDenyList, initialModelDenyList, initialProviderDenyList]);
 
   const initFromServer = useCallback(
-    (init: { modelAllowList: ReadonlyArray<string>; providerAllowList: ReadonlyArray<string> }) => {
+    (init: { modelDenyList: ReadonlyArray<string>; providerDenyList: ReadonlyArray<string> }) => {
       dispatch({
         type: 'INIT_FROM_SERVER',
-        modelAllowList: init.modelAllowList,
-        providerAllowList: init.providerAllowList,
+        modelDenyList: init.modelDenyList,
+        providerDenyList: init.providerDenyList,
       });
     },
     []
   );
 
-  const toggleProvider = useCallback(
-    (input: { providerSlug: string; nextEnabled: boolean }) => {
-      dispatch({
-        type: 'TOGGLE_PROVIDER',
-        providerSlug: input.providerSlug,
-        nextEnabled: input.nextEnabled,
-        allProviderSlugsWithEndpoints,
-      });
-    },
-    [allProviderSlugsWithEndpoints]
-  );
+  const toggleProvider = useCallback((input: { providerSlug: string; nextEnabled: boolean }) => {
+    dispatch({
+      type: 'TOGGLE_PROVIDER',
+      providerSlug: input.providerSlug,
+      nextEnabled: input.nextEnabled,
+    });
+  }, []);
 
-  const toggleModel = useCallback(
-    (input: { modelId: string; nextAllowed: boolean }) => {
-      const providerSlugsForModelId = modelProvidersIndex.get(input.modelId);
-      dispatch({
-        type: 'TOGGLE_MODEL',
-        modelId: input.modelId,
-        nextAllowed: input.nextAllowed,
-        allModelIds,
-        providerSlugsForModelId: providerSlugsForModelId
-          ? sortUniqueStrings([...providerSlugsForModelId])
-          : undefined,
-      });
-    },
-    [allModelIds, modelProvidersIndex]
-  );
-
-  const toggleProviderWildcard = useCallback(
-    (input: { providerSlug: string; nextAllowed: boolean }) => {
-      dispatch({
-        type: 'TOGGLE_PROVIDER_WILDCARD',
-        providerSlug: input.providerSlug,
-        nextAllowed: input.nextAllowed,
-        allProviderSlugsWithEndpoints,
-      });
-    },
-    [allProviderSlugsWithEndpoints]
-  );
+  const toggleModel = useCallback((input: { modelId: string; nextAllowed: boolean }) => {
+    dispatch({
+      type: 'TOGGLE_MODEL',
+      modelId: input.modelId,
+      nextAllowed: input.nextAllowed,
+    });
+  }, []);
 
   const selectors: ProvidersAndModelsAllowListsSelectors = useMemo(
     () => ({
@@ -417,7 +350,6 @@ export function useProvidersAndModelsAllowListsState(params: {
       initFromServer,
       toggleProvider,
       toggleModel,
-      toggleProviderWildcard,
       resetToInitial: () => dispatch({ type: 'RESET_TO_INITIAL' }),
       markSaved: () => dispatch({ type: 'MARK_SAVED' }),
       setModelSearch: (value: string) => dispatch({ type: 'SET_MODEL_SEARCH', value }),
@@ -436,7 +368,7 @@ export function useProvidersAndModelsAllowListsState(params: {
       setInfoProviderSlug: (value: string | null) =>
         dispatch({ type: 'SET_INFO_PROVIDER_SLUG', value }),
     }),
-    [initFromServer, toggleModel, toggleProvider, toggleProviderWildcard]
+    [initFromServer, toggleModel, toggleProvider]
   );
 
   return {
