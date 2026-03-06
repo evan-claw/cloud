@@ -81,6 +81,7 @@ function createItemExtractor(r2Key: string) {
         itemParser = null;
         if (isOpen) depth++;
         if (isClose) depth--;
+        if (depth === 2) skippingItem = false; // item ended on the trigger token
         return;
       }
 
