@@ -187,7 +187,7 @@ export type MicrodollarUsageContext = {
   session_id: string | null;
   /** Client mode from x-kilocode-mode header (e.g. 'code', 'build', 'architect'). */
   mode: string | null;
-  /** The kilo/auto model ID when one was requested (e.g. 'kilo/auto', 'kilo/auto-free'). */
+  /** The auto model ID when one was requested (e.g. 'kilo-auto/free'). */
   auto_model: string | null;
 };
 

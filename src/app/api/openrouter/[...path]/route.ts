@@ -114,9 +114,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   const requestedModel = requestBodyParsed.model.trim();
   const requestedModelLowerCased = requestedModel.toLowerCase();
 
-  // "kilo/auto" is a quasi-model id that resolves to a real model based on x-kilocode-mode.
-  // After this resolution, the rest of the proxy flow behaves as if the client requested
-  // the resolved model directly.
   const modeHeader = extractHeaderAndLimitLength(request, 'x-kilocode-mode');
   let autoModel: string | null = null;
   if (isKiloAutoModel(requestedModelLowerCased)) {

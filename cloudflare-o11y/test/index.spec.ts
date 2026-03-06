@@ -69,7 +69,7 @@ function makeValidApiMetricsBody(overrides?: Record<string, unknown>) {
 		mode: 'build',
 		provider: 'openai',
 		inferenceProvider: 'openai',
-		requestedModel: 'kilo/auto',
+		requestedModel: 'kilo-auto/frontier',
 		resolvedModel: 'anthropic/claude-sonnet-4.5',
 		toolsAvailable: ['function:get_weather', 'function:searchDocs'],
 		toolsUsed: ['function:searchDocs'],
