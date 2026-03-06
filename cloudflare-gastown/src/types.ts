@@ -15,6 +15,7 @@ export const BeadType = z.enum([
   'convoy',
   'molecule',
   'agent',
+  'triage_request',
 ]);
 export type BeadType = z.infer<typeof BeadType>;
 
@@ -48,7 +49,7 @@ export type BeadFilter = {
 
 // -- Agents (now beads + agent_metadata) --
 
-export const AgentRole = z.enum(['polecat', 'refinery', 'mayor', 'witness']);
+export const AgentRole = z.enum(['polecat', 'refinery', 'mayor', 'witness', 'triage']);
 export type AgentRole = z.infer<typeof AgentRole>;
 
 export const AgentStatus = z.enum(['idle', 'working', 'stalled', 'dead']);

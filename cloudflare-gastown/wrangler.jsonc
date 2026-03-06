@@ -12,6 +12,14 @@
       "zone_name": "kiloapps.io",
     },
   ],
+
+  // External health watchdog: fires every 5 minutes to verify active towns'
+  // DO alarms are firing and containers are responsive. This provides an
+  // external observer independent of the DO alarm (analogous to Boot in local
+  // Gastown), so a dead town alarm can be detected and re-armed from outside.
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
   "workers_dev": false,
 
   "containers": [

@@ -42,6 +42,7 @@ import { bead_dependencies } from '../db/tables/bead-dependencies.table';
 import { query } from '../util/query.util';
 import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
+import { getGastownUserStub } from './GastownUser.do';
 
 import { BeadPriority } from '../types';
 import type {
@@ -77,6 +78,10 @@ const MAX_DISPATCH_ATTEMPTS = 5;
 // Escalation constants
 const STALE_ESCALATION_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 const MAX_RE_ESCALATIONS = 3;
+
+// Deacon patrol constants
+const STALE_HOOK_THRESHOLD_MS = 60 * 60_000; // 1 hour — bead hooked but agent never dispatched
+const GUPP_TRIAGE_THRESHOLD_MS = 60 * 60_000; // 1 hour — GUPP_CHECK sent but agent still inactive
 const SEVERITY_ORDER = ['low', 'medium', 'high', 'critical'] as const;
 
 function generateId(): string {
@@ -1553,6 +1558,16 @@ export class TownDO extends DurableObject<Env> {
       console.error(`${TOWN_LOG} alarm: witnessPatrol failed`, err);
     }
     try {
+      await this.deaconPatrol();
+    } catch (err) {
+      console.error(`${TOWN_LOG} alarm: deaconPatrol failed`, err);
+    }
+    try {
+      await this.maybeDispatchTriageAgent();
+    } catch (err) {
+      console.error(`${TOWN_LOG} alarm: maybeDispatchTriageAgent failed`, err);
+    }
+    try {
       await this.deliverPendingMail();
     } catch (err) {
       console.warn(`${TOWN_LOG} alarm: deliverPendingMail failed`, err);
@@ -1802,11 +1817,18 @@ export class TownDO extends DurableObject<Env> {
   }
 
   /**
-   * Witness patrol: detect dead/stale agents, orphaned beads.
+   * Witness patrol: detect dead/stale agents and flag ambiguous cases for triage.
+   *
+   * Mechanical behaviors (no LLM needed):
+   * - Agent exited cleanly → push to review queue
+   * - Agent exited unexpectedly → reset to idle for redispatch
+   * - GUPP violation with no activity → send GUPP_CHECK mail
+   * - GUPP violation with prior unanswered GUPP_CHECK → create triage_request
    */
   private async witnessPatrol(): Promise<void> {
     const townId = this.townId;
     const guppThreshold = new Date(Date.now() - GUPP_THRESHOLD_MS).toISOString();
+    const guppTriageThreshold = new Date(Date.now() - GUPP_TRIAGE_THRESHOLD_MS).toISOString();
 
     const WorkingAgentRow = AgentMetadataRecord.pick({
       bead_id: true,
@@ -1833,44 +1855,460 @@ export class TownDO extends DurableObject<Env> {
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
         if (containerInfo.exitReason === 'completed') {
+          // Agent finished cleanly — push into review queue
           reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });
           continue;
         }
+        // Agent exited unexpectedly — reset to idle so schedulePendingWork retries
         query(
           this.sql,
-          /* sql */ `UPDATE ${agent_metadata} SET ${agent_metadata.columns.status} = 'idle', ${agent_metadata.columns.last_activity_at} = ? WHERE ${agent_metadata.bead_id} = ?`,
+          /* sql */ `
+            UPDATE ${agent_metadata}
+            SET ${agent_metadata.columns.status} = 'idle',
+                ${agent_metadata.columns.last_activity_at} = ?
+            WHERE ${agent_metadata.bead_id} = ?
+          `,
           [now(), agentId]
         );
         continue;
       }
 
-      // GUPP violation check
+      // GUPP violation: working but no activity for 30+ min
       if (lastActivity && lastActivity < guppThreshold) {
-        // Check for existing GUPP mail
+        // Check for an existing open GUPP_CHECK mail
         const existingGupp = [
           ...query(
             this.sql,
             /* sql */ `
-              SELECT ${beads.bead_id} FROM ${beads}
+              SELECT ${beads.bead_id}, ${beads.created_at} FROM ${beads}
               WHERE ${beads.type} = 'message'
                 AND ${beads.assignee_agent_bead_id} = ?
                 AND ${beads.title} = 'GUPP_CHECK'
                 AND ${beads.status} = 'open'
+              ORDER BY ${beads.created_at} ASC
               LIMIT 1
             `,
             [agentId]
           ),
         ];
+
         if (existingGupp.length === 0) {
+          // No prior GUPP_CHECK — send one now
           mail.sendMail(this.sql, {
             from_agent_id: 'witness',
             to_agent_id: agentId,
             subject: 'GUPP_CHECK',
             body: 'You have had work hooked for 30+ minutes with no activity. Are you stuck? If so, call gt_escalate.',
           });
+        } else {
+          // Prior GUPP_CHECK was sent but agent is still inactive — escalate to triage
+          const guppRow = z
+            .object({ bead_id: z.string(), created_at: z.string() })
+            .parse(existingGupp[0]);
+          const guppSentAt = guppRow.created_at;
+          if (guppSentAt < guppTriageThreshold) {
+            // GUPP_CHECK sent >1hr ago with no response — queue for triage
+            this.createTriageRequestIfAbsent(agentId, 'stuck_agent', {
+              reason: 'GUPP_CHECK sent 1hr+ ago with no response from agent',
+              last_activity_at: lastActivity,
+              gupp_check_sent_at: guppSentAt,
+            });
+          }
         }
       }
     }
+  }
+
+  /**
+   * Deacon patrol: redispatch failed beads, detect stale hooks, feed stranded convoys.
+   *
+   * Mechanical behaviors (no LLM needed):
+   * - Beads hooked by an idle agent with no recent dispatch → stale hook cleanup
+   * - Open convoy-tracked beads with no assignee → auto-sling them
+   */
+  private async deaconPatrol(): Promise<void> {
+    this.detectStaleHooks();
+    await this.feedStrandedConvoys();
+  }
+
+  /**
+   * Detect stale hooks: an agent is idle but has a bead hooked, and has had no
+   * dispatch activity for longer than STALE_HOOK_THRESHOLD_MS. This happens when:
+   * - The eager fire-and-forget dispatch failed silently
+   * - The agent was reset to idle but never re-dispatched due to a code bug
+   *
+   * Mechanical action: reset the bead's assignee so schedulePendingWork can retry.
+   */
+  private detectStaleHooks(): void {
+    const staleThreshold = new Date(Date.now() - STALE_HOOK_THRESHOLD_MS).toISOString();
+
+    const StaleHookRow = AgentMetadataRecord.pick({
+      bead_id: true,
+      current_hook_bead_id: true,
+      last_activity_at: true,
+    });
+    const staleAgents = StaleHookRow.array().parse([
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${agent_metadata.bead_id}, ${agent_metadata.current_hook_bead_id}, ${agent_metadata.last_activity_at}
+          FROM ${agent_metadata}
+          WHERE ${agent_metadata.status} = 'idle'
+            AND ${agent_metadata.current_hook_bead_id} IS NOT NULL
+            AND (${agent_metadata.last_activity_at} IS NULL OR ${agent_metadata.last_activity_at} < ?)
+        `,
+        [staleThreshold]
+      ),
+    ]);
+
+    for (const agent of staleAgents) {
+      const hookBeadId = agent.current_hook_bead_id;
+      if (!hookBeadId) continue;
+
+      // Re-arm the agent as idle with no hook so schedulePendingWork will
+      // re-hook and redispatch it on the next alarm tick.
+      console.log(
+        `${TOWN_LOG} detectStaleHooks: resetting stale hook agentId=${agent.bead_id} beadId=${hookBeadId}`
+      );
+      query(
+        this.sql,
+        /* sql */ `
+          UPDATE ${agent_metadata}
+          SET ${agent_metadata.columns.current_hook_bead_id} = NULL,
+              ${agent_metadata.columns.status} = 'idle',
+              ${agent_metadata.columns.dispatch_attempts} = 0,
+              ${agent_metadata.columns.last_activity_at} = ?
+          WHERE ${agent_metadata.bead_id} = ?
+        `,
+        [now(), agent.bead_id]
+      );
+      // Remove assignee from the bead so slingBead's hook logic can re-hook it
+      query(
+        this.sql,
+        /* sql */ `
+          UPDATE ${beads}
+          SET ${beads.columns.assignee_agent_bead_id} = NULL,
+              ${beads.columns.status} = 'open',
+              ${beads.columns.updated_at} = ?
+          WHERE ${beads.bead_id} = ?
+        `,
+        [now(), hookBeadId]
+      );
+    }
+  }
+
+  /**
+   * Feed stranded convoys: open issue beads tracked by a convoy with no assigned
+   * agent are auto-dispatched by re-hooking an idle agent.
+   *
+   * This handles the case where a convoy was created but some beads never got
+   * dispatched (e.g., concurrency cap prevented initial dispatch, or an agent
+   * was deleted after hooking).
+   */
+  private async feedStrandedConvoys(): Promise<void> {
+    // Find open issue beads that belong to a convoy (via bead_dependencies with
+    // dependency_type='tracks') and have no assignee agent.
+    const StrandedBeadRow = z.object({
+      bead_id: z.string(),
+      rig_id: z.string().nullable(),
+    });
+    const strandedBeads = StrandedBeadRow.array().parse([
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${beads.bead_id}, ${beads.rig_id}
+          FROM ${beads}
+          INNER JOIN ${bead_dependencies} ON ${bead_dependencies.bead_id} = ${beads.bead_id}
+          WHERE ${beads.type} = 'issue'
+            AND ${beads.status} = 'open'
+            AND ${beads.assignee_agent_bead_id} IS NULL
+            AND ${bead_dependencies.dependency_type} = 'tracks'
+          LIMIT 10
+        `,
+        []
+      ),
+    ]);
+
+    if (strandedBeads.length === 0) return;
+    console.log(`${TOWN_LOG} feedStrandedConvoys: found ${strandedBeads.length} stranded bead(s)`);
+
+    for (const row of strandedBeads) {
+      if (!row.rig_id) continue;
+      // Verify the convoy that tracks this bead is still open
+      const convoyId = beadOps.getConvoyForBead(this.sql, row.bead_id);
+      if (!convoyId) continue;
+      const convoyBead = beadOps.getBead(this.sql, convoyId);
+      if (!convoyBead || convoyBead.status === 'closed' || convoyBead.status === 'failed') continue;
+
+      // Hook an idle polecat to this bead — this mirrors the slingBead logic
+      const polecat = agents.getOrCreateAgent(this.sql, 'polecat', row.rig_id, this.townId);
+      try {
+        agents.hookBead(this.sql, polecat.id, row.bead_id);
+        console.log(
+          `${TOWN_LOG} feedStrandedConvoys: hooked bead=${row.bead_id} to agent=${polecat.id}`
+        );
+      } catch (err) {
+        // Agent already hooked to another bead — skip
+        console.warn(
+          `${TOWN_LOG} feedStrandedConvoys: failed to hook bead=${row.bead_id}`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  }
+
+  /**
+   * Create a triage_request bead for an ambiguous situation, if one doesn't
+   * already exist for this agent + triage_type combination.
+   */
+  private createTriageRequestIfAbsent(
+    agentId: string,
+    triageType: string,
+    context: Record<string, unknown>
+  ): void {
+    const existing = [
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${beads.bead_id} FROM ${beads}
+          WHERE ${beads.type} = 'triage_request'
+            AND ${beads.status} = 'open'
+            AND json_extract(${beads.metadata}, '$.agent_bead_id') = ?
+            AND json_extract(${beads.metadata}, '$.triage_type') = ?
+          LIMIT 1
+        `,
+        [agentId, triageType]
+      ),
+    ];
+    if (existing.length > 0) return;
+
+    const triageBeadId = generateId();
+    const timestamp = now();
+    const metadata = JSON.stringify({ triage_type: triageType, agent_bead_id: agentId, context });
+    query(
+      this.sql,
+      /* sql */ `
+        INSERT INTO ${beads} (
+          ${beads.columns.bead_id}, ${beads.columns.type}, ${beads.columns.status},
+          ${beads.columns.title}, ${beads.columns.body}, ${beads.columns.rig_id},
+          ${beads.columns.parent_bead_id}, ${beads.columns.assignee_agent_bead_id},
+          ${beads.columns.priority}, ${beads.columns.labels}, ${beads.columns.metadata},
+          ${beads.columns.created_by}, ${beads.columns.created_at}, ${beads.columns.updated_at},
+          ${beads.columns.closed_at}
+        ) VALUES (?, 'triage_request', 'open', ?, NULL, NULL, NULL, NULL,
+                  'medium', '[]', ?, 'witness', ?, ?, NULL)
+      `,
+      [triageBeadId, `[${triageType}] agent=${agentId.slice(0, 8)}`, metadata, timestamp, timestamp]
+    );
+    console.log(
+      `${TOWN_LOG} createTriageRequest: created triage_request=${triageBeadId} type=${triageType} agent=${agentId}`
+    );
+  }
+
+  /**
+   * Dispatch a short-lived triage agent when triage_request beads are queued.
+   * The triage agent processes all pending requests and exits. LLM cost is
+   * proportional to actual ambiguity in the system, not to wall-clock uptime.
+   */
+  private async maybeDispatchTriageAgent(): Promise<void> {
+    const openTriageRows = z
+      .object({ bead_id: z.string(), metadata: z.string() })
+      .array()
+      .parse([
+        ...query(
+          this.sql,
+          /* sql */ `
+            SELECT ${beads.bead_id}, ${beads.metadata}
+            FROM ${beads}
+            WHERE ${beads.type} = 'triage_request'
+              AND ${beads.status} = 'open'
+            ORDER BY ${beads.created_at} ASC
+          `,
+          []
+        ),
+      ]);
+
+    if (openTriageRows.length === 0) return;
+
+    // Check if a triage agent is already running
+    const activeTriageAgents = agents.listAgents(this.sql, { role: 'triage', status: 'working' });
+    if (activeTriageAgents.length > 0) {
+      console.log(
+        `${TOWN_LOG} maybeDispatchTriageAgent: triage agent already active, skipping dispatch`
+      );
+      return;
+    }
+
+    console.log(
+      `${TOWN_LOG} maybeDispatchTriageAgent: ${openTriageRows.length} triage request(s) queued — dispatching triage agent`
+    );
+
+    // Use the first rig for git context (triage agent doesn't write code
+    // but needs a repo to run `kilo serve` in)
+    const rigList = rigs.listRigs(this.sql);
+    const rigConfig = rigList.length > 0 ? await this.getRigConfig(rigList[0].id) : null;
+    const townConfig = await this.getTownConfig();
+    const kilocodeToken = await this.resolveKilocodeToken();
+
+    if (!kilocodeToken) {
+      console.warn(`${TOWN_LOG} maybeDispatchTriageAgent: no kilocodeToken, deferring`);
+      return;
+    }
+
+    // Build triage context summary for the system prompt
+    const situations = openTriageRows.map((row, i) => {
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = JSON.parse(row.metadata) as Record<string, unknown>;
+      } catch {
+        // ignore
+      }
+      return `${i + 1}. [${meta.triage_type ?? 'unknown'}] triage_bead_id=${row.bead_id}\n   Context: ${JSON.stringify(meta.context ?? {})}\n   Options: see gt_triage_resolve`;
+    });
+
+    const triagePrompt = [
+      'You are a Gastown triage agent. Process the following queued situations and resolve each one.',
+      'For each triage request, assess the situation and call gt_triage_resolve with the chosen action.',
+      'When all requests are resolved, call gt_done.',
+      '',
+      'Situations to assess:',
+      ...situations,
+    ].join('\n');
+
+    // Triage agents are ephemeral town-wide — no rig affiliation needed
+    const triageRigId = rigConfig ? rigList[0].id : `triage-${this.townId}`;
+    const triageAgent = agents.getOrCreateAgent(this.sql, 'triage', triageRigId, this.townId);
+
+    const { buildTriageSystemPrompt } = await import('../prompts/triage-system.prompt');
+    const systemPrompt = buildTriageSystemPrompt({
+      townId: this.townId,
+      identity: triageAgent.identity,
+    });
+
+    const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
+      townId: this.townId,
+      rigId: triageRigId,
+      userId: townConfig.owner_user_id ?? rigConfig?.userId ?? this.townId,
+      agentId: triageAgent.id,
+      agentName: 'triage',
+      role: 'triage',
+      identity: triageAgent.identity,
+      beadId: openTriageRows[0].bead_id,
+      beadTitle: `Triage: ${openTriageRows.length} situation(s) queued`,
+      beadBody: triagePrompt,
+      checkpoint: null,
+      gitUrl: rigConfig?.gitUrl ?? '',
+      defaultBranch: rigConfig?.defaultBranch ?? 'main',
+      kilocodeToken,
+      townConfig,
+      systemPromptOverride: systemPrompt,
+      platformIntegrationId: rigConfig?.platformIntegrationId,
+    });
+
+    if (started) {
+      agents.updateAgentStatus(this.sql, triageAgent.id, 'working');
+    } else {
+      console.error(`${TOWN_LOG} maybeDispatchTriageAgent: failed to start triage agent`);
+    }
+  }
+
+  /**
+   * Resolve a triage request: mark the bead closed and apply the chosen action.
+   * Called by the triage agent via the gt_triage_resolve tool.
+   */
+  async resolveTriageRequest(
+    triageBeadId: string,
+    action: string,
+    notes?: string
+  ): Promise<{ resolved: boolean; action: string }> {
+    await this.ensureInitialized();
+
+    const triadBead = beadOps.getBead(this.sql, triageBeadId);
+    if (!triadBead || triadBead.type !== 'triage_request') {
+      console.warn(
+        `${TOWN_LOG} resolveTriageRequest: bead not found or wrong type: ${triageBeadId}`
+      );
+      return { resolved: false, action };
+    }
+    if (triadBead.status === 'closed') {
+      return { resolved: true, action };
+    }
+
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = triadBead.metadata as Record<string, unknown>;
+    } catch {
+      // continue with empty meta
+    }
+
+    const triageType = typeof meta.triage_type === 'string' ? meta.triage_type : 'unknown';
+    const agentBeadId = typeof meta.agent_bead_id === 'string' ? meta.agent_bead_id : null;
+
+    console.log(
+      `${TOWN_LOG} resolveTriageRequest: triageBeadId=${triageBeadId} type=${triageType} action=${action} agent=${agentBeadId ?? 'none'}`
+    );
+
+    // Apply the mechanical action
+    switch (action) {
+      case 'RESTART': {
+        if (agentBeadId) {
+          // Reset agent to idle so schedulePendingWork will redispatch
+          query(
+            this.sql,
+            /* sql */ `
+              UPDATE ${agent_metadata}
+              SET ${agent_metadata.columns.status} = 'idle',
+                  ${agent_metadata.columns.dispatch_attempts} = 0,
+                  ${agent_metadata.columns.last_activity_at} = ?
+              WHERE ${agent_metadata.bead_id} = ?
+            `,
+            [now(), agentBeadId]
+          );
+          // Stop any lingering container process
+          dispatch.stopAgentInContainer(this.env, this.townId, agentBeadId).catch(() => undefined);
+          console.log(`${TOWN_LOG} resolveTriageRequest: RESTART — reset agent ${agentBeadId}`);
+        }
+        break;
+      }
+      case 'ESCALATE': {
+        const agentName = agentBeadId
+          ? (beadOps.getBead(this.sql, agentBeadId)?.title ?? agentBeadId)
+          : 'unknown agent';
+        mail.sendMail(this.sql, {
+          from_agent_id: 'triage',
+          to_agent_id: 'mayor',
+          subject: `TRIAGE_ESCALATION:${triageType}`,
+          body: `Triage agent escalated ${triageType} for agent "${agentName}". Notes: ${notes ?? 'none'}`,
+        });
+        break;
+      }
+      case 'DISCARD': {
+        if (agentBeadId) {
+          // Unhook agent and reset bead to open for manual re-assignment
+          agents.unhookBead(this.sql, agentBeadId);
+          query(
+            this.sql,
+            /* sql */ `
+              UPDATE ${agent_metadata}
+              SET ${agent_metadata.columns.status} = 'idle',
+                  ${agent_metadata.columns.dispatch_attempts} = 0
+              WHERE ${agent_metadata.bead_id} = ?
+            `,
+            [agentBeadId]
+          );
+        }
+        break;
+      }
+      default:
+        console.warn(
+          `${TOWN_LOG} resolveTriageRequest: unknown action "${action}", closing bead anyway`
+        );
+    }
+
+    // Close the triage_request bead
+    beadOps.updateBeadStatus(this.sql, triageBeadId, 'closed', 'triage');
+
+    return { resolved: true, action };
   }
 
   /**
@@ -2439,6 +2877,33 @@ export class TownDO extends DurableObject<Env> {
     if (!current || current < Date.now()) {
       await this.ctx.storage.setAlarm(Date.now() + ACTIVE_ALARM_INTERVAL_MS);
     }
+    // Register this town with the global watchdog registry so the cron
+    // health watchdog can discover and ping it.
+    if (this.townId) {
+      const watchdog = getGastownUserStub(this.env, 'watchdog');
+      watchdog.registerActiveTown(this.townId).catch(err => {
+        console.warn(`${TOWN_LOG} armAlarmIfNeeded: failed to register with watchdog`, err);
+      });
+    }
+  }
+
+  /**
+   * Re-arm the alarm if it has stalled. Called by the external health watchdog
+   * cron (every 5 minutes) to recover towns whose alarm failed to reschedule.
+   *
+   * This is safe to call at any time — it only sets an alarm if none is pending
+   * or the pending one is overdue.
+   */
+  async pingAlarm(): Promise<{ townId: string; alarmRearmed: boolean }> {
+    await this.ensureInitialized();
+    const current = await this.ctx.storage.getAlarm();
+    const now = Date.now();
+    const isOverdue = !current || current < now;
+    if (isOverdue) {
+      console.log(`${TOWN_LOG} pingAlarm: re-arming stalled alarm for town=${this.townId}`);
+      await this.ctx.storage.setAlarm(now + ACTIVE_ALARM_INTERVAL_MS);
+    }
+    return { townId: this.townId, alarmRearmed: isOverdue };
   }
 
   // ══════════════════════════════════════════════════════════════════

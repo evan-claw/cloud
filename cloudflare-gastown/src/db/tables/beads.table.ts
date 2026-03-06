@@ -13,6 +13,7 @@ export const BeadType = z.enum([
   'convoy',
   'molecule',
   'agent',
+  'triage_request',
 ]);
 
 export const BeadStatus = z.enum(['open', 'in_progress', 'closed', 'failed']);
@@ -113,7 +114,7 @@ export const beads = getTableFromZodSchema('beads', BeadRecord);
 export function createTableBeads(): string {
   return getCreateTableQueryFromTable(beads, {
     bead_id: `text primary key`,
-    type: `text not null check(type in ('issue', 'message', 'escalation', 'merge_request', 'convoy', 'molecule', 'agent'))`,
+    type: `text not null check(type in ('issue', 'message', 'escalation', 'merge_request', 'convoy', 'molecule', 'agent', 'triage_request'))`,
     status: `text not null default 'open' check(status in ('open', 'in_progress', 'closed', 'failed'))`,
     title: `text not null`,
     body: `text`,

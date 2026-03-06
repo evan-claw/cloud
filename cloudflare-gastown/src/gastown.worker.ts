@@ -95,6 +95,7 @@ import {
   handleListEscalations,
   handleAcknowledgeEscalation,
 } from './handlers/town-escalations.handler';
+import { handleTriageResolve } from './handlers/rig-triage.handler';
 
 export { GastownUserDO } from './dos/GastownUser.do';
 export { AgentIdentityDO } from './dos/AgentIdentity.do';
@@ -257,6 +258,12 @@ app.get('/api/towns/:townId/rigs/:rigId/agents/:agentId/molecule/current', c =>
 );
 app.post('/api/towns/:townId/rigs/:rigId/agents/:agentId/molecule/advance', c =>
   handleAdvanceMoleculeStep(c, c.req.param())
+);
+
+// ── Triage ───────────────────────────────────────────────────────────────
+
+app.post('/api/towns/:townId/rigs/:rigId/triage/:triageBeadId/resolve', c =>
+  handleTriageResolve(c, c.req.param())
 );
 
 // ── Escalations ─────────────────────────────────────────────────────────
@@ -441,6 +448,59 @@ const WS_STREAM_PATTERN = /^\/api\/towns\/([^/]+)\/container\/agents\/([^/]+)\/s
 const WS_PTY_PATTERN = /^\/api\/towns\/([^/]+)\/container\/agents\/([^/]+)\/pty\/([^/]+)\/connect$/;
 
 export default {
+  /**
+   * Cron trigger: external health watchdog that runs every 5 minutes.
+   *
+   * Independently of each TownDO's self-rescheduled alarm, this cron fires
+   * from the Cloudflare Workers runtime and re-arms alarms for any active town
+   * whose alarm has stalled (e.g., due to a code bug that silently threw during
+   * alarm.setAlarm, or a DO eviction with a missed reschedule).
+   *
+   * This is the cloud equivalent of local Gastown's Boot daemon — an external
+   * observer that cannot be killed by the same failure it is trying to detect.
+   */
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    console.log('[gastown-worker] cron: health watchdog fired');
+    try {
+      // List all active towns from the watchdog registry.
+      // For each town, call pingAlarm() which re-arms the alarm if it has stalled.
+      // A single stalled town must not block the watchdog from checking others.
+      const watchdog = env.GASTOWN_USER.get(env.GASTOWN_USER.idFromName('watchdog'));
+      const townIds = await watchdog.listAllTownIds();
+      console.log(`[gastown-worker] cron: checking ${townIds.length} active town(s)`);
+
+      await Promise.allSettled(
+        townIds.map(async townId => {
+          try {
+            const town = env.TOWN.get(env.TOWN.idFromName(townId));
+            await town.pingAlarm();
+          } catch (err) {
+            console.warn(`[gastown-worker] cron: pingAlarm failed for town=${townId}`, err);
+          }
+        })
+      );
+    } catch (err) {
+      console.error('[gastown-worker] cron: health watchdog failed', err);
+    }
+      const body = (await response.json()) as { townIds?: string[] };
+      const townIds: string[] = Array.isArray(body?.townIds) ? body.townIds : [];
+      console.log(`[gastown-worker] cron: checking ${townIds.length} active town(s)`);
+
+      await Promise.allSettled(
+        townIds.map(async townId => {
+          try {
+            const town = env.TOWN.get(env.TOWN.idFromName(townId));
+            await town.pingAlarm();
+          } catch (err) {
+            console.warn(`[gastown-worker] cron: pingAlarm failed for town=${townId}`, err);
+          }
+        })
+      );
+    } catch (err) {
+      console.error('[gastown-worker] cron: health watchdog failed', err);
+    }
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Intercept WebSocket upgrade requests for agent streaming and PTY.
     // Must bypass Hono — the DO returns a 101 + WebSocketPair that the

@@ -162,6 +162,20 @@ export class GastownClient {
     }
   }
 
+  async triageResolve(
+    triageBeadId: string,
+    action: string,
+    notes?: string
+  ): Promise<{ resolved: boolean; action: string }> {
+    return this.request<{ resolved: boolean; action: string }>(
+      this.rigPath(`/triage/${triageBeadId}/resolve`),
+      {
+        method: 'POST',
+        body: JSON.stringify({ action, notes }),
+      }
+    );
+  }
+
   async advanceMoleculeStep(summary: string): Promise<{
     moleculeId: string;
     previousStep: number;

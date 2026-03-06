@@ -223,6 +223,53 @@ export class GastownUserDO extends DurableObject<Env> {
   async ping(): Promise<string> {
     return 'pong';
   }
+
+  // ── Watchdog Registry ─────────────────────────────────────────────────
+  // The well-known GastawnUserDO instance with ID 'watchdog' acts as a
+  // global active-town registry. TownDOs register themselves here when
+  // they arm alarms; the cron watchdog reads this list to check each town.
+
+  async registerActiveTown(townId: string): Promise<void> {
+    await this.ensureInitialized();
+    // Use the user_towns table but with a special marker so we don't
+    // conflict with real per-user town records. The 'watchdog' DO instance
+    // only ever holds these registry entries.
+    const existing = [
+      ...query(
+        this.sql,
+        /* sql */ `SELECT ${user_towns.columns.id} FROM ${user_towns} WHERE ${user_towns.columns.id} = ?`,
+        [townId]
+      ),
+    ];
+    if (existing.length > 0) return;
+    const timestamp = now();
+    query(
+      this.sql,
+      /* sql */ `
+        INSERT INTO ${user_towns} (
+          ${user_towns.columns.id},
+          ${user_towns.columns.name},
+          ${user_towns.columns.owner_user_id},
+          ${user_towns.columns.created_at},
+          ${user_towns.columns.updated_at}
+        ) VALUES (?, ?, 'watchdog', ?, ?)
+      `,
+      [townId, townId, timestamp, timestamp]
+    );
+  }
+
+  async listAllTownIds(): Promise<string[]> {
+    await this.ensureInitialized();
+    const rows = [
+      ...query(this.sql, /* sql */ `SELECT ${user_towns.columns.id} FROM ${user_towns}`, []),
+    ];
+    return rows
+      .map(r => {
+        const parsed = user_towns.columns.id ? String((r as Record<string, unknown>).id) : '';
+        return parsed;
+      })
+      .filter(Boolean);
+  }
 }
 
 export function getGastownUserStub(env: Env, userId: string) {

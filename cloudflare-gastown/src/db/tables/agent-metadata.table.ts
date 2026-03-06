@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getTableFromZodSchema, getCreateTableQueryFromTable } from '../../util/table';
 
-const AgentRole = z.enum(['polecat', 'refinery', 'mayor', 'witness']);
+const AgentRole = z.enum(['polecat', 'refinery', 'mayor', 'witness', 'triage']);
 const AgentProcessStatus = z.enum(['idle', 'working', 'stalled', 'dead']);
 
 export const AgentMetadataRecord = z.object({
@@ -35,7 +35,7 @@ export const agent_metadata = getTableFromZodSchema('agent_metadata', AgentMetad
 export function createTableAgentMetadata(): string {
   return getCreateTableQueryFromTable(agent_metadata, {
     bead_id: `text primary key references beads(bead_id)`,
-    role: `text not null check(role in ('polecat', 'refinery', 'mayor', 'witness'))`,
+    role: `text not null check(role in ('polecat', 'refinery', 'mayor', 'witness', 'triage'))`,
     identity: `text not null unique`,
     container_process_id: `text`,
     status: `text not null default 'idle' check(status in ('idle', 'working', 'stalled', 'dead'))`,

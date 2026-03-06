@@ -166,6 +166,33 @@ export function createTools(client: GastownClient) {
       },
     }),
 
+    gt_triage_resolve: tool({
+      description:
+        'Resolve a triage request bead with a chosen action. ' +
+        'The TownDO will execute the action (restart agent, escalate, discard). ' +
+        'Call this for each triage request in your queue.',
+      args: {
+        triage_bead_id: tool.schema
+          .string()
+          .describe('The bead_id of the triage_request bead to resolve'),
+        action: tool.schema
+          .enum(['RESTART', 'ESCALATE', 'DISCARD'])
+          .describe(
+            'RESTART: reset the agent to idle for redispatch. ' +
+              'ESCALATE: forward to Mayor. ' +
+              'DISCARD: unhook agent and return bead to open.'
+          ),
+        notes: tool.schema
+          .string()
+          .describe('Optional reasoning notes logged with the resolution')
+          .optional(),
+      },
+      async execute(args) {
+        const result = await client.triageResolve(args.triage_bead_id, args.action, args.notes);
+        return `Triage request ${args.triage_bead_id} resolved with action=${result.action}`;
+      },
+    }),
+
     gt_mol_advance: tool({
       description:
         'Complete the current molecule step and advance to the next one. ' +
