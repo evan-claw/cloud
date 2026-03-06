@@ -121,6 +121,44 @@ describe('CloudAgentSession.startExecutionV2', () => {
     expect(result.plan).toBeNull();
   });
 
+  it('repairs the active execution ID when a hidden execution is still running', async () => {
+    const userId = 'user_exec_repair' as const;
+    const sessionId = 'agent_exec_repair' as const;
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const hiddenId = 'exc_hidden_repair' as ExecutionId;
+      await instance.addExecution({
+        executionId: hiddenId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: hiddenId,
+      });
+      await instance.updateExecutionStatus({
+        executionId: hiddenId,
+        status: 'running',
+      });
+
+      const activeExecutionId = await instance.getActiveExecutionId();
+      const storedActiveExecutionId =
+        await state.storage.get<string>('active_execution_id');
+
+      return { activeExecutionId, storedActiveExecutionId };
+    });
+
+    expect(result.activeExecutionId).toBe('exc_hidden_repair');
+    expect(result.storedActiveExecutionId).toBe('exc_hidden_repair');
+  });
+
   it('clears an invalid active marker before starting a new execution', async () => {
     const userId = 'user_exec_invalid_marker' as const;
     const sessionId = 'agent_exec_invalid_marker' as const;

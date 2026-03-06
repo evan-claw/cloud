@@ -390,7 +390,7 @@ describe('Disconnect handling & reaper', () => {
     expect(result.staleExecution?.status).toBe('failed');
     expect(result.staleExecution?.error).toContain('no heartbeat');
     expect(result.freshExecution?.status).toBe('running');
-    expect(result.activeExecId).toBeNull();
+    expect(result.activeExecId).toBe('exc_orphan_fresh');
     expect(result.staleErrorEvents).toHaveLength(1);
     expect(result.freshErrorEvents).toHaveLength(0);
   });
@@ -445,6 +445,52 @@ describe('Disconnect handling & reaper', () => {
     expect(result.nextAlarm).toBeDefined();
     const delta = (result.nextAlarm as number) - result.now;
     // Allow ± 5s for clock drift inside the DO
+    expect(delta).toBeGreaterThanOrEqual(115_000);
+    expect(delta).toBeLessThanOrEqual(125_000);
+  });
+
+  it('alarm restores the active marker for a hidden running execution', async () => {
+    const userId = 'user_alarm_3';
+    const sessionId = 'agent_alarm_3';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const excId = 'exc_hidden_alarm' as ExecutionId;
+      await instance.addExecution({
+        executionId: excId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: excId,
+      });
+
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'running',
+      });
+
+      await instance.updateExecutionHeartbeat(excId, now - 5_000);
+
+      await instance.alarm();
+
+      const nextAlarm = await state.storage.getAlarm();
+      const activeExecId = await instance.getActiveExecutionId();
+
+      return { nextAlarm, activeExecId, now };
+    });
+
+    expect(result.activeExecId).toBe('exc_hidden_alarm');
+    expect(result.nextAlarm).toBeDefined();
+    const delta = (result.nextAlarm as number) - result.now;
     expect(delta).toBeGreaterThanOrEqual(115_000);
     expect(delta).toBeLessThanOrEqual(125_000);
   });

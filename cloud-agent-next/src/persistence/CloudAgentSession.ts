@@ -681,7 +681,7 @@ export class CloudAgentSession extends DurableObject {
    * @returns Result indicating if the interrupt was initiated
    */
   async interruptExecution(): Promise<{ success: boolean; message?: string }> {
-    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const activeExecutionId = (await this.getExecutionInProgress())?.executionId ?? null;
 
     if (!activeExecutionId) {
       return { success: false, message: 'No active execution' };
@@ -946,8 +946,8 @@ export class CloudAgentSession extends DurableObject {
     // Wrapped in try/catch so a failure here never prevents rescheduling the alarm.
     let nextInterval = this.getReaperIntervalMs();
     try {
-      const activeExecutionId = await this.executionQueries.getActiveExecutionId();
-      if (activeExecutionId) {
+      const executionInProgress = await this.getExecutionInProgress();
+      if (executionInProgress) {
         nextInterval = REAPER_ACTIVE_INTERVAL_MS;
       }
     } catch {
@@ -983,23 +983,8 @@ export class CloudAgentSession extends DurableObject {
    * Marks them as failed and clears the active execution.
    */
   private async cleanupStaleExecutions(now: number): Promise<void> {
-    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const activeExecution = await this.getExecutionInProgress();
     const executions = await this.executionQueries.getAll();
-    const activeExecution =
-      activeExecutionId === null
-        ? null
-        : executions.find(execution => execution.executionId === activeExecutionId) ?? null;
-
-    if (activeExecutionId && (!activeExecution || !this.isNonTerminalExecution(activeExecution))) {
-      logger
-        .withFields({
-          sessionId: this.sessionId,
-          executionId: activeExecutionId,
-          reason: activeExecution ? activeExecution.status : 'missing',
-        })
-        .warn('Clearing invalid active execution ID');
-      await this.executionQueries.clearActiveExecution();
-    }
 
     const nonTerminalExecutions = executions
       .filter(execution => this.isNonTerminalExecution(execution))
@@ -1087,6 +1072,7 @@ export class CloudAgentSession extends DurableObject {
   private async getExecutionInProgress(): Promise<ExecutionMetadata | null> {
     const activeExecutionId = await this.executionQueries.getActiveExecutionId();
     const nonTerminalExecutions = await this.getNonTerminalExecutions();
+    const canonicalExecution = nonTerminalExecutions[nonTerminalExecutions.length - 1] ?? null;
 
     if (activeExecutionId) {
       const activeExecution =
@@ -1101,7 +1087,30 @@ export class CloudAgentSession extends DurableObject {
       await this.executionQueries.clearActiveExecution();
     }
 
-    return nonTerminalExecutions[0] ?? null;
+    if (!canonicalExecution) {
+      return null;
+    }
+
+    const setActiveResult = await this.executionQueries.setActiveExecution(canonicalExecution.executionId);
+    if (!setActiveResult.ok) {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: canonicalExecution.executionId,
+          error: setActiveResult.error,
+        })
+        .warn('Failed to restore active execution ID');
+    } else {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: canonicalExecution.executionId,
+          candidateCount: nonTerminalExecutions.length,
+        })
+        .warn('Restored active execution ID from non-terminal execution');
+    }
+
+    return canonicalExecution;
   }
 
   private async failExecutionFromReaper(params: {
@@ -1214,7 +1223,7 @@ export class CloudAgentSession extends DurableObject {
     }
 
     // Check if there's an active execution - don't stop the server mid-run
-    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const activeExecutionId = (await this.getExecutionInProgress())?.executionId ?? null;
     if (activeExecutionId !== null) {
       logger
         .withFields({
@@ -1367,7 +1376,7 @@ export class CloudAgentSession extends DurableObject {
    * Get the currently active execution ID.
    */
   async getActiveExecutionId(): Promise<ExecutionId | null> {
-    return this.executionQueries.getActiveExecutionId();
+    return (await this.getExecutionInProgress())?.executionId ?? null;
   }
 
   /**
