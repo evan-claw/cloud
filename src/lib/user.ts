@@ -50,6 +50,8 @@ import {
   free_model_usage,
   kilo_pass_scheduled_changes,
   security_analysis_owner_state,
+  contributor_champion_events,
+  contributor_champion_memberships,
 } from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
@@ -597,6 +599,31 @@ export async function softDeleteUser(userId: string) {
         http_x_vercel_ja4_digest: null,
       })
       .where(eq(payment_methods.user_id, userId));
+
+    // Contributor champions: anonymize email PII and nullify user link
+    // Clear events linked through membership
+    await tx
+      .update(contributor_champion_events)
+      .set({ github_author_email: null })
+      .where(
+        sql`${contributor_champion_events.contributor_id} IN (
+          SELECT m.contributor_id FROM contributor_champion_memberships m
+          WHERE m.linked_kilo_user_id = ${userId}
+        )`
+      );
+    // Also clear events matched by email directly (covers un-enrolled contributors)
+    await tx
+      .update(contributor_champion_events)
+      .set({ github_author_email: null })
+      .where(
+        sql`lower(${contributor_champion_events.github_author_email}) = lower(
+          (SELECT u.google_user_email FROM kilocode_users u WHERE u.id = ${userId})
+        )`
+      );
+    await tx
+      .update(contributor_champion_memberships)
+      .set({ linked_kilo_user_id: null })
+      .where(eq(contributor_champion_memberships.linked_kilo_user_id, userId));
 
     // ── 4. Nullify FK references ─────────────────────────────────────────
     await tx
