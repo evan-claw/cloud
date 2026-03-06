@@ -63,6 +63,113 @@ describe('CloudAgentSession.startExecutionV2', () => {
     expect(result.plan).toBeNull();
   });
 
+  it('returns EXECUTION_IN_PROGRESS when a non-terminal execution exists without an active marker', async () => {
+    const userId = 'user_exec_hidden' as const;
+    const sessionId = 'agent_exec_hidden' as const;
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async instance => {
+      let capturedPlan: any = null;
+      (instance as any).orchestrator = {
+        execute: async (plan: any) => {
+          capturedPlan = plan;
+          return { messageId: plan.executionId, kiloSessionId: 'kilo_test' };
+        },
+      };
+
+      const now = Date.now();
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const hiddenId = 'exc_hidden' as ExecutionId;
+      await instance.addExecution({
+        executionId: hiddenId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: hiddenId,
+      });
+      await instance.updateExecutionStatus({
+        executionId: hiddenId,
+        status: 'running',
+      });
+
+      const request: StartExecutionV2Request = {
+        kind: 'initiate',
+        userId,
+        authToken: 'token-init',
+        prompt: 'do the thing',
+        mode: 'code',
+        model: 'test-model',
+        gitUrl: 'https://example.com/repo.git',
+        gitToken: 'git-token',
+      };
+
+      const startResult = await instance.startExecutionV2(request);
+      return { startResult, plan: capturedPlan };
+    });
+
+    expect(result.startResult.success).toBe(false);
+    if (result.startResult.success) return;
+
+    expect(result.startResult.code).toBe('EXECUTION_IN_PROGRESS');
+    expect(result.startResult.activeExecutionId).toBe('exc_hidden');
+    expect(result.plan).toBeNull();
+  });
+
+  it('clears an invalid active marker before starting a new execution', async () => {
+    const userId = 'user_exec_invalid_marker' as const;
+    const sessionId = 'agent_exec_invalid_marker' as const;
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      let capturedPlan: any = null;
+      (instance as any).orchestrator = {
+        execute: async (plan: any) => {
+          capturedPlan = plan;
+          return { messageId: plan.executionId, kiloSessionId: 'kilo_test' };
+        },
+      };
+
+      const now = Date.now();
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      await state.storage.put('active_execution_id', 'exc_missing');
+
+      const request: StartExecutionV2Request = {
+        kind: 'initiate',
+        userId,
+        authToken: 'token-init',
+        prompt: 'do the thing',
+        mode: 'code',
+        model: 'test-model',
+        gitUrl: 'https://example.com/repo.git',
+        gitToken: 'git-token',
+      };
+
+      const startResult = await instance.startExecutionV2(request);
+      const activeExecutionId = await instance.getActiveExecutionId();
+      return { startResult, activeExecutionId, plan: capturedPlan };
+    });
+
+    expect(result.startResult.success).toBe(true);
+    if (!result.startResult.success) return;
+
+    expect(result.startResult.status).toBe('started');
+    expect(result.activeExecutionId).toBe(result.startResult.executionId);
+    expect(result.plan).toBeTruthy();
+  });
+
   it('builds a launch plan for follow-up and applies token overrides', async () => {
     const userId = 'user_exec_followup' as const;
     const sessionId = 'agent_exec_followup' as const;

@@ -301,6 +301,100 @@ describe('Disconnect handling & reaper', () => {
     expect(payload.error).toContain('no heartbeat');
   });
 
+  it('reaper scans all non-terminal executions when active marker is missing', async () => {
+    const userId = 'user_reaper_6';
+    const sessionId = 'agent_reaper_6';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const staleId = 'exc_orphan_stale' as ExecutionId;
+      const freshId = 'exc_orphan_fresh' as ExecutionId;
+
+      await instance.addExecution({
+        executionId: staleId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: staleId,
+      });
+      await instance.addExecution({
+        executionId: freshId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: freshId,
+      });
+
+      await instance.updateExecutionStatus({
+        executionId: staleId,
+        status: 'running',
+      });
+      await instance.updateExecutionStatus({
+        executionId: freshId,
+        status: 'running',
+      });
+
+      const executions =
+        await state.storage.get<
+          Array<{ executionId: string; startedAt: number; [k: string]: unknown }>
+        >('executions');
+      if (executions) {
+        const staleIndex = executions.findIndex(execution => execution.executionId === staleId);
+        const freshIndex = executions.findIndex(execution => execution.executionId === freshId);
+        if (staleIndex !== -1) {
+          executions[staleIndex].startedAt = now - 20_000;
+        }
+        if (freshIndex !== -1) {
+          executions[freshIndex].startedAt = now - 10_000;
+        }
+        await state.storage.put('executions', executions);
+      }
+
+      await instance.updateExecutionHeartbeat(staleId, now - 11 * 60 * 1000);
+      await instance.updateExecutionHeartbeat(freshId, now - 5_000);
+
+      await instance.alarm();
+
+      const staleExecution = await instance.getExecution(staleId);
+      const freshExecution = await instance.getExecution(freshId);
+
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
+      const events = eventQueries.findByFilters({ executionIds: [staleId, freshId] });
+      const staleErrorEvents = events.filter(
+        event => event.execution_id === staleId && event.stream_event_type === 'error'
+      );
+      const freshErrorEvents = events.filter(
+        event => event.execution_id === freshId && event.stream_event_type === 'error'
+      );
+
+      const activeExecId = await instance.getActiveExecutionId();
+
+      return {
+        staleExecution,
+        freshExecution,
+        staleErrorEvents,
+        freshErrorEvents,
+        activeExecId,
+      };
+    });
+
+    expect(result.staleExecution?.status).toBe('failed');
+    expect(result.staleExecution?.error).toContain('no heartbeat');
+    expect(result.freshExecution?.status).toBe('running');
+    expect(result.activeExecId).toBeNull();
+    expect(result.staleErrorEvents).toHaveLength(1);
+    expect(result.freshErrorEvents).toHaveLength(0);
+  });
+
   // ---------------------------------------------------------------------------
   // Fix 5: Dynamic alarm scheduling — 2-min interval when active, 5-min idle
   // ---------------------------------------------------------------------------

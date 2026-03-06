@@ -983,169 +983,165 @@ export class CloudAgentSession extends DurableObject {
    * Marks them as failed and clears the active execution.
    */
   private async cleanupStaleExecutions(now: number): Promise<void> {
-    let activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const executions = await this.executionQueries.getAll();
+    const activeExecution =
+      activeExecutionId === null
+        ? null
+        : executions.find(execution => execution.executionId === activeExecutionId) ?? null;
 
-    if (!activeExecutionId) {
-      const recoveredExecution = await this.recoverExecutionWithoutActiveMarker();
-      if (!recoveredExecution) return;
-      activeExecutionId = recoveredExecution.executionId;
-    }
-
-    // Get the execution metadata
-    const execution = await this.executionQueries.get(activeExecutionId);
-
-    if (!execution) {
-      // Orphaned active execution ID - clear it
+    if (activeExecutionId && (!activeExecution || !this.isNonTerminalExecution(activeExecution))) {
       logger
-        .withFields({ sessionId: this.sessionId, executionId: activeExecutionId })
-        .warn('Clearing orphaned active execution ID');
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: activeExecutionId,
+          reason: activeExecution ? activeExecution.status : 'missing',
+        })
+        .warn('Clearing invalid active execution ID');
       await this.executionQueries.clearActiveExecution();
-      return;
     }
 
-    // Check if execution is stale (no heartbeat for STALE_THRESHOLD_MS)
-    if (execution.status === 'running') {
-      const staleThresholdMs = this.getStaleThresholdMs();
-      const isStale = !execution.lastHeartbeat || now - execution.lastHeartbeat > staleThresholdMs;
+    const nonTerminalExecutions = executions
+      .filter(execution => this.isNonTerminalExecution(execution))
+      .sort((a, b) => a.startedAt - b.startedAt);
 
-      if (isStale) {
+    for (const execution of nonTerminalExecutions) {
+      const wasActiveExecution = execution.executionId === activeExecution?.executionId;
+
+      if (execution.status === 'running') {
+        const staleThresholdMs = this.getStaleThresholdMs();
+        const isStale = !execution.lastHeartbeat || now - execution.lastHeartbeat > staleThresholdMs;
+
+        if (!isStale) {
+          continue;
+        }
+
         logger
           .withFields({
             sessionId: this.sessionId,
-            executionId: activeExecutionId,
+            executionId: execution.executionId,
             lastHeartbeat: execution.lastHeartbeat,
             staleDurationMs: execution.lastHeartbeat ? now - execution.lastHeartbeat : 'never',
             staleThresholdMs,
+            wasActiveExecution,
           })
           .info('Marking stale execution as failed');
 
-        // Mark as failed — if another codepath already moved it to a terminal
-        // state (e.g. webSocketClose), skip cleanup and broadcast.
-        const statusResult = await this.updateExecutionStatus({
-          executionId: activeExecutionId,
-          status: 'failed',
-          error: 'Execution timeout - no heartbeat received',
-          completedAt: now,
+        await this.failExecutionFromReaper({
+          executionId: execution.executionId,
+          now,
+          errorMessage: 'Execution timeout - no heartbeat received',
+          wasActiveExecution,
+          skipLogMessage: 'Skipping stale cleanup - status transition failed',
         });
-
-        if (!statusResult.ok) {
-          logger
-            .withFields({ executionId: activeExecutionId, error: statusResult.error })
-            .info('Skipping reaper cleanup - status transition failed');
-          return;
-        }
-
-        // Clear active execution (updateStatus should do this, but ensure it)
-        await this.executionQueries.clearActiveExecution();
-
-        // Clear interrupt flag if set
-        await this.executionQueries.clearInterrupt();
-
-        // Notify /stream clients that the execution was reaped
-        const sessionId = await this.requireSessionId();
-        const errorPayload = JSON.stringify({
-          error: 'Execution timeout - no heartbeat received',
-          fatal: true,
-        });
-        this.insertAndBroadcastEvent({
-          executionId: activeExecutionId,
-          sessionId,
-          streamEventType: 'error',
-          payload: errorPayload,
-          timestamp: now,
-        });
+        continue;
       }
-    }
 
-    if (execution.status === 'pending') {
       const pendingTimeoutMs = this.getPendingStartTimeoutMs();
       const isPendingTooLong = now - execution.startedAt > pendingTimeoutMs;
 
-      if (isPendingTooLong) {
-        logger
-          .withFields({
-            sessionId: this.sessionId,
-            executionId: activeExecutionId,
-            startedAt: execution.startedAt,
-            pendingTimeoutMs,
-          })
-          .info('Marking stuck pending execution as failed');
-
-        // Mark as failed — if another codepath already moved it to a terminal
-        // state, skip cleanup and broadcast.
-        const statusResult = await this.updateExecutionStatus({
-          executionId: activeExecutionId,
-          status: 'failed',
-          error: 'Execution timeout - wrapper never connected',
-          completedAt: now,
-        });
-
-        if (!statusResult.ok) {
-          logger
-            .withFields({ executionId: activeExecutionId, error: statusResult.error })
-            .info('Skipping pending timeout cleanup - status transition failed');
-          return;
-        }
-
-        await this.executionQueries.clearActiveExecution();
-        await this.executionQueries.clearInterrupt();
-
-        // Notify /stream clients that the pending execution timed out
-        const sessionId = await this.requireSessionId();
-        const errorPayload = JSON.stringify({
-          error: 'Execution timeout - wrapper never connected',
-          fatal: true,
-        });
-        this.insertAndBroadcastEvent({
-          executionId: activeExecutionId,
-          sessionId,
-          streamEventType: 'error',
-          payload: errorPayload,
-          timestamp: now,
-        });
+      if (!isPendingTooLong) {
+        continue;
       }
+
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: execution.executionId,
+          startedAt: execution.startedAt,
+          pendingTimeoutMs,
+          wasActiveExecution,
+        })
+        .info('Marking stuck pending execution as failed');
+
+      await this.failExecutionFromReaper({
+        executionId: execution.executionId,
+        now,
+        errorMessage: 'Execution timeout - wrapper never connected',
+        wasActiveExecution,
+        skipLogMessage: 'Skipping pending timeout cleanup - status transition failed',
+      });
     }
   }
 
   /**
-   * Recover a non-terminal execution when the active execution marker is missing.
-   *
-   * This keeps the reaper authoritative even if some other code path cleared
-   * active_execution_id before the execution reached a terminal state.
+   * Get non-terminal executions in deterministic order.
    */
-  private async recoverExecutionWithoutActiveMarker(): Promise<ExecutionMetadata | null> {
-    const executions = await this.executionQueries.getAll();
-    const candidates = executions
-      .filter(execution => execution.status === 'running' || execution.status === 'pending')
-      .sort((a, b) => b.startedAt - a.startedAt);
+  private async getNonTerminalExecutions(): Promise<ExecutionMetadata[]> {
+    return (await this.executionQueries.getAll())
+      .filter(execution => this.isNonTerminalExecution(execution))
+      .sort((a, b) => a.startedAt - b.startedAt);
+  }
 
-    const recoveredExecution = candidates[0] ?? null;
-    if (!recoveredExecution) {
-      return null;
-    }
+  private isNonTerminalExecution(
+    execution: ExecutionMetadata
+  ): execution is ExecutionMetadata & { status: 'running' | 'pending' } {
+    return execution.status === 'running' || execution.status === 'pending';
+  }
 
-    logger
-      .withFields({
-        sessionId: this.sessionId,
-        executionId: recoveredExecution.executionId,
-        candidateCount: candidates.length,
-      })
-      .warn('Recovered non-terminal execution without active marker');
+  /**
+   * Returns the execution that should block a new start, even if the active marker
+   * has been lost. Clears invalid active markers so new executions can start again
+   * once all real non-terminal work is gone.
+   */
+  private async getExecutionInProgress(): Promise<ExecutionMetadata | null> {
+    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    const nonTerminalExecutions = await this.getNonTerminalExecutions();
 
-    const setActiveResult = await this.executionQueries.setActiveExecution(
-      recoveredExecution.executionId
-    );
-    if (!setActiveResult.ok) {
+    if (activeExecutionId) {
+      const activeExecution =
+        nonTerminalExecutions.find(execution => execution.executionId === activeExecutionId) ?? null;
+      if (activeExecution) {
+        return activeExecution;
+      }
+
       logger
-        .withFields({
-          sessionId: this.sessionId,
-          executionId: recoveredExecution.executionId,
-          error: setActiveResult.error,
-        })
-        .warn('Failed to restore active execution marker');
+        .withFields({ sessionId: this.sessionId, executionId: activeExecutionId })
+        .warn('Clearing invalid active execution ID during start check');
+      await this.executionQueries.clearActiveExecution();
     }
 
-    return recoveredExecution;
+    return nonTerminalExecutions[0] ?? null;
+  }
+
+  private async failExecutionFromReaper(params: {
+    executionId: ExecutionId;
+    now: number;
+    errorMessage: string;
+    wasActiveExecution: boolean;
+    skipLogMessage: string;
+  }): Promise<void> {
+    const statusResult = await this.updateExecutionStatus({
+      executionId: params.executionId,
+      status: 'failed',
+      error: params.errorMessage,
+      completedAt: params.now,
+    });
+
+    if (!statusResult.ok) {
+      logger
+        .withFields({ executionId: params.executionId, error: statusResult.error })
+        .info(params.skipLogMessage);
+      return;
+    }
+
+    if (params.wasActiveExecution) {
+      await this.executionQueries.clearActiveExecution();
+      await this.executionQueries.clearInterrupt();
+    }
+
+    const sessionId = await this.requireSessionId();
+    const errorPayload = JSON.stringify({
+      error: params.errorMessage,
+      fatal: true,
+    });
+    this.insertAndBroadcastEvent({
+      executionId: params.executionId,
+      sessionId,
+      streamEventType: 'error',
+      payload: errorPayload,
+      timestamp: params.now,
+    });
   }
 
   /**
@@ -1590,9 +1586,10 @@ export class CloudAgentSession extends DurableObject {
 
   /**
    * Start a V2 execution using direct execution (no queue).
-   * This method performs validation, checks for active execution, and executes directly.
+   * This method performs validation, checks for non-terminal execution state,
+   * and executes directly.
    *
-   * Returns 409 Conflict (EXECUTION_IN_PROGRESS) if an execution is already active.
+   * Returns 409 Conflict (EXECUTION_IN_PROGRESS) if an execution is already in progress.
    */
   async startExecutionV2(request: StartExecutionV2Request): Promise<StartExecutionV2Result> {
     const sessionId = await this.requireSessionId();
@@ -1613,13 +1610,13 @@ export class CloudAgentSession extends DurableObject {
     };
 
     try {
-      // Check if there's already an active execution - return 409 if so
-      const activeExecutionId = await this.executionQueries.getActiveExecutionId();
-      if (activeExecutionId) {
+      // Check if any execution is still pending/running - return 409 if so.
+      const executionInProgress = await this.getExecutionInProgress();
+      if (executionInProgress) {
         return this.buildStartError(
           'EXECUTION_IN_PROGRESS',
-          `Execution ${activeExecutionId} is in progress`,
-          activeExecutionId
+          `Execution ${executionInProgress.executionId} is in progress`,
+          executionInProgress.executionId
         );
       }
 
