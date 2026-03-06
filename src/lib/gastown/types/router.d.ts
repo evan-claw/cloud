@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/consistent-type-imports */
 import type { TRPCContext } from './init';
 export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
   {
@@ -57,8 +56,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         townId: string;
         name: string;
         gitUrl: string;
-        defaultBranch?: string;
-        platformIntegrationId?: string;
+        defaultBranch?: string | undefined;
+        platformIntegrationId?: string | undefined;
       };
       output: {
         id: string;
@@ -66,7 +65,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         name: string;
         git_url: string;
         default_branch: string;
-        platform_integration_id: string;
+        platform_integration_id: string | null;
         created_at: string;
         updated_at: string;
       };
@@ -82,7 +81,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         name: string;
         git_url: string;
         default_branch: string;
-        platform_integration_id: string;
+        platform_integration_id: string | null;
         created_at: string;
         updated_at: string;
       }[];
@@ -98,7 +97,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         name: string;
         git_url: string;
         default_branch: string;
-        platform_integration_id: string;
+        platform_integration_id: string | null;
         created_at: string;
         updated_at: string;
         agents: {
@@ -151,7 +150,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
     listBeads: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         rigId: string;
-        status?: 'closed' | 'failed' | 'in_progress' | 'open';
+        status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
       };
       output: {
         bead_id: string;
@@ -218,8 +217,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       input: {
         rigId: string;
         title: string;
-        body?: string;
-        model?: string;
+        body?: string | undefined;
+        model?: string | undefined;
       };
       output: {
         bead: {
@@ -266,8 +265,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       input: {
         townId: string;
         message: string;
-        model?: string;
-        rigId?: string;
+        model?: string | undefined;
+        rigId?: string | undefined;
       };
       output: {
         agentId: string;
@@ -281,13 +280,13 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       };
       output: {
         configured: boolean;
-        townId?: string;
-        session?: {
+        townId: string | null;
+        session: {
           agentId: string;
           sessionId: string;
           status: 'active' | 'idle' | 'starting';
           lastActivityAt: string;
-        };
+        } | null;
       };
       meta: object;
     }>;
@@ -344,68 +343,106 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       output: {
         env_vars: Record<string, string>;
         git_auth: {
-          github_token?: string;
-          gitlab_token?: string;
-          gitlab_instance_url?: string;
-          platform_integration_id?: string;
+          github_token?: string | undefined;
+          gitlab_token?: string | undefined;
+          gitlab_instance_url?: string | undefined;
+          platform_integration_id?: string | undefined;
         };
-        owner_user_id?: string;
-        kilocode_token?: string;
-        default_model?: string;
-        small_model?: string;
-        max_polecats_per_rig?: number;
+        owner_user_id?: string | undefined;
+        kilocode_token?: string | undefined;
+        default_model?: string | undefined;
+        small_model?: string | undefined;
+        max_polecats_per_rig?: number | undefined;
         merge_strategy: 'direct' | 'pr';
-        refinery?: {
-          gates: string[];
-          auto_merge: boolean;
-          require_clean_merge: boolean;
-        };
-        alarm_interval_active?: number;
-        alarm_interval_idle?: number;
-        container?: {
-          sleep_after_minutes?: number;
-        };
+        refinery?:
+          | {
+              gates: string[];
+              auto_merge: boolean;
+              require_clean_merge: boolean;
+            }
+          | undefined;
+        alarm_interval_active?: number | undefined;
+        alarm_interval_idle?: number | undefined;
+        container?:
+          | {
+              sleep_after_minutes?: number | undefined;
+            }
+          | undefined;
       };
       meta: object;
     }>;
     updateTownConfig: import('@trpc/server').TRPCMutationProcedure<{
       input: {
         townId: string;
-        config: Record<string, unknown>;
+        config: {
+          env_vars?: Record<string, string> | undefined;
+          git_auth?:
+            | {
+                github_token?: string | undefined;
+                gitlab_token?: string | undefined;
+                gitlab_instance_url?: string | undefined;
+                platform_integration_id?: string | undefined;
+              }
+            | undefined;
+          owner_user_id?: string | undefined;
+          kilocode_token?: string | undefined;
+          default_model?: string | undefined;
+          small_model?: string | undefined;
+          max_polecats_per_rig?: number | undefined;
+          merge_strategy?: 'direct' | 'pr' | undefined;
+          refinery?:
+            | {
+                gates?: string[] | undefined;
+                auto_merge?: boolean | undefined;
+                require_clean_merge?: boolean | undefined;
+              }
+            | undefined;
+          alarm_interval_active?: number | undefined;
+          alarm_interval_idle?: number | undefined;
+          container?:
+            | {
+                sleep_after_minutes?: number | undefined;
+              }
+            | undefined;
+        };
       };
       output: {
         env_vars: Record<string, string>;
         git_auth: {
-          github_token?: string;
-          gitlab_token?: string;
-          gitlab_instance_url?: string;
-          platform_integration_id?: string;
+          github_token?: string | undefined;
+          gitlab_token?: string | undefined;
+          gitlab_instance_url?: string | undefined;
+          platform_integration_id?: string | undefined;
         };
-        owner_user_id?: string;
-        kilocode_token?: string;
-        default_model?: string;
-        small_model?: string;
-        max_polecats_per_rig?: number;
+        owner_user_id?: string | undefined;
+        kilocode_token?: string | undefined;
+        default_model?: string | undefined;
+        small_model?: string | undefined;
+        max_polecats_per_rig?: number | undefined;
         merge_strategy: 'direct' | 'pr';
-        refinery?: {
-          gates: string[];
-          auto_merge: boolean;
-          require_clean_merge: boolean;
-        };
-        alarm_interval_active?: number;
-        alarm_interval_idle?: number;
-        container?: {
-          sleep_after_minutes?: number;
-        };
+        refinery?:
+          | {
+              gates: string[];
+              auto_merge: boolean;
+              require_clean_merge: boolean;
+            }
+          | undefined;
+        alarm_interval_active?: number | undefined;
+        alarm_interval_idle?: number | undefined;
+        container?:
+          | {
+              sleep_after_minutes?: number | undefined;
+            }
+          | undefined;
       };
       meta: object;
     }>;
     getBeadEvents: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         rigId: string;
-        beadId?: string;
-        since?: string;
-        limit?: number;
+        beadId?: string | undefined;
+        since?: string | undefined;
+        limit?: number | undefined;
       };
       output: {
         bead_event_id: string;
@@ -416,16 +453,16 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         new_value: string | null;
         metadata: Record<string, unknown>;
         created_at: string;
-        rig_id: string | null;
-        rig_name?: string;
+        rig_id?: string | undefined;
+        rig_name?: string | undefined;
       }[];
       meta: object;
     }>;
     getTownEvents: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         townId: string;
-        since?: string;
-        limit?: number;
+        since?: string | undefined;
+        limit?: number | undefined;
       };
       output: {
         bead_event_id: string;
@@ -436,9 +473,68 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         new_value: string | null;
         metadata: Record<string, unknown>;
         created_at: string;
-        rig_id: string | null;
-        rig_name?: string;
+        rig_id?: string | undefined;
+        rig_name?: string | undefined;
       }[];
+      meta: object;
+    }>;
+    listConvoys: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+      };
+      output: {
+        id: string;
+        title: string;
+        status: 'active' | 'landed';
+        total_beads: number;
+        closed_beads: number;
+        created_by: string | null;
+        created_at: string;
+        landed_at: string | null;
+        feature_branch: string | null;
+        merge_mode: string | null;
+        beads: {
+          bead_id: string;
+          title: string;
+          status: string;
+          rig_id: string | null;
+          assignee_agent_name: string | null;
+        }[];
+        dependency_edges: {
+          bead_id: string;
+          depends_on_bead_id: string;
+        }[];
+      }[];
+      meta: object;
+    }>;
+    closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        convoyId: string;
+      };
+      output: {
+        id: string;
+        title: string;
+        status: 'active' | 'landed';
+        total_beads: number;
+        closed_beads: number;
+        created_by: string | null;
+        created_at: string;
+        landed_at: string | null;
+        feature_branch: string | null;
+        merge_mode: string | null;
+        beads: {
+          bead_id: string;
+          title: string;
+          status: string;
+          rig_id: string | null;
+          assignee_agent_name: string | null;
+        }[];
+        dependency_edges: {
+          bead_id: string;
+          depends_on_bead_id: string;
+        }[];
+      } | null;
       meta: object;
     }>;
   }>
@@ -515,8 +611,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             townId: string;
             name: string;
             gitUrl: string;
-            defaultBranch?: string;
-            platformIntegrationId?: string;
+            defaultBranch?: string | undefined;
+            platformIntegrationId?: string | undefined;
           };
           output: {
             id: string;
@@ -524,7 +620,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             name: string;
             git_url: string;
             default_branch: string;
-            platform_integration_id: string;
+            platform_integration_id: string | null;
             created_at: string;
             updated_at: string;
           };
@@ -540,7 +636,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             name: string;
             git_url: string;
             default_branch: string;
-            platform_integration_id: string;
+            platform_integration_id: string | null;
             created_at: string;
             updated_at: string;
           }[];
@@ -556,7 +652,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             name: string;
             git_url: string;
             default_branch: string;
-            platform_integration_id: string;
+            platform_integration_id: string | null;
             created_at: string;
             updated_at: string;
             agents: {
@@ -609,7 +705,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
         listBeads: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             rigId: string;
-            status?: 'closed' | 'failed' | 'in_progress' | 'open';
+            status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
           };
           output: {
             bead_id: string;
@@ -676,8 +772,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           input: {
             rigId: string;
             title: string;
-            body?: string;
-            model?: string;
+            body?: string | undefined;
+            model?: string | undefined;
           };
           output: {
             bead: {
@@ -724,8 +820,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           input: {
             townId: string;
             message: string;
-            model?: string;
-            rigId?: string;
+            model?: string | undefined;
+            rigId?: string | undefined;
           };
           output: {
             agentId: string;
@@ -739,13 +835,13 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           };
           output: {
             configured: boolean;
-            townId?: string;
-            session?: {
+            townId: string | null;
+            session: {
               agentId: string;
               sessionId: string;
               status: 'active' | 'idle' | 'starting';
               lastActivityAt: string;
-            };
+            } | null;
           };
           meta: object;
         }>;
@@ -802,68 +898,106 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           output: {
             env_vars: Record<string, string>;
             git_auth: {
-              github_token?: string;
-              gitlab_token?: string;
-              gitlab_instance_url?: string;
-              platform_integration_id?: string;
+              github_token?: string | undefined;
+              gitlab_token?: string | undefined;
+              gitlab_instance_url?: string | undefined;
+              platform_integration_id?: string | undefined;
             };
-            owner_user_id?: string;
-            kilocode_token?: string;
-            default_model?: string;
-            small_model?: string;
-            max_polecats_per_rig?: number;
+            owner_user_id?: string | undefined;
+            kilocode_token?: string | undefined;
+            default_model?: string | undefined;
+            small_model?: string | undefined;
+            max_polecats_per_rig?: number | undefined;
             merge_strategy: 'direct' | 'pr';
-            refinery?: {
-              gates: string[];
-              auto_merge: boolean;
-              require_clean_merge: boolean;
-            };
-            alarm_interval_active?: number;
-            alarm_interval_idle?: number;
-            container?: {
-              sleep_after_minutes?: number;
-            };
+            refinery?:
+              | {
+                  gates: string[];
+                  auto_merge: boolean;
+                  require_clean_merge: boolean;
+                }
+              | undefined;
+            alarm_interval_active?: number | undefined;
+            alarm_interval_idle?: number | undefined;
+            container?:
+              | {
+                  sleep_after_minutes?: number | undefined;
+                }
+              | undefined;
           };
           meta: object;
         }>;
         updateTownConfig: import('@trpc/server').TRPCMutationProcedure<{
           input: {
             townId: string;
-            config: Record<string, unknown>;
+            config: {
+              env_vars?: Record<string, string> | undefined;
+              git_auth?:
+                | {
+                    github_token?: string | undefined;
+                    gitlab_token?: string | undefined;
+                    gitlab_instance_url?: string | undefined;
+                    platform_integration_id?: string | undefined;
+                  }
+                | undefined;
+              owner_user_id?: string | undefined;
+              kilocode_token?: string | undefined;
+              default_model?: string | undefined;
+              small_model?: string | undefined;
+              max_polecats_per_rig?: number | undefined;
+              merge_strategy?: 'direct' | 'pr' | undefined;
+              refinery?:
+                | {
+                    gates?: string[] | undefined;
+                    auto_merge?: boolean | undefined;
+                    require_clean_merge?: boolean | undefined;
+                  }
+                | undefined;
+              alarm_interval_active?: number | undefined;
+              alarm_interval_idle?: number | undefined;
+              container?:
+                | {
+                    sleep_after_minutes?: number | undefined;
+                  }
+                | undefined;
+            };
           };
           output: {
             env_vars: Record<string, string>;
             git_auth: {
-              github_token?: string;
-              gitlab_token?: string;
-              gitlab_instance_url?: string;
-              platform_integration_id?: string;
+              github_token?: string | undefined;
+              gitlab_token?: string | undefined;
+              gitlab_instance_url?: string | undefined;
+              platform_integration_id?: string | undefined;
             };
-            owner_user_id?: string;
-            kilocode_token?: string;
-            default_model?: string;
-            small_model?: string;
-            max_polecats_per_rig?: number;
+            owner_user_id?: string | undefined;
+            kilocode_token?: string | undefined;
+            default_model?: string | undefined;
+            small_model?: string | undefined;
+            max_polecats_per_rig?: number | undefined;
             merge_strategy: 'direct' | 'pr';
-            refinery?: {
-              gates: string[];
-              auto_merge: boolean;
-              require_clean_merge: boolean;
-            };
-            alarm_interval_active?: number;
-            alarm_interval_idle?: number;
-            container?: {
-              sleep_after_minutes?: number;
-            };
+            refinery?:
+              | {
+                  gates: string[];
+                  auto_merge: boolean;
+                  require_clean_merge: boolean;
+                }
+              | undefined;
+            alarm_interval_active?: number | undefined;
+            alarm_interval_idle?: number | undefined;
+            container?:
+              | {
+                  sleep_after_minutes?: number | undefined;
+                }
+              | undefined;
           };
           meta: object;
         }>;
         getBeadEvents: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             rigId: string;
-            beadId?: string;
-            since?: string;
-            limit?: number;
+            beadId?: string | undefined;
+            since?: string | undefined;
+            limit?: number | undefined;
           };
           output: {
             bead_event_id: string;
@@ -874,16 +1008,16 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             new_value: string | null;
             metadata: Record<string, unknown>;
             created_at: string;
-            rig_id: string | null;
-            rig_name?: string;
+            rig_id?: string | undefined;
+            rig_name?: string | undefined;
           }[];
           meta: object;
         }>;
         getTownEvents: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             townId: string;
-            since?: string;
-            limit?: number;
+            since?: string | undefined;
+            limit?: number | undefined;
           };
           output: {
             bead_event_id: string;
@@ -894,9 +1028,68 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             new_value: string | null;
             metadata: Record<string, unknown>;
             created_at: string;
-            rig_id: string | null;
-            rig_name?: string;
+            rig_id?: string | undefined;
+            rig_name?: string | undefined;
           }[];
+          meta: object;
+        }>;
+        listConvoys: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+          };
+          output: {
+            id: string;
+            title: string;
+            status: 'active' | 'landed';
+            total_beads: number;
+            closed_beads: number;
+            created_by: string | null;
+            created_at: string;
+            landed_at: string | null;
+            feature_branch: string | null;
+            merge_mode: string | null;
+            beads: {
+              bead_id: string;
+              title: string;
+              status: string;
+              rig_id: string | null;
+              assignee_agent_name: string | null;
+            }[];
+            dependency_edges: {
+              bead_id: string;
+              depends_on_bead_id: string;
+            }[];
+          }[];
+          meta: object;
+        }>;
+        closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            convoyId: string;
+          };
+          output: {
+            id: string;
+            title: string;
+            status: 'active' | 'landed';
+            total_beads: number;
+            closed_beads: number;
+            created_by: string | null;
+            created_at: string;
+            landed_at: string | null;
+            feature_branch: string | null;
+            merge_mode: string | null;
+            beads: {
+              bead_id: string;
+              title: string;
+              status: string;
+              rig_id: string | null;
+              assignee_agent_name: string | null;
+            }[];
+            dependency_edges: {
+              bead_id: string;
+              depends_on_bead_id: string;
+            }[];
+          } | null;
           meta: object;
         }>;
       }>
