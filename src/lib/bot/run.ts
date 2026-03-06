@@ -168,7 +168,7 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
     onStepFinish: step => {
       collectedSteps.push(serializeStep(step));
       if (botRequestId) {
-        updateBotRequest(botRequestId, { steps: collectedSteps });
+        updateBotRequest(botRequestId, { steps: [...collectedSteps] });
       }
     },
   });
@@ -179,7 +179,7 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
     if (botRequestId) {
       updateBotRequest(botRequestId, {
         status: 'completed',
-        steps: collectedSteps,
+        steps: [...collectedSteps],
         responseTimeMs: Date.now() - startedAt,
       });
     }
@@ -192,7 +192,7 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
       updateBotRequest(botRequestId, {
         status: 'error',
         errorMessage: errMsg.slice(0, 2000),
-        steps: collectedSteps,
+        steps: [...collectedSteps],
         responseTimeMs: Date.now() - startedAt,
       });
     }
