@@ -76,7 +76,7 @@ bot.onNewMention(async function handleIncomingMessage(
     console.error('[Bot] Unhandled error in message handler:', error);
     if (botRequestId) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      await updateBotRequest(botRequestId, {
+      updateBotRequest(botRequestId, {
         status: 'error',
         errorMessage: errMsg.slice(0, 2000),
       });

@@ -134,7 +134,7 @@ export async function processMessage({
   const collectedSteps: BotRequestStep[] = [];
 
   if (botRequestId) {
-    await updateBotRequest(botRequestId, { modelUsed: modelSlug });
+    updateBotRequest(botRequestId, { modelUsed: modelSlug });
   }
 
   const agent = new ToolLoopAgent({
@@ -177,7 +177,7 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
     const result = await agent.generate({ prompt: message.text });
 
     if (botRequestId) {
-      await updateBotRequest(botRequestId, {
+      updateBotRequest(botRequestId, {
         status: 'completed',
         steps: collectedSteps,
         responseTimeMs: Date.now() - startedAt,
@@ -189,7 +189,7 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
     const errMsg = error instanceof Error ? error.message : String(error);
 
     if (botRequestId) {
-      await updateBotRequest(botRequestId, {
+      updateBotRequest(botRequestId, {
         status: 'error',
         errorMessage: errMsg.slice(0, 2000),
         steps: collectedSteps,

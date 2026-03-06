@@ -1,6 +1,7 @@
 import 'server-only';
 import { db } from '@/lib/drizzle';
 import { eq } from 'drizzle-orm';
+import { after } from 'next/server';
 import { bot_requests, type BotRequestStatus, type BotRequestStep } from '@kilocode/db/schema';
 
 type CreateBotRequestParams = {
@@ -54,12 +55,7 @@ type UpdateBotRequestParams = {
   responseTimeMs?: number;
 };
 
-/**
- * Update an existing bot_requests row. Called as processing progresses
- * and on completion/error. Silently catches errors to avoid disrupting
- * the main flow.
- */
-export async function updateBotRequest(id: string, params: UpdateBotRequestParams): Promise<void> {
+async function performUpdate(id: string, params: UpdateBotRequestParams): Promise<void> {
   try {
     await db
       .update(bot_requests)
@@ -77,4 +73,12 @@ export async function updateBotRequest(id: string, params: UpdateBotRequestParam
   } catch (error) {
     console.error('[Bot:RequestLog] Failed to update request log:', error);
   }
+}
+
+/**
+ * Schedule an update to an existing bot_requests row via `after()`.
+ * The write is deferred so it never blocks bot message processing.
+ */
+export function updateBotRequest(id: string, params: UpdateBotRequestParams): void {
+  after(() => performUpdate(id, params));
 }
