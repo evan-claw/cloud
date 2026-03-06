@@ -327,7 +327,7 @@ export class CloudAgentSession extends DurableObject {
     }
 
     // Route ingest WebSocket (internal only - from queue consumer)
-    if (url.pathname === '/ingest') {
+    if (url.pathname.endsWith('/ingest')) {
       const ingestHandler = await this.getIngestHandler();
       return ingestHandler.handleIngestRequest(request);
     }

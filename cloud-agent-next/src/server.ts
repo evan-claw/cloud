@@ -93,21 +93,14 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
   }
 
   const sessionId = c.req.param('sessionId');
-  const authHeader = c.req.header('Authorization');
-  const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
-  if (!authResult.success) {
-    return c.text(authResult.error, 401);
-  }
-  if (authResult.userId !== userId) {
-    return c.text('Token does not match session user', 403);
-  }
+  // Do not validate Kilo token here. The ingest stream token is the executionId, not a JWT.
+  // The DO handles auth for /ingest natively.
 
   const doId = c.env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
   const stub = c.env.CLOUD_AGENT_SESSION.get(doId);
-  const doUrl = new URL(c.req.url);
-  doUrl.pathname = '/ingest';
-  const doRequest = new Request(doUrl.toString(), c.req.raw);
-  return stub.fetch(doRequest);
+  // Must pass the raw request directly to preserve the WebSocket upgrade.
+  // Constructing a new Request(c.req.raw) strips the upgrade context.
+  return stub.fetch(c.req.raw);
 });
 
 const ALLOWED_LOG_FILENAMES = new Set(['logs.tar.gz']);
