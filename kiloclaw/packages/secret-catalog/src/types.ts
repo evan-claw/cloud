@@ -23,29 +23,33 @@ export const SecretIconKeySchema = z.enum(['send', 'discord', 'slack', 'key']);
  */
 export const InjectionMethodSchema = z.enum(['env', 'openclaw-secrets']);
 
-export const SecretFieldDefinitionSchema = z.object({
-  key: z.string(), // storage key (e.g. 'telegramBotToken')
-  label: z.string(), // UI label
-  placeholder: z.string(),
-  placeholderConfigured: z.string(),
-  validationPattern: z.string().optional(), // regex string (not RegExp — must be serializable)
-  validationMessage: z.string().optional(),
-  envVar: z.string(), // container env var name
-  maxLength: z.number().int().positive(), // max input length
-});
+export const SecretFieldDefinitionSchema = z
+  .object({
+    key: z.string(), // storage key (e.g. 'telegramBotToken')
+    label: z.string(), // UI label
+    placeholder: z.string(),
+    placeholderConfigured: z.string(),
+    validationPattern: z.string().optional(), // regex string (not RegExp — must be serializable)
+    validationMessage: z.string().optional(),
+    envVar: z.string(), // container env var name
+    maxLength: z.number().int().positive(), // max input length
+  })
+  .readonly();
 
-export const SecretCatalogEntrySchema = z.object({
-  id: z.string(), // e.g. 'telegram', 'brave-search'
-  label: z.string(),
-  category: SecretCategorySchema,
-  icon: SecretIconKeySchema, // typed union, resolved to React component at UI layer
-  fields: z.array(SecretFieldDefinitionSchema).readonly(),
-  helpText: z.string().optional(),
-  helpUrl: z.url().optional(),
-  allFieldsRequired: z.boolean().optional(), // e.g. Slack needs both bot + app tokens
-  order: z.number().int().optional(), // sort within category (undefined sorts last)
-  injectionMethod: InjectionMethodSchema.optional(), // omit = use DEFAULT_INJECTION_METHOD
-});
+export const SecretCatalogEntrySchema = z
+  .object({
+    id: z.string(), // e.g. 'telegram', 'brave-search'
+    label: z.string(),
+    category: SecretCategorySchema,
+    icon: SecretIconKeySchema, // typed union, resolved to React component at UI layer
+    fields: z.array(SecretFieldDefinitionSchema).readonly(),
+    helpText: z.string().optional(),
+    helpUrl: z.url().optional(),
+    allFieldsRequired: z.boolean().optional(), // e.g. Slack needs both bot + app tokens
+    order: z.number().int().optional(), // sort within category (undefined sorts last)
+    injectionMethod: InjectionMethodSchema.optional(), // omit = use DEFAULT_INJECTION_METHOD
+  })
+  .readonly();
 
 // --- Derived Types (preserves literal inference via as const satisfies) ---
 
