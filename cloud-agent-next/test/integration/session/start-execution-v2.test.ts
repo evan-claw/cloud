@@ -149,8 +149,7 @@ describe('CloudAgentSession.startExecutionV2', () => {
       });
 
       const activeExecutionId = await instance.getActiveExecutionId();
-      const storedActiveExecutionId =
-        await state.storage.get<string>('active_execution_id');
+      const storedActiveExecutionId = await state.storage.get<string>('active_execution_id');
 
       return { activeExecutionId, storedActiveExecutionId };
     });

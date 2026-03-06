@@ -995,7 +995,8 @@ export class CloudAgentSession extends DurableObject {
 
       if (execution.status === 'running') {
         const staleThresholdMs = this.getStaleThresholdMs();
-        const isStale = !execution.lastHeartbeat || now - execution.lastHeartbeat > staleThresholdMs;
+        const isStale =
+          !execution.lastHeartbeat || now - execution.lastHeartbeat > staleThresholdMs;
 
         if (!isStale) {
           continue;
@@ -1076,7 +1077,8 @@ export class CloudAgentSession extends DurableObject {
 
     if (activeExecutionId) {
       const activeExecution =
-        nonTerminalExecutions.find(execution => execution.executionId === activeExecutionId) ?? null;
+        nonTerminalExecutions.find(execution => execution.executionId === activeExecutionId) ??
+        null;
       if (activeExecution) {
         return activeExecution;
       }
@@ -1091,7 +1093,9 @@ export class CloudAgentSession extends DurableObject {
       return null;
     }
 
-    const setActiveResult = await this.executionQueries.setActiveExecution(canonicalExecution.executionId);
+    const setActiveResult = await this.executionQueries.setActiveExecution(
+      canonicalExecution.executionId
+    );
     if (!setActiveResult.ok) {
       logger
         .withFields({
