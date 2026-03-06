@@ -20,7 +20,7 @@ import type {
   OrganizationPlan,
 } from '@/lib/organizations/organization-types';
 import type { OpenRouterProviderConfig } from '@/lib/providers/openrouter/types';
-import { extraRequiredProviders } from '@/lib/models';
+import { extraRequiredProvider } from '@/lib/models';
 import { getFraudDetectionHeaders } from '@/lib/utils';
 import { normalizeProjectId } from '@/lib/normalizeProjectId';
 import { getXKiloCodeVersionNumber } from '@/lib/userAgent';
@@ -322,16 +322,9 @@ export function checkOrganizationModelRestrictions(params: {
 
   if (params.organizationPlan === 'enterprise' && providerAllowList.length > 0) {
     // Check if the model requires specific providers that aren't in the allow list
-    const requiredProviders = extraRequiredProviders(normalizedModelId);
-    if (
-      requiredProviders.length > 0 &&
-      !requiredProviders.every(p => providerAllowList.includes(p))
-    ) {
-      console.error(
-        `This FREE model requires ALL of these providers to be allowed: ${requiredProviders.join(', ')}`
-      );
-      // This is overly strict, but checking for just one of them is not enough,
-      // because this list overrides the org allow list
+    const requiredProvider = extraRequiredProvider(normalizedModelId);
+    if (requiredProvider && !providerAllowList.includes(requiredProvider)) {
+      console.error(`This FREE model requires the provider: ${requiredProvider}`);
       return { error: modelNotAllowedResponse() };
     }
     providerConfig.only = providerAllowList;

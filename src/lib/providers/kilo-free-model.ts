@@ -13,7 +13,7 @@ export type KiloFreeModel = {
   flags: KiloFreeModelFlag[];
   gateway: ProviderId;
   internal_id: string;
-  inference_providers: OpenRouterInferenceProviderId[];
+  inference_provider: OpenRouterInferenceProviderId | null;
 };
 
 export function convertFromKiloModel(model: KiloFreeModel) {
