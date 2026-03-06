@@ -13,7 +13,6 @@ import type { OAuthV2Response } from '@slack/oauth';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
-import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Slack integrations - separate from the global platform default

@@ -11,7 +11,6 @@ import { APP_URL } from '@/lib/constants';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
-import { minimax_m25_free_model } from '@/lib/providers/minimax';
 import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Discord integrations - mirrors the Slack default
