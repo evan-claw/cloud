@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SecurityFindingsCard } from './SecurityFindingsCard';
 import { FindingDetailDialog } from './FindingDetailDialog';
@@ -32,6 +32,7 @@ export function SecurityFindingsPage() {
     handleDismiss,
     handleStartAnalysis,
     isSyncing,
+    isDismissing,
     startingAnalysisIds,
     gitHubError,
   } = useSecurityAgent();
@@ -155,14 +156,22 @@ export function SecurityFindingsPage() {
   const serverRunningCount = findingsData?.runningCount ?? 0;
   const concurrencyLimit = findingsData?.concurrencyLimit ?? 3;
 
+  // Count how many IDs the user just clicked "Analyze" on that haven't yet
+  // transitioned to pending/running *on the current page*.  IDs that aren't
+  // visible on this page are already included in serverRunningCount (which is
+  // global), so we must NOT add them again — that would double-count.
   const runningCount = useMemo(() => {
     if (startingAnalysisIds.size === 0) return serverRunningCount;
     let optimisticAdditional = 0;
     for (const id of startingAnalysisIds) {
       const finding = findings.find(f => f.id === id);
+      // Only add optimistic count for findings visible on this page whose
+      // server status hasn't caught up yet.  Off-page findings are already
+      // reflected in serverRunningCount.
       if (
-        !finding ||
-        (finding.analysis_status !== 'pending' && finding.analysis_status !== 'running')
+        finding &&
+        finding.analysis_status !== 'pending' &&
+        finding.analysis_status !== 'running'
       ) {
         optimisticAdditional++;
       }
@@ -203,16 +212,29 @@ export function SecurityFindingsPage() {
     setDismissDialogOpen(true);
   }, []);
 
+  // Track whether we've submitted a dismiss so we can close the dialog when the
+  // mutation settles (success or failure), rather than closing eagerly and losing
+  // the user's reason/comment on failure.
+  const dismissSubmittedRef = useRef(false);
+
   const handleDismissSubmit = useCallback(
     (reason: DismissReason, comment?: string) => {
       if (!selectedFinding) return;
+      dismissSubmittedRef.current = true;
       handleDismiss(selectedFinding, reason, comment);
-      setDismissDialogOpen(false);
-      setDetailDialogOpen(false);
-      setSelectedFinding(null);
     },
     [selectedFinding, handleDismiss]
   );
+
+  // Close dismiss dialog after the mutation finishes (isDismissing: true → false).
+  useEffect(() => {
+    if (!isDismissing && dismissSubmittedRef.current) {
+      dismissSubmittedRef.current = false;
+      setDismissDialogOpen(false);
+      setDetailDialogOpen(false);
+      setSelectedFinding(null);
+    }
+  }, [isDismissing]);
 
   const handleEnableClick = useCallback(() => {
     const basePath = isOrg ? `/organizations/${organizationId}/security-agent` : '/security-agent';
@@ -287,7 +309,7 @@ export function SecurityFindingsPage() {
         open={dismissDialogOpen}
         onOpenChange={setDismissDialogOpen}
         onDismiss={handleDismissSubmit}
-        isLoading={false}
+        isLoading={isDismissing}
       />
     </>
   );
