@@ -1,5 +1,5 @@
 import { connection, NextResponse } from 'next/server';
-import { modelsByProvider } from '@kilocode/db/schema';
+import { MODELS_BY_PROVIDER_SCRIPT_NAME, modelsByProvider } from '@kilocode/db/schema';
 import { desc } from 'drizzle-orm';
 import { db } from '@/lib/drizzle';
 
@@ -13,7 +13,7 @@ export async function GET() {
     .limit(1);
 
   if (!result || result.length === 0) {
-    return NextResponse.json({ error: 'No models data found in database' }, { status: 404 });
+    throw new Error('No models data found in database. Run ' + MODELS_BY_PROVIDER_SCRIPT_NAME);
   }
 
   return NextResponse.json(result[0].data, {

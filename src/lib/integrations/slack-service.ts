@@ -14,12 +14,10 @@ import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
-import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Slack integrations - separate from the global platform default
-const SLACK_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
-  ? minimax_m25_free_model.public_id
-  : CLAUDE_OPUS_CURRENT_MODEL_ID;
+const SLACK_DEFAULT_MODEL = KILO_AUTO_FREE_MODEL.id;
 
 // Slack OAuth scopes for the integration
 // These should be kept in sync with the scopes requested in the Slack app configuration

@@ -12,12 +12,10 @@ import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
 import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
-import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Discord integrations - mirrors the Slack default
-const DISCORD_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
-  ? minimax_m25_free_model.public_id
-  : CLAUDE_OPUS_CURRENT_MODEL_ID;
+const DISCORD_DEFAULT_MODEL = KILO_AUTO_FREE_MODEL.id;
 
 // Discord OAuth2 scopes for the bot integration
 // 'bot' scope is needed for the bot to join servers

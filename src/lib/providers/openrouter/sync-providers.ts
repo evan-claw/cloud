@@ -133,7 +133,7 @@ async function fetchModelsForProvider(provider: OpenRouterProvider): Promise<Ope
   return data.data.models;
 }
 
-export async function syncProviders() {
+async function syncProviders() {
   // Fetch all providers
   const providers = await fetchProviders();
 

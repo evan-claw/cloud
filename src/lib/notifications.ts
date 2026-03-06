@@ -15,6 +15,7 @@ import { hasReceivedPromotion } from '@/lib/promotionalCredits';
 import { getKiloPassStateForUser } from '@/lib/kilo-pass/state';
 import { db } from '@/lib/drizzle';
 import { fromMicrodollars } from '@/lib/utils';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 export type KiloNotification = {
   id: string;
@@ -313,7 +314,7 @@ async function generateKimiFreeEndingNotification(user: User): Promise<KiloNotif
         title: 'Kimi K2.5 Free Promotion Ending Soon',
         message:
           'We hope you enjoyed free use of Kimi K2.5! The promotion will be ending soon. You can switch to Kilo: Auto free mode or keep using Kimi with credits.',
-        suggestModelId: 'kilo/auto-free',
+        suggestModelId: KILO_AUTO_FREE_MODEL.id,
         action: {
           actionText: 'Switch to Kilo: Auto Free',
           actionURL: `${APP_URL}/credits`,

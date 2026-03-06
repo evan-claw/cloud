@@ -8,6 +8,7 @@ import {
   getConversationContext,
   formatConversationContextForPrompt,
 } from '@/lib/bot/conversation-context';
+import { updateBotRequest } from '@/lib/bot/request-logging';
 import spawnCloudAgentSession, {
   spawnCloudAgentInputSchema,
 } from '@/lib/bot/tools/spawn-cloud-agent-session';
@@ -26,13 +27,29 @@ import {
 import { generateApiToken } from '@/lib/tokens';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { PlatformIntegration, User } from '@kilocode/db';
+import type { BotRequestStep } from '@kilocode/db/schema';
 import { ToolLoopAgent, stepCountIs, tool } from 'ai';
+import type { StepResult, ToolSet } from 'ai';
 import { Actions, Card, CardText, LinkButton, Section } from 'chat';
 import type { Thread, Message } from 'chat';
 
 function ownerFromIntegration(pi: PlatformIntegration): Owner {
   if (pi.owned_by_organization_id) return { type: 'org', id: pi.owned_by_organization_id };
   else return { type: 'user', id: pi.owned_by_user_id as string };
+}
+
+function serializeStep(step: StepResult<ToolSet>): BotRequestStep {
+  return {
+    stepNumber: step.stepNumber,
+    finishReason: step.finishReason,
+    toolCalls: step.staticToolCalls.map(tc => ({ name: tc.toolName, args: tc.input })),
+    toolResults: step.staticToolResults.map(tr => ({ name: tr.toolName, result: tr.output })),
+    usage: {
+      inputTokens: step.usage.inputTokens ?? undefined,
+      outputTokens: step.usage.outputTokens ?? undefined,
+      totalTokens: step.usage.totalTokens ?? undefined,
+    },
+  };
 }
 
 async function buildSystemPrompt(
@@ -84,11 +101,13 @@ export async function processMessage({
   message,
   platformIntegration,
   user,
+  botRequestId,
 }: {
   thread: Thread;
   message: Message;
   platformIntegration: PlatformIntegration;
   user: User;
+  botRequestId: string | undefined;
 }) {
   const headers: Record<string, string> = {
     'X-KiloCode-Version': BOT_VERSION,
@@ -112,6 +131,13 @@ export async function processMessage({
     (platformIntegration.metadata as { model_slug?: string }).model_slug ?? DEFAULT_BOT_MODEL;
   const owner = ownerFromIntegration(platformIntegration);
 
+  const startedAt = Date.now();
+  const collectedSteps: BotRequestStep[] = [];
+
+  if (botRequestId) {
+    updateBotRequest(botRequestId, { modelUsed: modelSlug });
+  }
+
   const agent = new ToolLoopAgent({
     model: provider.chatModel(modelSlug),
     instructions: await buildSystemPrompt(platformIntegration, thread, message),
@@ -132,18 +158,45 @@ After the tool returns, if mode was "code", check the result for a PR/MR URL and
             ({ kiloSessionId }) => {
               const sessionUrl = buildSessionUrl(kiloSessionId, owner);
               postSessionLinkEphemeral(thread, message, sessionUrl);
+
+              if (botRequestId) {
+                updateBotRequest(botRequestId, { cloudAgentSessionId: kiloSessionId });
+              }
             }
           ),
       }),
+    },
+    onStepFinish: step => {
+      collectedSteps.push(serializeStep(step));
+      if (botRequestId) {
+        updateBotRequest(botRequestId, { steps: [...collectedSteps] });
+      }
     },
   });
 
   try {
     const result = await agent.generate({ prompt: message.text });
 
+    if (botRequestId) {
+      updateBotRequest(botRequestId, {
+        status: 'completed',
+        steps: [...collectedSteps],
+        responseTimeMs: Date.now() - startedAt,
+      });
+    }
+
     await thread.post({ markdown: result.text });
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
+
+    if (botRequestId) {
+      updateBotRequest(botRequestId, {
+        status: 'error',
+        errorMessage: errMsg.slice(0, 2000),
+        steps: [...collectedSteps],
+        responseTimeMs: Date.now() - startedAt,
+      });
+    }
 
     console.error(`[KiloBot] Error during bot run:`, errMsg, error);
 
