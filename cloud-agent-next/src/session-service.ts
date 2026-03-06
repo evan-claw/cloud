@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { z } from 'zod';
 import type {
   ExecutionSession,
   SandboxInstance,
@@ -1411,16 +1412,25 @@ export class SessionService {
       );
     }
 
+    const combinedExportSchema = z.object({
+      snapshot: z.unknown(),
+      diff: z
+        .array(
+          z.object({
+            file: z.string(),
+            after: z.string(),
+            status: z.enum(['added', 'deleted', 'modified']).optional(),
+          })
+        )
+        .nullable(),
+    });
+
     let snapshotJson: string;
-    let diff: Array<{
-      file: string;
-      after: string;
-      status?: 'added' | 'deleted' | 'modified';
-    }> | null;
+    let diff: z.infer<typeof combinedExportSchema>['diff'];
     try {
-      const parsed: { snapshot: unknown; diff: unknown } = JSON.parse(combinedPayload);
+      const parsed = combinedExportSchema.parse(JSON.parse(combinedPayload));
       snapshotJson = JSON.stringify(parsed.snapshot);
-      diff = Array.isArray(parsed.diff) ? parsed.diff : null;
+      diff = parsed.diff;
     } catch (error) {
       throw new Error(
         `Failed to parse combined export payload: ${error instanceof Error ? error.message : String(error)}`
