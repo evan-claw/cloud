@@ -64,17 +64,15 @@ export const kiloFreeModels = [
 ] as KiloFreeModel[];
 
 export function isKiloStealthModel(model: string): boolean {
-  return kiloFreeModels.some(
-    m => m.public_id === model && m.inference_providers.includes('stealth')
-  );
+  return kiloFreeModels.some(m => m.public_id === model && m.inference_provider === 'stealth');
 }
 
 function isOpenRouterStealthModel(model: string): boolean {
   return model.startsWith('openrouter/') && (model.endsWith('-alpha') || model.endsWith('-beta'));
 }
 
-export function extraRequiredProviders(model: string) {
-  return kiloFreeModels.find(m => m.public_id === model)?.inference_providers ?? [];
+export function extraRequiredProvider(model: string) {
+  return kiloFreeModels.find(m => m.public_id === model)?.inference_provider;
 }
 
 export function isDeadFreeModel(model: string): boolean {

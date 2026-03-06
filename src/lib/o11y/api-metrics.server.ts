@@ -80,7 +80,7 @@ export function getToolsAvailable(
 export function getToolsUsed(
   messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> | undefined
 ): string[] {
-  if (!messages) return [];
+  if (!Array.isArray(messages)) return [];
 
   const used = new Array<string>();
 

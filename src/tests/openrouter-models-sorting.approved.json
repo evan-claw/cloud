@@ -1,8 +1,8 @@
 {
   "data": [
     {
-      "id": "kilo/auto",
-      "name": "Kilo: Auto",
+      "id": "kilo-auto/frontier",
+      "name": "Kilo Auto: Frontier",
       "created": 0,
       "description": "Automatically routes your request to the best model for the task.",
       "architecture": {
@@ -43,8 +43,8 @@
       "preferredIndex": 0
     },
     {
-      "id": "kilo/auto-free",
-      "name": "Kilo: Auto Free",
+      "id": "kilo-auto/free",
+      "name": "Kilo Auto: Free",
       "created": 0,
       "description": "Automatically routes your request to a free model.",
       "architecture": {
@@ -595,8 +595,8 @@
       }
     },
     {
-      "id": "kilo/auto-small",
-      "name": "Kilo: Auto Small",
+      "id": "kilo-auto/small",
+      "name": "Kilo Auto: Small",
       "created": 0,
       "description": "Automatically routes your request to a small model.",
       "architecture": {
