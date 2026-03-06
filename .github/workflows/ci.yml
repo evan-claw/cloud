@@ -87,7 +87,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm run typecheck
+        run: pnpm turbo run typecheck --filter=kilocode-backend...
 
       - name: Lint
         run: pnpm run lint
@@ -184,7 +184,7 @@ jobs:
         run: bun run build.ts
 
       - name: Typecheck (cloud-agent)
-        run: pnpm --filter cloud-agent typecheck
+        run: pnpm turbo run typecheck --filter=cloud-agent...
 
       - name: Lint (cloud-agent)
         run: pnpm --filter cloud-agent lint
@@ -227,7 +227,7 @@ jobs:
         run: bun run build.ts
 
       - name: Typecheck (cloud-agent-next)
-        run: pnpm --filter cloud-agent-next typecheck
+        run: pnpm turbo run typecheck --filter=cloud-agent-next...
 
       - name: Lint (cloud-agent-next)
         run: pnpm --filter cloud-agent-next lint
@@ -260,7 +260,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck (webhook-agent-ingest)
-        run: pnpm --filter cloudflare-webhook-agent-ingest typecheck
+        run: pnpm turbo run typecheck --filter=cloudflare-webhook-agent-ingest...
 
       - name: Lint (webhook-agent-ingest)
         run: pnpm --filter cloudflare-webhook-agent-ingest lint
@@ -293,7 +293,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck (security-auto-analysis)
-        run: pnpm --filter cloudflare-security-auto-analysis typecheck
+        run: pnpm turbo run typecheck --filter=cloudflare-security-auto-analysis...
 
       - name: Run security-auto-analysis tests
         run: pnpm --filter cloudflare-security-auto-analysis test
@@ -323,7 +323,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck (kiloclaw)
-        run: pnpm --filter kiloclaw typecheck
+        run: pnpm turbo run typecheck --filter=kiloclaw...
 
       - name: Lint (kiloclaw)
         run: pnpm --filter kiloclaw lint
@@ -356,7 +356,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck (app-builder)
-        run: pnpm --filter app-builder typecheck
+        run: pnpm turbo run typecheck --filter=app-builder...
 
       - name: Run app-builder tests
         run: pnpm --filter app-builder test
@@ -395,4 +395,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm --filter ${{ matrix.filter }} typecheck
+        run: pnpm turbo run typecheck --filter=${{ matrix.filter }}...

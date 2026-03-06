@@ -22,7 +22,7 @@
     "test:integration": "vitest run --config vitest.workers.config.ts",
     "test:integration:watch": "vitest --config vitest.workers.config.ts",
     "test:all": "vitest run && vitest run --config vitest.workers.config.ts",
-    "typecheck": "tsgo --noEmit --incremental false && pnpm -C wrapper run typecheck"
+    "typecheck": "tsgo --noEmit --incremental false"
   },
   "dependencies": {
     "@cloudflare/sandbox": "0.7.8",

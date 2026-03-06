@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "lint": {},
+    "//#typecheck": {},
+    "//#lint": {}
+  }
+}

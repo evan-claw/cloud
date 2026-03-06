@@ -87,6 +87,9 @@ run-milvus-test.sh
 .env*.local
 /.superset
 
+# Turborepo
+.turbo/
+
 # Git worktrees
 .worktrees/
 
