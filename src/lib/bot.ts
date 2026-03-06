@@ -1,14 +1,18 @@
-import { Chat, emoji, type ActionEvent, type Message, type Thread } from 'chat';
+import { Chat, type ActionEvent, type Message, type Thread } from 'chat';
 import { createSlackAdapter } from '@chat-adapter/slack';
 import { createRedisState } from '@chat-adapter/state-redis';
 import { createMemoryState } from '@chat-adapter/state-memory';
 import { captureException } from '@sentry/nextjs';
-import { resolveKiloUserId, unlinkKiloUser } from '@/lib/bot-identity';
+import { resolveKiloUserId, type PlatformIdentity, unlinkKiloUser } from '@/lib/bot-identity';
+import { handleLinkedBotMessage } from '@/lib/bot/handle-linked-message';
 import { getPlatformIdentity, getPlatformIntegration } from '@/lib/bot/platform-helpers';
-import { LINK_ACCOUNT_ACTION_PREFIX, promptLinkAccount } from '@/lib/bot/link-account';
-import { createBotRequest, updateBotRequest } from '@/lib/bot/request-logging';
+import {
+  createLinkAccountTarget,
+  LINK_ACCOUNT_ACTION_PREFIX,
+  promptLinkAccount,
+} from '@/lib/bot/link-account';
+import { storePendingLinkReplay } from '@/lib/bot/pending-link-replay';
 import { findUserById } from '@/lib/user';
-import { processMessage } from '@/lib/bot/run';
 
 const slackAdapter = createSlackAdapter({
   clientId: process.env.SLACK_NEXT_CLIENT_ID,
@@ -24,6 +28,31 @@ export const bot = new Chat({
   },
   state: process.env.REDIS_URL ? createRedisState() : createMemoryState(),
 });
+
+async function promptLinkAccountForMessage(
+  thread: Thread,
+  message: Message,
+  identity: PlatformIdentity
+): Promise<void> {
+  const linkAccountTarget = createLinkAccountTarget(identity);
+
+  try {
+    await storePendingLinkReplay(bot.getState(), linkAccountTarget.token, thread, message);
+  } catch (error) {
+    captureException(error, {
+      tags: { component: 'kilo-bot', op: 'store-pending-link-replay' },
+      extra: {
+        messageId: message.id,
+        platform: identity.platform,
+        teamId: identity.teamId,
+        threadId: thread.id,
+        userId: identity.userId,
+      },
+    });
+  }
+
+  await promptLinkAccount(thread, message, linkAccountTarget);
+}
 
 bot.onNewMention(async function handleIncomingMessage(
   thread: Thread,
@@ -43,7 +72,7 @@ bot.onNewMention(async function handleIncomingMessage(
   }
 
   if (!kiloUserId) {
-    await promptLinkAccount(thread, message, identity);
+    await promptLinkAccountForMessage(thread, message, identity);
     return;
   }
 
@@ -51,40 +80,11 @@ bot.onNewMention(async function handleIncomingMessage(
 
   if (!user) {
     await unlinkKiloUser(bot.getState(), identity);
-    await promptLinkAccount(thread, message, identity);
+    await promptLinkAccountForMessage(thread, message, identity);
     return;
   }
 
-  const platform = thread.id.split(':')[0];
-  const botRequestId = await createBotRequest({
-    createdBy: user.id,
-    organizationId: platformIntegration.owned_by_organization_id ?? null,
-    platformIntegrationId: platformIntegration.id,
-    platform,
-    platformThreadId: thread.id,
-    platformMessageId: message.id,
-    userMessage: message.text,
-    modelUsed: undefined,
-  });
-
-  const received = thread.createSentMessageFromMessage(message);
-  await received.addReaction(emoji.eyes);
-
-  try {
-    await processMessage({ thread, message, platformIntegration, user, botRequestId });
-  } catch (error) {
-    console.error('[Bot] Unhandled error in message handler:', error);
-    if (botRequestId) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      updateBotRequest(botRequestId, {
-        status: 'error',
-        errorMessage: errMsg.slice(0, 2000),
-      });
-    }
-    await thread.post({ markdown: 'Sorry, something went wrong while processing your message.' });
-  } finally {
-    await Promise.all([received.removeReaction(emoji.eyes), received.addReaction(emoji.check)]);
-  }
+  await handleLinkedBotMessage({ thread, message, platformIntegration, user });
 });
 
 // When the user clicks the "Link Account" LinkButton, Slack fires a

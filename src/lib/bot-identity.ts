@@ -66,7 +66,7 @@ export async function unlinkKiloUser(
 
 const HMAC_ALGORITHM = 'sha256';
 
-const TOKEN_TTL_SECONDS = 30 * 60;
+export const LINK_TOKEN_TTL_SECONDS = 30 * 60;
 
 const NONCE_BYTES = 16;
 
@@ -117,7 +117,7 @@ export function verifyLinkToken(token: string): PlatformIdentity | null {
 
     if (typeof data.iat !== 'number') return null;
     const age = Math.floor(Date.now() / 1000) - data.iat;
-    if (age < 0 || age > TOKEN_TTL_SECONDS) return null;
+    if (age < 0 || age > LINK_TOKEN_TTL_SECONDS) return null;
 
     if (typeof data.nonce !== 'string' || data.nonce.length === 0) return null;
 

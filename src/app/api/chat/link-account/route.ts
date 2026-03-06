@@ -1,6 +1,13 @@
+import { after } from 'next/server';
+import { captureException } from '@sentry/nextjs';
 import { bot } from '@/lib/bot';
+import { replayLinkedBotMessage } from '@/lib/bot/handle-linked-message';
 import { APP_URL } from '@/lib/constants';
 import { linkKiloUser, verifyLinkToken } from '@/lib/bot-identity';
+import {
+  consumePendingLinkReplay,
+  deserializePendingLinkReplay,
+} from '@/lib/bot/pending-link-replay';
 import { db } from '@/lib/drizzle';
 import { isOrganizationMember } from '@/lib/organizations/organizations';
 import { getUserFromAuth } from '@/lib/user.server';
@@ -77,7 +84,8 @@ async function verifyIntegrationAccess(
  *  2. Authenticate the user via NextAuth session (redirect to sign-in if needed).
  *  3. Verify the user belongs to the org that owns the integration.
  *  4. Write the platform identity → Kilo user mapping into Redis.
- *  5. Show a success page.
+ *  5. Replay the original chat message when pending context exists.
+ *  6. Show a success page.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -119,14 +127,47 @@ export async function GET(request: Request) {
 
   await linkKiloUser(bot.getState(), identity, user.id);
 
+  const pendingReplayPayload = await consumePendingLinkReplay(bot.getState(), token);
+  let replayQueued = false;
+
+  if (pendingReplayPayload) {
+    try {
+      const replayContext = deserializePendingLinkReplay(pendingReplayPayload, bot.reviver());
+      replayQueued = true;
+
+      after(async () => {
+        await replayLinkedBotMessage({
+          thread: replayContext.thread,
+          message: replayContext.message,
+          user,
+        });
+      });
+    } catch (error) {
+      captureException(error, {
+        tags: { component: 'kilo-bot', op: 'deserialize-pending-link-replay' },
+        extra: {
+          platform: identity.platform,
+          teamId: identity.teamId,
+          userId: identity.userId,
+        },
+      });
+    }
+  }
+
+  const successMessage = replayQueued
+    ? `Your ${identity.platform} account has been linked to your Kilo account.<br>
+     Kilo is now handling your original chat message. You can close this tab.<br>
+     If you do not see a reply in chat in a few moments, @mention Kilo again.`
+    : `Your ${identity.platform} account has been linked to your Kilo account.<br>
+     You can close this tab and @mention Kilo again in your chat.`;
+
   return new Response(
     `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Account Linked</title></head>
 <body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
 <div style="text-align:center">
   <h1>Account linked</h1>
-  <p>Your ${identity.platform} account has been linked to your Kilo account.<br>
-     You can close this tab and @mention Kilo again in your chat.</p>
+  <p>${successMessage}</p>
 </div>
 </body></html>`,
     { headers: { 'content-type': 'text/html; charset=utf-8' } }
