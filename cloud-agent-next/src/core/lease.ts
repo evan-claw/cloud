@@ -20,6 +20,10 @@ export const HEARTBEAT_INTERVAL_MS = 30_000;
  * Wrapper heartbeats every 20s (debounced to 30s), so 90s ≈ 3 missed heartbeats. */
 export const STALE_THRESHOLD_MS = 90_000;
 
+/** Sandbox container sleep-after timeout in seconds (15 minutes).
+ * After this duration of inactivity the container is stopped by @cloudflare/containers. */
+export const SANDBOX_SLEEP_AFTER_SECONDS = 900;
+
 // ---------------------------------------------------------------------------
 // Lease Helpers
 // ---------------------------------------------------------------------------

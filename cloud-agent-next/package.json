@@ -40,7 +40,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/containers": "0.0.30",
+    "@cloudflare/containers": "0.1.1",
     "@cloudflare/vitest-pool-workers": "^0.12.8",
     "@kilocode/eslint-config": "workspace:*",
     "@types/jsonwebtoken": "catalog:",

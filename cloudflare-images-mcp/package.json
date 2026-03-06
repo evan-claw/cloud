@@ -19,7 +19,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260120.0",
+    "@cloudflare/workers-types": "^4.20260305.0",
     "@kilocode/eslint-config": "workspace:*",
     "@types/jsonwebtoken": "catalog:",
     "@types/node": "^22",
