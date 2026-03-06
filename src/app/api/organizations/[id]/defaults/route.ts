@@ -27,9 +27,10 @@ export async function GET(
   // Get organization's default model setting
   let defaultModel = organization.settings?.default_model;
 
-  const denyList = organization.settings?.model_deny_list;
+  const modelDenyList = organization.settings?.model_deny_list;
+  const providerDenyList = organization.settings?.provider_deny_list;
 
-  const isAllowed = createAllowPredicateFromDenyList(denyList ?? []);
+  const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
 
   const findFirstAllowedModel = async (modelIds: readonly string[]) => {
     for (const modelId of modelIds) {
@@ -71,7 +72,7 @@ export async function GET(
 
   // Fallback to global default if no organization default is set or it's not allowed
   if (!defaultModel) {
-    if (!denyList?.length) {
+    if (!modelDenyList?.length && !providerDenyList?.length) {
       // No restrictions - use PRIMARY_DEFAULT_MODEL directly
       defaultModel = PRIMARY_DEFAULT_MODEL;
     } else {

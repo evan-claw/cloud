@@ -1,13 +1,26 @@
 import 'server-only';
 import { normalizeModelId } from '@/lib/model-utils';
+import { getProviderSlugsForModel } from '@/lib/providers/openrouter/models-by-provider-index.server';
 
 export type ProviderAwareAllowPredicate = (modelId: string) => Promise<boolean>;
 
 export function createAllowPredicateFromDenyList(
-  denyList: string[] | undefined
+  modelDenyList: string[] | undefined,
+  providerDenyList: string[] | undefined
 ): ProviderAwareAllowPredicate {
-  const denyListSet = new Set(denyList?.map(normalizeModelId));
-  return (modelId: string): Promise<boolean> => {
-    return Promise.resolve(!denyListSet.has(normalizeModelId(modelId)));
+  const modelDenySet = new Set(modelDenyList?.map(normalizeModelId));
+  const providerDenySet = new Set(providerDenyList);
+  return async (modelId: string): Promise<boolean> => {
+    const normalizedModelId = normalizeModelId(modelId);
+    if (modelDenySet.has(normalizedModelId)) {
+      return false;
+    }
+    if (providerDenySet.size > 0) {
+      const providerSlugs = await getProviderSlugsForModel(normalizedModelId);
+      if (providerSlugs.size > 0 && [...providerSlugs].every(slug => providerDenySet.has(slug))) {
+        return false;
+      }
+    }
+    return true;
   };
 }

@@ -16,13 +16,14 @@ export async function getDefaultAllowedModel(
   }
 
   const modelDenyList = organization.settings?.model_deny_list || [];
+  const providerDenyList = organization.settings?.provider_deny_list || [];
 
   // If no restrictions, use global default
-  if (modelDenyList.length === 0) {
+  if (modelDenyList.length === 0 && providerDenyList.length === 0) {
     return globalDefault;
   }
 
-  const isAllowed = createAllowPredicateFromDenyList(modelDenyList);
+  const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
 
   // Check if the organization's default model is allowed
   const orgDefaultModel = organization.settings?.default_model;

@@ -479,8 +479,9 @@ export async function updateModel(
     const organization = await getOrganizationById(owner.id);
     if (organization) {
       const modelDenyList = organization.settings?.model_deny_list || [];
-      if (modelDenyList.length > 0) {
-        const isAllowed = createAllowPredicateFromDenyList(modelDenyList);
+      const providerDenyList = organization.settings?.provider_deny_list || [];
+      if (modelDenyList.length > 0 || providerDenyList.length > 0) {
+        const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
         if (!(await isAllowed(modelSlug))) {
           return { success: false, error: 'Model is not allowed by organization policy' };
         }
