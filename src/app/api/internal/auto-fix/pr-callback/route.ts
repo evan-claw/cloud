@@ -103,6 +103,34 @@ export async function POST(req: NextRequest) {
     }
 
     const ticketId = ticket.id;
+
+    // Use review_comment_id as the definitive signal for review-comment triggers.
+    // This is more robust than trigger_source alone because review_comment_id is
+    // set immutably at ticket creation and never modified by status updates.
+    const isReviewCommentTrigger = ticket.review_comment_id != null;
+
+    if (isReviewCommentTrigger && ticket.trigger_source !== 'review_comment') {
+      errorExceptInTest(
+        '[auto-fix-pr-callback] trigger_source mismatch: ticket has review_comment_id but trigger_source is not review_comment',
+        {
+          ticketId,
+          sessionId,
+          triggerSource: ticket.trigger_source,
+          reviewCommentId: ticket.review_comment_id,
+        }
+      );
+      captureMessage('auto-fix trigger_source mismatch', {
+        level: 'warning',
+        tags: { source: 'auto-fix-pr-callback' },
+        extra: {
+          ticketId,
+          sessionId,
+          triggerSource: ticket.trigger_source,
+          reviewCommentId: ticket.review_comment_id,
+        },
+      });
+    }
+
     const isTerminalState =
       ticket.status === 'completed' || ticket.status === 'failed' || ticket.status === 'cancelled';
 
@@ -128,7 +156,7 @@ export async function POST(req: NextRequest) {
         errorMessage,
       });
 
-      if (ticket.trigger_source === 'review_comment') {
+      if (isReviewCommentTrigger) {
         const replyResult = await handleCommentReply({
           ticketId,
           sessionId,
@@ -153,7 +181,7 @@ export async function POST(req: NextRequest) {
 
       // Post issue-level failure comment only for issue-triggered tickets.
       // Review-comment-triggered tickets are notified on their original review thread.
-      if (ticket.trigger_source !== 'review_comment') {
+      if (!isReviewCommentTrigger) {
         try {
           if (ticket.platform_integration_id) {
             const integration = await getIntegrationById(ticket.platform_integration_id);
@@ -207,7 +235,7 @@ export async function POST(req: NextRequest) {
       sessionId,
     });
 
-    if (ticket.trigger_source === 'review_comment') {
+    if (isReviewCommentTrigger) {
       const replyResult = await handleCommentReply({
         ticketId,
         sessionId,
