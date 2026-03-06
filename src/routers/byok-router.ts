@@ -3,7 +3,11 @@ import { ensureOrganizationAccess } from '@/routers/organizations/utils';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { db, readDb } from '@/lib/drizzle';
-import { byok_api_keys, modelsByProvider } from '@kilocode/db/schema';
+import {
+  byok_api_keys,
+  MODELS_BY_PROVIDER_SCRIPT_NAME,
+  modelsByProvider,
+} from '@kilocode/db/schema';
 import { desc, eq } from 'drizzle-orm';
 import { encryptApiKey } from '@/lib/byok/encryption';
 import { BYOK_ENCRYPTION_KEY } from '@/lib/config.server';
@@ -33,24 +37,28 @@ import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 
 const fetchSupportedModels = unstable_cache(
   async (): Promise<Record<string, string[]>> => {
+    const vercelModelMetadataRaw = (
+      await readDb
+        .select({ vercel: modelsByProvider.vercel })
+        .from(modelsByProvider)
+        .orderBy(desc(modelsByProvider.id))
+        .limit(1)
+    ).at(0);
+
+    if (!vercelModelMetadataRaw) {
+      throw new Error(
+        'No Vercel model metadata in the database, run ' + MODELS_BY_PROVIDER_SCRIPT_NAME
+      );
+    }
+
     const vercelModelMetadata = z
       .record(z.string(), StoredModelSchema)
-      .safeParse(
-        (
-          await readDb
-            .select({ vercel: modelsByProvider.vercel })
-            .from(modelsByProvider)
-            .orderBy(desc(modelsByProvider.id))
-            .limit(1)
-        ).at(0)?.vercel
-      );
+      .safeParse(vercelModelMetadataRaw?.vercel);
 
     if (!vercelModelMetadata.success) {
-      console.error(
-        '[fetchSupportedModels] failed to parse Vercel model metadata',
-        z.treeifyError(vercelModelMetadata.error)
+      throw new Error(
+        'Failed to parse Vercel model metadata:\n' + z.prettifyError(vercelModelMetadata.error)
       );
-      return {};
     }
 
     const result: Record<string, string[]> = {};
