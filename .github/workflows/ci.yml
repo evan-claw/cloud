@@ -331,6 +331,9 @@ jobs:
       - name: Run kiloclaw tests
         run: pnpm --filter kiloclaw test
 
+      - name: Typecheck (secret-catalog)
+        run: pnpm --filter @kilocode/kiloclaw-secret-catalog typecheck
+
       - name: Run secret-catalog tests
         run: pnpm --filter @kilocode/kiloclaw-secret-catalog test
 
