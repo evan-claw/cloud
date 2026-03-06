@@ -3,6 +3,7 @@ import { db } from '@/lib/drizzle';
 import { bot_requests, kilocode_users, organizations } from '@kilocode/db/schema';
 import * as z from 'zod';
 import { sql, desc, eq, gte, count } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
 
 const bigIntToNumber = (value: unknown): number => {
   if (value === null || value === undefined) return 0;
@@ -164,7 +165,12 @@ export const adminBotRequestsRouter = createTRPCRouter({
       .limit(1);
 
     const row = result[0];
-    if (!row) return null;
+    if (!row) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'Bot request not found',
+      });
+    }
 
     return {
       id: row.id,

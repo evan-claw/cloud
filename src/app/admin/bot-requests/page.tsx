@@ -43,9 +43,12 @@ import {
   useDailyUsage,
   useBotRequestsList,
 } from './hooks';
+import { BotRequestStatusBadge } from './BotRequestStatusBadge';
 
 const MESSAGE_PREVIEW_LENGTH = 80;
 const DEFAULT_DAYS = 30;
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 25;
 const PLATFORM_COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#0891b2', '#475569'];
 
 const breadcrumbs = (
@@ -363,12 +366,22 @@ function DailyUsageChart() {
   );
 }
 
-// --- Status badge helper ---
+// --- Search param parsing ---
 
-function StatusBadge({ status }: { status: string }) {
-  const variant =
-    status === 'completed' ? 'default' : status === 'error' ? 'destructive' : 'secondary';
-  return <Badge variant={variant}>{status}</Badge>;
+function parsePageSize(value: string | null): PageSize {
+  const parsed = Number.parseInt(value ?? '', 10);
+
+  return PAGE_SIZE_OPTIONS.find(option => option === parsed) ?? DEFAULT_PAGE_SIZE;
+}
+
+function parsePageNumber(value: string | null): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_PAGE;
+  }
+
+  return parsed;
 }
 
 // --- Pagination ---
@@ -396,7 +409,10 @@ function RequestsPagination({
           <span className="text-muted-foreground text-sm">Rows per page</span>
           <Select
             value={String(pagination.limit)}
-            onValueChange={v => onLimitChange(Number(v) as PageSize)}
+            onValueChange={value => {
+              const nextLimit = parsePageSize(value);
+              onLimitChange(nextLimit);
+            }}
           >
             <SelectTrigger className="w-[70px]">
               <SelectValue />
@@ -538,7 +554,7 @@ function RequestsTable({
                       <Badge variant="outline">{row.platform}</Badge>
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={row.status} />
+                      <BotRequestStatusBadge status={row.status} />
                     </TableCell>
                     <TableCell className="text-sm whitespace-nowrap">
                       {format(parseISO(row.createdAt), 'MMM d, HH:mm')}
@@ -575,8 +591,8 @@ export default function BotRequestsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const page = parseInt(searchParams.get('page') || '1', 10);
-  const limit = parseInt(searchParams.get('limit') || '25', 10) as PageSize;
+  const page = parsePageNumber(searchParams.get('page'));
+  const limit = parsePageSize(searchParams.get('limit'));
 
   const pushWith = useCallback(
     (overrides: Record<string, string>) => {

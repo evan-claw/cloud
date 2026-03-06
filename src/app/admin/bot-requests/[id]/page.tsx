@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/breadcrumb';
 import Link from 'next/link';
 import { useBotRequestDetail } from '../hooks';
+import { BotRequestStatusBadge } from '../BotRequestStatusBadge';
 
 type StepData = {
   stepNumber: number;
@@ -29,12 +30,6 @@ type StepData = {
   toolResults?: Array<{ name: string; result?: unknown }>;
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 };
-
-function StatusBadge({ status }: { status: string }) {
-  const variant =
-    status === 'completed' ? 'default' : status === 'error' ? 'destructive' : 'secondary';
-  return <Badge variant={variant}>{status}</Badge>;
-}
 
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -115,19 +110,25 @@ export default function BotRequestDetailPage() {
   );
 
   if (error) {
+    const isNotFound = error.data?.code === 'NOT_FOUND';
+
     return (
       <AdminPage breadcrumbs={breadcrumbs}>
         <Card>
           <CardHeader>
-            <CardTitle>Error</CardTitle>
-            <CardDescription>{error.message}</CardDescription>
+            <CardTitle>{isNotFound ? 'Bot Request Not Found' : 'Error'}</CardTitle>
+            <CardDescription>
+              {isNotFound
+                ? 'The requested bot request does not exist or is no longer available.'
+                : error.message}
+            </CardDescription>
           </CardHeader>
         </Card>
       </AdminPage>
     );
   }
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <AdminPage breadcrumbs={breadcrumbs}>
         <div className="flex w-full flex-col gap-y-4">
@@ -138,6 +139,21 @@ export default function BotRequestDetailPage() {
             </CardHeader>
           </Card>
         </div>
+      </AdminPage>
+    );
+  }
+
+  if (!data) {
+    return (
+      <AdminPage breadcrumbs={breadcrumbs}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Bot Request Not Found</CardTitle>
+            <CardDescription>
+              The requested bot request does not exist or is no longer available.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </AdminPage>
     );
   }
@@ -157,7 +173,7 @@ export default function BotRequestDetailPage() {
               <CardTitle className="text-sm font-medium">Status</CardTitle>
             </CardHeader>
             <CardContent>
-              <StatusBadge status={data.status} />
+              <BotRequestStatusBadge status={data.status} />
             </CardContent>
           </Card>
           <Card>
