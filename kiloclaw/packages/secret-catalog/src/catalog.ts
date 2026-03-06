@@ -1,11 +1,16 @@
+import { z } from 'zod';
 import type { SecretCatalogEntry, SecretCategory } from './types.js';
+import { SecretCatalogEntrySchema } from './types.js';
 
 /**
  * Secret Catalog — declarative registry of all secret types.
  *
  * Migrated from cloud/src/app/(app)/claw/components/channel-config.tsx
+ *
+ * Uses `as const satisfies` to preserve literal IDs/keys/env-vars for
+ * precise TypeScript unions, while Zod validates the structure at runtime.
  */
-export const SECRET_CATALOG: readonly SecretCatalogEntry[] = [
+const SECRET_CATALOG_RAW = [
   {
     id: 'telegram',
     label: 'Telegram',
@@ -84,7 +89,13 @@ export const SECRET_CATALOG: readonly SecretCatalogEntry[] = [
     helpText: 'Get tokens from Slack App Management. Both Bot Token and App Token are required.',
     helpUrl: 'https://api.slack.com/apps',
   },
-];
+] as const satisfies readonly SecretCatalogEntry[];
+
+// Runtime validation — fails fast at module load if catalog data is malformed
+export const SECRET_CATALOG: readonly SecretCatalogEntry[] = z
+  .array(SecretCatalogEntrySchema)
+  .readonly()
+  .parse(SECRET_CATALOG_RAW);
 
 // Lookup helpers
 

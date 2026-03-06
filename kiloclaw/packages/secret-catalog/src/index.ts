@@ -1,3 +1,12 @@
+// Zod Schemas
+export {
+  SecretCategorySchema,
+  SecretIconKeySchema,
+  InjectionMethodSchema,
+  SecretFieldDefinitionSchema,
+  SecretCatalogEntrySchema,
+} from './types.js';
+
 // Types
 export type {
   SecretCategory,
