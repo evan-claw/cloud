@@ -369,6 +369,7 @@ export async function resetCodeReviewForRetry(reviewId: string): Promise<void> {
         session_id: null,
         cli_session_id: null,
         error_message: null,
+        check_run_id: null,
         started_at: null,
         completed_at: null,
         model: null,

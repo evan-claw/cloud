@@ -15,7 +15,6 @@ import type { Owner } from '@/lib/code-reviews/core';
 import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 import type { CodeReviewAgentConfig } from '@/lib/agent-config/core/types';
 import { addReactionToPR, createCheckRun } from '../adapter';
-import type { GitHubAppType } from '../app-selector';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { updateCheckRunId } from '@/lib/code-reviews/db/code-reviews';
 import { resolvePullRequestCheckoutRef } from './pull-request-checkout-ref';
@@ -209,7 +208,7 @@ export async function handlePullRequestCodeReview(
     const [repoOwner, repoName] = repository.full_name.split('/');
 
     // 7. Create GitHub Check Run (PR gate) — skip for lite (read-only) app
-    const appType = (integration.github_app_type ?? 'standard') as GitHubAppType;
+    const appType = integration.github_app_type ?? 'standard';
     if (appType !== 'lite') {
       try {
         const detailsUrl = `${APP_URL}/code-reviews/${reviewId}`;
