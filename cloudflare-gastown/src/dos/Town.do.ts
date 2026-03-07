@@ -1875,8 +1875,9 @@ export class TownDO extends DurableObject<Env> {
 
       // GUPP violation: working but no activity for 30+ min
       if (lastActivity && lastActivity < guppThreshold) {
-        // Check for an existing open GUPP_CHECK mail
-        const existingGupp = [
+        // Check for any prior GUPP_CHECK (open OR closed — mail.readAndDeliverMail
+        // closes message beads on delivery, so we must check both statuses)
+        const priorGupp = [
           ...query(
             this.sql,
             /* sql */ `
@@ -1884,7 +1885,7 @@ export class TownDO extends DurableObject<Env> {
               WHERE ${beads.type} = 'message'
                 AND ${beads.assignee_agent_bead_id} = ?
                 AND ${beads.title} = 'GUPP_CHECK'
-                AND ${beads.status} = 'open'
+                AND ${beads.status} IN ('open', 'closed')
               ORDER BY ${beads.created_at} ASC
               LIMIT 1
             `,
@@ -1892,7 +1893,7 @@ export class TownDO extends DurableObject<Env> {
           ),
         ];
 
-        if (existingGupp.length === 0) {
+        if (priorGupp.length === 0) {
           // No prior GUPP_CHECK — send one now
           mail.sendMail(this.sql, {
             from_agent_id: 'witness',
@@ -1901,17 +1902,17 @@ export class TownDO extends DurableObject<Env> {
             body: 'You have had work hooked for 30+ minutes with no activity. Are you stuck? If so, call gt_escalate.',
           });
         } else {
-          // Prior GUPP_CHECK was sent but agent is still inactive — escalate to triage
+          // A GUPP_CHECK was already sent; if the agent is still inactive >1hr
+          // after it was sent, queue a triage request
           const guppRow = z
             .object({ bead_id: z.string(), created_at: z.string() })
-            .parse(existingGupp[0]);
-          const guppSentAt = guppRow.created_at;
-          if (guppSentAt < guppTriageThreshold) {
+            .parse(priorGupp[0]);
+          if (guppRow.created_at < guppTriageThreshold) {
             // GUPP_CHECK sent >1hr ago with no response — queue for triage
             this.createTriageRequestIfAbsent(agentId, 'stuck_agent', {
               reason: 'GUPP_CHECK sent 1hr+ ago with no response from agent',
               last_activity_at: lastActivity,
-              gupp_check_sent_at: guppSentAt,
+              gupp_check_sent_at: guppRow.created_at,
             });
           }
         }
@@ -2163,7 +2164,8 @@ export class TownDO extends DurableObject<Env> {
       } catch {
         // ignore
       }
-      return `${i + 1}. [${meta.triage_type ?? 'unknown'}] triage_bead_id=${row.bead_id}\n   Context: ${JSON.stringify(meta.context ?? {})}\n   Options: see gt_triage_resolve`;
+      const triType = typeof meta.triage_type === 'string' ? meta.triage_type : 'unknown';
+      return `${i + 1}. [${triType}] triage_bead_id=${row.bead_id}\n   Context: ${JSON.stringify(meta.context ?? {})}\n   Options: see gt_triage_resolve`;
     });
 
     const triagePrompt = [
@@ -2228,6 +2230,7 @@ export class TownDO extends DurableObject<Env> {
   async resolveTriageRequest(
     triageBeadId: string,
     action: string,
+    callerAgentId: string,
     notes?: string
   ): Promise<{ resolved: boolean; action: string }> {
     await this.ensureInitialized();
@@ -2236,6 +2239,16 @@ export class TownDO extends DurableObject<Env> {
     if (!triadBead || triadBead.type !== 'triage_request') {
       console.warn(
         `${TOWN_LOG} resolveTriageRequest: bead not found or wrong type: ${triageBeadId}`
+      );
+      return { resolved: false, action };
+    }
+
+    // Verify the caller is the agent assigned to this triage bead.
+    // Any agent in the rig can reach this endpoint via the rig-scoped JWT, so
+    // we enforce that only the hooked triage agent may resolve it.
+    if (triadBead.assignee_agent_bead_id && triadBead.assignee_agent_bead_id !== callerAgentId) {
+      console.warn(
+        `${TOWN_LOG} resolveTriageRequest: caller=${callerAgentId} is not the assigned triage agent (${triadBead.assignee_agent_bead_id}) for bead=${triageBeadId}`
       );
       return { resolved: false, action };
     }
@@ -2293,7 +2306,9 @@ export class TownDO extends DurableObject<Env> {
       }
       case 'DISCARD': {
         if (agentBeadId) {
-          // Unhook agent and reset bead to open for manual re-assignment
+          const hookedBeadId = agents.getAgent(this.sql, agentBeadId)?.current_hook_bead_id ?? null;
+          // unhookBead clears agent_metadata.current_hook_bead_id but does not
+          // clear the work bead's assignee or reopen it — do both explicitly.
           agents.unhookBead(this.sql, agentBeadId);
           query(
             this.sql,
@@ -2305,6 +2320,19 @@ export class TownDO extends DurableObject<Env> {
             `,
             [agentBeadId]
           );
+          if (hookedBeadId) {
+            query(
+              this.sql,
+              /* sql */ `
+                UPDATE ${beads}
+                SET ${beads.columns.assignee_agent_bead_id} = NULL,
+                    ${beads.columns.status} = 'open',
+                    ${beads.columns.updated_at} = ?
+                WHERE ${beads.bead_id} = ?
+              `,
+              [now(), hookedBeadId]
+            );
+          }
         }
         break;
       }

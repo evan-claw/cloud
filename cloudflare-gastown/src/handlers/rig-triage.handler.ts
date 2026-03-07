@@ -8,6 +8,7 @@ import type { GastownEnv } from '../gastown.worker';
 import { getTownDOStub } from '../dos/Town.do';
 import { resSuccess } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
+import { getEnforcedAgentId } from '../middleware/auth.middleware';
 
 const TriageResolveBody = z.object({
   action: z.enum(['RESTART', 'ESCALATE', 'DISCARD']),
@@ -31,10 +32,16 @@ export async function handleTriageResolve(
     );
   }
 
+  const callerAgentId = getEnforcedAgentId(c);
+  if (!callerAgentId) {
+    return c.json({ success: false, error: 'Agent ID not found in token' }, 401);
+  }
+
   const town = getTownDOStub(c.env, params.townId);
   const result = await town.resolveTriageRequest(
     params.triageBeadId,
     parsed.data.action,
+    callerAgentId,
     parsed.data.notes
   );
   return c.json(resSuccess(result), 200);
