@@ -258,6 +258,13 @@ export class GastownUserDO extends DurableObject<Env> {
     );
   }
 
+  async unregisterActiveTown(townId: string): Promise<void> {
+    await this.ensureInitialized();
+    query(this.sql, /* sql */ `DELETE FROM ${user_towns} WHERE ${user_towns.columns.id} = ?`, [
+      townId,
+    ]);
+  }
+
   async listAllTownIds(): Promise<string[]> {
     await this.ensureInitialized();
     const rows = [

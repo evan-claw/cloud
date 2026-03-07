@@ -482,23 +482,6 @@ export default {
     } catch (err) {
       console.error('[gastown-worker] cron: health watchdog failed', err);
     }
-      const body = (await response.json()) as { townIds?: string[] };
-      const townIds: string[] = Array.isArray(body?.townIds) ? body.townIds : [];
-      console.log(`[gastown-worker] cron: checking ${townIds.length} active town(s)`);
-
-      await Promise.allSettled(
-        townIds.map(async townId => {
-          try {
-            const town = env.TOWN.get(env.TOWN.idFromName(townId));
-            await town.pingAlarm();
-          } catch (err) {
-            console.warn(`[gastown-worker] cron: pingAlarm failed for town=${townId}`, err);
-          }
-        })
-      );
-    } catch (err) {
-      console.error('[gastown-worker] cron: health watchdog failed', err);
-    }
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

@@ -2169,7 +2169,7 @@ export class TownDO extends DurableObject<Env> {
     const triagePrompt = [
       'You are a Gastown triage agent. Process the following queued situations and resolve each one.',
       'For each triage request, assess the situation and call gt_triage_resolve with the chosen action.',
-      'When all requests are resolved, call gt_done.',
+      'When all requests are resolved, call gt_bead_close on your hooked bead (NOT gt_done — triage work does not go to the review queue).',
       '',
       'Situations to assess:',
       ...situations,
@@ -2178,6 +2178,14 @@ export class TownDO extends DurableObject<Env> {
     // Triage agents are ephemeral town-wide — no rig affiliation needed
     const triageRigId = rigConfig ? rigList[0].id : `triage-${this.townId}`;
     const triageAgent = agents.getOrCreateAgent(this.sql, 'triage', triageRigId, this.townId);
+
+    // Hook the triage agent to the first queued triage_request bead.
+    // This gives the agent a valid current_hook_bead_id so it can call
+    // gt_bead_close on completion without a null-hook error.
+    const firstTriageBeadId = openTriageRows[0].bead_id;
+    if (!triageAgent.current_hook_bead_id) {
+      agents.hookBead(this.sql, triageAgent.id, firstTriageBeadId);
+    }
 
     const { buildTriageSystemPrompt } = await import('../prompts/triage-system.prompt');
     const systemPrompt = buildTriageSystemPrompt({
@@ -2193,7 +2201,7 @@ export class TownDO extends DurableObject<Env> {
       agentName: 'triage',
       role: 'triage',
       identity: triageAgent.identity,
-      beadId: openTriageRows[0].bead_id,
+      beadId: firstTriageBeadId,
       beadTitle: `Triage: ${openTriageRows.length} situation(s) queued`,
       beadBody: triagePrompt,
       checkpoint: null,
@@ -2208,6 +2216,7 @@ export class TownDO extends DurableObject<Env> {
     if (started) {
       agents.updateAgentStatus(this.sql, triageAgent.id, 'working');
     } else {
+      agents.unhookBead(this.sql, triageAgent.id);
       console.error(`${TOWN_LOG} maybeDispatchTriageAgent: failed to start triage agent`);
     }
   }
@@ -2920,6 +2929,16 @@ export class TownDO extends DurableObject<Env> {
       );
     } catch {
       // Best-effort
+    }
+
+    // Remove this town from the watchdog registry so the cron doesn't
+    // keep pinging a destroyed town and recreating zombie DO instances.
+    if (this.townId) {
+      getGastownUserStub(this.env, 'watchdog')
+        .unregisterActiveTown(this.townId)
+        .catch(err => {
+          console.warn(`${TOWN_LOG} destroy: failed to unregister from watchdog`, err);
+        });
     }
 
     await this.ctx.storage.deleteAlarm();

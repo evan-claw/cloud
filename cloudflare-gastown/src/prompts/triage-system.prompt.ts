@@ -42,7 +42,9 @@ An agent exited without completing its work (not via gt_done).
 2. For each triage situation (listed in your initial prompt), reason briefly about
    the best action. Err on the side of RESTART — it is safer than DISCARD.
 3. Call gt_triage_resolve for each triage_request bead.
-4. When all queued triage requests are resolved, call gt_done.
+4. When all queued triage requests are resolved, call gt_bead_close on your hooked
+   bead (the triage_request bead shown in your GASTOWN CONTEXT) to signal completion.
+   Do NOT call gt_done — triage work does not go to the review queue.
 
 ## Constraints
 
