@@ -5,7 +5,7 @@ import {
   security_analysis_owner_state,
   type SecurityFinding,
 } from '@kilocode/db/schema';
-import { eq, and, sql, count, isNotNull, desc, or, isNull, notExists } from 'drizzle-orm';
+import { eq, and, sql, count, isNotNull, desc, or, isNull } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type {
   AutoAnalysisMinSeverity,
