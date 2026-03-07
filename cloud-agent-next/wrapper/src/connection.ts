@@ -54,12 +54,24 @@ export type ConnectionCallbacks = {
   onDisconnect: (reason: string) => void;
   /** Called on any completion event to signal post-processing waiters */
   onCompletionSignal: () => void;
+  /** Called when the ingest WS starts reconnecting */
+  onReconnecting?: (attempt: number) => void;
+  /** Called when the ingest WS successfully reconnects */
+  onReconnected?: () => void;
 };
 
 type WebSocketCtor = new (
   url: string,
   options?: { headers?: Record<string, string> } | string | string[]
 ) => WebSocket;
+
+/** DO sends this close code to signal execution is done — don't reconnect */
+const CLOSE_CODE_EXECUTION_DONE = 4000;
+
+/** Maximum number of reconnection attempts before giving up */
+const MAX_RECONNECT_ATTEMPTS = 5;
+/** Base delay for exponential backoff (1 second) */
+const RECONNECT_BASE_DELAY_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Connection Manager
@@ -72,6 +84,8 @@ export type ConnectionManager = {
   close: () => Promise<void>;
   /** Check if currently connected. */
   isConnected: () => boolean;
+  /** Whether the ingest WS is currently attempting to reconnect */
+  isReconnecting: () => boolean;
 };
 
 /**
@@ -88,6 +102,11 @@ export function createConnectionManager(
   let sseConsumer: SSEConsumer | null = null;
   let ingestWs: WebSocket | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  let closedByUs = false;
+  let reconnecting = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Event buffer for disconnection periods
   const MAX_BUFFER_SIZE = 1000;
@@ -171,12 +190,31 @@ export function createConnectionManager(
         resolve();
       };
 
-      ws.onclose = () => {
-        logToFile(`ingest WS closed: ${wsUrl}`);
-        if (ingestWs === ws) {
-          ingestWs = null;
-          callbacks.onDisconnect('ingest websocket closed');
+      ws.onclose = (event: CloseEvent) => {
+        logToFile(
+          `ingest WS closed: code=${event.code} reason=${event.reason || '(none)'} url=${wsUrl}`
+        );
+        if (ingestWs !== ws) return; // Stale socket — ignore
+
+        ingestWs = null;
+
+        if (closedByUs) {
+          // Expected close (during drain/shutdown) — don't reconnect
+          closedByUs = false;
+          return;
         }
+
+        if (event.code === CLOSE_CODE_EXECUTION_DONE) {
+          // DO says execution is done — don't reconnect
+          logToFile('ingest WS closed by DO (execution done) — not reconnecting');
+          callbacks.onDisconnect('ingest websocket closed (execution done)');
+          return;
+        }
+
+        // Unexpected close — attempt reconnection
+        logToFile('ingest WS closed unexpectedly — starting reconnection');
+        stopHeartbeat();
+        attemptReconnect();
       };
 
       ws.onerror = () => {
@@ -351,6 +389,59 @@ export function createConnectionManager(
     }
   }
 
+  function attemptReconnect(): void {
+    if (reconnecting) return;
+    reconnecting = true;
+    reconnectAttempt = 0;
+    scheduleReconnect();
+  }
+
+  function scheduleReconnect(): void {
+    reconnectAttempt++;
+    if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+      logToFile(`reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts — giving up`);
+      reconnecting = false;
+      reconnectAttempt = 0;
+      callbacks.onDisconnect('ingest websocket closed (reconnection failed)');
+      return;
+    }
+
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempt - 1);
+    logToFile(`reconnect attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+    callbacks.onReconnecting?.(reconnectAttempt);
+
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      openIngestWs()
+        .then(() => {
+          logToFile(`reconnected successfully on attempt ${reconnectAttempt}`);
+          reconnecting = false;
+          reconnectAttempt = 0;
+          startHeartbeat();
+          // Update state's WS reference to match the reconnected socket
+          const sseAbort = state.sseAbortController;
+          if (ingestWs && sseAbort) {
+            state.setConnections(ingestWs, sseAbort);
+          }
+          callbacks.onReconnected?.();
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          logToFile(`reconnect attempt ${reconnectAttempt} failed: ${msg}`);
+          scheduleReconnect();
+        });
+    }, delay);
+  }
+
+  function cancelReconnect(): void {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnecting = false;
+    reconnectAttempt = 0;
+  }
+
   return {
     open: async () => {
       logToFile('opening connections');
@@ -367,8 +458,7 @@ export function createConnectionManager(
 
     close: async () => {
       logToFile('closing connections');
-
-      // Stop heartbeat
+      cancelReconnect();
       stopHeartbeat();
 
       // Stop SSE consumer
@@ -379,6 +469,7 @@ export function createConnectionManager(
 
       // Close ingest WS
       if (ingestWs) {
+        closedByUs = true;
         try {
           ingestWs.close();
         } catch {
@@ -397,5 +488,7 @@ export function createConnectionManager(
     isConnected: () => {
       return ingestWs !== null && ingestWs.readyState === WebSocket.OPEN && sseConsumer !== null;
     },
+
+    isReconnecting: () => reconnecting,
   };
 }

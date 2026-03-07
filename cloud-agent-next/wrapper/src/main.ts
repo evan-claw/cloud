@@ -208,6 +208,13 @@ async function main() {
         // Signal completion to lifecycle manager for post-processing waiters
         getLifecycleManager().signalCompletion();
       },
+      onReconnecting: (attempt: number) => {
+        logToFile(`ingest WS reconnecting: attempt ${attempt}`);
+      },
+      onReconnected: () => {
+        logToFile('ingest WS reconnected');
+        state.clearLastError();
+      },
     }
   );
 
