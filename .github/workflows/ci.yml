@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs when a new commit is pushed to the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read
@@ -43,7 +48,49 @@ jobs:
             app_builder:
               - 'cloudflare-app-builder/**'
 
+  # Fast quality checks that gate slower jobs — runs on a standard runner
+  # since these are CPU-light. Fails early on code style / type issues
+  # before spending 8-core minutes on tests and builds.
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: |
+          pnpm run format:check || {
+            echo "::error::Prettier formatting check failed. Please run 'pnpm run format' locally and commit the changes before pushing."
+            exit 1
+          }
+
+      - name: Dependency cycle check
+        run: pnpm run dependency-cycle-check
+
   test:
+    needs: quality-gate
     runs-on: ubuntu-24.04-8core
 
     services:
@@ -86,26 +133,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Format check
-        run: |
-          pnpm run format:check || {
-            echo "::error::Prettier formatting check failed. Please run 'pnpm run format' locally and commit the changes before pushing."
-            exit 1
-          }
-
-      - name: Dependency cycle check
-        run: pnpm run dependency-cycle-check
-
       - name: Run tests
         run: pnpm run test
 
   build:
+    needs: quality-gate
     runs-on: ubuntu-24.04-8core
     steps:
       - uses: actions/checkout@v4
