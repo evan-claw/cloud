@@ -2302,6 +2302,20 @@ export class TownDO extends DurableObject<Env> {
           subject: `TRIAGE_ESCALATION:${triageType}`,
           body: `Triage agent escalated ${triageType} for agent "${agentName}". Notes: ${notes ?? 'none'}`,
         });
+        // Reset last_activity_at so witnessPatrol won't re-create a triage_request
+        // for this agent on the very next alarm tick. The escalation is now in
+        // the Mayor's hands; give the system a full GUPP window before reconsidering.
+        if (agentBeadId) {
+          query(
+            this.sql,
+            /* sql */ `
+              UPDATE ${agent_metadata}
+              SET ${agent_metadata.columns.last_activity_at} = ?
+              WHERE ${agent_metadata.bead_id} = ?
+            `,
+            [now(), agentBeadId]
+          );
+        }
         break;
       }
       case 'DISCARD': {

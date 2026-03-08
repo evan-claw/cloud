@@ -53,7 +53,7 @@ export const BeadOutput = z.object({
 export const AgentOutput = z.object({
   id: z.string(),
   rig_id: z.string().nullable(),
-  role: z.enum(['polecat', 'refinery', 'mayor', 'witness']),
+  role: z.enum(['polecat', 'refinery', 'mayor', 'witness', 'triage']),
   name: z.string(),
   identity: z.string(),
   status: z.enum(['idle', 'working', 'stalled', 'dead']),
