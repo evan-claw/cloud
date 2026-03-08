@@ -55,6 +55,9 @@ export async function updateLastSyncedAt(owner: SecurityReviewOwner): Promise<vo
       );
   } catch (error) {
     logError('Failed to update last_synced_at in runtime_state', { error });
+    captureException(error, {
+      tags: { operation: 'updateLastSyncedAt' },
+    });
   }
 }
 
@@ -295,7 +298,7 @@ export async function syncAllReposForOwner(params: {
   }
 
   const totalDurationMs = Math.round(performance.now() - syncStartTime);
-  if (totalResult.synced === 0 && totalResult.errors === 0) {
+  if (totalResult.synced === 0 && totalResult.errors === 0 && totalResult.skipped === 0) {
     warn('Sync completed with zero findings processed across all repos', {
       reposScanned: repositories.length,
       durationMs: totalDurationMs,

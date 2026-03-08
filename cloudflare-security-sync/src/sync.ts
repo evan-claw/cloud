@@ -767,7 +767,7 @@ export async function syncOwner(params: {
     durationMs: Date.now() - startTime,
   };
 
-  if (totalResult.synced === 0 && totalResult.errors === 0) {
+  if (totalResult.synced === 0 && totalResult.errors === 0 && totalResult.skipped === 0) {
     console.warn('Sync completed with zero findings processed across all repos', syncSummary);
   } else {
     console.info('Sync cycle summary', syncSummary);

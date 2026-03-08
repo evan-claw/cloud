@@ -824,7 +824,7 @@ export async function getLastSyncTime(params: {
       .from(security_findings)
       .where(and(...findingConditions));
 
-    return result[0]?.lastSyncedAt || null;
+    return result[0]?.lastSyncedAt ?? null;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'getLastSyncTime' },
