@@ -497,4 +497,24 @@ describe('getLastSyncTime', () => {
     expect(result).not.toBeNull();
     expect(result).not.toBe('2026-06-01T00:00:00.000Z');
   });
+
+  it('falls back to owner-level runtime_state for repo with zero findings', async () => {
+    const user = await insertTestUser();
+    const owner: SecurityReviewOwner = { userId: user.id };
+    const expectedTime = '2026-03-01T12:00:00.000Z';
+
+    await db.insert(agent_configs).values({
+      owned_by_user_id: user.id,
+      agent_type: 'security_scan',
+      platform: 'github',
+      config: {},
+      is_enabled: true,
+      runtime_state: { last_synced_at: expectedTime },
+      created_by: 'test',
+    });
+
+    // No findings inserted for this repo — simulates a clean repo with zero alerts
+    const result = await getLastSyncTime({ owner, repoFullName: 'test-org/clean-repo' });
+    expect(result).toBe(expectedTime);
+  });
 });

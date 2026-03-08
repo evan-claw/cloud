@@ -776,6 +776,30 @@ export async function findSecurityFindingBySource(
   }
 }
 
+/** Read owner-level last_synced_at from agent_configs.runtime_state. */
+async function getOwnerLastSyncedAt(ownerConverted: Owner): Promise<string | null> {
+  const ownerCondition =
+    ownerConverted.type === 'org'
+      ? eq(agent_configs.owned_by_organization_id, ownerConverted.id)
+      : eq(agent_configs.owned_by_user_id, ownerConverted.id);
+
+  const configResult = await db
+    .select({
+      lastSyncedAt: sql<string | null>`${agent_configs.runtime_state}->>'last_synced_at'`,
+    })
+    .from(agent_configs)
+    .where(
+      and(
+        ownerCondition,
+        eq(agent_configs.agent_type, 'security_scan'),
+        eq(agent_configs.platform, 'github')
+      )
+    )
+    .limit(1);
+
+  return configResult[0]?.lastSyncedAt ?? null;
+}
+
 export async function getLastSyncTime(params: {
   owner: SecurityReviewOwner;
   repoFullName?: string;
@@ -788,29 +812,11 @@ export async function getLastSyncTime(params: {
     // Return null (not MAX(findings)) when runtime_state is missing — falling back to
     // findings would overstate freshness after partial sync failures.
     if (!repoFullName) {
-      const ownerCondition =
-        ownerConverted.type === 'org'
-          ? eq(agent_configs.owned_by_organization_id, ownerConverted.id)
-          : eq(agent_configs.owned_by_user_id, ownerConverted.id);
-
-      const configResult = await db
-        .select({
-          lastSyncedAt: sql<string | null>`${agent_configs.runtime_state}->>'last_synced_at'`,
-        })
-        .from(agent_configs)
-        .where(
-          and(
-            ownerCondition,
-            eq(agent_configs.agent_type, 'security_scan'),
-            eq(agent_configs.platform, 'github')
-          )
-        )
-        .limit(1);
-
-      return configResult[0]?.lastSyncedAt ?? null;
+      return await getOwnerLastSyncedAt(ownerConverted);
     }
 
     // Repo-specific: read MAX(last_synced_at) from findings for the specific repo.
+    // Falls back to owner-level runtime_state for repos with zero findings (clean repos).
     const findingConditions: SQL[] = [];
     if (ownerConverted.type === 'org') {
       findingConditions.push(eq(security_findings.owned_by_organization_id, ownerConverted.id));
@@ -824,7 +830,9 @@ export async function getLastSyncTime(params: {
       .from(security_findings)
       .where(and(...findingConditions));
 
-    return result[0]?.lastSyncedAt ?? null;
+    // Clean repos have no findings rows, so fall back to the owner-level
+    // runtime_state.last_synced_at (set only after a fully successful sync).
+    return result[0]?.lastSyncedAt ?? (await getOwnerLastSyncedAt(ownerConverted));
   } catch (error) {
     captureException(error, {
       tags: { operation: 'getLastSyncTime' },
