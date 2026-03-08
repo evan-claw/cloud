@@ -450,4 +450,177 @@ describe('Disconnect handling & reaper', () => {
     expect(result.execution?.status).toBe('failed');
     expect(result.interruptAfter).toBe(false);
   });
+
+  // ---------------------------------------------------------------------------
+  // failExecutionRpc — direct RPC path for external callers
+  // ---------------------------------------------------------------------------
+
+  it('failExecutionRpc marks execution as failed with full cleanup', async () => {
+    const userId = 'user_rpc_1';
+    const sessionId = 'agent_rpc_1';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const excId = 'exc_rpc_cleanup' as ExecutionId;
+      await instance.addExecution({
+        executionId: excId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: excId,
+      });
+      await instance.setActiveExecution(excId);
+
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'running',
+      });
+
+      // Set the interrupt flag so we can verify it gets cleared
+      await instance.requestInterrupt();
+
+      const rpcResult = await instance.failExecutionRpc({
+        executionId: excId,
+        error: 'Interrupted - no running processes found',
+      });
+
+      const execution = await instance.getExecution(excId);
+      const activeExecId = await instance.getActiveExecutionId();
+      const interruptAfter = await instance.isInterruptRequested();
+
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
+      const events = eventQueries.findByFilters({ executionIds: [excId] });
+      const errorEvents = events.filter(e => e.stream_event_type === 'error');
+
+      return { rpcResult, execution, activeExecId, interruptAfter, errorEvents };
+    });
+
+    expect(result.rpcResult).toBe(true);
+    expect(result.execution?.status).toBe('failed');
+    expect(result.execution?.error).toContain('Interrupted - no running processes found');
+    expect(result.activeExecId).toBeNull();
+    expect(result.interruptAfter).toBe(false);
+    expect(result.errorEvents).toHaveLength(1);
+
+    const payload = JSON.parse(result.errorEvents[0].payload);
+    expect(payload.fatal).toBe(true);
+    expect(payload.error).toContain('Interrupted - no running processes found');
+  });
+
+  it('failExecutionRpc returns false for already-terminal execution', async () => {
+    const userId = 'user_rpc_2';
+    const sessionId = 'agent_rpc_2';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const excId = 'exc_rpc_terminal' as ExecutionId;
+      await instance.addExecution({
+        executionId: excId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: excId,
+      });
+      await instance.setActiveExecution(excId);
+
+      // Transition to running, then to failed
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'running',
+      });
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'failed',
+        error: 'already dead',
+      });
+
+      // Count events before the RPC call
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
+      const eventsBefore = eventQueries.findByFilters({ executionIds: [excId] });
+      const errorCountBefore = eventsBefore.filter(e => e.stream_event_type === 'error').length;
+
+      // Now call failExecutionRpc on the already-terminal execution
+      const rpcResult = await instance.failExecutionRpc({
+        executionId: excId,
+        error: 'should be a no-op',
+      });
+
+      const eventsAfter = eventQueries.findByFilters({ executionIds: [excId] });
+      const errorCountAfter = eventsAfter.filter(e => e.stream_event_type === 'error').length;
+
+      return { rpcResult, errorCountBefore, errorCountAfter };
+    });
+
+    expect(result.rpcResult).toBe(false);
+    expect(result.errorCountAfter).toBe(result.errorCountBefore);
+  });
+
+  it('failExecutionRpc passes custom streamEventType', async () => {
+    const userId = 'user_rpc_3';
+    const sessionId = 'agent_rpc_3';
+    const doId = env.CLOUD_AGENT_SESSION.idFromName(`${userId}:${sessionId}`);
+    const stub = env.CLOUD_AGENT_SESSION.get(doId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const now = Date.now();
+
+      await instance.updateMetadata({
+        version: now,
+        sessionId,
+        userId,
+        timestamp: now,
+      });
+
+      const excId = 'exc_rpc_custom_type' as ExecutionId;
+      await instance.addExecution({
+        executionId: excId,
+        mode: 'code',
+        streamingMode: 'websocket',
+        ingestToken: excId,
+      });
+      await instance.setActiveExecution(excId);
+
+      await instance.updateExecutionStatus({
+        executionId: excId,
+        status: 'running',
+      });
+
+      const rpcResult = await instance.failExecutionRpc({
+        executionId: excId,
+        error: 'test',
+        streamEventType: 'wrapper_disconnected',
+      });
+
+      const db = drizzle(state.storage, { logger: false });
+      const eventQueries = createEventQueries(db, state.storage.sql);
+      const events = eventQueries.findByFilters({ executionIds: [excId] });
+      const customEvents = events.filter(e => e.stream_event_type === 'wrapper_disconnected');
+
+      return { rpcResult, customEvents };
+    });
+
+    expect(result.rpcResult).toBe(true);
+    expect(result.customEvents).toHaveLength(1);
+    expect(result.customEvents[0].stream_event_type).toBe('wrapper_disconnected');
+  });
 });
