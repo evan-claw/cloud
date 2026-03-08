@@ -543,12 +543,17 @@ export async function setFindingRunning(
     );
 }
 
+/**
+ * Mark a finding's analysis as completed.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ * The caller should clear analysis_status when this returns false.
+ */
 export async function setFindingCompleted(
   db: WorkerDb,
   findingId: string,
   analysis: SecurityFindingAnalysis
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const rows = await db
     .update(security_findings)
     .set({
       analysis_status: 'completed',
@@ -565,15 +570,23 @@ export async function setFindingCompleted(
           not(like(security_findings.ignored_reason, 'superseded:%'))
         )
       )
-    );
+    )
+    .returning({ id: security_findings.id });
+
+  return rows.length > 0;
 }
 
+/**
+ * Mark a finding's analysis as failed.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ * The caller should clear analysis_status when this returns false.
+ */
 export async function setFindingFailed(
   db: WorkerDb,
   findingId: string,
   errorMessage: string
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const rows = await db
     .update(security_findings)
     .set({
       analysis_status: 'failed',
@@ -589,5 +602,22 @@ export async function setFindingFailed(
           not(like(security_findings.ignored_reason, 'superseded:%'))
         )
       )
-    );
+    )
+    .returning({ id: security_findings.id });
+
+  return rows.length > 0;
+}
+
+/**
+ * Clear analysis_status so a superseded finding no longer counts against
+ * the owner's concurrency cap in countRunningAnalyses().
+ */
+export async function clearAnalysisStatus(db: WorkerDb, findingId: string): Promise<void> {
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`.mapWith(String),
+    })
+    .where(eq(security_findings.id, findingId));
 }

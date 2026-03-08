@@ -5,6 +5,7 @@ import { captureException, captureMessage } from '@sentry/nextjs';
 import { getSecurityFindingById } from '@/lib/security-agent/db/security-findings';
 import {
   updateAnalysisStatus,
+  clearAnalysisStatus,
   transitionAutoAnalysisQueueFromCallback,
   type AutoAnalysisFailureCode,
 } from '@/lib/security-agent/db/security-analysis';
@@ -147,9 +148,9 @@ export async function POST(
         toStatus: 'completed',
         failureCode: 'SKIPPED_NO_LONGER_ELIGIBLE',
       });
-      await updateAnalysisStatus(findingId, 'failed', {
-        error: 'Superseded before callback arrived',
-      });
+      // Use clearAnalysisStatus (not updateAnalysisStatus) because the finding
+      // is already superseded and updateAnalysisStatus's guard would no-op.
+      await clearAnalysisStatus(findingId);
       return NextResponse.json({ success: true, message: 'Superseded finding ignored' });
     }
 
@@ -179,9 +180,13 @@ export async function POST(
             findingId,
             status: unknownStatus,
           });
-          await updateAnalysisStatus(findingId, 'failed', {
-            error: `Unknown callback status: ${unknownStatus}`,
-          });
+          if (
+            !(await updateAnalysisStatus(findingId, 'failed', {
+              error: `Unknown callback status: ${unknownStatus}`,
+            }))
+          ) {
+            await clearAnalysisStatus(findingId);
+          }
           await transitionAutoAnalysisQueueFromCallback({
             findingId,
             toStatus: 'failed',
@@ -254,9 +259,13 @@ async function handleAnalysisCompleted(
 
   if (!triggeredByUserId) {
     logError('Missing triggeredByUserId in analysis context', { findingId, correlationId });
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: 'Cannot process callback — triggeredByUserId missing from analysis context',
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: 'Cannot process callback — triggeredByUserId missing from analysis context',
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     await transitionAutoAnalysisQueueFromCallback({
       findingId,
       toStatus: 'failed',
@@ -269,9 +278,13 @@ async function handleAnalysisCompleted(
   const kiloSessionId = payload.kiloSessionId;
   if (!kiloSessionId) {
     logError('Callback missing kiloSessionId', { findingId, correlationId });
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: 'Callback missing kiloSessionId — cannot retrieve analysis result',
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: 'Callback missing kiloSessionId — cannot retrieve analysis result',
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     await transitionAutoAnalysisQueueFromCallback({
       findingId,
       toStatus: 'failed',
@@ -330,9 +343,13 @@ async function handleAnalysisCompleted(
       kiloSessionId,
       attempts: maxAttempts,
     });
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: 'Analysis completed but result could not be retrieved from ingest service',
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: 'Analysis completed but result could not be retrieved from ingest service',
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     await transitionAutoAnalysisQueueFromCallback({
       findingId,
       toStatus: 'failed',
@@ -365,9 +382,13 @@ async function handleAnalysisCompleted(
       correlationId,
       triggeredByUserId,
     });
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: `User ${triggeredByUserId} not found — cannot run Tier 3 extraction`,
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: `User ${triggeredByUserId} not found — cannot run Tier 3 extraction`,
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     await transitionAutoAnalysisQueueFromCallback({
       findingId,
       toStatus: 'failed',
@@ -482,7 +503,9 @@ async function handleAnalysisFailed(
     });
   }
 
-  await updateAnalysisStatus(findingId, 'failed', { error: errorMessage });
+  if (!(await updateAnalysisStatus(findingId, 'failed', { error: errorMessage }))) {
+    await clearAnalysisStatus(findingId);
+  }
   await transitionAutoAnalysisQueueFromCallback({
     findingId,
     toStatus: 'failed',

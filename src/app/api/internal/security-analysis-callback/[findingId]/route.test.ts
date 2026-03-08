@@ -66,8 +66,13 @@ jest.mock('@/lib/security-agent/db/security-findings', () => ({
   getSecurityFindingById: mockGetSecurityFindingById,
 }));
 
+const mockClearAnalysisStatus = jest.fn() as jest.MockedFunction<
+  typeof securityAnalysisModule.clearAnalysisStatus
+>;
+
 jest.mock('@/lib/security-agent/db/security-analysis', () => ({
   updateAnalysisStatus: mockUpdateAnalysisStatus,
+  clearAnalysisStatus: mockClearAnalysisStatus,
   transitionAutoAnalysisQueueFromCallback: mockTransitionAutoAnalysisQueueFromCallback,
 }));
 
@@ -236,7 +241,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   afterPromises = [];
-  mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+  mockUpdateAnalysisStatus.mockResolvedValue(true);
   mockTransitionAutoAnalysisQueueFromCallback.mockResolvedValue(undefined);
   mockFinalizeAnalysis.mockResolvedValue(undefined);
   ({ POST } = await import('./route'));
@@ -332,9 +337,7 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
         toStatus: 'completed',
         failureCode: 'SKIPPED_NO_LONGER_ELIGIBLE',
       });
-      expect(mockUpdateAnalysisStatus).toHaveBeenCalledWith(FINDING_ID, 'failed', {
-        error: 'Superseded before callback arrived',
-      });
+      expect(mockClearAnalysisStatus).toHaveBeenCalledWith(FINDING_ID);
     });
 
     it('skips processing when finding is already completed', async () => {

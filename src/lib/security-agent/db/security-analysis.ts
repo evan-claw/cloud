@@ -125,6 +125,10 @@ export function isFindingEligibleForAutoAnalysis(params: {
   return { eligible: effectiveRank <= maxRank, severityRank: effectiveRank };
 }
 
+/**
+ * Update the analysis status of a finding.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ */
 export async function updateAnalysisStatus(
   findingId: string,
   status: SecurityFindingAnalysisStatus,
@@ -134,7 +138,7 @@ export async function updateAnalysisStatus(
     error?: string;
     analysis?: SecurityFindingAnalysis;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   try {
     const updateData: Record<string, unknown> = {
       analysis_status: status,
@@ -172,7 +176,7 @@ export async function updateAnalysisStatus(
       updateData.analysis_completed_at = sql`now()`;
     }
 
-    await db
+    const rows = await db
       .update(security_findings)
       .set(updateData)
       .where(
@@ -183,7 +187,10 @@ export async function updateAnalysisStatus(
             not(like(security_findings.ignored_reason, 'superseded:%'))
           )
         )
-      );
+      )
+      .returning({ id: security_findings.id });
+
+    return rows.length > 0;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'updateAnalysisStatus' },
@@ -191,6 +198,20 @@ export async function updateAnalysisStatus(
     });
     throw error;
   }
+}
+
+/**
+ * Clear analysis_status so a superseded finding no longer counts against
+ * the owner's concurrency cap in countRunningAnalyses().
+ */
+export async function clearAnalysisStatus(findingId: string): Promise<void> {
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`,
+    })
+    .where(eq(security_findings.id, findingId));
 }
 
 export async function countRunningAnalyses(owner: SecurityReviewOwner): Promise<number> {
