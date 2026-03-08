@@ -5,7 +5,7 @@ import {
   security_analysis_owner_state,
   type SecurityFinding,
 } from '@kilocode/db/schema';
-import { eq, and, sql, count, isNotNull, desc, or, isNull } from 'drizzle-orm';
+import { eq, and, sql, count, isNotNull, desc, or, isNull, inArray } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type {
   AutoAnalysisMinSeverity,
@@ -670,6 +670,41 @@ export async function enqueueBacklogFindings(params: {
   `);
 
   return result.rows.length;
+}
+
+/**
+ * Remove superseded findings from the auto-analysis queue so the worker
+ * doesn't analyze findings that are no longer open.
+ *
+ * Targets both `queued` and `pending` (claimed but not yet running) rows
+ * because the auto-analysis worker may claim rows between per-finding
+ * enqueue and this repo-level cleanup.
+ */
+export async function dequeueSupersededFindings(findingIds: string[]): Promise<number> {
+  if (findingIds.length === 0) return 0;
+
+  const result = await db
+    .update(security_analysis_queue)
+    .set({
+      queue_status: 'completed',
+      failure_code: 'SKIPPED_NO_LONGER_ELIGIBLE',
+      claim_token: null,
+      claimed_at: null,
+      claimed_by_job_id: null,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(security_analysis_queue.finding_id, findingIds),
+        or(
+          eq(security_analysis_queue.queue_status, 'queued'),
+          eq(security_analysis_queue.queue_status, 'pending')
+        )
+      )
+    )
+    .returning({ id: security_analysis_queue.id });
+
+  return result.length;
 }
 
 export async function transitionAutoAnalysisQueueFromCallback(params: {

@@ -83,6 +83,8 @@ export type UpsertSecurityFindingResult = {
   findingId: string;
   wasInserted: boolean;
   previousStatus: SecurityFindingStatus | null;
+  /** The status actually persisted — may differ from the input when a superseded row is preserved. */
+  effectiveStatus: SecurityFindingStatus;
   findingCreatedAt: string;
 };
 
@@ -97,11 +99,14 @@ export async function upsertSecurityFinding(
       findingId: string;
       wasInserted: boolean;
       previousStatus: SecurityFindingStatus | null;
+      effectiveStatus: SecurityFindingStatus;
       findingCreatedAt: string;
     }>(sql`
       WITH existing_match AS (
         SELECT ${security_findings.id} AS id,
                ${security_findings.status} AS previous_status,
+               ${security_findings.ignored_reason} AS ignored_reason,
+               ${security_findings.ignored_by} AS ignored_by,
                ${security_findings.created_at} AS created_at
         FROM ${security_findings}
         WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
@@ -119,9 +124,18 @@ export async function upsertSecurityFinding(
           ${sql.identifier(security_findings.patched_version.name)} = ${params.patched_version},
           ${sql.identifier(security_findings.title.name)} = ${params.title},
           ${sql.identifier(security_findings.description.name)} = ${params.description},
-          ${sql.identifier(security_findings.status.name)} = ${params.status},
-          ${sql.identifier(security_findings.ignored_reason.name)} = ${params.ignored_reason},
-          ${sql.identifier(security_findings.ignored_by.name)} = ${params.ignored_by},
+          ${sql.identifier(security_findings.status.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.previous_status
+            ELSE ${params.status}
+          END,
+          ${sql.identifier(security_findings.ignored_reason.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.ignored_reason
+            ELSE ${params.ignored_reason}
+          END,
+          ${sql.identifier(security_findings.ignored_by.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.ignored_by
+            ELSE ${params.ignored_by}
+          END,
           ${sql.identifier(security_findings.fixed_at.name)} = ${params.fixed_at},
           ${sql.identifier(security_findings.sla_due_at.name)} = ${params.slaDueAt?.toISOString() || null},
           ${sql.identifier(security_findings.dependabot_html_url.name)} = ${params.dependabot_html_url},
@@ -136,6 +150,7 @@ export async function upsertSecurityFinding(
         RETURNING
           ${security_findings.id} AS id,
           existing_match.previous_status AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
       ),
       inserted AS (
@@ -200,6 +215,7 @@ export async function upsertSecurityFinding(
         ON CONFLICT (${sql.identifier(security_findings.repo_full_name.name)}, ${sql.identifier(security_findings.source.name)}, ${sql.identifier(security_findings.source_id.name)}) DO NOTHING
         RETURNING ${security_findings.id} AS id,
           NULL::text AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
       ),
       -- fallback: concurrent insert race — previous_status reflects the current row state
@@ -210,6 +226,7 @@ export async function upsertSecurityFinding(
         SELECT
           ${security_findings.id} AS id,
           ${security_findings.status} AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
         FROM ${security_findings}
         WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
@@ -220,16 +237,17 @@ export async function upsertSecurityFinding(
         LIMIT 1
       ),
       chosen AS (
-        SELECT id, false AS was_inserted, previous_status, created_at FROM updated
+        SELECT id, false AS was_inserted, previous_status, effective_status, created_at FROM updated
         UNION ALL
-        SELECT id, true AS was_inserted, previous_status, created_at FROM inserted
+        SELECT id, true AS was_inserted, previous_status, effective_status, created_at FROM inserted
         UNION ALL
-        SELECT id, false AS was_inserted, previous_status, created_at FROM fallback
+        SELECT id, false AS was_inserted, previous_status, effective_status, created_at FROM fallback
       )
       SELECT
         chosen.id AS "findingId",
         chosen.was_inserted AS "wasInserted",
         chosen.previous_status AS "previousStatus",
+        chosen.effective_status AS "effectiveStatus",
         chosen.created_at AS "findingCreatedAt"
       FROM chosen
       LIMIT 1
@@ -245,6 +263,67 @@ export async function upsertSecurityFinding(
     captureException(error, {
       tags: { operation: 'upsertSecurityFinding' },
       extra: { params },
+    });
+    throw error;
+  }
+}
+
+/**
+ * GitHub sometimes creates a new Dependabot alert (new alert number) for the
+ * same GHSA/package/manifest when an advisory is updated. Keep the newest
+ * alert open and mark older duplicates as ignored with a superseded reference.
+ */
+export type SupersedeResult = { count: number; supersededFindingIds: string[] };
+
+export async function supersedeDuplicateFindings(repoFullName: string): Promise<SupersedeResult> {
+  try {
+    const { rows } = await db.execute<{ id: string }>(sql`
+    WITH ranked AS (
+      SELECT
+        ${security_findings.id} AS id,
+        ROW_NUMBER() OVER (
+          PARTITION BY ${security_findings.repo_full_name},
+                       ${security_findings.source},
+                       ${security_findings.ghsa_id},
+                       ${security_findings.package_name},
+                       ${security_findings.manifest_path}
+          ORDER BY ${security_findings.source_id}::int DESC
+        ) AS rn,
+        FIRST_VALUE(${security_findings.id}) OVER (
+          PARTITION BY ${security_findings.repo_full_name},
+                       ${security_findings.source},
+                       ${security_findings.ghsa_id},
+                       ${security_findings.package_name},
+                       ${security_findings.manifest_path}
+          ORDER BY ${security_findings.source_id}::int DESC
+        ) AS canonical_id
+      FROM ${security_findings}
+      WHERE ${security_findings.repo_full_name} = ${repoFullName}
+        AND ${security_findings.source} = 'dependabot'
+        AND ${security_findings.ghsa_id} IS NOT NULL
+        AND ${security_findings.status} = 'open'
+    ),
+    superseded AS (
+      UPDATE ${security_findings}
+      SET
+        ${sql.identifier(security_findings.status.name)} = 'ignored',
+        ${sql.identifier(security_findings.ignored_reason.name)} = 'superseded:' || ranked.canonical_id,
+        ${sql.identifier(security_findings.ignored_by.name)} = 'system',
+        ${sql.identifier(security_findings.updated_at.name)} = now()
+      FROM ranked
+      WHERE ${security_findings.id} = ranked.id
+        AND ranked.rn > 1
+      RETURNING ${security_findings.id}
+    )
+    SELECT id FROM superseded
+  `);
+
+    const supersededFindingIds = rows.map(r => r.id);
+    return { count: supersededFindingIds.length, supersededFindingIds };
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'supersedeDuplicateFindings' },
+      extra: { repoFullName },
     });
     throw error;
   }
