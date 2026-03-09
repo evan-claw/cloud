@@ -20,6 +20,8 @@ import type {
   GatewayProcessActionResponse,
   ConfigRestoreResponse,
   ControllerVersionResponse,
+  GoogleCredentialsInput,
+  GoogleCredentialsResponse,
 } from './types';
 
 /**
@@ -232,6 +234,22 @@ export class KiloClawInternalClient {
     return this.request('/api/platform/config/restore', {
       method: 'POST',
       body: JSON.stringify({ userId, version }),
+    });
+  }
+
+  async updateGoogleCredentials(
+    userId: string,
+    input: GoogleCredentialsInput
+  ): Promise<GoogleCredentialsResponse> {
+    return this.request('/api/platform/google-credentials', {
+      method: 'POST',
+      body: JSON.stringify({ userId, ...input }),
+    });
+  }
+
+  async clearGoogleCredentials(userId: string): Promise<GoogleCredentialsResponse> {
+    return this.request(`/api/platform/google-credentials?userId=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
     });
   }
 }
