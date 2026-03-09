@@ -7,7 +7,7 @@ import {
   kilocode_users,
   organization_memberships,
 } from '@kilocode/db/schema';
-import { and, asc, count, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lte, not, like, or, sql } from 'drizzle-orm';
 import type { QueueOwner, SecurityAgentConfig, SecurityFindingAnalysis } from '../types.js';
 import {
   AUTO_ANALYSIS_OWNER_CAP,
@@ -504,7 +504,15 @@ export async function setFindingPending(
       cli_session_id: null,
       updated_at: sql`now()`.mapWith(String),
     })
-    .where(eq(security_findings.id, findingId));
+    .where(
+      and(
+        eq(security_findings.id, findingId),
+        or(
+          isNull(security_findings.ignored_reason),
+          not(like(security_findings.ignored_reason, 'superseded:%'))
+        )
+      )
+    );
 }
 
 export async function setFindingRunning(
@@ -524,15 +532,28 @@ export async function setFindingRunning(
       ),
       updated_at: sql`now()`.mapWith(String),
     })
-    .where(eq(security_findings.id, findingId));
+    .where(
+      and(
+        eq(security_findings.id, findingId),
+        or(
+          isNull(security_findings.ignored_reason),
+          not(like(security_findings.ignored_reason, 'superseded:%'))
+        )
+      )
+    );
 }
 
+/**
+ * Mark a finding's analysis as completed.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ * The caller should clear analysis_status when this returns false.
+ */
 export async function setFindingCompleted(
   db: WorkerDb,
   findingId: string,
   analysis: SecurityFindingAnalysis
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const rows = await db
     .update(security_findings)
     .set({
       analysis_status: 'completed',
@@ -541,20 +562,61 @@ export async function setFindingCompleted(
       analysis_completed_at: sql`now()`.mapWith(String),
       updated_at: sql`now()`.mapWith(String),
     })
-    .where(eq(security_findings.id, findingId));
+    .where(
+      and(
+        eq(security_findings.id, findingId),
+        or(
+          isNull(security_findings.ignored_reason),
+          not(like(security_findings.ignored_reason, 'superseded:%'))
+        )
+      )
+    )
+    .returning({ id: security_findings.id });
+
+  return rows.length > 0;
 }
 
+/**
+ * Mark a finding's analysis as failed.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ * The caller should clear analysis_status when this returns false.
+ */
 export async function setFindingFailed(
   db: WorkerDb,
   findingId: string,
   errorMessage: string
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const rows = await db
     .update(security_findings)
     .set({
       analysis_status: 'failed',
       analysis_error: errorMessage,
       analysis_completed_at: sql`now()`.mapWith(String),
+      updated_at: sql`now()`.mapWith(String),
+    })
+    .where(
+      and(
+        eq(security_findings.id, findingId),
+        or(
+          isNull(security_findings.ignored_reason),
+          not(like(security_findings.ignored_reason, 'superseded:%'))
+        )
+      )
+    )
+    .returning({ id: security_findings.id });
+
+  return rows.length > 0;
+}
+
+/**
+ * Clear analysis_status so a superseded finding no longer counts against
+ * the owner's concurrency cap in countRunningAnalyses().
+ */
+export async function clearAnalysisStatus(db: WorkerDb, findingId: string): Promise<void> {
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
       updated_at: sql`now()`.mapWith(String),
     })
     .where(eq(security_findings.id, findingId));

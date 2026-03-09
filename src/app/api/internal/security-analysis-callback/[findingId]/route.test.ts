@@ -66,8 +66,13 @@ jest.mock('@/lib/security-agent/db/security-findings', () => ({
   getSecurityFindingById: mockGetSecurityFindingById,
 }));
 
+const mockClearAnalysisStatus = jest.fn() as jest.MockedFunction<
+  typeof securityAnalysisModule.clearAnalysisStatus
+>;
+
 jest.mock('@/lib/security-agent/db/security-analysis', () => ({
   updateAnalysisStatus: mockUpdateAnalysisStatus,
+  clearAnalysisStatus: mockClearAnalysisStatus,
   transitionAutoAnalysisQueueFromCallback: mockTransitionAutoAnalysisQueueFromCallback,
 }));
 
@@ -236,7 +241,7 @@ beforeEach(async () => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   afterPromises = [];
-  mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+  mockUpdateAnalysisStatus.mockResolvedValue(true);
   mockTransitionAutoAnalysisQueueFromCallback.mockResolvedValue(undefined);
   mockFinalizeAnalysis.mockResolvedValue(undefined);
   ({ POST } = await import('./route'));
@@ -309,6 +314,30 @@ describe('POST /api/internal/security-analysis-callback/[findingId]', () => {
         'Auto-analysis callback session mismatch',
         expect.objectContaining({ level: 'warning' })
       );
+    });
+
+    it('skips processing when finding has been superseded but transitions queue row and clears analysis_status', async () => {
+      mockGetSecurityFindingById.mockResolvedValue(
+        createMockFinding({
+          status: 'ignored',
+          ignored_reason: 'superseded:finding-canonical-1',
+          ignored_by: 'system',
+        })
+      );
+      const req = makeRequest(FINDING_ID, completedPayload);
+
+      const response = await POST(req, makeParams(FINDING_ID));
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.success).toBe(true);
+      expect(body.message).toBe('Superseded finding ignored');
+      expect(mockTransitionAutoAnalysisQueueFromCallback).toHaveBeenCalledWith({
+        findingId: FINDING_ID,
+        toStatus: 'completed',
+        failureCode: 'SKIPPED_NO_LONGER_ELIGIBLE',
+      });
+      expect(mockClearAnalysisStatus).toHaveBeenCalledWith(FINDING_ID);
     });
 
     it('skips processing when finding is already completed', async () => {

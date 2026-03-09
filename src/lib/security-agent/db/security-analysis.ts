@@ -5,7 +5,7 @@ import {
   security_analysis_owner_state,
   type SecurityFinding,
 } from '@kilocode/db/schema';
-import { eq, and, sql, count, isNotNull, desc, or, isNull } from 'drizzle-orm';
+import { eq, and, sql, count, isNotNull, desc, or, isNull, inArray, not, like } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type {
   AutoAnalysisMinSeverity,
@@ -125,6 +125,10 @@ export function isFindingEligibleForAutoAnalysis(params: {
   return { eligible: effectiveRank <= maxRank, severityRank: effectiveRank };
 }
 
+/**
+ * Update the analysis status of a finding.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ */
 export async function updateAnalysisStatus(
   findingId: string,
   status: SecurityFindingAnalysisStatus,
@@ -134,7 +138,7 @@ export async function updateAnalysisStatus(
     error?: string;
     analysis?: SecurityFindingAnalysis;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   try {
     const updateData: Record<string, unknown> = {
       analysis_status: status,
@@ -172,7 +176,21 @@ export async function updateAnalysisStatus(
       updateData.analysis_completed_at = sql`now()`;
     }
 
-    await db.update(security_findings).set(updateData).where(eq(security_findings.id, findingId));
+    const rows = await db
+      .update(security_findings)
+      .set(updateData)
+      .where(
+        and(
+          eq(security_findings.id, findingId),
+          or(
+            isNull(security_findings.ignored_reason),
+            not(like(security_findings.ignored_reason, 'superseded:%'))
+          )
+        )
+      )
+      .returning({ id: security_findings.id });
+
+    return rows.length > 0;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'updateAnalysisStatus' },
@@ -180,6 +198,20 @@ export async function updateAnalysisStatus(
     });
     throw error;
   }
+}
+
+/**
+ * Clear analysis_status so a superseded finding no longer counts against
+ * the owner's concurrency cap in countRunningAnalyses().
+ */
+export async function clearAnalysisStatus(findingId: string): Promise<void> {
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`,
+    })
+    .where(eq(security_findings.id, findingId));
 }
 
 export async function countRunningAnalyses(owner: SecurityReviewOwner): Promise<number> {
@@ -670,6 +702,63 @@ export async function enqueueBacklogFindings(params: {
   `);
 
   return result.rows.length;
+}
+
+/**
+ * Remove superseded findings from the auto-analysis queue so the worker
+ * doesn't analyze findings that are no longer open.
+ *
+ * Targets both `queued` and `pending` (claimed but not yet running) rows
+ * because the auto-analysis worker may claim rows between per-finding
+ * enqueue and this repo-level cleanup.
+ *
+ * Clears `analysis_status` for `pending` findings so they no longer count
+ * against the owner's concurrency cap. Already-running analyses are left
+ * alone — the callback route transitions their queue rows when the job
+ * reports back, releasing the concurrency slot at that point.
+ */
+export async function dequeueSupersededFindings(findingIds: string[]): Promise<number> {
+  if (findingIds.length === 0) return 0;
+
+  const result = await db
+    .update(security_analysis_queue)
+    .set({
+      queue_status: 'completed',
+      failure_code: 'SKIPPED_NO_LONGER_ELIGIBLE',
+      claim_token: null,
+      claimed_at: null,
+      claimed_by_job_id: null,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(security_analysis_queue.finding_id, findingIds),
+        or(
+          eq(security_analysis_queue.queue_status, 'queued'),
+          eq(security_analysis_queue.queue_status, 'pending')
+        )
+      )
+    )
+    .returning({ id: security_analysis_queue.id });
+
+  // Clear pending analysis_status so countRunningAnalyses no longer counts
+  // these superseded findings against the owner's concurrency cap.
+  // Running analyses are left alone — the callback route transitions their
+  // queue rows when the job completes, releasing the concurrency slot.
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(security_findings.id, findingIds),
+        eq(security_findings.analysis_status, 'pending')
+      )
+    );
+
+  return result.length;
 }
 
 export async function transitionAutoAnalysisQueueFromCallback(params: {
