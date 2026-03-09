@@ -1467,47 +1467,71 @@ export class SessionService {
       platform: context.platform,
     });
 
-    // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
-    await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
-    await writeGlobalRules(sandbox, context.sessionHome, sessionId);
+    // Wrap post-clone steps so that a transient failure (e.g. `kilo import`)
+    // removes the workspace directory. Without this, `.git` survives and the
+    // next retry sees `isColdStart = false`, skipping the full restore flow —
+    // leaving the session in a broken half-initialized state.
+    // `SessionSnapshotRestoreError` (404) is permanent and is re-thrown without
+    // cleanup since retrying won't help.
+    try {
+      // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
+      await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
+      await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
-    // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
-    const internalSecret = await env.INTERNAL_API_SECRET_PROD.get();
-    const response = await env.SESSION_INGEST.fetch(
-      new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
-        headers: {
-          'X-Internal-Secret': internalSecret,
-          'X-Kilo-User-Id': userId,
-        },
-      })
-    );
-
-    if (response.status === 404) {
-      throw new SessionSnapshotRestoreError(
-        `Session snapshot restore failed: session not found`,
-        404
+      // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
+      const internalSecret = await env.INTERNAL_API_SECRET_PROD.get();
+      const response = await env.SESSION_INGEST.fetch(
+        new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
+          headers: {
+            'X-Internal-Secret': internalSecret,
+            'X-Kilo-User-Id': userId,
+          },
+        })
       );
-    }
-    if (!response.ok) {
-      throw new Error(`Session export failed: ${response.status}`);
-    }
 
-    const snapshotPayload = await response.text();
+      if (response.status === 404) {
+        throw new SessionSnapshotRestoreError(
+          `Session snapshot restore failed: session not found`,
+          404
+        );
+      }
+      if (!response.ok) {
+        throw new Error(`Session export failed: ${response.status}`);
+      }
 
-    // Extract diffs client-side from the streamed snapshot messages.
-    const diffs = SessionService.extractDiffsFromMessages(snapshotPayload);
+      const snapshotPayload = await response.text();
 
-    await this.restoreSessionSnapshot(session, sessionId, userId, snapshotPayload);
+      // Extract diffs client-side from the streamed snapshot messages.
+      const diffs = SessionService.extractDiffsFromMessages(snapshotPayload);
 
-    // Apply file-level changes from the previous session on top of the fresh clone.
-    // This runs after kilo import (conversation restore) since the CLI doesn't need
-    // the file state during import — it only restores its internal session DB.
-    await this.applySessionDiff(session, sessionId, userId, context.workspacePath, diffs);
+      await this.restoreSessionSnapshot(session, sessionId, userId, snapshotPayload);
 
-    // Re-run setup commands (fresh clone, need to reinstall)
-    if (metadata.setupCommands && metadata.setupCommands.length > 0) {
-      logger.info('Re-running setup commands after fresh clone');
-      await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
+      // Apply file-level changes from the previous session on top of the fresh clone.
+      // This runs after kilo import (conversation restore) since the CLI doesn't need
+      // the file state during import — it only restores its internal session DB.
+      await this.applySessionDiff(session, sessionId, userId, context.workspacePath, diffs);
+
+      // Re-run setup commands (fresh clone, need to reinstall)
+      if (metadata.setupCommands && metadata.setupCommands.length > 0) {
+        logger.info('Re-running setup commands after fresh clone');
+        await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
+      }
+    } catch (error) {
+      if (error instanceof SessionSnapshotRestoreError) {
+        throw error;
+      }
+
+      // Remove the workspace and sessionHome so the next retry sees a true
+      // cold start and re-runs the full restore from scratch.
+      logger
+        .withFields({
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Post-clone cold-start step failed; removing workspace for clean retry');
+      await cleanupWorkspace(session, context.workspacePath, context.sessionHome);
+
+      throw error;
     }
   }
 

@@ -36,6 +36,7 @@ import {
   cloneGitHubRepo as mockCloneGitHubRepo,
   manageBranch as mockManageBranch,
   restoreWorkspace as mockRestoreWorkspace,
+  cleanupWorkspace as mockCleanupWorkspace,
 } from './workspace.js';
 import { InvalidSessionMetadataError, SessionService } from './session-service.js';
 import type { SandboxInstance, SessionId, SessionContext, ExecutionSession } from './types.js';
@@ -929,6 +930,148 @@ describe('SessionService', () => {
       ).rejects.toThrow('session not found');
 
       expect(fetchMock).toHaveBeenCalled();
+    });
+
+    it('removes workspace when kilo import fails during cold start so retry can reclone', async () => {
+      const mockDOGetMetadata = vi.fn();
+      const payload = JSON.stringify({ info: {}, messages: [{ info: {}, parts: [] }] });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(payload));
+      const envWithIngest: PersistenceEnv = {
+        ...mockEnv,
+        SESSION_INGEST: {
+          fetch: fetchMock,
+        } as unknown as PersistenceEnv['SESSION_INGEST'],
+        CLOUD_AGENT_SESSION: {
+          idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
+          get: vi.fn(() => ({
+            getMetadata: mockDOGetMetadata,
+            updateMetadata: vi.fn().mockResolvedValue(undefined),
+            deleteSession: vi.fn().mockResolvedValue(undefined),
+          })),
+        } as unknown as PersistenceEnv['CLOUD_AGENT_SESSION'],
+      };
+      const fakeSession = {
+        exec: vi.fn().mockImplementation((cmd: string) => {
+          if (cmd.includes('test -d') && cmd.includes('.git')) {
+            return Promise.resolve({ success: true, exitCode: 1, stdout: '', stderr: '' });
+          }
+          if (cmd.includes('kilo import')) {
+            return Promise.resolve({
+              success: false,
+              exitCode: 1,
+              stdout: '',
+              stderr: 'import failed',
+            });
+          }
+          return Promise.resolve({ success: true, exitCode: 0, stdout: '', stderr: '' });
+        }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
+      const sandbox = {
+        createSession: vi.fn().mockResolvedValue(fakeSession),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: sandboxExec,
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+
+      const kiloSessionId = 'ses_test_kilo_session_id_0001';
+      const metadata = {
+        version: 123456789,
+        sessionId,
+        orgId,
+        userId,
+        timestamp: 123456789,
+        githubRepo: 'facebook/react',
+        githubToken: 'test-token',
+        kiloSessionId,
+      };
+      mockDOGetMetadata.mockResolvedValue(metadata);
+
+      const service = new SessionService();
+      await expect(
+        service.resume({
+          sandbox,
+          sandboxId: `${orgId}__${userId}`,
+          orgId,
+          userId,
+          sessionId,
+          kilocodeToken: 'test-token',
+          kilocodeModel: 'test-model',
+          env: envWithIngest,
+        })
+      ).rejects.toThrow('Session snapshot import failed');
+
+      const workspacePath = `/workspace/${orgId}/${userId}/sessions/${sessionId}`;
+      const sessionHome = `/home/${sessionId}`;
+      expect(mockCleanupWorkspace).toHaveBeenCalledWith(fakeSession, workspacePath, sessionHome);
+    });
+
+    it('does not remove workspace when SessionSnapshotRestoreError (404) is thrown', async () => {
+      const mockDOGetMetadata = vi.fn();
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+      const envWithIngest: PersistenceEnv = {
+        ...mockEnv,
+        SESSION_INGEST: {
+          fetch: fetchMock,
+        } as unknown as PersistenceEnv['SESSION_INGEST'],
+        CLOUD_AGENT_SESSION: {
+          idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
+          get: vi.fn(() => ({
+            getMetadata: mockDOGetMetadata,
+            updateMetadata: vi.fn().mockResolvedValue(undefined),
+            deleteSession: vi.fn().mockResolvedValue(undefined),
+          })),
+        } as unknown as PersistenceEnv['CLOUD_AGENT_SESSION'],
+      };
+      const fakeSession = {
+        exec: vi
+          .fn()
+          .mockResolvedValueOnce({ success: true, exitCode: 1, stdout: '', stderr: '' })
+          .mockResolvedValue({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandboxExec = vi.fn().mockResolvedValue({ exitCode: 0 });
+      const sandbox = {
+        createSession: vi.fn().mockResolvedValue(fakeSession),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: sandboxExec,
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+
+      const kiloSessionId = 'ses_test_kilo_session_id_0001';
+      const metadata = {
+        version: 123456789,
+        sessionId,
+        orgId,
+        userId,
+        timestamp: 123456789,
+        githubRepo: 'facebook/react',
+        githubToken: 'test-token',
+        kiloSessionId,
+      };
+      mockDOGetMetadata.mockResolvedValue(metadata);
+
+      const service = new SessionService();
+      await expect(
+        service.resume({
+          sandbox,
+          sandboxId: `${orgId}__${userId}`,
+          orgId,
+          userId,
+          sessionId,
+          kilocodeToken: 'test-token',
+          kilocodeModel: 'test-model',
+          env: envWithIngest,
+        })
+      ).rejects.toThrow('session not found');
+
+      // cleanupWorkspace should NOT have been called for 404 errors (permanent failure)
+      expect(mockCleanupWorkspace).not.toHaveBeenCalled();
     });
   });
 
