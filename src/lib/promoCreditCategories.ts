@@ -171,7 +171,8 @@ const nonSelfServicePromos: readonly NonSelfServicePromoCreditCategoryConfig[] =
   },
   {
     credit_category: 'automatic-welcome-credits',
-    description: 'Free credits for new users who pass both Turnstile and Stytch validation (disabled)',
+    description:
+      'Free credits for new users who pass both Turnstile and Stytch validation (disabled)',
     amount_usd: 0,
     is_idempotent: true,
     expiry_hours: PROMO_CREDIT_EXPIRY_HRS,
