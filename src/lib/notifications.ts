@@ -47,7 +47,7 @@ const normalUnconditionalNotifications: KiloNotification[] = [
   {
     id: 'kilo-cli-jan-5',
     title: 'Kilo CLI',
-    message: 'Prefer the terminal? Install the Kilo CLI with npm install -g @kilocode/cli',
+    message: 'Use Kilo directly inside your terminal. Install our CLI with npm install -g @kilocode/cli',
     action: {
       actionText: 'Learn more',
       actionURL: 'https://kilo.ai/docs/cli',
