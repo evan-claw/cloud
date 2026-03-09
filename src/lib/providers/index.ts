@@ -3,9 +3,9 @@ import { debugSaveProxyResponseStream } from '../debugUtils';
 import { fetchWithBackoff } from '../fetchWithBackoff';
 import { captureException, captureMessage } from '@sentry/nextjs';
 import type {
+  GatewayResponsesRequest,
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
-  OpenRouterProviderConfig,
 } from '@/lib/providers/openrouter/types';
 import {
   applyMistralModelSettings,
@@ -91,7 +91,7 @@ export const PROVIDERS = {
 
 export async function getProvider(
   requestedModel: string,
-  request: { provider?: OpenRouterProviderConfig },
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
@@ -216,7 +216,7 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
 
 function applyPreferredProvider(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest
+  requestToMutate: OpenRouterChatCompletionRequest | GatewayResponsesRequest
 ) {
   const preferredProviderOrder = getPreferredProviderOrder(requestedModel);
   if (preferredProviderOrder.length === 0) {
@@ -306,7 +306,7 @@ export async function openRouterRequest({
   path: string;
   search: string;
   method: string;
-  body: object;
+  body: OpenRouterChatCompletionRequest | GatewayResponsesRequest;
   extraHeaders: Record<string, string>;
   provider: Provider;
   signal?: AbortSignal;

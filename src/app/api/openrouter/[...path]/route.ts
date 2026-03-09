@@ -409,18 +409,16 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   if (
     isDataCollectionRequiredOnKiloCodeOnly(originalModelIdLowerCased) &&
-    parsedRequest.kind === 'chat_completions' &&
     !isFreePromptTrainingAllowed(parsedRequest.body.provider)
   ) {
     return dataCollectionRequiredResponse();
   }
 
-  const safetyHash = generateProviderSpecificHash(user.id, provider);
   if (taskId) {
     parsedRequest.body.prompt_cache_key = generateProviderSpecificHash(user.id + taskId, provider);
   }
-  parsedRequest.body.safety_identifier = safetyHash;
-  parsedRequest.body.user = safetyHash; // deprecated, but this is what OpenRouter uses
+  parsedRequest.body.safety_identifier = generateProviderSpecificHash(user.id, provider);
+  parsedRequest.body.user = parsedRequest.body.safety_identifier; // deprecated, but this is what OpenRouter uses
 
   if (parsedRequest.kind === 'chat_completions') {
     if (ENABLE_TOOL_REPAIR) {
@@ -432,6 +430,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     }
   }
 
+  // TODO Responses API
   const toolsAvailable =
     parsedRequest.kind === 'chat_completions' ? getToolsAvailable(parsedRequest.body.tools) : [];
   const toolsUsed =
