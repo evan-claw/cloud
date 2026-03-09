@@ -179,8 +179,8 @@ export async function restoreSession(
         if (diff.status === 'deleted') {
           try {
             fs.unlinkSync(fp);
-          } catch {
-            // file may already be absent
+          } catch (err: unknown) {
+            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
           }
           applied++;
         } else if (diff.after) {

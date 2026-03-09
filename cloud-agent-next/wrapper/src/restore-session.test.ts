@@ -254,7 +254,7 @@ describe('restoreSession', () => {
 
   it('skips diffs with path traversal', async () => {
     const snapshot = makeSnapshot([
-      { file: '../../../etc/passwd', after: 'malicious', status: 'modified' },
+      { file: '../escaped.txt', after: 'malicious', status: 'modified' },
       { file: 'safe.txt', after: 'safe content', status: 'modified' },
     ]);
     mockFetchOk(snapshot);
@@ -268,8 +268,8 @@ describe('restoreSession', () => {
       expect(result.diffs.total).toBe(2);
     }
 
-    // Verify malicious path was NOT written
-    expect(fs.existsSync(path.resolve(workspace, '../../../etc/passwd'))).toBe(false);
+    // Verify traversal target was NOT written outside the workspace
+    expect(fs.existsSync(path.join(tmpDir, 'escaped.txt'))).toBe(false);
 
     // Verify safe file was written
     expect(fs.readFileSync(path.join(workspace, 'safe.txt'), 'utf-8')).toBe('safe content');
