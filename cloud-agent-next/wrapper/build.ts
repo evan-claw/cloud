@@ -7,4 +7,12 @@ await Bun.build({
   sourcemap: 'external',
 });
 
-console.log('Build complete: dist/wrapper.js');
+await Bun.build({
+  entrypoints: ['./src/restore-session.ts'],
+  outdir: './dist',
+  naming: 'restore-session.js',
+  target: 'bun',
+  minify: true,
+});
+
+console.log('Build complete: dist/wrapper.js, dist/restore-session.js');
