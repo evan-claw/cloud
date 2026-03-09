@@ -71,6 +71,11 @@ import {
   FIELD_KEY_TO_ENV_VAR,
   ENV_VAR_TO_FIELD_KEY,
 } from '@kilocode/kiloclaw-secret-catalog';
+
+/** Channel env var names — used to exclude channel secrets from secretCount (they have their own channelCount). */
+const CHANNEL_ENV_VARS = new Set(
+  SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.envVar))
+);
 import { parseRegions, shuffleRegions, deprioritizeRegion } from './regions';
 import {
   METADATA_RECOVERY_COOLDOWN_MS,
@@ -577,7 +582,19 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       }
     }
 
-    // 3. Dual-write: update both fields for backward compat
+    // 3. Enforce allFieldsRequired on post-merge state.
+    //    Rejects partial clears (e.g. removing slackBotToken while slackAppToken remains).
+    for (const entry of SECRET_CATALOG) {
+      if (!entry.allFieldsRequired) continue;
+      const fieldValues = entry.fields.map(f => currentSecrets[f.key]);
+      const hasAny = fieldValues.some(v => v != null);
+      const hasAll = fieldValues.every(v => v != null);
+      if (hasAny && !hasAll) {
+        throw new Error(`${entry.label} requires all fields to be set together`);
+      }
+    }
+
+    // 4. Dual-write: update both fields for backward compat
     //    Legacy callers (patchChannels) still read from `channels`
     const channelKeys = new Set(
       SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.key))
@@ -1224,7 +1241,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastStartedAt: this.lastStartedAt,
       lastStoppedAt: this.lastStoppedAt,
       envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
-      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      secretCount: this.encryptedSecrets
+        ? Object.keys(this.encryptedSecrets).filter(k => !CHANNEL_ENV_VARS.has(k)).length
+        : 0,
       channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
       flyAppName: this.flyAppName,
       flyMachineId: this.flyMachineId,
@@ -1279,7 +1298,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastStartedAt: this.lastStartedAt,
       lastStoppedAt: this.lastStoppedAt,
       envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
-      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      secretCount: this.encryptedSecrets
+        ? Object.keys(this.encryptedSecrets).filter(k => !CHANNEL_ENV_VARS.has(k)).length
+        : 0,
       channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
       flyAppName: this.flyAppName,
       flyMachineId: this.flyMachineId,

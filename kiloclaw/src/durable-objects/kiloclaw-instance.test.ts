@@ -1621,6 +1621,21 @@ describe('updateSecrets', () => {
     expect(result.configured).toContain('telegramBotToken');
     expect(result.configured).not.toContain('TELEGRAM_BOT_TOKEN');
   });
+
+  it('rejects partial clear of allFieldsRequired entry', async () => {
+    const slackBotEnvelope = { ...fakeEnvelope, encryptedData: 'slack-bot' };
+    const slackAppEnvelope = { ...fakeEnvelope, encryptedData: 'slack-app' };
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      channels: { slackBotToken: slackBotEnvelope, slackAppToken: slackAppEnvelope },
+      encryptedSecrets: { SLACK_BOT_TOKEN: slackBotEnvelope, SLACK_APP_TOKEN: slackAppEnvelope },
+    });
+
+    // Removing only one Slack token should fail — allFieldsRequired
+    await expect(
+      instance.updateSecrets({ slackBotToken: null })
+    ).rejects.toThrow('Slack requires all fields to be set together');
+  });
 });
 
 // ============================================================================
