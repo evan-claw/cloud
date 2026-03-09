@@ -4,6 +4,7 @@ import { isOpenCodeBasedClient, isRooCodeBasedClient, stripRequiredPrefix } from
 import { generateProviderSpecificHash } from '@/lib/providerHash';
 import {
   extractPromptInfo,
+  extractResponsesPromptInfo,
   type MicrodollarUsageContext,
   type PromptInfo,
 } from '@/lib/processUsage';
@@ -324,7 +325,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   const tokenEstimates =
     parsedRequest.kind === 'chat_completions'
       ? estimateChatTokens_ignoringToolDefinitions(parsedRequest.body)
-      : estimateResponsesTokens(parsedRequest.body);
+      : { estimatedInputTokens: 0, estimatedOutputTokens: 0 };
   const promptInfo: PromptInfo =
     parsedRequest.kind === 'chat_completions'
       ? extractPromptInfo(parsedRequest.body)
@@ -581,29 +582,4 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   }
 
   return wrapInSafeNextResponse(response);
-}
-
-// ---------------------------------------------------------------------------
-// Responses API helpers
-// ---------------------------------------------------------------------------
-
-function extractResponsesPromptInfo(body: GatewayResponsesRequest): PromptInfo {
-  const instructions = body.instructions ?? '';
-  const input = typeof body.input === 'string' ? body.input : '';
-  return {
-    system_prompt_prefix: instructions.slice(0, 100),
-    system_prompt_length: instructions.length,
-    user_prompt_prefix: input.slice(0, 100),
-  };
-}
-
-function estimateResponsesTokens(body: GatewayResponsesRequest): {
-  estimatedInputTokens: number;
-  estimatedOutputTokens: number;
-} {
-  const inputLen =
-    typeof body.input === 'string' ? body.input.length : JSON.stringify(body.input ?? []).length;
-  const instructionsLen = (body.instructions ?? '').length;
-  const total = inputLen + instructionsLen;
-  return { estimatedInputTokens: total / 4, estimatedOutputTokens: total / 4 };
 }

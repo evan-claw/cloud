@@ -7,6 +7,7 @@ import { createTimer } from '@/lib/timer';
 import type { OpenAI } from 'openai';
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import type {
+  GatewayResponsesRequest,
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
 } from './providers/openrouter/types';
@@ -102,6 +103,16 @@ export function extractPromptInfo(body: OpenRouterChatCompletionRequest) {
     });
     return { system_prompt_prefix: '', system_prompt_length: -1, user_prompt_prefix: '' };
   }
+}
+
+export function extractResponsesPromptInfo(body: GatewayResponsesRequest): PromptInfo {
+  const instructions = body.instructions ?? '';
+  const input = typeof body.input === 'string' ? body.input : '';
+  return {
+    system_prompt_prefix: instructions.slice(0, 100),
+    system_prompt_length: instructions.length,
+    user_prompt_prefix: input.slice(0, 100),
+  };
 }
 
 interface Message {
