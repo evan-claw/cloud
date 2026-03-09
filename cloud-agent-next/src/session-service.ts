@@ -1305,39 +1305,47 @@ export class SessionService {
       );
 
       if (restoreResult.exitCode !== 0) {
-        logger
-          .withFields({
-            sessionId,
-            userId,
-            exitCode: restoreResult.exitCode,
-            stderr: restoreResult.stderr,
-            stdout: restoreResult.stdout,
-          })
-          .error('Cold-start session restore failed');
-
-        // Parse stdout JSON for structured error info
-        let code: number | undefined;
+        // Parse the script's structured JSON output for diagnostic fields
+        let restoreStep: string | undefined;
+        let restoreError: string | undefined;
+        let restoreCode: number | undefined;
         try {
           const parsed = JSON.parse(restoreResult.stdout?.trim() ?? '{}') as Record<
             string,
             unknown
           >;
-          if (typeof parsed.code === 'number') {
-            code = parsed.code;
-          }
+          if (typeof parsed.step === 'string') restoreStep = parsed.step;
+          if (typeof parsed.error === 'string') restoreError = parsed.error;
+          if (typeof parsed.code === 'number') restoreCode = parsed.code;
         } catch {
           // non-JSON stdout, ignore
         }
 
-        if (code === 404) {
+        logger
+          .withFields({
+            sessionId,
+            userId,
+            exitCode: restoreResult.exitCode,
+            restoreStep,
+            restoreError,
+            restoreCode,
+            stderr: restoreResult.stderr,
+          })
+          .error('Cold-start session restore failed');
+
+        if (restoreCode === 404) {
           throw new SessionSnapshotRestoreError(
             'Session snapshot restore failed: session not found',
             404
           );
         }
+
+        const detail = restoreStep
+          ? `step=${restoreStep} error=${restoreError ?? 'unknown'}`
+          : `stdout=${restoreResult.stdout?.trim()}`;
         throw new SessionSnapshotRestoreError(
-          `Cold-start session restore failed: exit ${restoreResult.exitCode}`,
-          code
+          `Cold-start session restore failed: ${detail} (exit ${restoreResult.exitCode})`,
+          restoreCode
         );
       }
 
