@@ -4,7 +4,8 @@ export type ExecutionLifecycleContext = {
   updateExecutionStatus: (
     executionId: string,
     status: ExecutionStatus,
-    error?: string
+    error?: string,
+    gateResult?: 'pass' | 'fail'
   ) => Promise<void>;
   clearActiveExecution: () => Promise<void>;
   getActiveExecutionId: () => Promise<string | null>;
@@ -18,16 +19,17 @@ export async function handleExecutionComplete(
   executionId: string,
   status: ExecutionStatus,
   ctx: ExecutionLifecycleContext,
-  error?: string
+  error?: string,
+  gateResult?: 'pass' | 'fail'
 ): Promise<void> {
-  ctx.logger.info('Execution complete', { executionId, status, error });
+  ctx.logger.info('Execution complete', { executionId, status, error, gateResult });
 
   // Snapshot active execution before updateStatus clears it — we need this to
   // decide whether to clean up afterward.
   const wasActive = (await ctx.getActiveExecutionId()) === executionId;
 
   // Update the execution status and completedAt in storage
-  await ctx.updateExecutionStatus(executionId, status, error);
+  await ctx.updateExecutionStatus(executionId, status, error, gateResult);
 
   // Clear active execution only if this was the active execution.
   // updateStatus already clears active_execution_id internally when it matches,

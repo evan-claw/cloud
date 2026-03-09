@@ -14,9 +14,12 @@ import type { PlatformIntegration } from '@kilocode/db/schema';
 import type { Owner } from '@/lib/code-reviews/core';
 import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 import type { CodeReviewAgentConfig } from '@/lib/agent-config/core/types';
-import { addReactionToPR } from '../adapter';
+import { addReactionToPR, createCheckRun, updateCheckRun } from '../adapter';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
+import { updateCheckRunId } from '@/lib/code-reviews/db/code-reviews';
 import { resolvePullRequestCheckoutRef } from './pull-request-checkout-ref';
+import { APP_URL } from '@/lib/constants';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 
 /**
  * GitHub Pull Request Event Handler
@@ -203,9 +206,63 @@ export async function handlePullRequestCodeReview(
       `Created code review ${reviewId} for ${repository.full_name}#${pull_request.number}`
     );
 
-    // 7. Post 👀 reaction to show Kilo is reviewing
+    const [repoOwner, repoName] = repository.full_name.split('/');
+
+    // 7. Create GitHub Check Run (PR gate) — skip for lite (read-only) app, skip when flag is off
+    const appType = integration.github_app_type ?? 'standard';
+    const isPrGateEnabled =
+      process.env.NODE_ENV === 'development' ||
+      (await isFeatureFlagEnabled('code-review-pr-gate', owner.userId));
+
+    if (appType !== 'lite' && isPrGateEnabled) {
+      let checkRunId: number | undefined;
+      try {
+        const detailsUrl = `${APP_URL}/code-reviews/${reviewId}`;
+        checkRunId = await createCheckRun(
+          integration.platform_installation_id as string,
+          repoOwner,
+          repoName,
+          pull_request.head.sha,
+          {
+            detailsUrl,
+            output: {
+              title: 'Kilo Code Review queued',
+              summary: 'Waiting for a review slot...',
+            },
+          },
+          appType
+        );
+        await updateCheckRunId(reviewId, checkRunId);
+        logExceptInTest(
+          `Created check run ${checkRunId} for ${repository.full_name}#${pull_request.number}`
+        );
+      } catch (checkRunError) {
+        // Non-blocking — the review still proceeds even if the check run fails
+        // (e.g. the app may not yet have the checks:write permission)
+        logExceptInTest('Failed to create check run:', checkRunError);
+        // If we created the check run on GitHub but failed to persist its ID,
+        // cancel it so it doesn't block merging on repos with required checks.
+        if (checkRunId !== undefined) {
+          try {
+            await updateCheckRun(
+              integration.platform_installation_id as string,
+              repoOwner,
+              repoName,
+              checkRunId,
+              { status: 'completed', conclusion: 'cancelled' }
+            );
+            logExceptInTest(
+              `Cancelled orphaned check run ${checkRunId} for ${repository.full_name}#${pull_request.number}`
+            );
+          } catch (cancelError) {
+            logExceptInTest('Failed to cancel orphaned check run:', cancelError);
+          }
+        }
+      }
+    }
+
+    // 8. Post 👀 reaction to show Kilo is reviewing
     try {
-      const [repoOwner, repoName] = repository.full_name.split('/');
       await addReactionToPR(
         integration.platform_installation_id as string,
         repoOwner,
@@ -219,7 +276,7 @@ export async function handlePullRequestCodeReview(
       logExceptInTest('Failed to add eyes reaction:', reactionError);
     }
 
-    // 8. Try to dispatch pending reviews (including this new one)
+    // 9. Try to dispatch pending reviews (including this new one)
     // Review is created with status='pending' and dispatch will pick it up if slots available
     try {
       const dispatchResult = await tryDispatchPendingReviews(owner);
@@ -244,7 +301,7 @@ export async function handlePullRequestCodeReview(
       // Don't throw - review record created as pending, will be picked up later
     }
 
-    // 9. Return 202 Accepted (always succeeds, review queued as pending)
+    // 10. Return 202 Accepted (always succeeds, review queued as pending)
     return NextResponse.json(
       {
         message: 'Code review queued',

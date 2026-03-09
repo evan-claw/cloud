@@ -384,6 +384,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           callbackTarget: input.callbackTarget,
           images: input.images,
           createdOnPlatform: input.createdOnPlatform,
+          gateThreshold: input.gateThreshold,
           // Workspace metadata
           workspacePath,
           sessionHome,

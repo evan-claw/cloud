@@ -369,6 +369,7 @@ export async function resetCodeReviewForRetry(reviewId: string): Promise<void> {
         session_id: null,
         cli_session_id: null,
         error_message: null,
+        check_run_id: null,
         started_at: null,
         completed_at: null,
         model: null,
@@ -414,6 +415,28 @@ export async function findActiveReviewsForPR(
     captureException(error, {
       tags: { operation: 'findActiveReviewsForPR' },
       extra: { repoFullName, prNumber, excludeSha },
+    });
+    throw error;
+  }
+}
+
+/**
+ * Stores the GitHub Check Run ID on a code review record.
+ * Called after creating the initial check run so we can update it later.
+ */
+export async function updateCheckRunId(reviewId: string, checkRunId: number): Promise<void> {
+  try {
+    await db
+      .update(cloud_agent_code_reviews)
+      .set({
+        check_run_id: checkRunId,
+        updated_at: new Date().toISOString(),
+      })
+      .where(eq(cloud_agent_code_reviews.id, reviewId));
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'updateCheckRunId' },
+      extra: { reviewId, checkRunId },
     });
     throw error;
   }

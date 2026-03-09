@@ -215,6 +215,12 @@ export const PrepareSessionInput = z
       .describe(
         'Perform a shallow clone (depth: 1) for faster checkout and reduced disk usage. Useful when full git history is not needed.'
       ),
+    gateThreshold: z
+      .enum(['off', 'all', 'warning', 'critical'])
+      .optional()
+      .describe(
+        'PR gate threshold — when not "off", the agent should evaluate findings and report gateResult in its callback'
+      ),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',

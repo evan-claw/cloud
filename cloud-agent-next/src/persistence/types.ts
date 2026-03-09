@@ -103,6 +103,8 @@ export type CloudAgentSessionState = {
   condenseOnComplete?: boolean;
   /** Custom text to append to the system prompt */
   appendSystemPrompt?: string;
+  /** PR gate threshold — when not "off", the agent evaluates findings and reports gateResult */
+  gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
 
   // Lifecycle timestamps (for state machine)
   /** Timestamp when session was prepared (state machine: prepared) */

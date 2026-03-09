@@ -29,6 +29,8 @@ export interface SessionInput {
   platform?: 'github' | 'gitlab';
   envVars?: Record<string, string>;
   mcpServers?: Record<string, MCPServerConfig>;
+  /** Gate threshold — when not 'off', the agent should report gateResult in its callback */
+  gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
 }
 
 export interface CodeReviewEvent {

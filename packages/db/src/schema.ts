@@ -2044,6 +2044,10 @@ export const cloud_agent_code_reviews = pgTable(
     // Which cloud agent backend executed this review: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next)
     agent_version: text().default('v1'),
 
+    // PR gate check tracking
+    // GitHub Check Run ID; null for GitLab or pre-feature reviews
+    check_run_id: bigint({ mode: 'number' }),
+
     // Usage tracking (populated on completion by orchestrator)
     model: text(), // LLM model slug used (e.g., 'anthropic/claude-sonnet-4.6')
     total_tokens_in: integer(), // Total input tokens across all LLM calls

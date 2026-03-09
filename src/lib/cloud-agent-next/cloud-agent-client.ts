@@ -96,6 +96,8 @@ export type PrepareSessionInput = {
   callbackTarget?: CallbackTarget;
   /** Platform that created this session (e.g. 'security-agent', 'slack', 'app-builder') */
   createdOnPlatform?: string;
+  /** PR gate threshold — when not 'off', the agent reports gateResult in its callback */
+  gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
 };
 
 /** Output from prepareSession procedure */
