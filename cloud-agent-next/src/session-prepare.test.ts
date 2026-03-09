@@ -36,6 +36,7 @@ vi.mock('@cloudflare/sandbox', () => ({
 
 // Mock workspace functions
 vi.mock('./workspace.js', () => ({
+  checkDiskAndCleanBeforeSetup: vi.fn().mockResolvedValue(undefined),
   setupWorkspace: vi.fn().mockResolvedValue({
     workspacePath: '/workspace/test',
     sessionHome: '/home/test',

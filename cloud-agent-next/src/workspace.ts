@@ -1,7 +1,17 @@
 import type { SandboxInstance, ExecutionSession, SystemSandboxUsageEvent } from './types.js';
+import type { ExecResult, ExecOptions } from '@cloudflare/sandbox';
 import { logger } from './logger.js';
 import { findWrapperForSessionInProcesses } from './kilo/wrapper-manager.js';
 import { withTimeout } from '@kilocode/worker-utils';
+
+/**
+ * Minimal interface for running shell commands.
+ * Both SandboxInstance and ExecutionSession satisfy this,
+ * letting us run disk checks before a session exists.
+ */
+export type CommandExecutor = {
+  exec(command: string, options?: ExecOptions): Promise<ExecResult>;
+};
 
 /**
  * Sanitize a string for use in filesystem paths by replacing forbidden characters with dashes.
@@ -91,6 +101,32 @@ export interface SessionPaths {
   sessionHome: string;
 }
 
+/**
+ * Check disk space and clean up stale workspaces if low, using the sandbox
+ * directly so it can run before any session or workspace directory exists.
+ * Errors are caught and logged — never rethrown — so cleanup failure never blocks setup.
+ */
+export async function checkDiskAndCleanBeforeSetup(
+  sandbox: SandboxInstance,
+  orgId: string | undefined,
+  userId: string,
+  sessionId: string
+): Promise<void> {
+  try {
+    const diskSpace = await checkDiskSpace(sandbox);
+    if (diskSpace.isLow) {
+      logger.info('Low disk space detected before workspace setup, cleaning stale workspaces');
+      await cleanupStaleWorkspaces(sandbox, getBaseWorkspacePath(orgId, userId), sessionId);
+    }
+  } catch (error) {
+    // Log and continue — a failed disk check should not block workspace setup.
+    // The worst case is that mkdir fails (which it would have anyway without cleanup).
+    logger
+      .withFields({ error: error instanceof Error ? error.message : String(error) })
+      .warn('Pre-setup disk check failed, continuing with workspace setup');
+  }
+}
+
 export async function setupWorkspace(
   sandbox: SandboxInstance,
   userId: string,
@@ -126,12 +162,12 @@ export async function setupWorkspace(
  * Clean up workspace directories for a session.
  * Removes both the workspace directory and session home directory.
  *
- * @param session - Execution session
+ * @param executor - Anything that can run shell commands (sandbox or session)
  * @param workspacePath - Path to the session workspace (e.g., /workspace/org/user/sessions/sessionId)
  * @param sessionHome - Path to the session home (e.g., /home/sessionId)
  */
 export async function cleanupWorkspace(
-  session: ExecutionSession,
+  executor: CommandExecutor,
   workspacePath: string,
   sessionHome: string
 ): Promise<void> {
@@ -140,7 +176,7 @@ export async function cleanupWorkspace(
 
   try {
     // Delete workspace directory
-    const workspaceResult = await session.exec(`rm -rf '${workspacePath}'`);
+    const workspaceResult = await executor.exec(`rm -rf '${workspacePath}'`);
     if (workspaceResult.exitCode !== 0) {
       logger
         .withFields({ stderr: workspaceResult.stderr })
@@ -148,7 +184,7 @@ export async function cleanupWorkspace(
     }
 
     // Delete session home directory
-    const homeResult = await session.exec(`rm -rf '${sessionHome}'`);
+    const homeResult = await executor.exec(`rm -rf '${sessionHome}'`);
     if (homeResult.exitCode !== 0) {
       logger
         .withFields({ stderr: homeResult.stderr })
@@ -170,7 +206,6 @@ export async function cleanupWorkspace(
  * Errors are caught and logged — never rethrown — so cleanup failure never blocks setup.
  */
 export async function cleanupStaleWorkspaces(
-  session: ExecutionSession,
   sandbox: SandboxInstance,
   baseWorkspacePath: string,
   currentSessionId: string
@@ -181,7 +216,7 @@ export async function cleanupStaleWorkspaces(
 
   let sessionDirs: string[];
   try {
-    const lsResult = await session.exec(`ls -1 '${baseWorkspacePath}/sessions/'`);
+    const lsResult = await sandbox.exec(`ls -1 '${baseWorkspacePath}/sessions/'`);
     if (lsResult.exitCode !== 0 || !lsResult.stdout) {
       logger
         .withFields({ stderr: lsResult.stderr })
@@ -236,7 +271,7 @@ export async function cleanupStaleWorkspaces(
         .withFields({ candidateSessionId, workspacePath, sessionHome })
         .info('Removing stale session directories');
 
-      await cleanupWorkspace(session, workspacePath, sessionHome);
+      await cleanupWorkspace(sandbox, workspacePath, sessionHome);
       cleaned++;
     } catch (error) {
       logger
@@ -276,11 +311,11 @@ export type DiskSpaceResult = {
  * @returns Structured disk space result
  * @throws Error if disk check fails (command error, parse error, or exception)
  */
-export async function checkDiskSpace(session: ExecutionSession): Promise<DiskSpaceResult> {
+export async function checkDiskSpace(executor: CommandExecutor): Promise<DiskSpaceResult> {
   // df -B1 gives output in bytes for clean numeric parsing (no M/G/K suffixes)
   // --output=avail,size gives available and total space
   // Always use "/" since all container paths share the same root filesystem
-  const result = await session.exec('df -B1 --output=avail,size / | tail -1');
+  const result = await executor.exec('df -B1 --output=avail,size / | tail -1');
 
   if (result.exitCode !== 0) {
     logger
@@ -331,10 +366,10 @@ export async function checkDiskSpace(session: ExecutionSession): Promise<DiskSpa
  * @throws Error if disk check fails
  */
 export async function createSandboxUsageEvent(
-  session: ExecutionSession,
+  executor: CommandExecutor,
   sessionId?: string
 ): Promise<SystemSandboxUsageEvent> {
-  const result = await checkDiskSpace(session);
+  const result = await checkDiskSpace(executor);
 
   return {
     streamEventType: 'sandbox-usage',

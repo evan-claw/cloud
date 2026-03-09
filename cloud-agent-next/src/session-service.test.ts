@@ -10,7 +10,8 @@ vi.mock('./workspace.js', () => {
   const cloneGitRepo = vi.fn();
   const manageBranch = vi.fn();
   const restoreWorkspace = vi.fn();
-  const checkDiskSpace = vi.fn().mockResolvedValue({ availableMB: 5000, totalMB: 10000 });
+  const checkDiskAndCleanBeforeSetup = vi.fn().mockResolvedValue(undefined);
+  const cleanupWorkspace = vi.fn().mockResolvedValue(undefined);
 
   return {
     setupWorkspace,
@@ -18,7 +19,9 @@ vi.mock('./workspace.js', () => {
     cloneGitRepo,
     manageBranch,
     restoreWorkspace,
-    checkDiskSpace,
+    checkDiskAndCleanBeforeSetup,
+    cleanupWorkspace,
+    getBaseWorkspacePath: (orgId: string, userId: string) => `/workspace/${orgId}/${userId}`,
     getSessionHomePath: (sessionId: string) => `/home/${sessionId}`,
     getSessionWorkspacePath: (orgId: string, userId: string, sessionId: string) =>
       `/workspace/${orgId}/${userId}/sessions/${sessionId}`,
