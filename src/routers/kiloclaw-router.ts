@@ -9,7 +9,6 @@ import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
 import {
   ALL_SECRET_FIELD_KEYS,
-  SECRET_CATALOG,
   FIELD_KEY_TO_ENTRY,
   validateFieldValue,
 } from '@kilocode/kiloclaw-secret-catalog';
@@ -311,21 +310,8 @@ export const kiloclawRouter = createTRPCRouter({
         }
       }
 
-      // 2. Enforce allFieldsRequired: reject partial updates for entries that need all fields
-      for (const entry of SECRET_CATALOG) {
-        if (!entry.allFieldsRequired) continue;
-        const fieldValues = entry.fields.map(f => secrets[f.key]);
-        // Skip entries where no fields are in this patch
-        if (fieldValues.every(v => v === undefined)) continue;
-        const hasAny = fieldValues.some(v => v !== null && v !== undefined);
-        const hasAll = fieldValues.every(v => v !== null && v !== undefined);
-        if (hasAny && !hasAll) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: `${entry.label} requires all fields to be set together`,
-          });
-        }
-      }
+      // 2. allFieldsRequired is enforced by the DO on post-merge state (not here),
+      //    so single-field rotations work when the other field is already stored.
 
       // 3. Validate non-null values against catalog patterns + enforce per-field maxLength
       for (const [key, value] of Object.entries(secrets)) {
