@@ -183,7 +183,7 @@ describe('Stytch Fingerprint Functions', () => {
       expect(savedFingerprint?.kilo_free_tier_allowed).toBe(false);
     });
 
-    test('should automatically grant welcome credits and set default model when validation passes', async () => {
+    test('should no longer grant welcome credits (signup credits disabled)', async () => {
       const user = await insertTestUser();
       const fingerprintData = createMockFingerprintData();
       const headers = createMockHeaders();
@@ -193,13 +193,12 @@ describe('Stytch Fingerprint Functions', () => {
 
       await handleSignupPromotion(user, kilo_free_tier_allowed);
 
-      // Check if credit was granted
+      // Verify no credit was granted (signup credits are disabled)
       const creditTransaction = await db.query.credit_transactions.findFirst({
         where: eq(credit_transactions.kilo_user_id, user.id),
       });
 
-      expect(creditTransaction?.credit_category).toBe('automatic-welcome-credits');
-      expect(creditTransaction?.amount_microdollars).toBe(5000000); // $5 in microdollars
+      expect(creditTransaction).toBeUndefined();
     });
   });
 
