@@ -328,18 +328,24 @@ export async function prepareReviewPayload(
         previousHeadSha = previousReview?.head_sha ?? null;
 
         if (previousHeadSha) {
-          logExceptInTest('[prepareReviewPayload] Found previous completed review for incremental mode', {
-            reviewId,
-            previousHeadSha: previousHeadSha.substring(0, 8),
-            currentHeadSha: review.head_sha.substring(0, 8),
-          });
+          logExceptInTest(
+            '[prepareReviewPayload] Found previous completed review for incremental mode',
+            {
+              reviewId,
+              previousHeadSha: previousHeadSha.substring(0, 8),
+              currentHeadSha: review.head_sha.substring(0, 8),
+            }
+          );
         }
       } catch (error) {
         // Non-critical - fall back to full review
-        logExceptInTest('[prepareReviewPayload] Failed to fetch previous review, falling back to full review:', {
-          reviewId,
-          error,
-        });
+        logExceptInTest(
+          '[prepareReviewPayload] Failed to fetch previous review, falling back to full review:',
+          {
+            reviewId,
+            error,
+          }
+        );
       }
     }
 
