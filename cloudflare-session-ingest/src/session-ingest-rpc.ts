@@ -8,10 +8,17 @@ import type { Env } from './env';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from './dos/SessionAccessCacheDO';
 import { withDORetry } from '@kilocode/worker-utils';
+import { app } from './app';
 
 const sessionIdSchema = z.string().startsWith('ses_').length(30);
 
 export class SessionIngestRPC extends WorkerEntrypoint<Env> {
+  // Delegate HTTP requests to the Hono app so callers using the service
+  // binding can `.fetch()` against this entrypoint (not just call RPC methods).
+  fetch(request: Request): Response | Promise<Response> {
+    return app.fetch(request, this.env, this.ctx);
+  }
+
   /**
    * RPC method: create a cli_sessions_v2 record for a cloud-agent-next session.
    * Called via service binding from cloud-agent-next during session preparation.

@@ -1476,15 +1476,12 @@ export class SessionService {
     // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
     const internalSecret = await env.INTERNAL_API_SECRET_PROD.get();
     const response = await env.SESSION_INGEST.fetch(
-      new Request(
-        `https://ingest.kilosessions.ai/internal/session/${metadata.kiloSessionId}/export`,
-        {
-          headers: {
-            'X-Internal-Secret': internalSecret,
-            'X-Kilo-User-Id': userId,
-          },
-        }
-      )
+      new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
+        headers: {
+          'X-Internal-Secret': internalSecret,
+          'X-Kilo-User-Id': userId,
+        },
+      })
     );
 
     if (response.status === 404) {
