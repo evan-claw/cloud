@@ -122,6 +122,61 @@ async function recreatePRGateCheck(review: CloudAgentCodeReview) {
   }
 }
 
+/**
+ * Finalizes the PR gate check as cancelled for a review that never left pending.
+ * Without this, cancelling a pending review leaves a stale queued/pending gate
+ * that permanently blocks protected branches.
+ */
+async function cancelPRGateCheck(review: CloudAgentCodeReview) {
+  if (!review.platform_integration_id) return;
+
+  const integration = await getIntegrationById(review.platform_integration_id);
+  if (!integration) return;
+
+  const platform = review.platform || 'github';
+  const detailsUrl = `${APP_URL}/code-reviews/${review.id}`;
+
+  if (platform === 'github' && integration.platform_installation_id) {
+    if (!review.check_run_id) return;
+
+    const [repoOwner, repoName] = review.repo_full_name.split('/');
+    await updateCheckRun(
+      integration.platform_installation_id,
+      repoOwner,
+      repoName,
+      review.check_run_id,
+      {
+        status: 'completed',
+        conclusion: 'cancelled',
+        detailsUrl,
+        output: { title: 'Kilo Code Review cancelled', summary: 'Review was cancelled.' },
+      }
+    );
+    logExceptInTest(
+      `[cancel] Finalized check run for ${review.repo_full_name}#${review.pr_number}`
+    );
+  } else if (platform === PLATFORM.GITLAB) {
+    const storedPrat = review.platform_project_id
+      ? getStoredProjectAccessToken(integration, review.platform_project_id)
+      : null;
+    const accessToken = storedPrat ? storedPrat.token : await getValidGitLabToken(integration);
+    const metadata = integration.metadata as { gitlab_instance_url?: string } | null;
+    const instanceUrl = metadata?.gitlab_instance_url || 'https://gitlab.com';
+
+    await setCommitStatus(
+      accessToken,
+      review.platform_project_id ?? review.repo_full_name,
+      review.head_sha,
+      'canceled',
+      { targetUrl: detailsUrl, description: 'Kilo Code Review cancelled' },
+      instanceUrl
+    );
+    logExceptInTest(
+      `[cancel] Set commit status 'canceled' on ${review.repo_full_name}!${review.pr_number}`
+    );
+  }
+}
+
 export const codeReviewRouter = createTRPCRouter({
   /**
    * List code reviews for an organization
@@ -321,12 +376,22 @@ export const codeReviewRouter = createTRPCRouter({
           // If worker call fails, still update DB status as fallback
           console.error('Worker cancel failed, updating DB directly:', workerError);
           await cancelCodeReview(input.reviewId);
+          try {
+            await cancelPRGateCheck(review);
+          } catch (gateError) {
+            logExceptInTest('[cancel] Failed to finalize PR gate check:', gateError);
+          }
           return successResult({ message: 'Code review cancelled (worker unreachable)' });
         }
       }
 
-      // For pending reviews (not yet dispatched to worker), just update DB
+      // For pending reviews (not yet dispatched to worker), update DB and finalize gate
       await cancelCodeReview(input.reviewId);
+      try {
+        await cancelPRGateCheck(review);
+      } catch (gateError) {
+        logExceptInTest('[cancel] Failed to finalize PR gate check:', gateError);
+      }
 
       return successResult({ message: 'Code review cancelled successfully' });
     } catch (error) {
