@@ -69,6 +69,7 @@ import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
 import { isKiloAutoModel, resolveAutoModel } from '@/lib/kilo-auto-model';
 import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplicateReasoning';
+import type OpenAI from 'openai';
 
 export const maxDuration = 800;
 
@@ -139,11 +140,18 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   if (isKiloAutoModel(requestedModelLowerCased)) {
     autoModel = requestedModelLowerCased;
     const resolved = resolveAutoModel(requestedModelLowerCased, modeHeader);
-    if (parsedRequest.kind === 'chat_completions') {
-      Object.assign(parsedRequest.body, resolved);
-    } else {
-      // Only apply model; reasoning config for responses differs from chat completions
-      parsedRequest.body.model = resolved.model;
+    parsedRequest.body.model = resolved.model;
+    if (resolved.reasoning) parsedRequest.body.reasoning = resolved.reasoning;
+    if (resolved.verbosity) {
+      if (parsedRequest.kind === 'chat_completions') {
+        parsedRequest.body.verbosity =
+          resolved.verbosity as OpenRouterChatCompletionRequest['verbosity'];
+      } else {
+        parsedRequest.body.text = {
+          ...parsedRequest.body.text,
+          verbosity: resolved.verbosity as OpenAI.Responses.ResponseTextConfig['verbosity'],
+        };
+      }
     }
   }
 
@@ -371,8 +379,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     });
     if (modelRestrictionError) return modelRestrictionError;
 
-    // providerConfig (data-collection / allow-list override) only applies to Chat Completions
-    if (providerConfig && parsedRequest.kind === 'chat_completions') {
+    if (providerConfig) {
       parsedRequest.body.provider = providerConfig;
     }
   }
