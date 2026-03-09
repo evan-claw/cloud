@@ -2,10 +2,12 @@
 
 ## Prerequisites
 
-- [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5/month) -- required for Cloudflare Sandbox containers
-- [Containers enabled](https://dash.cloudflare.com/?to=/:account/workers/containers) on your account
 - Node.js 22+
 - pnpm
+- [Fly CLI](https://fly.io/docs/flyctl/install/) (`fly`)
+- Docker (for building/pushing images)
+- Access to the **Kilo (dev)** Fly org
+- A Cloudflare tunnel or ngrok (so Fly machines can call back to your local Next.js)
 
 ## Quick Start
 
@@ -16,15 +18,130 @@ pnpm install
 # Copy the example env file
 cp .dev.vars.example .dev.vars
 
-# Edit .dev.vars -- add any required secrets
-# See "Environment Variables" below for details
+# Edit .dev.vars -- see "Environment Variables" below
+```
 
-# Run the dev server
+## How it fits together
+
+KiloClaw is a Cloudflare Worker that manages per-user OpenClaw instances on
+Fly.io Machines. In local dev there are three moving pieces:
+
+1. **Next.js app** (`localhost:3000`) -- the dashboard and platform API.
+   Provisions/starts/stops instances by calling the worker's internal API.
+2. **KiloClaw worker** (`localhost:8795`) -- `wrangler dev`. Manages Fly
+   machines, proxies browser traffic to them.
+3. **Fly Machines** (remote) -- the actual OpenClaw instances. They call
+   back to your Next.js app (via the KiloCode gateway) for model requests.
+
+Because Fly machines are remote, they can't reach `localhost:3000` directly.
+You need a tunnel so that `KILOCODE_API_BASE_URL` resolves to your local
+Next.js from the internet.
+
+### Tunnel setup
+
+Use Cloudflare Tunnel (recommended) or ngrok to expose your local Next.js:
+
+```bash
+# Cloudflare Tunnel (free, no account needed for quick tunnels)
+cloudflared tunnel --url http://localhost:3000
+
+# Or ngrok
+ngrok http 3000
+```
+
+Copy the tunnel URL and set it in `.dev.vars`:
+
+```
+KILOCODE_API_BASE_URL=https://<your-tunnel>.trycloudflare.com/api/openrouter/
+```
+
+## Environment Variables
+
+There are two env files to configure:
+
+### 1. `kiloclaw/.dev.vars` (worker secrets)
+
+Copy `.dev.vars.example` and fill in:
+
+**Auth** -- must match the Next.js app's values:
+
+| Variable               | Description                                                         |
+| ---------------------- | ------------------------------------------------------------------- |
+| `NEXTAUTH_SECRET`      | JWT signing key. Must match the Next.js app's `NEXTAUTH_SECRET`     |
+| `INTERNAL_API_SECRET`  | Platform API key. Must match Next.js `KILOCLAW_INTERNAL_API_SECRET` |
+| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens (worker-only)               |
+| `WORKER_ENV`           | Set to `development` for local dev                                  |
+
+**Fly.io** -- requires access to the Kilo (dev) org:
+
+| Variable           | Description                                                               |
+| ------------------ | ------------------------------------------------------------------------- |
+| `FLY_API_TOKEN`    | Fly API token. Generate with `fly tokens create dev-token`                |
+| `FLY_ORG_SLUG`     | Fly org slug for the dev org (run `fly orgs list`)                        |
+| `FLY_REGISTRY_APP` | Shared Fly app that holds Docker images                                   |
+| `FLY_APP_NAME`     | Legacy fallback app name for existing instances                           |
+| `FLY_REGION`       | Default region priority list, e.g. `us,eu`                                |
+| `FLY_IMAGE_TAG`    | Docker image tag. Set automatically by `scripts/push-dev.sh`              |
+| `FLY_IMAGE_DIGEST` | Docker image digest. Set automatically by `scripts/push-dev.sh`           |
+| `OPENCLAW_VERSION` | OpenClaw version in the image. Set automatically by `scripts/push-dev.sh` |
+
+**Tunnel / API** -- so Fly machines can reach your local Next.js:
+
+| Variable                | Description                                                   |
+| ----------------------- | ------------------------------------------------------------- |
+| `KILOCODE_API_BASE_URL` | Your tunnel URL + `/api/openrouter/` (see tunnel setup above) |
+
+**Encryption** -- for decrypting user-provided secrets:
+
+| Variable                     | Description                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). Matching public key is in the Next.js app. |
+
+**Other:**
+
+| Variable                   | Description                                       |
+| -------------------------- | ------------------------------------------------- |
+| `OPENCLAW_ALLOWED_ORIGINS` | Comma-separated origins for WebSocket connections |
+
+### 2. `.env.development.local` (Next.js, monorepo root)
+
+The Next.js app needs to know how to reach the KiloClaw worker:
+
+| Variable                       | Description                                     |
+| ------------------------------ | ----------------------------------------------- |
+| `KILOCLAW_API_URL`             | Worker URL, e.g. `http://localhost:8795`        |
+| `KILOCLAW_INTERNAL_API_SECRET` | Must match `INTERNAL_API_SECRET` in `.dev.vars` |
+
+## Building and Pushing Images
+
+Before you can provision instances, you need a Docker image in the Fly registry.
+
+```bash
+# Authenticate Docker with Fly registry (one-time)
+fly auth docker
+
+# Build, push, and update .dev.vars with the new tag/digest/version
+./scripts/push-dev.sh
+```
+
+`push-dev.sh` will:
+
+1. Build the Docker image for `linux/amd64`
+2. Push it to `registry.fly.io/{FLY_REGISTRY_APP}:{tag}`
+3. Auto-update `FLY_IMAGE_TAG`, `FLY_IMAGE_DIGEST`, and `OPENCLAW_VERSION` in `.dev.vars`
+
+After pushing, restart `wrangler dev` to pick up the new values. Then
+destroy and re-provision your instance from the dashboard (or restart it).
+
+## Running
+
+```bash
+# Start the worker (from kiloclaw/)
 pnpm start
 ```
 
-`pnpm start` runs `wrangler dev`, which builds the worker and starts a local dev server.
-The first request will pull the container image and cold-start it (1-2 minutes).
+This runs `wrangler dev` on port 8795. Make sure your Next.js app is also
+running on `localhost:3000` and your tunnel is active.
 
 ## Commands
 
@@ -42,14 +159,13 @@ pnpm types            # regenerate worker-configuration.d.ts
 pnpm deploy           # wrangler deploy
 ```
 
-Run `pnpm types` after changing `wrangler.jsonc` to regenerate the TypeScript
+Run `pnpm types` after changing `wrangler.jsonc` to regenerate TypeScript
 binding types.
 
 ## Controller Smoke Tests (Docker)
 
-These scripts validate the machine-side Node controller introduced for KiloClaw.
-
-Build the image first from `kiloclaw/`:
+These scripts validate the machine-side Node controller. Build the image
+first from `kiloclaw/`:
 
 ```bash
 docker build --progress=plain -t kiloclaw:controller .
@@ -57,215 +173,25 @@ docker build --progress=plain -t kiloclaw:controller .
 
 Then run one of:
 
-- `bash scripts/controller-smoke-test.sh`
-  - Fastest check. Runs the controller binary directly as the container entrypoint.
-  - Use this when iterating on controller auth/proxy behavior.
-- `bash scripts/controller-entrypoint-smoke-test.sh`
-  - Runs the default image CMD (`start-openclaw.sh`) and validates the full startup path.
-  - Use this when changing startup script, env patching, or Docker wiring.
-- `bash scripts/controller-proxy-auth-smoke-test.sh`
-  - Validates proxy enforcement semantics end-to-end:
-    no token -> `401`, correct proxy token -> pass-through.
-  - Use this when changing proxy token logic or route/auth ordering.
+- `bash scripts/controller-smoke-test.sh` -- direct controller startup.
+  Use for quick auth/proxy sanity checks.
+- `bash scripts/controller-entrypoint-smoke-test.sh` -- full startup path
+  via `start-openclaw.sh`. Use when changing startup script or Docker wiring.
+- `bash scripts/controller-proxy-auth-smoke-test.sh` -- proxy enforcement
+  semantics (401 without token, pass-through with token). Use when changing
+  proxy token logic.
 
 All scripts support overrides via env vars (`IMAGE`, `PORT`, `TOKEN`).
 
-## Environment Variables
-
-All secrets are configured in `.dev.vars` for local development and via
-`wrangler secret put` for production.
-
-### Auth (required)
-
-| Variable               | Description                                                                                                                    | How to generate        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
-| `NEXTAUTH_SECRET`      | JWT signing key (HS256). Must match the Next.js app's secret.                                                                  | `openssl rand -hex 32` |
-| `INTERNAL_API_SECRET`  | Shared key for platform API routes (`x-internal-api-key` header). Must match the Next.js app's `KILOCLAW_INTERNAL_API_SECRET`. | `openssl rand -hex 32` |
-| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens. Worker-only (Next.js reads derived tokens from the API).                              | `openssl rand -hex 32` |
-
-For local dev, any placeholder values work (the example file has defaults).
-For production, generate real secrets and keep `NEXTAUTH_SECRET` and
-`INTERNAL_API_SECRET` in sync with the Next.js deployment.
-
-### AI Provider (required)
-
-KiloClaw uses the KiloCode provider only.
-
-| Variable           | Description                                                                |
-| ------------------ | -------------------------------------------------------------------------- |
-| `KILOCODE_API_KEY` | Per-instance KiloCode API key (injected by Next.js during provision/patch) |
-
-### R2 Persistence
-
-Without these, container data is ephemeral (lost on restart). R2 mounting only
-works in production -- `wrangler dev` does not support s3fs mounts.
-
-| Variable               | Description                                 |
-| ---------------------- | ------------------------------------------- |
-| `R2_ACCESS_KEY_ID`     | R2 S3-compatible access key                 |
-| `R2_SECRET_ACCESS_KEY` | R2 S3-compatible secret key                 |
-| `CF_ACCOUNT_ID`        | Cloudflare account ID (for R2 endpoint URL) |
-
-To create R2 API credentials:
-
-1. Go to **R2 > Overview** in the [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. Click **Manage R2 API Tokens**
-3. Create a token with **Object Read & Write** permissions on the `kiloclaw-data` bucket
-4. Copy the Access Key ID and Secret Access Key
-
-### Encryption
-
-Required for decrypting user-provided secrets (BYOK API keys, channel tokens).
-
-| Variable                     | Description                                                                                                 |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). The matching public key lives in the Next.js backend as `AGENT_ENV_VARS_PUBLIC_KEY`. |
-
-The Next.js app encrypts user secrets with the public key before sending them to
-the worker. The worker decrypts them at container startup. Without this key,
-user-provided encrypted secrets and channel tokens are silently skipped.
-
-### Development Flags
-
-| Variable     | Description                                                                                                                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WORKER_ENV` | Defaults to `"production"` in `wrangler.jsonc`. **Set to `"development"` in `.dev.vars` for local dev.** Controls JWT `env` claim matching and Fly app name prefixes (`dev-` vs `acct-`). |
-
-### Optional
-
-| Variable                | Description                                        |
-| ----------------------- | -------------------------------------------------- |
-| `KILOCODE_API_BASE_URL` | Override KiloCode API base URL (dev only)          |
-| `CDP_SECRET`            | Shared secret for CDP browser automation endpoints |
-| `WORKER_URL`            | Public URL of the worker (required for CDP)        |
-
-## Wrangler Bindings
-
-These are configured in `wrangler.jsonc`, not as secrets:
-
-| Binding             | Type           | Description                                                   |
-| ------------------- | -------------- | ------------------------------------------------------------- |
-| `Sandbox`           | Durable Object | `KiloClawSandbox` -- container lifecycle management           |
-| `KILOCLAW_INSTANCE` | Durable Object | `KiloClawInstance` -- per-user instance state, config, alarms |
-| `KILOCLAW_BUCKET`   | R2 Bucket      | `kiloclaw-data` -- persistent storage                         |
-| `HYPERDRIVE`        | Hyperdrive     | Postgres connection for pepper validation + instance registry |
-
-## Production Deployment
-
-```bash
-# Set required secrets
-echo "$(openssl rand -hex 32)" | npx wrangler secret put NEXTAUTH_SECRET
-echo "$(openssl rand -hex 32)" | npx wrangler secret put INTERNAL_API_SECRET
-echo "$(openssl rand -hex 32)" | npx wrangler secret put GATEWAY_TOKEN_SECRET
-
-# Set AI provider key (optional if users bring their own)
-npx wrangler secret put KILOCODE_API_KEY
-
-# Set R2 credentials
-npx wrangler secret put R2_ACCESS_KEY_ID
-npx wrangler secret put R2_SECRET_ACCESS_KEY
-npx wrangler secret put CF_ACCOUNT_ID
-
-# Set encryption key (get from the Next.js deployment's AGENT_ENV_VARS_PRIVATE_KEY)
-npx wrangler secret put AGENT_ENV_VARS_PRIVATE_KEY
-
-# WORKER_ENV defaults to "production" in wrangler.jsonc -- no secret needed.
-
-# Deploy
-pnpm deploy
-```
-
-**Secrets that must match the Next.js app:**
-
-| Worker Secret                | Next.js Env Var                | Notes                                                 |
-| ---------------------------- | ------------------------------ | ----------------------------------------------------- |
-| `NEXTAUTH_SECRET`            | `NEXTAUTH_SECRET`              | Same HS256 signing key for JWT verification           |
-| `INTERNAL_API_SECRET`        | `KILOCLAW_INTERNAL_API_SECRET` | Platform API authentication                           |
-| `AGENT_ENV_VARS_PRIVATE_KEY` | `AGENT_ENV_VARS_PUBLIC_KEY`    | RSA key pair (worker has private, Next.js has public) |
-| `WORKER_ENV`                 | `NODE_ENV`                     | Defaults to `production` in `wrangler.jsonc`          |
-
-## Architecture
-
-```
-Next.js (kilo.ai)                   KiloClaw Worker (claw.kilo.ai)
-┌──────────────────┐                ┌────────────────────────────┐
-│  /claw dashboard  │──[internal]──>│  /api/platform/* (DO RPC)  │
-│  tRPC mutations   │   API key     │  provision/start/stop/...  │
-└──────────────────┘                └─────────────┬──────────────┘
-                                                  │
-User browser ──[JWT cookie]──> catch-all proxy ───┤
-                                    │             │
-                                    ▼             ▼
-                               Per-user      KiloClawInstance DO
-                               Sandbox       (config, state, alarms)
-                               Container
-                                    │
-                                    ▼
-                               OpenClaw Gateway (:18789)
-```
-
-- **Platform routes** (`/api/platform/*`): Internal API key auth. Called by Next.js
-  backend for lifecycle operations. Each route resolves the `KiloClawInstance` DO
-  and calls an RPC method.
-- **User routes** (`/api/kiloclaw/*`): JWT cookie auth. Returns user's config/status.
-- **Catch-all proxy**: JWT cookie auth. Resolves the user's per-user sandbox and
-  proxies HTTP/WebSocket to the OpenClaw gateway inside the container. Auto-recovers
-  crashed instances on the next request.
-- **Admin routes** (`/api/admin/*`): JWT cookie auth. Storage sync, gateway restart.
-  Delegates to the DO via RPC.
-
-## WebSocket Auth Flow
-
-The OpenClaw gateway authenticates WebSocket connections via a token sent inside
-the WebSocket protocol (NOT as a URL parameter). See
-`~/fd-plans/kiloclaw/openclaw-auth-overview.md` for full details. The short version:
-
-1. Next.js dashboard gets `gatewayToken` from the worker's platform status API
-2. Dashboard renders the "Open" link as `https://claw.kilo.ai/#token={gatewayToken}`
-3. OpenClaw SPA reads the fragment, saves token to localStorage
-4. SPA sends token in the WebSocket `connect` frame's `params.auth.token`
-5. Worker relays transparently -- does not inject or modify the token
-
-## Local Dev Without Auth
-
-To test the full flow locally without browser auth,
-use the platform API routes to provision and start an instance:
-
-```bash
-# Provision an instance (replace with a test user ID)
-curl -X POST http://localhost:8787/api/platform/provision \
-  -H "x-internal-api-key: dev-internal-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "test-user-123"}'
-
-# Start it
-curl -X POST http://localhost:8787/api/platform/start \
-  -H "x-internal-api-key: dev-internal-secret" \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "test-user-123"}'
-
-# Check status
-curl http://localhost:8787/api/platform/status?userId=test-user-123 \
-  -H "x-internal-api-key: dev-internal-secret"
-```
-
 ## Troubleshooting
 
-**Container won't start:** Check `npx wrangler tail` for errors. Verify your
-account has [Containers enabled](https://dash.cloudflare.com/?to=/:account/workers/containers).
+**Fly machine can't reach your Next.js:** Make sure your tunnel is running
+and `KILOCODE_API_BASE_URL` in `.dev.vars` points to the tunnel URL. OpenClaw will probably
+fail silently or complain that your model requires auth.
 
-**Gateway fails to start inside container:** Usually a missing AI provider key.
-Check `npx wrangler tail` and Fly machine logs for startup errors.
+**Typecheck fails after changing wrangler.jsonc:** Run `pnpm types` to
+regenerate `worker-configuration.d.ts`.
 
-**WebSocket connections fail:** `wrangler dev` has known issues with WebSocket
-proxying through sandboxes. Deploy to Cloudflare for full WebSocket support.
-
-**R2 not mounting:** R2 s3fs mounts only work in production, not with `wrangler dev`.
-Verify all three R2 secrets are set.
-
-**`validateRequiredEnv` blocking requests:** Only `NEXTAUTH_SECRET` and
-`GATEWAY_TOKEN_SECRET` are checked. If either is missing, non-platform
-routes return 500.
-
-**Typecheck fails after changing wrangler.jsonc:** Run `pnpm types` to regenerate
-`worker-configuration.d.ts`.
+**Instance won't start / provision fails:** Check that `FLY_API_TOKEN` is
+valid and your Fly org has capacity. Check `FLY_IMAGE_TAG` and
+`FLY_IMAGE_DIGEST` match a pushed image.

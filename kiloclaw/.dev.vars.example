@@ -29,17 +29,20 @@ FLY_REGISTRY_APP=kiloclaw-machines-dev
 # Examples: "us,eu" (try US first, then Europe), "lhr,fra" (London first, then Frankfurt)
 # The platform API can override per-user at provision time.
 FLY_REGION=us,eu
-# Docker image tag on registry.fly.io/{FLY_REGISTRY_APP}:{tag}.
-# In dev, use "latest" or run scripts/push-dev.sh which sets a timestamped tag.
-# In production, pin to a version (e.g., v40, sha-abc1234).
+# Docker image tag and digest on registry.fly.io/{FLY_REGISTRY_APP}:{tag}.
+# In dev, use "latest", or run scripts/push-dev.sh to build, push, and auto-update these three values
+# a fresh build.
+# In production, pin to a specific version.
 FLY_IMAGE_TAG=latest
+FLY_IMAGE_DIGEST=
 # OpenClaw version (must match the openclaw@x.x.x version in the Dockerfile).
 # Used by the worker to self-register the version → image tag mapping in KV,
 # enabling per-user version tracking. Without this, version tracking fields
 # will be null and instances fall back to FLY_IMAGE_TAG directly.
 OPENCLAW_VERSION=2026.2.9
 
-# Legacy fallback for existing instances without per-user apps.
+# Legacy fallback for existing instances without per-user apps and 
+# also the shared app we use as a registry.
 # New instances get per-user apps (acct-{hash}) created automatically.
 FLY_APP_NAME=kiloclaw-machines
 
