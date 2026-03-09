@@ -674,6 +674,7 @@ export class CloudAgentSession extends DurableObject {
     createdOnPlatform?: string;
     callbackTarget?: CallbackTarget;
     images?: Images;
+    gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
   }): Promise<OperationResult> {
     await this.requireSessionId(input.sessionId as SessionId);
     const existing = await this.ctx.storage.get<CloudAgentSessionState>('metadata');
