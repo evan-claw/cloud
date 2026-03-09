@@ -710,7 +710,7 @@ function createModel(customLlm: CustomLlm) {
             } else {
               return {
                 ...msg,
-                content: '<think>' + msg.reasoning_content + '</think>' + msg.content,
+                content: think + (msg.content ?? ''),
                 reasoning_content: undefined,
               };
             }
