@@ -61,6 +61,8 @@ export type PreparePayloadParams = {
   };
   /** Platform type (defaults to 'github' for backward compatibility) */
   platform?: CodeReviewPlatform;
+  /** Head SHA from the last completed review on this PR, for incremental reviews */
+  previousReviewHeadSha?: string;
 };
 
 export type SessionInput = {
@@ -103,7 +105,7 @@ export type CodeReviewPayload = {
 export async function prepareReviewPayload(
   params: PreparePayloadParams
 ): Promise<CodeReviewPayload> {
-  const { reviewId, owner, agentConfig, platform = 'github' } = params;
+  const { reviewId, owner, agentConfig, platform = 'github', previousReviewHeadSha } = params;
 
   logExceptInTest('[prepareReviewPayload] Starting payload preparation', {
     reviewId,
@@ -325,7 +327,8 @@ export async function prepareReviewPayload(
       reviewId,
       existingReviewState,
       platform,
-      gitlabContext
+      gitlabContext,
+      previousReviewHeadSha
     );
 
     logExceptInTest('[prepareReviewPayload] Generated prompt:', {

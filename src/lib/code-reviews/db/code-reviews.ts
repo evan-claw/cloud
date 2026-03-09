@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/drizzle';
 import { cloud_agent_code_reviews } from '@kilocode/db/schema';
-import { eq, and, desc, count, ne, inArray } from 'drizzle-orm';
+import { eq, and, desc, count, ne, inArray, or } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type { CreateReviewParams, CodeReviewStatus, ListReviewsParams, Owner } from '../core';
 import type { CloudAgentCodeReview } from '@kilocode/db/schema';
@@ -415,6 +415,42 @@ export async function findActiveReviewsForPR(
     captureException(error, {
       tags: { operation: 'findActiveReviewsForPR' },
       extra: { repoFullName, prNumber, excludeSha },
+    });
+    throw error;
+  }
+}
+
+/**
+ * Finds the most recent completed review for a given repo + PR.
+ * Used to determine the previous review's head SHA for incremental reviews.
+ * Returns the head_sha of the last completed review, or null if no prior review exists.
+ */
+export async function findLastCompletedReviewForPR(
+  repoFullName: string,
+  prNumber: number
+): Promise<string | null> {
+  try {
+    const [review] = await db
+      .select({ head_sha: cloud_agent_code_reviews.head_sha })
+      .from(cloud_agent_code_reviews)
+      .where(
+        and(
+          eq(cloud_agent_code_reviews.repo_full_name, repoFullName),
+          eq(cloud_agent_code_reviews.pr_number, prNumber),
+          or(
+            eq(cloud_agent_code_reviews.status, 'completed'),
+            eq(cloud_agent_code_reviews.status, 'interrupted')
+          )
+        )
+      )
+      .orderBy(desc(cloud_agent_code_reviews.completed_at))
+      .limit(1);
+
+    return review?.head_sha ?? null;
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'findLastCompletedReviewForPR' },
+      extra: { repoFullName, prNumber },
     });
     throw error;
   }

@@ -15,7 +15,7 @@ import { eq, and, or, count } from 'drizzle-orm';
 import type { Owner } from '../core';
 import { prepareReviewPayload } from '../triggers/prepare-review-payload';
 import { getAgentConfigForOwner } from '@/lib/agent-config/db/agent-configs';
-import { updateCodeReviewStatus } from '../db/code-reviews';
+import { updateCodeReviewStatus, findLastCompletedReviewForPR } from '../db/code-reviews';
 import { captureException } from '@sentry/nextjs';
 import { errorExceptInTest, logExceptInTest } from '@/lib/utils.server';
 import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
@@ -179,12 +179,25 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
     useCloudAgentNext,
   });
 
+  // 2b. Look up previous completed review SHA for incremental review support
+  const previousReviewHeadSha = await findLastCompletedReviewForPR(
+    review.repo_full_name,
+    review.pr_number
+  );
+
+  logExceptInTest('[dispatchReview] Previous review lookup', {
+    reviewId: review.id,
+    previousReviewHeadSha,
+    isIncremental: !!previousReviewHeadSha,
+  });
+
   // 3. Prepare complete payload for cloud agent
   const payload = await prepareReviewPayload({
     reviewId: review.id,
     owner,
     agentConfig,
     platform,
+    previousReviewHeadSha: previousReviewHeadSha ?? undefined,
   });
 
   // 4. Update status to "queued" (no longer pending) and record which agent version to use

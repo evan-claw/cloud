@@ -203,4 +203,81 @@ describe('generateReviewPrompt', () => {
     expect(prompt).not.toContain('STRICT REVIEW MODE');
     expect(prompt).not.toContain('ROAST MODE ACTIVATED');
   });
+
+  // --- Incremental review tests ---
+
+  it('includes incremental review section when previousReviewHeadSha is provided', async () => {
+    const previousSha = 'abc123def456';
+    const { prompt } = await generateReviewPrompt(
+      baseConfig,
+      'owner/repo',
+      1,
+      'review-id',
+      null,
+      'github',
+      undefined,
+      previousSha
+    );
+
+    expect(prompt).toContain('Incremental Review (Follow-up Push)');
+    expect(prompt).toContain('follow-up review');
+    expect(prompt).toContain(previousSha);
+    expect(prompt).toContain(`git diff ${previousSha}..HEAD`);
+  });
+
+  it('does not include incremental review section when previousReviewHeadSha is undefined', async () => {
+    const { prompt } = await generateReviewPrompt(
+      baseConfig,
+      'owner/repo',
+      1,
+      'review-id',
+      null,
+      'github',
+      undefined,
+      undefined
+    );
+
+    expect(prompt).not.toContain('Incremental Review (Follow-up Push)');
+    expect(prompt).not.toContain('follow-up review');
+  });
+
+  it('incremental review instructs not to re-report unchanged issues', async () => {
+    const previousSha = 'abc123def456';
+    const { prompt } = await generateReviewPrompt(
+      baseConfig,
+      'owner/repo',
+      1,
+      'review-id',
+      null,
+      'github',
+      undefined,
+      previousSha
+    );
+
+    expect(prompt).toContain('Do NOT re-report issues from the previous review');
+    expect(prompt).toContain('unchanged lines');
+  });
+
+  it('incremental review works with GitLab platform', async () => {
+    const previousSha = 'abc123def456';
+    const gitlabContext = {
+      baseSha: 'base-sha',
+      startSha: 'start-sha',
+      headSha: 'head-sha',
+    };
+    const { prompt } = await generateReviewPrompt(
+      baseConfig,
+      'group/project',
+      1,
+      'review-id',
+      null,
+      'gitlab',
+      gitlabContext,
+      previousSha
+    );
+
+    expect(prompt).toContain('Incremental Review (Follow-up Push)');
+    expect(prompt).toContain(previousSha);
+    expect(prompt).toContain(`git diff ${previousSha}..HEAD`);
+  });
 });

@@ -180,6 +180,7 @@ export type GitLabDiffContext = {
  * @param existingReviewState Complete review state for intelligent decisions (optional)
  * @param platform Platform type (defaults to 'github' for backward compatibility)
  * @param gitlabContext GitLab-specific diff context for inline comments (optional)
+ * @param previousReviewHeadSha Head SHA from the last completed review, for incremental reviews (optional)
  * @returns Generated prompt with version and source info
  */
 export async function generateReviewPrompt(
@@ -189,13 +190,16 @@ export async function generateReviewPrompt(
   reviewId?: string,
   existingReviewState?: ExistingReviewState | null,
   platform: CodeReviewPlatform = 'github',
-  gitlabContext?: GitLabDiffContext
+  gitlabContext?: GitLabDiffContext,
+  previousReviewHeadSha?: string
 ): Promise<{ prompt: string; version: string; source: 'posthog' | 'local' }> {
   // Load template from PostHog (remote) or local fallback
   const { template, source } = await loadPromptTemplate(platform);
   const platformConfig = getPlatformConfig(platform);
   const pr = prNumber || `{${platformConfig.prTerm}_NUMBER}`;
   const reviewStyle = config.review_style;
+
+  const isIncremental = !!previousReviewHeadSha;
 
   // Helper to replace common placeholders
   const replacePlaceholders = (text: string, commentId?: number): string => {
@@ -207,7 +211,8 @@ export async function generateReviewPrompt(
       .replace(/{PROJECT_PATH_ENCODED}/g, encodeURIComponent(repository))
       .replace(/{PR}/g, String(pr))
       .replace(/{COMMENT_ID}/g, commentId ? String(commentId) : '{COMMENT_ID}')
-      .replace(/{NOTE_ID}/g, commentId ? String(commentId) : '{NOTE_ID}');
+      .replace(/{NOTE_ID}/g, commentId ? String(commentId) : '{NOTE_ID}')
+      .replace(/{PREVIOUS_REVIEW_SHA}/g, previousReviewHeadSha ?? '{PREVIOUS_REVIEW_SHA}');
 
     // GitLab-specific SHA placeholders
     if (gitlabContext) {
@@ -285,6 +290,21 @@ export async function generateReviewPrompt(
       prompt += `\n*...and ${active.length - 20} more comments*\n`;
     }
     prompt += '\n';
+  }
+
+  // 10b. Incremental review context (dynamic - only for follow-up pushes)
+  if (isIncremental) {
+    prompt += `## Incremental Review (Follow-up Push)\n\n`;
+    prompt += `This is a **follow-up review** — new commits were pushed since the last completed review.\n\n`;
+    prompt += `**Previous review commit:** \`${previousReviewHeadSha}\`\n\n`;
+    prompt += `### Incremental Review Strategy\n\n`;
+    prompt += `1. **Focus on new changes first** — View the incremental diff to see what changed since the last review:\n`;
+    prompt += `   \`\`\`bash\n   git diff ${previousReviewHeadSha}..HEAD\n   \`\`\`\n`;
+    prompt += `2. **Check if previous issues were fixed** — Review the Existing Inline Comments table above. If an issue was addressed by the new commits, do NOT re-flag it.\n`;
+    prompt += `3. **Flag new issues in new code** — Apply the same review standards to the new changes.\n`;
+    prompt += `4. **Re-check touched files holistically** — If a file was modified in the new commits, re-read the full file to catch any issues introduced by the interaction of old and new code.\n`;
+    prompt += `5. **Update the summary** — Reflect the current state: which previous issues are fixed, which remain, and any new issues found.\n\n`;
+    prompt += `**IMPORTANT:** Do NOT re-report issues from the previous review that still exist on unchanged lines. Only flag issues on lines that were added or modified in the new commits, or previous issues that are now worse due to new changes.\n\n`;
   }
 
   // 11. Summary format templates (use style override if available, otherwise default)
