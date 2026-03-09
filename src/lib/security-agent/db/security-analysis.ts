@@ -3,10 +3,10 @@ import {
   security_findings,
   security_analysis_queue,
   security_analysis_owner_state,
+  type SecurityFinding,
 } from '@kilocode/db/schema';
-import { eq, and, sql, count, isNotNull, desc, or, isNull } from 'drizzle-orm';
+import { eq, and, sql, count, isNotNull, desc, or, isNull, inArray, not, like } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
-import type { SecurityFinding } from '@kilocode/db/schema';
 import type {
   AutoAnalysisMinSeverity,
   SecurityFindingStatus,
@@ -116,14 +116,19 @@ export function isFindingEligibleForAutoAnalysis(params: {
   ) {
     return { eligible: false, severityRank };
   }
-  if (severityRank == null) {
-    return { eligible: false, severityRank: null };
-  }
+  // Treat null/unknown severity as eligible with lowest rank (low=3) so these
+  // findings are not silently skipped. They still respect the severity threshold
+  // — if the threshold is stricter than 'all' they will be filtered out by rank.
+  const effectiveRank = severityRank ?? severityRankBySeverity.low;
 
   const maxRank = minSeverityToMaxRank(params.autoAnalysisMinSeverity);
-  return { eligible: severityRank <= maxRank, severityRank };
+  return { eligible: effectiveRank <= maxRank, severityRank: effectiveRank };
 }
 
+/**
+ * Update the analysis status of a finding.
+ * Returns false if the finding was superseded (guard tripped, no rows updated).
+ */
 export async function updateAnalysisStatus(
   findingId: string,
   status: SecurityFindingAnalysisStatus,
@@ -133,7 +138,7 @@ export async function updateAnalysisStatus(
     error?: string;
     analysis?: SecurityFindingAnalysis;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   try {
     const updateData: Record<string, unknown> = {
       analysis_status: status,
@@ -171,7 +176,21 @@ export async function updateAnalysisStatus(
       updateData.analysis_completed_at = sql`now()`;
     }
 
-    await db.update(security_findings).set(updateData).where(eq(security_findings.id, findingId));
+    const rows = await db
+      .update(security_findings)
+      .set(updateData)
+      .where(
+        and(
+          eq(security_findings.id, findingId),
+          or(
+            isNull(security_findings.ignored_reason),
+            not(like(security_findings.ignored_reason, 'superseded:%'))
+          )
+        )
+      )
+      .returning({ id: security_findings.id });
+
+    return rows.length > 0;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'updateAnalysisStatus' },
@@ -179,6 +198,20 @@ export async function updateAnalysisStatus(
     });
     throw error;
   }
+}
+
+/**
+ * Clear analysis_status so a superseded finding no longer counts against
+ * the owner's concurrency cap in countRunningAnalyses().
+ */
+export async function clearAnalysisStatus(findingId: string): Promise<void> {
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`,
+    })
+    .where(eq(security_findings.id, findingId));
 }
 
 export async function countRunningAnalyses(owner: SecurityReviewOwner): Promise<number> {
@@ -401,6 +434,35 @@ export async function setOwnerAutoAnalysisEnabledAtNow(owner: SecurityReviewOwne
     .where(and(ownerCondition, isNull(security_analysis_owner_state.auto_analysis_enabled_at)));
 }
 
+/**
+ * Unconditionally reset auto_analysis_enabled_at to now().
+ * Used when auto-analysis is re-enabled (toggled OFF then ON) so the time
+ * boundary reflects the latest activation, not the original one.
+ */
+export async function resetOwnerAutoAnalysisEnabledAt(owner: SecurityReviewOwner): Promise<void> {
+  const ownerConverted = toOwner(owner);
+  const ownerCondition =
+    ownerConverted.type === 'org'
+      ? eq(security_analysis_owner_state.owned_by_organization_id, ownerConverted.id)
+      : eq(security_analysis_owner_state.owned_by_user_id, ownerConverted.id);
+
+  // Upsert: insert if missing, update unconditionally if present
+  await db
+    .insert(security_analysis_owner_state)
+    .values({
+      owned_by_organization_id: ownerConverted.type === 'org' ? ownerConverted.id : null,
+      owned_by_user_id: ownerConverted.type === 'user' ? ownerConverted.id : null,
+      auto_analysis_enabled_at: sql`now()`,
+      updated_at: sql`now()`,
+    })
+    .onConflictDoNothing();
+
+  await db
+    .update(security_analysis_owner_state)
+    .set({ auto_analysis_enabled_at: sql`now()`, updated_at: sql`now()` })
+    .where(ownerCondition);
+}
+
 export async function syncAutoAnalysisQueueForFinding(params: {
   owner: SecurityReviewOwner;
   findingId: string;
@@ -564,6 +626,139 @@ export async function tryAcquireAnalysisStartLease(findingId: string): Promise<b
     .returning({ id: security_findings.id });
 
   return Boolean(lease);
+}
+
+/**
+ * Enqueue all existing unanalyzed findings for an owner into the auto-analysis queue.
+ * Called when `auto_analysis_include_existing` is toggled ON so pre-existing
+ * findings are picked up without waiting for the next sync cron.
+ *
+ * Only enqueues findings that:
+ *  - belong to the owner
+ *  - are open
+ *  - have no existing queue row
+ *  - have no in-flight analysis (analysis_status is null, completed, or failed)
+ *
+ * Returns the number of findings enqueued.
+ */
+export async function enqueueBacklogFindings(params: {
+  owner: SecurityReviewOwner;
+  autoAnalysisMinSeverity: AutoAnalysisMinSeverity;
+}): Promise<number> {
+  const ownerConverted = toOwner(params.owner);
+  const maxRank = minSeverityToMaxRank(params.autoAnalysisMinSeverity);
+
+  const ownerCondition =
+    ownerConverted.type === 'org'
+      ? sql`${security_findings.owned_by_organization_id} = ${ownerConverted.id}`
+      : sql`${security_findings.owned_by_user_id} = ${ownerConverted.id}`;
+
+  // Use a single INSERT ... SELECT to bulk-enqueue eligible findings.
+  // severity_rank maps null severity to low (3) to match isFindingEligibleForAutoAnalysis.
+  const result = await db.execute<{ id: string }>(sql`
+    INSERT INTO ${security_analysis_queue} (
+      finding_id,
+      owned_by_organization_id,
+      owned_by_user_id,
+      queue_status,
+      severity_rank,
+      queued_at,
+      updated_at
+    )
+    SELECT
+      ${security_findings.id},
+      ${security_findings.owned_by_organization_id},
+      ${security_findings.owned_by_user_id},
+      'queued',
+      CASE ${security_findings.severity}
+        WHEN 'critical' THEN 0
+        WHEN 'high' THEN 1
+        WHEN 'medium' THEN 2
+        WHEN 'low' THEN 3
+        ELSE 3
+      END,
+      now(),
+      now()
+    FROM ${security_findings}
+    WHERE ${ownerCondition}
+      AND ${security_findings.status} = 'open'
+      AND CASE ${security_findings.severity}
+            WHEN 'critical' THEN 0
+            WHEN 'high' THEN 1
+            WHEN 'medium' THEN 2
+            WHEN 'low' THEN 3
+            ELSE 3
+          END <= ${maxRank}
+      AND (
+        ${security_findings.analysis_status} IS NULL
+        OR ${security_findings.analysis_status} IN ('completed', 'failed')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${security_analysis_queue}
+        WHERE ${security_analysis_queue.finding_id} = ${security_findings.id}
+      )
+    ON CONFLICT (finding_id) DO NOTHING
+    RETURNING ${security_analysis_queue.id}
+  `);
+
+  return result.rows.length;
+}
+
+/**
+ * Remove superseded findings from the auto-analysis queue so the worker
+ * doesn't analyze findings that are no longer open.
+ *
+ * Targets both `queued` and `pending` (claimed but not yet running) rows
+ * because the auto-analysis worker may claim rows between per-finding
+ * enqueue and this repo-level cleanup.
+ *
+ * Clears `analysis_status` for `pending` findings so they no longer count
+ * against the owner's concurrency cap. Already-running analyses are left
+ * alone — the callback route transitions their queue rows when the job
+ * reports back, releasing the concurrency slot at that point.
+ */
+export async function dequeueSupersededFindings(findingIds: string[]): Promise<number> {
+  if (findingIds.length === 0) return 0;
+
+  const result = await db
+    .update(security_analysis_queue)
+    .set({
+      queue_status: 'completed',
+      failure_code: 'SKIPPED_NO_LONGER_ELIGIBLE',
+      claim_token: null,
+      claimed_at: null,
+      claimed_by_job_id: null,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(security_analysis_queue.finding_id, findingIds),
+        or(
+          eq(security_analysis_queue.queue_status, 'queued'),
+          eq(security_analysis_queue.queue_status, 'pending')
+        )
+      )
+    )
+    .returning({ id: security_analysis_queue.id });
+
+  // Clear pending analysis_status so countRunningAnalyses no longer counts
+  // these superseded findings against the owner's concurrency cap.
+  // Running analyses are left alone — the callback route transitions their
+  // queue rows when the job completes, releasing the concurrency slot.
+  await db
+    .update(security_findings)
+    .set({
+      analysis_status: null,
+      updated_at: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(security_findings.id, findingIds),
+        eq(security_findings.analysis_status, 'pending')
+      )
+    );
+
+  return result.length;
 }
 
 export async function transitionAutoAnalysisQueueFromCallback(params: {

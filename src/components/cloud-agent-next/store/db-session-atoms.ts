@@ -598,7 +598,7 @@ export const createNewSessionInIndexedDbAtom = atom(
     const newDbSession: DbSession = {
       session_id: kiloSessionId,
       title,
-      git_url: repository ? `https://github.com/${repository}` : null,
+      git_url: null,
       cloud_agent_session_id: cloudAgentSessionId,
       created_on_platform: 'cloud-agent',
       created_at: nowDate,

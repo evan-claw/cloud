@@ -1,6 +1,6 @@
 import { type KiloFreeModel } from '@/lib/providers/kilo-free-model';
 
-export const minimax_m25_free_model = {
+export const minimax_m25_free_model: KiloFreeModel = {
   public_id: 'minimax/minimax-m2.5:free',
   display_name: 'MiniMax: MiniMax M2.5 (free)',
   description:
@@ -11,10 +11,10 @@ export const minimax_m25_free_model = {
   flags: ['reasoning', 'prompt_cache'],
   gateway: 'openrouter',
   internal_id: 'minimax/minimax-m2.5',
-  inference_providers: [],
-} as KiloFreeModel;
+  inference_provider: null,
+};
 
-export const minimax_m21_free_model = {
+export const minimax_m21_free_model: KiloFreeModel = {
   public_id: 'minimax/minimax-m2.1:free',
   display_name: 'MiniMax: MiniMax M2.1 (free)',
   description:
@@ -25,5 +25,5 @@ export const minimax_m21_free_model = {
   flags: ['reasoning', 'prompt_cache'],
   gateway: 'openrouter',
   internal_id: 'minimax/minimax-m2.1',
-  inference_providers: [],
-} as KiloFreeModel;
+  inference_provider: null,
+};

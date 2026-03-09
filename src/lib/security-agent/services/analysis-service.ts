@@ -6,7 +6,11 @@ import {
 } from '@/lib/cloud-agent-next/cloud-agent-client';
 import { generateApiToken } from '@/lib/tokens';
 import { getSecurityFindingById } from '../db/security-findings';
-import { updateAnalysisStatus, tryAcquireAnalysisStartLease } from '../db/security-analysis';
+import {
+  updateAnalysisStatus,
+  clearAnalysisStatus,
+  tryAcquireAnalysisStartLease,
+} from '../db/security-analysis';
 import type {
   AnalysisMode,
   SecurityFindingAnalysis,
@@ -134,17 +138,25 @@ export async function finalizeAnalysis(
   organizationId?: string
 ): Promise<void> {
   if (!rawMarkdown.trim()) {
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: 'No response received from analysis agent',
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: 'No response received from analysis agent',
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     return;
   }
 
   const finding = await getSecurityFindingById(findingId);
   if (!finding) {
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: 'Finding not found during finalization',
-    });
+    if (
+      !(await updateAnalysisStatus(findingId, 'failed', {
+        error: 'Finding not found during finalization',
+      }))
+    ) {
+      await clearAnalysisStatus(findingId);
+    }
     return;
   }
 
@@ -181,7 +193,10 @@ export async function finalizeAnalysis(
     correlationId,
   };
 
-  await updateAnalysisStatus(findingId, 'completed', { analysis });
+  if (!(await updateAnalysisStatus(findingId, 'completed', { analysis }))) {
+    await clearAnalysisStatus(findingId);
+    return;
+  }
 
   const triggeredBy = existingAnalysis?.triggeredByUserId ?? userId;
   trackSecurityAgentAnalysisCompleted({
@@ -373,7 +388,11 @@ export async function startSecurityAnalysis(params: {
         correlationId,
       };
 
-      await updateAnalysisStatus(findingId, 'completed', { analysis });
+      const written = await updateAnalysisStatus(findingId, 'completed', { analysis });
+      if (!written) {
+        await clearAnalysisStatus(findingId);
+        return { started: false, error: 'Finding was superseded during analysis' };
+      }
 
       trackSecurityAgentAnalysisCompleted({
         distinctId: user.id,
@@ -494,22 +513,26 @@ export async function startSecurityAnalysis(params: {
         });
       }
 
-      await updateAnalysisStatus(findingId, 'failed', { error: userMessage });
+      if (!(await updateAnalysisStatus(findingId, 'failed', { error: userMessage }))) {
+        await clearAnalysisStatus(findingId);
+      }
       return { started: false, error: userMessage, errorCode };
     }
 
     return { started: true, triageOnly: false };
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
-      await updateAnalysisStatus(findingId, 'failed', { error: error.message });
+      if (!(await updateAnalysisStatus(findingId, 'failed', { error: error.message }))) {
+        await clearAnalysisStatus(findingId);
+      }
       throw error;
     }
 
     const classified = classifyAnalysisError(error);
 
-    await updateAnalysisStatus(findingId, 'failed', {
-      error: classified.userMessage,
-    });
+    if (!(await updateAnalysisStatus(findingId, 'failed', { error: classified.userMessage }))) {
+      await clearAnalysisStatus(findingId);
+    }
     if (isUserActionableError(classified.code)) {
       warn('Analysis failed (user-actionable)', {
         correlationId,

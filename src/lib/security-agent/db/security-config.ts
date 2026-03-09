@@ -6,7 +6,10 @@ import {
 import type { Owner } from '@/lib/code-reviews/core';
 import { DEFAULT_SECURITY_AGENT_CONFIG, parseSecurityAgentConfig } from '../core/constants';
 import { SecurityAgentConfigSchema, type SecurityAgentConfig } from '../core/types';
-import { setOwnerAutoAnalysisEnabledAtNow } from './security-analysis';
+import {
+  setOwnerAutoAnalysisEnabledAtNow,
+  resetOwnerAutoAnalysisEnabledAt,
+} from './security-analysis';
 
 const AGENT_TYPE = 'security_scan';
 const DEFAULT_PLATFORM = 'github';
@@ -54,6 +57,9 @@ export async function upsertSecurityAgentConfig(
   const existingConfig = await getSecurityAgentConfigWithStatus(owner, platform);
   const fullConfig = parseSecurityAgentConfig({ ...existingConfig?.storedConfig, ...config });
 
+  const wasAutoAnalysisEnabled = existingConfig?.config.auto_analysis_enabled ?? false;
+  const isNowAutoAnalysisEnabled = fullConfig.auto_analysis_enabled;
+
   await upsertAgentConfigForOwner({
     owner,
     agentType: AGENT_TYPE,
@@ -63,12 +69,18 @@ export async function upsertSecurityAgentConfig(
     createdBy,
   });
 
-  // Idempotent: sets auto_analysis_enabled_at only when null, so safe to call on every save.
-  // This guards against a prior save where the config committed but the timestamp write failed.
-  if (fullConfig.auto_analysis_enabled) {
-    await setOwnerAutoAnalysisEnabledAtNow(
-      owner.type === 'org' ? { organizationId: owner.id } : { userId: owner.id }
-    );
+  const securityOwner = owner.type === 'org' ? { organizationId: owner.id } : { userId: owner.id };
+
+  if (isNowAutoAnalysisEnabled) {
+    if (!wasAutoAnalysisEnabled) {
+      // Transitioning OFF → ON: unconditionally reset the timestamp so the
+      // time boundary reflects this activation, not a previous one.
+      await resetOwnerAutoAnalysisEnabledAt(securityOwner);
+    } else {
+      // Already enabled: idempotent set (only writes when null) to guard
+      // against a prior save where the config committed but timestamp failed.
+      await setOwnerAutoAnalysisEnabledAtNow(securityOwner);
+    }
   }
 }
 

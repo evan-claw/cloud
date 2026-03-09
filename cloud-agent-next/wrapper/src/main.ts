@@ -85,8 +85,8 @@ async function main() {
 
   const autoCommit = getOptionalEnvBool('AUTO_COMMIT', false);
   const condenseOnComplete = getOptionalEnvBool('CONDENSE_ON_COMPLETE', false);
-  const upstreamBranch = getOptionalEnv('UPSTREAM_BRANCH', '');
   const model = getOptionalEnv('MODEL', '');
+  const upstreamBranch = process.env.UPSTREAM_BRANCH || undefined;
 
   const maxRuntimeMs = getOptionalEnvInt('MAX_RUNTIME_MS', DEFAULT_INFLIGHT_TIMEOUT_MS);
 
@@ -102,7 +102,7 @@ async function main() {
     logToFile(`config: agentSession=${agentSessionId}`);
   }
   logToFile(
-    `config: autoCommit=${autoCommit} condenseOnComplete=${condenseOnComplete} maxRuntimeMs=${maxRuntimeMs}`
+    `config: autoCommit=${autoCommit} condenseOnComplete=${condenseOnComplete} maxRuntimeMs=${maxRuntimeMs} upstreamBranch=${upstreamBranch ?? '(none)'}`
   );
 
   // Create state
@@ -192,13 +192,33 @@ async function main() {
           message: reason,
           timestamp: Date.now(),
         });
+
+        // Abort the kilo session — the CLI is still running but we can't relay events
+        const job = state.currentJob;
+        if (job) {
+          kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
+        }
+
+        // Mark as aborted so we don't send 'complete' (the WS is dead anyway)
+        getLifecycleManager().setAborted();
         state.clearAllInflight();
-        // Also close SSE consumer to avoid orphaned connection
-        void connectionManager.close();
+        getLifecycleManager().triggerDrainAndClose();
       },
       onCompletionSignal: () => {
         // Signal completion to lifecycle manager for post-processing waiters
         getLifecycleManager().signalCompletion();
+      },
+      onReconnecting: (attempt: number) => {
+        logToFile(`ingest WS reconnecting: attempt ${attempt}`);
+      },
+      onReconnected: () => {
+        logToFile('ingest WS reconnected');
+        // Only clear DISCONNECT errors — preserve more severe errors
+        // (e.g. INFLIGHT_TIMEOUT) that may have been set during the reconnect window
+        const lastError = state.getLastError();
+        if (lastError?.code === 'DISCONNECT') {
+          state.clearLastError();
+        }
       },
     }
   );
@@ -210,8 +230,8 @@ async function main() {
       autoCommit,
       condenseOnComplete,
       workspacePath,
-      upstreamBranch: upstreamBranch || undefined,
       model: model || undefined,
+      upstreamBranch,
     },
     {
       state,

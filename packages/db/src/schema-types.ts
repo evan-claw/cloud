@@ -125,10 +125,11 @@ export const OrganizationPlanSchema = z.enum(['teams', 'enterprise']);
 export type OrganizationPlan = z.infer<typeof OrganizationPlanSchema>;
 
 const OrganizationSettingsSchema = z.object({
+  /** @deprecated use model_deny_list instead. delete if this is still here May 2026 */
   model_allow_list: z.array(z.string()).optional(),
+  /** @deprecated use provider_deny_list instead. delete if this is still here May 2026 */
   provider_allow_list: z.array(z.string()).optional(),
 
-  // under development, not yet enforced, will replace model_allow_list and provider_allow_list:
   model_deny_list: z.array(z.string()).optional(),
   provider_deny_list: z.array(z.string()).optional(),
 
@@ -297,6 +298,13 @@ export const CodeReviewAgentConfigSchema = z.object({
   selected_repository_ids: z.array(z.number()).optional(),
   // Manually added repositories (for GitLab where pagination limits results)
   manually_added_repositories: z.array(ManuallyAddedRepositorySchema).optional(),
+  // Controls when the PR gate check (GitHub Check Run / GitLab commit status)
+  // reports a failure based on review findings.
+  //   'off'      — gate only fails on system errors (timeout, crash)
+  //   'all'      — gate fails on any finding
+  //   'warning'  — gate fails on warnings and above
+  //   'critical' — gate fails only on critical issues
+  gate_threshold: z.enum(['off', 'all', 'warning', 'critical']).optional(),
 });
 
 export type CodeReviewAgentConfig = z.infer<typeof CodeReviewAgentConfigSchema>;

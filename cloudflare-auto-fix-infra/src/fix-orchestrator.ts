@@ -78,9 +78,16 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
         }
       }
 
-      await this.updateStatus('failed', {
-        errorMessage: errorMessage,
-      });
+      try {
+        await this.updateStatus('failed', {
+          errorMessage: errorMessage,
+        });
+      } catch (statusError) {
+        console.error('[AutoFixOrchestrator] Failed to update ticket to failed state', {
+          ticketId: this.state.ticketId,
+          error: statusError instanceof Error ? statusError.message : String(statusError),
+        });
+      }
     }
   }
 
@@ -357,16 +364,32 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     await this.ctx.storage.put('state', this.state);
 
     // Update Next.js database
-    await fetch(`${this.env.API_URL}/api/internal/auto-fix-status/${this.state.ticketId}`, {
-      method: 'POST',
-      headers: {
-        'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const response = await fetch(
+      `${this.env.API_URL}/api/internal/auto-fix-status/${this.state.ticketId}`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status,
+          ...updates,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'unknown');
+      console.error('[AutoFixOrchestrator] Failed to update status in Next.js database', {
+        ticketId: this.state.ticketId,
         status,
-        ...updates,
-      }),
-    });
+        httpStatus: response.status,
+        errorText,
+      });
+      throw new Error(
+        `Failed to update ticket status in database: ${response.status} ${response.statusText}`
+      );
+    }
   }
 }

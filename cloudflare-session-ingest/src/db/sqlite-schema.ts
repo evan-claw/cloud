@@ -5,6 +5,8 @@ export const ingestItems = sqliteTable('ingest_items', {
   item_id: text('item_id').notNull().unique(),
   item_type: text('item_type').notNull(),
   item_data: text('item_data').notNull(),
+  item_data_r2_key: text('item_data_r2_key'),
+  ingested_at: integer('ingested_at'),
 });
 
 export const ingestMeta = sqliteTable('ingest_meta', {

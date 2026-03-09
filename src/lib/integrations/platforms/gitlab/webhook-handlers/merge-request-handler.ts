@@ -23,10 +23,12 @@ import type { PlatformIntegration } from '@kilocode/db/schema';
 import type { Owner } from '@/lib/code-reviews/core';
 import { getBotUserId } from '@/lib/bot-users/bot-user-service';
 import type { CodeReviewAgentConfig } from '@/lib/agent-config/core/types';
-import { addReactionToMR } from '../adapter';
+import { addReactionToMR, setCommitStatus } from '../adapter';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
 import { getOrCreateProjectAccessToken } from '@/lib/integrations/gitlab-service';
+import { APP_URL } from '@/lib/constants';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 
 /**
  * Handles merge request events that trigger code review
@@ -212,13 +214,41 @@ export async function handleMergeRequestCodeReview(
     } | null;
     const instanceUrl = metadata?.gitlab_instance_url || 'https://gitlab.com';
 
-    // 8. Post 👀 reaction to show Kilo is reviewing (using PrAT for bot identity)
+    // 8. Post 👀 reaction and set commit status (using PrAT for bot identity)
+    const isPrGateEnabled =
+      process.env.NODE_ENV === 'development' ||
+      (await isFeatureFlagEnabled('code-review-pr-gate', owner.userId));
+
     if (fullIntegration) {
       try {
         const pratToken = await getOrCreateProjectAccessToken(fullIntegration, project.id);
         logExceptInTest(`Got PrAT for project ${project.path_with_namespace}`, {
           projectId: project.id,
         });
+
+        // Set commit status to 'pending' so the MR shows a pending Kilo check (only when PR gate is enabled)
+        if (isPrGateEnabled) {
+          try {
+            const detailsUrl = `${APP_URL}/code-reviews/${reviewId}`;
+            await setCommitStatus(
+              pratToken,
+              project.id,
+              headSha,
+              'pending',
+              {
+                targetUrl: detailsUrl,
+                description: 'Kilo Code Review queued',
+              },
+              instanceUrl
+            );
+            logExceptInTest(
+              `Set commit status 'pending' on ${project.path_with_namespace}!${mr.iid}`
+            );
+          } catch (statusError) {
+            // Non-blocking — review still proceeds if commit status fails
+            logExceptInTest('Failed to set commit status:', statusError);
+          }
+        }
 
         await addReactionToMR(pratToken, project.id, mr.iid, 'eyes', instanceUrl);
         logExceptInTest(`Added eyes reaction to ${project.path_with_namespace}!${mr.iid}`);

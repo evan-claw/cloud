@@ -13,6 +13,7 @@ import {
   Rocket,
   Blocks,
   MessageSquare,
+  Bot,
   Sparkles,
   FileSearch,
   GitPullRequest,
@@ -111,6 +112,11 @@ const productEngineeringItems: MenuItem[] = [
     title: () => 'Slack Bot',
     url: '/admin/slack-bot',
     icon: () => <MessageSquare />,
+  },
+  {
+    title: () => 'Kilo Bot',
+    url: '/admin/bot-requests',
+    icon: () => <Bot />,
   },
   {
     title: () => 'Deployments',

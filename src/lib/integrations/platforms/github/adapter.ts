@@ -759,3 +759,111 @@ export async function checkExistingFork(
     throw error;
   }
 }
+
+// ============================================================================
+// Check Runs API (PR gate checks)
+// ============================================================================
+
+/**
+ * Conclusion values for a completed GitHub Check Run.
+ * @see https://docs.github.com/en/rest/checks/runs#create-a-check-run
+ */
+export type CheckRunConclusion =
+  | 'success'
+  | 'failure'
+  | 'neutral'
+  | 'cancelled'
+  | 'timed_out'
+  | 'action_required';
+
+type CheckRunOutput = {
+  title: string;
+  summary: string;
+  text?: string;
+};
+
+/**
+ * Creates a GitHub Check Run on a commit.
+ *
+ * Used when a code review is first queued so the PR immediately shows
+ * a pending "Kilo Code Review" check that can be configured as a
+ * required status check in branch protection rules.
+ *
+ * @returns The numeric Check Run ID (store this to update the check later)
+ */
+export async function createCheckRun(
+  installationId: string,
+  owner: string,
+  repo: string,
+  headSha: string,
+  options: {
+    detailsUrl?: string;
+    output?: CheckRunOutput;
+  } = {},
+  appType: GitHubAppType = 'standard'
+): Promise<number> {
+  const tokenData = await generateGitHubInstallationToken(installationId, appType);
+  const octokit = new Octokit({ auth: tokenData.token });
+
+  const { data } = await octokit.checks.create({
+    owner,
+    repo,
+    name: 'Kilo Code Review',
+    head_sha: headSha,
+    status: 'queued',
+    ...(options.detailsUrl ? { details_url: options.detailsUrl } : {}),
+    ...(options.output ? { output: options.output } : {}),
+  });
+
+  logExceptInTest('[createCheckRun] Created check run', {
+    owner,
+    repo,
+    headSha: headSha.substring(0, 8),
+    checkRunId: data.id,
+  });
+
+  return data.id;
+}
+
+/**
+ * Updates an existing GitHub Check Run.
+ *
+ * Called as the review progresses through its lifecycle:
+ * - queued  -> in_progress  (review starts running)
+ * - in_progress -> completed (review finishes, with a conclusion)
+ */
+export async function updateCheckRun(
+  installationId: string,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+  options: {
+    status?: 'queued' | 'in_progress' | 'completed';
+    conclusion?: CheckRunConclusion;
+    detailsUrl?: string;
+    output?: CheckRunOutput;
+  },
+  appType: GitHubAppType = 'standard'
+): Promise<void> {
+  const tokenData = await generateGitHubInstallationToken(installationId, appType);
+  const octokit = new Octokit({ auth: tokenData.token });
+
+  await octokit.checks.update({
+    owner,
+    repo,
+    check_run_id: checkRunId,
+    ...(options.status ? { status: options.status } : {}),
+    ...(options.conclusion ? { conclusion: options.conclusion } : {}),
+    ...(options.detailsUrl ? { details_url: options.detailsUrl } : {}),
+    ...(options.output ? { output: options.output } : {}),
+    ...(options.status === 'completed' ? { completed_at: new Date().toISOString() } : {}),
+  });
+
+  logExceptInTest('[updateCheckRun] Updated check run', {
+    owner,
+    repo,
+    checkRunId,
+    status: options.status,
+    conclusion: options.conclusion,
+  });
+}

@@ -196,7 +196,7 @@ function generateRandomRecord(
       50
     ),
     auto_model: maybeNull(
-      pickRandom(['kilo/auto', 'kilo/auto-free', 'kilo/auto-small'], Math.random()),
+      pickRandom(['kilo-auto/frontier', 'kilo-auto/free', 'kilo-auto/small'], Math.random()),
       70
     ),
     market_cost: core.cost,

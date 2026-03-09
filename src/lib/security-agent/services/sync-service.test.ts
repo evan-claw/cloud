@@ -27,6 +27,12 @@ const mockGetOwnerAutoAnalysisEnabledAt = jest.fn() as jest.MockedFunction<
 const mockSyncAutoAnalysisQueueForFinding = jest.fn() as jest.MockedFunction<
   typeof analysisDbModule.syncAutoAnalysisQueueForFinding
 >;
+const mockSupersedeDuplicateFindings = jest.fn() as jest.MockedFunction<
+  typeof findingsDbModule.supersedeDuplicateFindings
+>;
+const mockDequeueSupersededFindings = jest.fn() as jest.MockedFunction<
+  typeof analysisDbModule.dequeueSupersededFindings
+>;
 const mockSyncLogger = jest.fn();
 
 jest.mock('../github/dependabot-api', () => ({
@@ -39,6 +45,7 @@ jest.mock('../parsers/dependabot-parser', () => ({
 
 jest.mock('../db/security-findings', () => ({
   upsertSecurityFinding: mockUpsertSecurityFinding,
+  supersedeDuplicateFindings: mockSupersedeDuplicateFindings,
 }));
 
 jest.mock('../db/security-config', () => ({
@@ -49,6 +56,7 @@ jest.mock('../db/security-config', () => ({
 jest.mock('../db/security-analysis', () => ({
   getOwnerAutoAnalysisEnabledAt: mockGetOwnerAutoAnalysisEnabledAt,
   syncAutoAnalysisQueueForFinding: mockSyncAutoAnalysisQueueForFinding,
+  dequeueSupersededFindings: mockDequeueSupersededFindings,
 }));
 
 jest.mock('@/lib/drizzle', () => ({ db: {} }));
@@ -124,6 +132,7 @@ describe('sync-service queue enqueue wiring', () => {
       findingId: 'finding-1',
       wasInserted: true,
       previousStatus: null,
+      effectiveStatus: 'open',
       findingCreatedAt: '2026-01-01T00:00:00.000Z',
     });
     mockSyncAutoAnalysisQueueForFinding.mockResolvedValue({
@@ -132,6 +141,11 @@ describe('sync-service queue enqueue wiring', () => {
       boundarySkipCount: 0,
       unknownSeverityCount: 0,
     });
+    mockSupersedeDuplicateFindings.mockResolvedValue({
+      count: 0,
+      supersededFindingIds: [],
+    });
+    mockDequeueSupersededFindings.mockResolvedValue(0);
   });
 
   it('passes upsert metadata into auto-analysis queue sync', async () => {
@@ -146,9 +160,35 @@ describe('sync-service queue enqueue wiring', () => {
       expect.objectContaining({
         findingId: 'finding-1',
         previousStatus: null,
+        currentStatus: 'open',
         findingCreatedAt: '2026-01-01T00:00:00.000Z',
         autoAnalysisEnabled: true,
         isAgentEnabled: true,
+      })
+    );
+  });
+
+  it('uses effectiveStatus (not payload status) so superseded findings are not re-queued', async () => {
+    mockUpsertSecurityFinding.mockResolvedValue({
+      findingId: 'finding-superseded',
+      wasInserted: false,
+      previousStatus: 'ignored',
+      effectiveStatus: 'ignored',
+      findingCreatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await syncDependabotAlertsForRepo({
+      owner: { userId: 'user-1' },
+      platformIntegrationId: 'integration-1',
+      installationId: 'inst-1',
+      repoFullName: 'acme/repo',
+    });
+
+    expect(mockSyncAutoAnalysisQueueForFinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        findingId: 'finding-superseded',
+        previousStatus: 'ignored',
+        currentStatus: 'ignored',
       })
     );
   });

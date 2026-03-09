@@ -13,7 +13,7 @@ import type { KiloClient } from './kilo-client.js';
 import type { ConnectionManager } from './connection.js';
 import { runAutoCommit } from './auto-commit.js';
 import { runCondenseOnComplete } from './condense-on-complete.js';
-import { logToFile } from './utils.js';
+import { getCurrentBranch, logToFile } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -47,10 +47,10 @@ export type LifecycleConfig = {
   condenseOnComplete: boolean;
   /** Workspace path for auto-commit/condense */
   workspacePath: string;
-  /** Upstream branch for auto-commit */
-  upstreamBranch?: string;
   /** Model for auto-commit/condense */
   model?: string;
+  /** Upstream branch explicitly provided by the user via API */
+  upstreamBranch?: string;
 };
 
 export type LifecycleDependencies = {
@@ -143,6 +143,10 @@ export function createLifecycleManager(
   function checkSseHealth(): void {
     // Only check when has job context
     if (!state.hasJob) return;
+
+    // Skip SSE health checks while the ingest WS is reconnecting — the SSE stream
+    // is still alive, we just can't relay events until the WS reconnects.
+    if (connectionManager.isReconnecting()) return;
 
     const now = Date.now();
 
@@ -248,16 +252,23 @@ export function createLifecycleManager(
     const job = state.currentJob;
     if (!job) return;
 
+    // Skip post-completion tasks when aborted — the execution already failed
+    // (e.g. disconnect, fatal error) so auto-commit/condense on partial work is unsafe
+    if (isAborted) {
+      logToFile('skipping post-completion tasks — execution was aborted');
+      return;
+    }
+
     // Run auto-commit if enabled
     if (config.autoCommit) {
       logToFile('running auto-commit');
       try {
         const autoCommitPromise = runAutoCommit({
           workspacePath: config.workspacePath,
-          upstreamBranch: config.upstreamBranch,
           onEvent: event => state.sendToIngest(event),
           kiloClient,
           messageId: state.lastAssistantMessageId ?? undefined,
+          upstreamBranch: config.upstreamBranch,
         });
         const timeoutPromise = new Promise<'timeout'>(resolve =>
           setTimeout(() => resolve('timeout'), AUTO_COMMIT_TIMEOUT_MS)
@@ -361,23 +372,35 @@ export function createLifecycleManager(
           uploader.stop();
         }
       })
-      .finally(() => {
-        // Send complete event to ingest so DO can update execution status and trigger callbacks
-        // BUT only if not aborted - fatal errors already sent their own terminal event
-        const job = state.currentJob;
-        if (job && !isAborted) {
-          logToFile(`sending complete event for executionId=${job.executionId}`);
-          state.sendToIngest({
-            streamEventType: 'complete',
-            data: {
-              exitCode: 0,
-              executionId: job.executionId,
-              kiloSessionId: job.kiloSessionId,
-            },
-            timestamp: new Date().toISOString(),
-          });
-        } else if (job && isAborted) {
-          logToFile(`skipping complete event - execution was aborted`);
+      .finally(async () => {
+        try {
+          // Send complete event to ingest so DO can update execution status and trigger callbacks
+          // BUT only if not aborted - fatal errors already sent their own terminal event
+          const job = state.currentJob;
+          if (job && !isAborted) {
+            // Capture current branch so the DO can persist it for future warm starts.
+            // Use a short timeout — if git hangs here the drain must still proceed.
+            const currentBranch = await getCurrentBranch(config.workspacePath, 10_000).catch(
+              () => ''
+            );
+            logToFile(
+              `sending complete event for executionId=${job.executionId} branch=${currentBranch || '(none)'}`
+            );
+            state.sendToIngest({
+              streamEventType: 'complete',
+              data: {
+                exitCode: 0,
+                executionId: job.executionId,
+                kiloSessionId: job.kiloSessionId,
+                ...(currentBranch ? { currentBranch } : {}),
+              },
+              timestamp: new Date().toISOString(),
+            });
+          } else if (job && isAborted) {
+            logToFile(`skipping complete event - execution was aborted`);
+          }
+        } catch (err) {
+          logToFile(`drain finally error: ${err instanceof Error ? err.message : String(err)}`);
         }
 
         drainTimeout = setTimeout(() => {

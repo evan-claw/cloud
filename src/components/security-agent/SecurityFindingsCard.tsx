@@ -4,6 +4,9 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -11,7 +14,10 @@ import {
   Loader2,
   RefreshCw,
   Settings2,
+  Shield,
 } from 'lucide-react';
+import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -20,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SecurityFinding } from '@kilocode/db/schema';
 import { RepositoryFilter } from './RepositoryFilter';
 import { SecurityFindingRow } from './SecurityFindingRow';
@@ -58,25 +65,38 @@ type SecurityFindingsCardProps = {
     status?: string;
     severity?: string;
     repoFullName?: string;
-    exploitability?: string;
-    suggestedAction?: string;
-    analysisStatus?: string;
+    outcomeFilter?: string;
   };
   onFiltersChange: (filters: {
     status?: string;
     severity?: string;
     repoFullName?: string;
-    exploitability?: string;
-    suggestedAction?: string;
-    analysisStatus?: string;
+    outcomeFilter?: string;
   }) => void;
   isEnabled: boolean;
   hasIntegration: boolean;
+  installUrl?: string;
   onEnableClick: () => void;
   lastSyncTime?: string | null;
   onStartAnalysis?: (findingId: string, options?: { retrySandboxOnly?: boolean }) => void;
-  startingAnalysisId?: string | null;
+  startingAnalysisIds?: Set<string>;
+  runningCount?: number;
+  concurrencyLimit?: number;
+  sortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc';
+  onSortByChange: (sortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc') => void;
 };
+
+// Outcome filters that imply their own status constraint in the DB query.
+// Kept at module level to avoid re-allocating on every render.
+const STATUS_IMPLYING_OUTCOMES = new Set([
+  'exploitable',
+  'not_exploitable',
+  'safe_to_dismiss',
+  'needs_review',
+  'triage_complete',
+  'fixed',
+  'dismissed',
+]);
 
 export function SecurityFindingsCard({
   findings,
@@ -94,10 +114,15 @@ export function SecurityFindingsCard({
   onFiltersChange,
   isEnabled,
   hasIntegration,
+  installUrl,
   onEnableClick,
   lastSyncTime,
   onStartAnalysis,
-  startingAnalysisId,
+  startingAnalysisIds,
+  runningCount = 0,
+  concurrencyLimit = 3,
+  sortBy,
+  onSortByChange,
 }: SecurityFindingsCardProps) {
   const totalPages = Math.ceil(totalCount / pageSize);
   const startItem = (page - 1) * pageSize + 1;
@@ -107,9 +132,14 @@ export function SecurityFindingsCard({
   const closedCount = stats.fixed + stats.ignored;
 
   const handleStatusChange = (value: string) => {
+    const newStatus = value === 'all' ? undefined : value;
     onFiltersChange({
       ...filters,
-      status: value === 'all' ? undefined : value,
+      status: newStatus,
+      outcomeFilter:
+        newStatus && filters.outcomeFilter && STATUS_IMPLYING_OUTCOMES.has(filters.outcomeFilter)
+          ? undefined
+          : filters.outcomeFilter,
     });
     onPageChange(1);
   };
@@ -130,35 +160,42 @@ export function SecurityFindingsCard({
     onPageChange(1);
   };
 
-  const handleExploitabilityChange = (value: string) => {
+  const handleOutcomeFilterChange = (value: string) => {
+    const newOutcome = value === 'all' ? undefined : value;
     onFiltersChange({
       ...filters,
-      exploitability: value === 'all' ? undefined : value,
+      outcomeFilter: newOutcome,
+      status: newOutcome && STATUS_IMPLYING_OUTCOMES.has(newOutcome) ? undefined : filters.status,
     });
     onPageChange(1);
   };
 
-  const handleSuggestedActionChange = (value: string) => {
-    onFiltersChange({
-      ...filters,
-      suggestedAction: value === 'all' ? undefined : value,
-    });
-    onPageChange(1);
-  };
-
-  const handleAnalysisStatusChange = (value: string) => {
-    onFiltersChange({
-      ...filters,
-      analysisStatus: value === 'all' ? undefined : value,
-    });
-    onPageChange(1);
-  };
+  if (!hasIntegration) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-700 py-16">
+        <Shield className="text-muted-foreground mb-4 h-12 w-12 opacity-40" />
+        <h3 className="text-lg font-medium">Connect GitHub to get started</h3>
+        <p className="text-muted-foreground mt-2 max-w-md text-center text-sm">
+          Install the Kilo GitHub App to automatically sync Dependabot alerts and manage security
+          findings across your repositories.
+        </p>
+        {installUrl && (
+          <Button asChild className="mt-6">
+            <Link href={installUrl}>Install GitHub App</Link>
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-6">
+      {/* Summary bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-800 bg-gray-900/50 px-4 py-2.5">
+        {/* Left: status counts */}
+        <div className="flex min-w-0 flex-wrap items-center gap-4">
           <button
+            type="button"
             onClick={() => handleStatusChange(filters.status === 'open' ? 'all' : 'open')}
             className={`flex items-center gap-2 text-sm ${
               filters.status === 'open'
@@ -170,6 +207,7 @@ export function SecurityFindingsCard({
             <span>{stats.open} Open</span>
           </button>
           <button
+            type="button"
             onClick={() => handleStatusChange(filters.status === 'closed' ? 'all' : 'closed')}
             className={`flex items-center gap-2 text-sm ${
               filters.status === 'closed'
@@ -181,34 +219,50 @@ export function SecurityFindingsCard({
             <span>{closedCount} Closed</span>
           </button>
         </div>
-        {isEnabled ? (
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {lastSyncTime && (
-              <span className="text-muted-foreground flex items-center gap-1 text-xs">
-                <Clock className="h-3 w-3" />
-                Last synced{' '}
-                {formatDistanceToNow(new Date(lastSyncTime), {
-                  addSuffix: true,
-                })}
-              </span>
-            )}
-            <Button variant="outline" size="sm" onClick={() => onSync()} disabled={isSyncing}>
-              {isSyncing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
+
+        {/* Right: capacity badge + sync */}
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant={runningCount >= concurrencyLimit ? 'destructive' : 'secondary'}>
+                {runningCount}/{concurrencyLimit} capacity
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}>
+              {runningCount}/{concurrencyLimit} concurrent analyses running. New requests are
+              rejected when at capacity.
+            </TooltipContent>
+          </Tooltip>
+          {isEnabled ? (
+            <>
+              {lastSyncTime && (
+                <span className="text-muted-foreground flex items-center gap-1 text-xs">
+                  <Clock className="h-3 w-3" />
+                  Last synced{' '}
+                  {formatDistanceToNow(new Date(lastSyncTime), {
+                    addSuffix: true,
+                  })}
+                </span>
               )}
-              {isSyncing ? 'Syncing...' : 'Sync'}
+              <Button variant="outline" size="sm" onClick={() => onSync()} disabled={isSyncing}>
+                {isSyncing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                {isSyncing ? 'Syncing...' : 'Sync'}
+              </Button>
+            </>
+          ) : hasIntegration ? (
+            <Button variant="outline" size="sm" onClick={onEnableClick}>
+              <Settings2 className="mr-2 h-4 w-4" />
+              Enable Security Reviews
             </Button>
-          </div>
-        ) : hasIntegration ? (
-          <Button variant="outline" size="sm" onClick={onEnableClick}>
-            <Settings2 className="mr-2 h-4 w-4" />
-            Enable Security Reviews
-          </Button>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
+      {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <RepositoryFilter
           repositories={repositories}
@@ -230,45 +284,47 @@ export function SecurityFindingsCard({
           </SelectContent>
         </Select>
 
-        <Select value={filters.exploitability || 'all'} onValueChange={handleExploitabilityChange}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Exploitability" />
+        <Select value={filters.outcomeFilter || 'all'} onValueChange={handleOutcomeFilterChange}>
+          <SelectTrigger className="w-[170px]">
+            <SelectValue placeholder="Outcome" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Findings</SelectItem>
+            <SelectItem value="all">All Outcomes</SelectItem>
+            <SelectItem value="not_analyzed">Not Analyzed</SelectItem>
+            <SelectItem value="failed">Analysis Failed</SelectItem>
             <SelectItem value="exploitable">Exploitable</SelectItem>
             <SelectItem value="not_exploitable">Not Exploitable</SelectItem>
+            <SelectItem value="safe_to_dismiss">Safe to Dismiss</SelectItem>
+            <SelectItem value="needs_review">Needs Review</SelectItem>
+            <SelectItem value="triage_complete">Triage Complete</SelectItem>
+            <SelectItem value="fixed">Fixed</SelectItem>
+            <SelectItem value="dismissed">Dismissed</SelectItem>
           </SelectContent>
         </Select>
 
-        <Select
-          value={filters.suggestedAction || 'all'}
-          onValueChange={handleSuggestedActionChange}
-        >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Action" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Actions</SelectItem>
-            <SelectItem value="dismissable">Dismissable</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={filters.analysisStatus || 'all'} onValueChange={handleAnalysisStatusChange}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Analysis" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Analysis</SelectItem>
-            <SelectItem value="not_analyzed">Not Analyzed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="running">Running</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="failed">Failed</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="border-muted ml-auto border-l pl-3">
+          <Select value={sortBy} onValueChange={onSortByChange}>
+            <SelectTrigger className="w-[180px]">
+              <ArrowUpDown className="mr-1.5 h-3.5 w-3.5 shrink-0 opacity-50" />
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="severity_desc">
+                <span className="flex items-center gap-1.5">
+                  Severity <ArrowDown className="h-3 w-3" />
+                </span>
+              </SelectItem>
+              <SelectItem value="severity_asc">
+                <span className="flex items-center gap-1.5">
+                  Severity <ArrowUp className="h-3 w-3" />
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
+      {/* Rows */}
       <div className="rounded-lg border border-gray-800">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
@@ -281,9 +337,7 @@ export function SecurityFindingsCard({
             {(filters.status ||
               filters.severity ||
               filters.repoFullName ||
-              filters.exploitability ||
-              filters.suggestedAction ||
-              filters.analysisStatus) && (
+              filters.outcomeFilter) && (
               <Button variant="link" size="sm" onClick={() => onFiltersChange({})} className="mt-2">
                 Clear filters
               </Button>
@@ -297,13 +351,14 @@ export function SecurityFindingsCard({
                 finding={finding}
                 onClick={() => onFindingClick(finding)}
                 onStartAnalysis={onStartAnalysis}
-                isStartingAnalysis={startingAnalysisId === finding.id}
+                isStartingAnalysis={startingAnalysisIds?.has(finding.id)}
               />
             ))}
           </div>
         )}
       </div>
 
+      {/* Pagination */}
       {totalCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <p className="text-muted-foreground text-sm">

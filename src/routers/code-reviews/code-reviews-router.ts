@@ -19,7 +19,18 @@ import {
   getCodeReviewById,
   cancelCodeReview,
   resetCodeReviewForRetry,
+  updateCheckRunId,
 } from '@/lib/code-reviews/db/code-reviews';
+import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
+import { createCheckRun, updateCheckRun } from '@/lib/integrations/platforms/github/adapter';
+import { setCommitStatus } from '@/lib/integrations/platforms/gitlab/adapter';
+import {
+  getValidGitLabToken,
+  getStoredProjectAccessToken,
+} from '@/lib/integrations/gitlab-service';
+import { PLATFORM } from '@/lib/integrations/core/constants';
+import { APP_URL } from '@/lib/constants';
+import { logExceptInTest } from '@/lib/utils.server';
 import {
   ListCodeReviewsInputSchema,
   ListCodeReviewsForUserInputSchema,
@@ -33,6 +44,139 @@ import { DEFAULT_LIST_LIMIT } from '@/lib/code-reviews/core/constants';
 import { codeReviewWorkerClient } from '@/lib/code-reviews/client/code-review-worker-client';
 import { tryDispatchPendingReviews } from '@/lib/code-reviews/dispatch/dispatch-pending-reviews';
 import { getBotUserId } from '@/lib/bot-users/bot-user-service';
+import type { CloudAgentCodeReview } from '@kilocode/db/schema';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
+
+/**
+ * Re-creates the PR gate check (GitHub Check Run / GitLab commit status)
+ * after a review has been reset for retry. Without this, `updatePRGateCheck()`
+ * would be a no-op for all subsequent status callbacks because `check_run_id`
+ * was cleared during reset.
+ */
+async function recreatePRGateCheck(review: CloudAgentCodeReview) {
+  if (!review.platform_integration_id) return;
+
+  const integration = await getIntegrationById(review.platform_integration_id);
+  if (!integration) return;
+
+  const platform = review.platform || 'github';
+  const detailsUrl = `${APP_URL}/code-reviews/${review.id}`;
+
+  if (platform === 'github' && integration.platform_installation_id) {
+    const appType = integration.github_app_type ?? 'standard';
+    if (appType === 'lite') return;
+
+    const [repoOwner, repoName] = review.repo_full_name.split('/');
+    const checkRunId = await createCheckRun(
+      integration.platform_installation_id,
+      repoOwner,
+      repoName,
+      review.head_sha,
+      {
+        detailsUrl,
+        output: { title: 'Kilo Code Review queued', summary: 'Waiting for a review slot...' },
+      },
+      appType
+    );
+    try {
+      await updateCheckRunId(review.id, checkRunId);
+    } catch (dbError) {
+      // Cancel the orphaned check run so it doesn't block merging
+      try {
+        await updateCheckRun(
+          integration.platform_installation_id,
+          repoOwner,
+          repoName,
+          checkRunId,
+          { status: 'completed', conclusion: 'cancelled' }
+        );
+        logExceptInTest(
+          `[retrigger] Cancelled orphaned check run ${checkRunId} for ${review.repo_full_name}#${review.pr_number}`
+        );
+      } catch (cancelError) {
+        logExceptInTest('[retrigger] Failed to cancel orphaned check run:', cancelError);
+      }
+      throw dbError;
+    }
+    logExceptInTest(
+      `[retrigger] Created check run ${checkRunId} for ${review.repo_full_name}#${review.pr_number}`
+    );
+  } else if (platform === PLATFORM.GITLAB) {
+    const storedPrat = review.platform_project_id
+      ? getStoredProjectAccessToken(integration, review.platform_project_id)
+      : null;
+    const accessToken = storedPrat ? storedPrat.token : await getValidGitLabToken(integration);
+    const metadata = integration.metadata as { gitlab_instance_url?: string } | null;
+    const instanceUrl = metadata?.gitlab_instance_url || 'https://gitlab.com';
+
+    await setCommitStatus(
+      accessToken,
+      review.platform_project_id ?? review.repo_full_name,
+      review.head_sha,
+      'pending',
+      { targetUrl: detailsUrl, description: 'Kilo Code Review queued' },
+      instanceUrl
+    );
+    logExceptInTest(
+      `[retrigger] Set commit status 'pending' on ${review.repo_full_name}!${review.pr_number}`
+    );
+  }
+}
+
+/**
+ * Finalizes the PR gate check as cancelled for a review that never left pending.
+ * Without this, cancelling a pending review leaves a stale queued/pending gate
+ * that permanently blocks protected branches.
+ */
+async function cancelPRGateCheck(review: CloudAgentCodeReview) {
+  if (!review.platform_integration_id) return;
+
+  const integration = await getIntegrationById(review.platform_integration_id);
+  if (!integration) return;
+
+  const platform = review.platform || 'github';
+  const detailsUrl = `${APP_URL}/code-reviews/${review.id}`;
+
+  if (platform === 'github' && integration.platform_installation_id) {
+    if (!review.check_run_id) return;
+
+    const [repoOwner, repoName] = review.repo_full_name.split('/');
+    await updateCheckRun(
+      integration.platform_installation_id,
+      repoOwner,
+      repoName,
+      review.check_run_id,
+      {
+        status: 'completed',
+        conclusion: 'cancelled',
+        detailsUrl,
+        output: { title: 'Kilo Code Review cancelled', summary: 'Review was cancelled.' },
+      }
+    );
+    logExceptInTest(
+      `[cancel] Finalized check run for ${review.repo_full_name}#${review.pr_number}`
+    );
+  } else if (platform === PLATFORM.GITLAB) {
+    const storedPrat = review.platform_project_id
+      ? getStoredProjectAccessToken(integration, review.platform_project_id)
+      : null;
+    const accessToken = storedPrat ? storedPrat.token : await getValidGitLabToken(integration);
+    const metadata = integration.metadata as { gitlab_instance_url?: string } | null;
+    const instanceUrl = metadata?.gitlab_instance_url || 'https://gitlab.com';
+
+    await setCommitStatus(
+      accessToken,
+      review.platform_project_id ?? review.repo_full_name,
+      review.head_sha,
+      'canceled',
+      { targetUrl: detailsUrl, description: 'Kilo Code Review cancelled' },
+      instanceUrl
+    );
+    logExceptInTest(
+      `[cancel] Set commit status 'canceled' on ${review.repo_full_name}!${review.pr_number}`
+    );
+  }
+}
 
 export const codeReviewRouter = createTRPCRouter({
   /**
@@ -233,12 +377,22 @@ export const codeReviewRouter = createTRPCRouter({
           // If worker call fails, still update DB status as fallback
           console.error('Worker cancel failed, updating DB directly:', workerError);
           await cancelCodeReview(input.reviewId);
+          try {
+            await cancelPRGateCheck(review);
+          } catch (gateError) {
+            logExceptInTest('[cancel] Failed to finalize PR gate check:', gateError);
+          }
           return successResult({ message: 'Code review cancelled (worker unreachable)' });
         }
       }
 
-      // For pending reviews (not yet dispatched to worker), just update DB
+      // For pending reviews (not yet dispatched to worker), update DB and finalize gate
       await cancelCodeReview(input.reviewId);
+      try {
+        await cancelPRGateCheck(review);
+      } catch (gateError) {
+        logExceptInTest('[cancel] Failed to finalize PR gate check:', gateError);
+      }
 
       return successResult({ message: 'Code review cancelled successfully' });
     } catch (error) {
@@ -298,7 +452,7 @@ export const codeReviewRouter = createTRPCRouter({
         // Reset the review for retry
         await resetCodeReviewForRetry(input.reviewId);
 
-        // Build owner object for dispatch.
+        // Build owner object for dispatch (and flag evaluation).
         // For org reviews, use the bot user ID so feature flags (e.g. code-review-cloud-agent-next)
         // evaluate consistently regardless of which human triggers the retrigger.
         let owner: Owner;
@@ -311,6 +465,20 @@ export const codeReviewRouter = createTRPCRouter({
           };
         } else {
           owner = { type: 'user', id: review.owned_by_user_id as string, userId: ctx.user.id };
+        }
+
+        // Re-create PR gate check so status callbacks can update it (only when flag is enabled)
+        const isPrGateEnabled =
+          process.env.NODE_ENV === 'development' ||
+          (await isFeatureFlagEnabled('code-review-pr-gate', owner.userId));
+
+        if (isPrGateEnabled) {
+          try {
+            await recreatePRGateCheck(review);
+          } catch (gateError) {
+            // Non-blocking — the review still retries even if the gate check fails
+            logExceptInTest('[retrigger] Failed to re-create PR gate check:', gateError);
+          }
         }
 
         // Try to dispatch the review

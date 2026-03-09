@@ -312,6 +312,7 @@ export function createSessionInitHandlers() {
             // Infrastructure interruptions (RPC disconnects, container failures, etc.) will still be handled appropriately.
             let interrupted = false;
             let interruptReason: string | undefined;
+            let gateResult: 'pass' | 'fail' | undefined;
             for await (const event of streamKilocodeExec(input.mode, input.prompt, {
               sessionId,
               skipInterruptPolling: false,
@@ -319,6 +320,14 @@ export function createSessionInitHandlers() {
               variant: input.variant,
             })) {
               yield event;
+              // Capture gate result from kilocode events when the agent reports one
+              if (
+                event.streamEventType === 'kilocode' &&
+                'gateResult' in event &&
+                (event.gateResult === 'pass' || event.gateResult === 'fail')
+              ) {
+                gateResult = event.gateResult;
+              }
               if (event.streamEventType === 'interrupted' || event.streamEventType === 'error') {
                 interrupted = true;
                 if (event.streamEventType === 'error') {
@@ -384,6 +393,7 @@ export function createSessionInitHandlers() {
             await invokeCallback(callbackUrl, callbackHeaders, {
               sessionId: confirmedSessionId,
               status: 'completed',
+              gateResult,
             });
 
             // Auto-cleanup - best effort (don't fail if stream already disconnected)

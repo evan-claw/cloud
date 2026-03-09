@@ -6,12 +6,13 @@
  */
 
 import { z } from 'zod';
-import { eq, and, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { WorkerDb } from '@kilocode/db/client';
 import {
   agent_configs,
   platform_integrations,
   security_findings,
+  security_analysis_queue,
   security_audit_log,
 } from '@kilocode/db/schema';
 import { SecurityAuditLogAction } from '@kilocode/db/schema-types';
@@ -391,7 +392,9 @@ async function upsertSecurityFinding(
 ): Promise<void> {
   const { finding, owner, platformIntegrationId, repoFullName, slaDueAt } = params;
 
-  // Fields that are updated on conflict (shared between insert and upsert)
+  // Fields that are updated on conflict (shared between insert and upsert).
+  // status, ignored_reason, and ignored_by are excluded here because the
+  // ON CONFLICT clause needs conditional logic to preserve superseded state.
   const mutableFields = {
     severity: finding.severity,
     ghsa_id: finding.ghsa_id,
@@ -400,9 +403,6 @@ async function upsertSecurityFinding(
     patched_version: finding.patched_version,
     title: finding.title,
     description: finding.description,
-    status: finding.status,
-    ignored_reason: finding.ignored_reason,
-    ignored_by: finding.ignored_by,
     fixed_at: finding.fixed_at,
     sla_due_at: slaDueAt,
     dependabot_html_url: finding.dependabot_html_url,
@@ -425,6 +425,9 @@ async function upsertSecurityFinding(
       package_ecosystem: finding.package_ecosystem,
       manifest_path: finding.manifest_path,
       first_detected_at: finding.first_detected_at,
+      status: finding.status,
+      ignored_reason: finding.ignored_reason,
+      ignored_by: finding.ignored_by,
       ...mutableFields,
     })
     .onConflictDoUpdate({
@@ -435,10 +438,123 @@ async function upsertSecurityFinding(
       ],
       set: {
         ...mutableFields,
+        status: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.status} ELSE ${finding.status} END`,
+        ignored_reason: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.ignored_reason} ELSE ${finding.ignored_reason} END`,
+        ignored_by: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.ignored_by} ELSE ${finding.ignored_by} END`,
         last_synced_at: sql`now()`,
         updated_at: sql`now()`,
       },
     });
+}
+
+type SupersedeResult = { count: number; supersededFindingIds: string[] };
+
+async function supersedeDuplicateFindings(
+  db: WorkerDb,
+  repoFullName: string
+): Promise<SupersedeResult> {
+  try {
+    const result = await db.execute<{ id: string }>(sql`
+      WITH ranked AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY repo_full_name, source, ghsa_id, package_name, manifest_path
+            ORDER BY CASE WHEN source_id ~ '^[0-9]+$' THEN source_id::int ELSE 0 END DESC
+          ) AS rn,
+          FIRST_VALUE(id) OVER (
+            PARTITION BY repo_full_name, source, ghsa_id, package_name, manifest_path
+            ORDER BY CASE WHEN source_id ~ '^[0-9]+$' THEN source_id::int ELSE 0 END DESC
+          ) AS canonical_id
+        FROM security_findings
+        WHERE repo_full_name = ${repoFullName}
+          AND source = 'dependabot'
+          AND ghsa_id IS NOT NULL
+          AND status = 'open'
+      ),
+      superseded AS (
+        UPDATE security_findings
+        SET
+          status = 'ignored',
+          ignored_reason = 'superseded:' || ranked.canonical_id,
+          ignored_by = 'system',
+          updated_at = now()
+        FROM ranked
+        WHERE security_findings.id = ranked.id
+          AND ranked.rn > 1
+        RETURNING security_findings.id
+      )
+      SELECT id FROM superseded
+    `);
+    const supersededFindingIds = result.rows.map(r => r.id);
+    return { count: supersededFindingIds.length, supersededFindingIds };
+  } catch (error) {
+    // Best-effort: don't let dedup failures break the sync.
+    console.error(`Error superseding duplicate findings for ${repoFullName}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { count: 0, supersededFindingIds: [] };
+  }
+}
+
+/**
+ * Remove superseded findings from the auto-analysis queue so the worker
+ * doesn't analyze findings that are no longer open.
+ *
+ * Clears `analysis_status` for `pending` findings so they no longer count
+ * against the owner's concurrency cap. Already-running analyses are left
+ * alone — the callback route transitions their queue rows when the job
+ * reports back, releasing the concurrency slot at that point.
+ */
+async function dequeueSupersededFindings(db: WorkerDb, findingIds: string[]): Promise<number> {
+  if (findingIds.length === 0) return 0;
+
+  try {
+    const result = await db
+      .update(security_analysis_queue)
+      .set({
+        queue_status: 'completed',
+        failure_code: 'SKIPPED_NO_LONGER_ELIGIBLE',
+        claim_token: null,
+        claimed_at: null,
+        claimed_by_job_id: null,
+        updated_at: sql`now()`,
+      })
+      .where(
+        and(
+          inArray(security_analysis_queue.finding_id, findingIds),
+          or(
+            eq(security_analysis_queue.queue_status, 'queued'),
+            eq(security_analysis_queue.queue_status, 'pending')
+          )
+        )
+      )
+      .returning({ id: security_analysis_queue.id });
+
+    // Clear pending analysis_status so countRunningAnalyses no longer counts
+    // these superseded findings against the owner's concurrency cap.
+    // Running analyses are left alone — the callback route transitions their
+    // queue rows when the job completes, releasing the concurrency slot.
+    await db
+      .update(security_findings)
+      .set({
+        analysis_status: null,
+        updated_at: sql`now()`,
+      })
+      .where(
+        and(
+          inArray(security_findings.id, findingIds),
+          eq(security_findings.analysis_status, 'pending')
+        )
+      );
+
+    return result.length;
+  } catch (error) {
+    console.error('Error dequeuing superseded findings from analysis queue', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
 }
 
 async function writeAuditLog(
@@ -674,6 +790,18 @@ async function syncRepo(params: {
         alertNumber: finding.source_id,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  const { count: supersededCount, supersededFindingIds } = await supersedeDuplicateFindings(
+    database,
+    repoFullName
+  );
+  if (supersededCount > 0) {
+    console.info(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
+    const dequeued = await dequeueSupersededFindings(database, supersededFindingIds);
+    if (dequeued > 0) {
+      console.info(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
     }
   }
 

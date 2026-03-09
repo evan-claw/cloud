@@ -133,7 +133,7 @@ async function fetchModelsForProvider(provider: OpenRouterProvider): Promise<Ope
   return data.data.models;
 }
 
-export async function syncProviders() {
+async function syncProviders() {
   // Fetch all providers
   const providers = await fetchProviders();
 
@@ -167,7 +167,7 @@ export async function syncProviders() {
   );
 
   const mappedExtraModels = kiloFreeModels
-    .filter(model => model.is_enabled && model.inference_providers.length > 0)
+    .filter(model => model.is_enabled && model.inference_provider)
     .map(kfm => {
       const model = convertFromKiloModel(kfm);
       return {
@@ -305,19 +305,17 @@ export async function syncProviders() {
             provider_region: null,
           },
         },
-        providers: kfm.inference_providers,
+        provider: kfm.inference_provider,
       };
     });
 
   for (const extraModel of mappedExtraModels) {
-    for (const provider of extraModel.providers) {
-      const providerData = providerModelData.find(data => data.provider.slug === provider);
-      if (providerData) {
-        console.log(
-          `Found existing ${provider} provider from OpenRouter, adding extra model ${extraModel.model.slug}`
-        );
-        providerData.models.splice(0, 0, extraModel.model);
-      }
+    const providerData = providerModelData.find(data => data.provider.slug === extraModel.provider);
+    if (providerData) {
+      console.log(
+        `Found existing ${extraModel.provider} provider from OpenRouter, adding extra model ${extraModel.model.slug}`
+      );
+      providerData.models.splice(0, 0, extraModel.model);
     }
   }
 
@@ -369,7 +367,7 @@ export async function syncProviders() {
         url: 'https://placehold.co/100?text=St&font=roboto',
         className: 'rounded-sm',
       },
-      models: mappedExtraModels.filter(m => m.providers.includes('stealth')).map(m => m.model),
+      models: mappedExtraModels.filter(m => m.provider === 'stealth').map(m => m.model),
     });
   }
   if (!allProviders.some(provider => provider.name.toLowerCase() === 'corethink')) {
@@ -388,7 +386,7 @@ export async function syncProviders() {
         url: 'https://placehold.co/100?text=CT&font=roboto',
         className: 'rounded-sm',
       },
-      models: mappedExtraModels.filter(m => m.providers.includes('corethink')).map(m => m.model),
+      models: mappedExtraModels.filter(m => m.provider === 'corethink').map(m => m.model),
     });
   }
 

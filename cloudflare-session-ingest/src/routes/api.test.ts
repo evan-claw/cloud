@@ -23,7 +23,17 @@ type HyperdriveBinding = { connectionString: string };
 
 type TestBindings = {
   HYPERDRIVE: HyperdriveBinding;
+  SESSION_INGEST_R2: { put: ReturnType<typeof vi.fn> };
+  INGEST_QUEUE: { send: ReturnType<typeof vi.fn> };
 };
+
+function makeTestEnv(): TestBindings {
+  return {
+    HYPERDRIVE: { connectionString: 'postgres://test' },
+    SESSION_INGEST_R2: { put: vi.fn(async () => undefined) },
+    INGEST_QUEUE: { send: vi.fn(async () => undefined) },
+  };
+}
 
 function makeApiApp() {
   const app = new Hono<{ Bindings: TestBindings; Variables: { user_id: string } }>();
@@ -146,7 +156,7 @@ describe('api routes', () => {
     );
 
     const app = makeApiApp();
-    const env: TestBindings = { HYPERDRIVE: { connectionString: 'postgres://test' } };
+    const env = makeTestEnv();
 
     const invalid = 'not-a-session';
     const ingestRes = await app.fetch(
@@ -204,7 +214,7 @@ describe('api routes', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId: 'ses_12345678901234567890123456' }),
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
@@ -218,195 +228,7 @@ describe('api routes', () => {
     });
   });
 
-  it('POST /session/:sessionId/ingest uses cache hit and updates title when changed', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-
-    const sessionCache = {
-      has: vi.fn(async () => true),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [{ name: 'title', value: 'Hello' }],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          data: [{ type: 'session', data: { title: 'Hello' } }],
-        }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(200);
-    expect(sessionCache.has).toHaveBeenCalledWith('ses_12345678901234567890123456');
-    expect(fns.selectResult).not.toHaveBeenCalled();
-    expect(ingestStub.ingest).toHaveBeenCalled();
-    expect(fns.update).toHaveBeenCalled();
-  });
-
-  it('POST /session/:sessionId/ingest updates platform and orgId when changed', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-
-    const sessionCache = {
-      has: vi.fn(async () => true),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [
-          { name: 'platform', value: 'github' },
-          { name: 'orgId', value: '00000000-0000-0000-0000-000000000000' },
-        ],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          data: [
-            {
-              type: 'kilo_meta',
-              data: { platform: 'github', orgId: '00000000-0000-0000-0000-000000000000' },
-            },
-          ],
-        }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(200);
-    // In Drizzle, all fields are set in a single .set() call
-    expect(fns.updateSet).toHaveBeenCalledWith({
-      created_on_platform: 'github',
-      organization_id: '00000000-0000-0000-0000-000000000000',
-    });
-  });
-
-  it('POST /session/:sessionId/ingest updates git_url and git_branch when changed', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-
-    const sessionCache = {
-      has: vi.fn(async () => true),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [
-          { name: 'gitUrl', value: 'https://github.com/user/repo' },
-          { name: 'gitBranch', value: 'main' },
-        ],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          data: [
-            {
-              type: 'kilo_meta',
-              data: {
-                platform: 'cli',
-                gitUrl: 'https://github.com/user/repo',
-                gitBranch: 'main',
-              },
-            },
-          ],
-        }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(200);
-    // In Drizzle, all changed fields are set in a single .set() call.
-    // The mock only returns gitUrl and gitBranch changes (not platform).
-    expect(fns.updateSet).toHaveBeenCalledWith({
-      git_url: 'https://github.com/user/repo',
-      git_branch: 'main',
-    });
-  });
-
-  it('POST /session/:sessionId/ingest updates parent_session_id when changed', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-
-    // Parent existence check: select returns a match.
-    fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' }]);
-
-    const sessionCache = {
-      has: vi.fn(async () => true),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [{ name: 'parentId', value: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' }],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          data: [{ type: 'session', data: { parentID: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' } }],
-        }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(200);
-    expect(sessionCache.has).toHaveBeenCalledWith('ses_12345678901234567890123456');
-    expect(fns.selectResult).toHaveBeenCalled();
-    expect(ingestStub.ingest).toHaveBeenCalled();
-    expect(fns.updateSet).toHaveBeenCalledWith({
-      parent_session_id: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa',
-    });
-  });
-
-  it('POST /session/:sessionId/ingest returns 400 when parent_session_id is self', async () => {
+  it('POST /session/:sessionId/ingest streams to R2 and enqueues on cache hit', async () => {
     const { db } = makeDbFakes();
     vi.mocked(getWorkerDb).mockReturnValue(db);
 
@@ -418,75 +240,33 @@ describe('api routes', () => {
       sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
     );
 
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [{ name: 'parentId', value: 'ses_12345678901234567890123456' }],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
     const app = makeApiApp();
+    const env = makeTestEnv();
     const res = await app.fetch(
       new Request('http://local/session/ses_12345678901234567890123456/ingest', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          data: [{ type: 'session', data: { parentID: 'ses_12345678901234567890123456' } }],
+          data: [{ type: 'session', data: { title: 'Hello' } }],
         }),
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      env
     );
 
-    expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({
-      success: false,
-      error: 'parent_session_id_cannot_be_self',
+    expect(res.status).toBe(200);
+    expect(sessionCache.has).toHaveBeenCalledWith('ses_12345678901234567890123456');
+    expect(env.SESSION_INGEST_R2.put).toHaveBeenCalledTimes(1);
+    expect(env.INGEST_QUEUE.send).toHaveBeenCalledTimes(1);
+
+    // Verify queue message shape
+    const queueMsg = env.INGEST_QUEUE.send.mock.calls[0][0] as Record<string, unknown>;
+    expect(queueMsg).toMatchObject({
+      kiloUserId: 'usr_test',
+      sessionId: 'ses_12345678901234567890123456',
+      ingestVersion: 0,
     });
-  });
-
-  it('POST /session/:sessionId/ingest returns 404 when parent_session_id is missing', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-
-    const sessionCache = {
-      has: vi.fn(async () => true),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [{ name: 'parentId', value: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' }],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    // Parent existence check fails — returns empty array.
-    fns.selectResult.mockResolvedValueOnce([]);
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          data: [{ type: 'session', data: { parentID: 'ses_aaaaaaaaaaaaaaaaaaaaaaaaaa' } }],
-        }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(404);
-    expect(await res.json()).toMatchObject({
-      success: false,
-      error: 'parent_session_not_found',
-    });
+    expect(queueMsg['r2Key']).toMatch(/^ingest\/usr_test\/ses_12345678901234567890123456\//);
+    expect(typeof queueMsg['ingestedAt']).toBe('number');
   });
 
   it('POST /session/:sessionId/ingest returns 404 on cache miss + missing session', async () => {
@@ -504,17 +284,52 @@ describe('api routes', () => {
     );
 
     const app = makeApiApp();
+    const env = makeTestEnv();
     const res = await app.fetch(
       new Request('http://local/session/ses_12345678901234567890123456/ingest', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ data: [] }),
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      env
     );
 
     expect(res.status).toBe(404);
     expect(fns.selectResult).toHaveBeenCalled();
+    // Should NOT have written to R2 or enqueued
+    expect(env.SESSION_INGEST_R2.put).not.toHaveBeenCalled();
+    expect(env.INGEST_QUEUE.send).not.toHaveBeenCalled();
+  });
+
+  it('POST /session/:sessionId/ingest backfills cache on cache miss + existing session', async () => {
+    const { db, fns } = makeDbFakes();
+    vi.mocked(getWorkerDb).mockReturnValue(db);
+    fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
+
+    const sessionCache = {
+      has: vi.fn(async () => false),
+      add: vi.fn(async () => undefined),
+    };
+    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
+      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
+    );
+
+    const app = makeApiApp();
+    const env = makeTestEnv();
+    const res = await app.fetch(
+      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ data: [] }),
+      }),
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(fns.selectResult).toHaveBeenCalled();
+    expect(sessionCache.add).toHaveBeenCalledWith('ses_12345678901234567890123456');
+    expect(env.SESSION_INGEST_R2.put).toHaveBeenCalledTimes(1);
+    expect(env.INGEST_QUEUE.send).toHaveBeenCalledTimes(1);
   });
 
   it('GET /session/:sessionId/export returns 400 for invalid sessionId', async () => {
@@ -527,7 +342,7 @@ describe('api routes', () => {
       new Request(`http://local/session/${invalid}/export`, {
         method: 'GET',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(400);
@@ -545,7 +360,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/export', {
         method: 'GET',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(404);
@@ -559,7 +374,7 @@ describe('api routes', () => {
 
     const payload = JSON.stringify({ success: true, events: [] });
     const ingestStub = {
-      getAll: vi.fn(async () => payload),
+      getAllStream: vi.fn(async () => new Response(payload).body!),
     };
     vi.mocked(getSessionIngestDO).mockReturnValue(
       ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
@@ -570,50 +385,13 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/export', {
         method: 'GET',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
     expect(await res.text()).toBe(payload);
-    expect(ingestStub.getAll).toHaveBeenCalled();
-  });
-
-  it('POST /session/:sessionId/ingest backfills cache on cache miss + existing session', async () => {
-    const { db, fns } = makeDbFakes();
-    vi.mocked(getWorkerDb).mockReturnValue(db);
-    fns.selectResult.mockResolvedValueOnce([{ session_id: 'ses_12345678901234567890123456' }]);
-
-    const sessionCache = {
-      has: vi.fn(async () => false),
-      add: vi.fn(async () => undefined),
-    };
-    vi.mocked(getSessionAccessCacheDO).mockReturnValue(
-      sessionCache as unknown as ReturnType<typeof getSessionAccessCacheDO>
-    );
-
-    const ingestStub = {
-      ingest: vi.fn(async () => ({
-        changes: [],
-      })),
-    };
-    vi.mocked(getSessionIngestDO).mockReturnValue(
-      ingestStub as unknown as ReturnType<typeof getSessionIngestDO>
-    );
-
-    const app = makeApiApp();
-    const res = await app.fetch(
-      new Request('http://local/session/ses_12345678901234567890123456/ingest', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ data: [] }),
-      }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
-    );
-
-    expect(res.status).toBe(200);
-    expect(fns.selectResult).toHaveBeenCalled();
-    expect(sessionCache.add).toHaveBeenCalledWith('ses_12345678901234567890123456');
+    expect(ingestStub.getAllStream).toHaveBeenCalled();
   });
 
   it('DELETE /session/:sessionId revokes cache, clears DO, and deletes row', async () => {
@@ -645,7 +423,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456', {
         method: 'DELETE',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
@@ -669,7 +447,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/share', {
         method: 'POST',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
@@ -698,7 +476,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/share', {
         method: 'POST',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
@@ -734,7 +512,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/share', {
         method: 'POST',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);
@@ -754,7 +532,7 @@ describe('api routes', () => {
       new Request('http://local/session/ses_12345678901234567890123456/unshare', {
         method: 'POST',
       }),
-      { HYPERDRIVE: { connectionString: 'postgres://test' } }
+      makeTestEnv()
     );
 
     expect(res.status).toBe(200);

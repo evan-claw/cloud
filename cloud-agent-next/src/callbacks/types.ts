@@ -11,6 +11,8 @@ export type ExecutionCallbackPayload = {
   errorMessage?: string;
   lastSeenBranch?: string;
   kiloSessionId?: string;
+  /** Gate result reported by the agent when gate_threshold is active */
+  gateResult?: 'pass' | 'fail';
 };
 
 export type CallbackJob = {

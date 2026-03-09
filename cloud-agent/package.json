@@ -37,6 +37,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
     "@cloudflare/vitest-pool-workers": "^0.12.8",
     "@kilocode/eslint-config": "workspace:*",
     "drizzle-kit": "catalog:",

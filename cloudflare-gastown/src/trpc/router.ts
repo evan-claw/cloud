@@ -27,6 +27,7 @@ import {
   RpcPtySessionOutput,
   RpcSlingResultOutput,
   RpcRigDetailOutput,
+  RpcConvoyDetailOutput,
 } from './schemas';
 import type { TRPCContext } from './init';
 
@@ -99,12 +100,20 @@ async function verifyRigOwnership(env: Env, userId: string, rigId: string) {
 
 async function mintKilocodeToken(env: Env, user: { id: string; api_token_pepper: string | null }) {
   if (!env.NEXTAUTH_SECRET) {
+    console.error('[mintKilocodeToken] NEXTAUTH_SECRET not configured');
     throw new TRPCError({
       code: 'INTERNAL_SERVER_ERROR',
-      message: 'NEXTAUTH_SECRET not configured',
+      message: 'Internal server error',
     });
   }
   const secret = await resolveSecret(env.NEXTAUTH_SECRET);
+  if (!secret) {
+    console.error('[mintKilocodeToken] failed to resolve NEXTAUTH_SECRET from Secrets Store');
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Internal server error',
+    });
+  }
   return generateKiloApiToken(user, secret);
 }
 
@@ -318,7 +327,7 @@ export const gastownRouter = router({
         rigId: z.string().uuid(),
         title: z.string().min(1),
         body: z.string().optional(),
-        model: z.string().default('kilo/auto'),
+        model: z.string().default('kilo/kilo-auto/frontier'),
       })
     )
     .output(RpcSlingResultOutput)
@@ -562,6 +571,38 @@ export const gastownRouter = router({
         since: input.since,
         limit: input.limit,
       });
+    }),
+
+  listConvoys: procedure
+    .input(
+      z.object({
+        townId: z.string().uuid(),
+      })
+    )
+    .output(z.array(RpcConvoyDetailOutput))
+    .query(async ({ ctx, input }) => {
+      requireAdmin(ctx);
+      await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      return townStub.listConvoysDetailed();
+    }),
+
+  closeConvoy: procedure
+    .input(
+      z.object({
+        townId: z.string().uuid(),
+        convoyId: z.string().uuid(),
+      })
+    )
+    .output(RpcConvoyDetailOutput.nullable())
+    .mutation(async ({ ctx, input }) => {
+      requireAdmin(ctx);
+      await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      const convoy = await townStub.closeConvoy(input.convoyId);
+      if (!convoy) return null;
+      const status = await townStub.getConvoyStatus(input.convoyId);
+      return status ?? { ...convoy, beads: [] };
     }),
 });
 

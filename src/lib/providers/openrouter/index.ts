@@ -14,13 +14,18 @@ import {
   getOpenCodeSettings,
   getVersionedModelSettings,
 } from '@/lib/providers/model-settings';
-import { AUTO_MODELS } from '@/lib/kilo-auto-model';
+import {
+  AUTO_MODELS,
+  deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck,
+} from '@/lib/kilo-auto-model';
 
 // Re-export from shared module for backwards compatibility
 export { normalizeModelId } from '@/lib/model-utils';
 
 function buildAutoModels(): OpenRouterModel[] {
-  return AUTO_MODELS.map(m => ({
+  return AUTO_MODELS.concat(
+    deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck()
+  ).map(m => ({
     id: m.id,
     name: m.name,
     created: 0,
@@ -64,10 +69,10 @@ function enhancedModelList(models: OpenRouterModel[]) {
       const preferredIndex = preferredModels.indexOf(model.id);
       const ageDays = (Date.now() / 1_000 - model.created) / (24 * 3600);
       const isNew = preferredIndex >= 0 && ageDays >= 0 && ageDays < 7;
-      const nameEndsWithParen = model.name.endsWith(')');
+      const skipSuffix = model.name.endsWith(')') || /\bfree\b/i.test(model.name);
       return {
         ...model,
-        name: nameEndsWithParen
+        name: skipSuffix
           ? model.name
           : isFreeModel(model.id)
             ? model.name + ' (free)'

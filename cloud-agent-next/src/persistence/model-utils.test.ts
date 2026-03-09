@@ -22,9 +22,4 @@ describe('normalizeKilocodeModel', () => {
       'kilo/anthropic/claude-sonnet-4'
     );
   });
-
-  it('re-prefixes kilo/auto so it becomes a valid provider model', () => {
-    expect(normalizeKilocodeModel('kilo/auto')).toBe('kilo/kilo/auto');
-    expect(normalizeKilocodeModel('kilo/auto-medium')).toBe('kilo/kilo/auto-medium');
-  });
 });

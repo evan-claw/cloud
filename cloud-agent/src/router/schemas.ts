@@ -482,6 +482,12 @@ export const PrepareSessionInput = z
     images: ImagesSchema.optional().describe(
       'Optional image attachments to download from R2 to the sandbox'
     ),
+    gateThreshold: z
+      .enum(['off', 'all', 'warning', 'critical'])
+      .optional()
+      .describe(
+        'PR gate threshold — when not "off", the agent should evaluate findings and report gateResult in its callback'
+      ),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',

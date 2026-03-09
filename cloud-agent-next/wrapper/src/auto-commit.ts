@@ -1,6 +1,6 @@
 import type { IngestEvent } from '../../src/shared/protocol.js';
 import type { KiloClient } from './kilo-client.js';
-import { git, getCurrentBranch, logToFile } from './utils.js';
+import { git, getCurrentBranch, hasGitUpstream, logToFile } from './utils.js';
 
 /** Timeout for local git operations (status, add, commit) */
 const GIT_LOCAL_TIMEOUT_MS = 30_000;
@@ -17,11 +17,14 @@ export type AutoCommitResult = {
 
 export type AutoCommitOptions = {
   workspacePath: string;
-  upstreamBranch?: string;
   onEvent: (event: IngestEvent) => void;
   kiloClient: KiloClient;
   /** The assistant message ID this autocommit is associated with (for per-message UI rendering) */
   messageId?: string;
+  /** If the user explicitly provided an upstream branch via API, pass it here to allow
+   *  committing to that branch even if it is main/master. Protection is only bypassed
+   *  when the current branch matches this value exactly. */
+  upstreamBranch?: string;
 };
 
 function emitStarted(
@@ -55,15 +58,13 @@ function emitCompleted(
 }
 
 export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommitResult> {
-  const { workspacePath, upstreamBranch, onEvent, kiloClient, messageId } = opts;
+  const { workspacePath, onEvent, kiloClient, messageId } = opts;
 
-  logToFile(
-    `auto-commit: starting workspacePath=${workspacePath} upstreamBranch=${upstreamBranch ?? '(none)'}`
-  );
+  logToFile(`auto-commit: starting workspacePath=${workspacePath}`);
 
   try {
-    // Check current branch
-    const branch = await getCurrentBranch(workspacePath);
+    // Check current branch (agent may have switched branches during execution)
+    const branch = await getCurrentBranch(workspacePath, GIT_LOCAL_TIMEOUT_MS);
     logToFile(`auto-commit: branch=${branch || '(detached HEAD)'}`);
     if (!branch) {
       logToFile('auto-commit: skipping - detached HEAD state');
@@ -79,21 +80,30 @@ export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommit
       return { success: true, skipped: true };
     }
 
-    // Branch protection: don't commit to main/master without an explicit upstream
-    const hasUpstream = upstreamBranch !== undefined && upstreamBranch !== '';
-    if (!hasUpstream && (branch === 'main' || branch === 'master')) {
-      logToFile(`auto-commit: skipping - protected branch ${branch} with no upstream`);
-      emitCompleted(
-        onEvent,
-        {
-          success: true,
-          message: `Skipped: cannot commit to ${branch}`,
-          skipped: true,
-        },
-        messageId
+    // Branch protection: block auto-commit to main/master unless the user
+    // explicitly targeted this exact branch via the upstreamBranch API param.
+    if (branch === 'main' || branch === 'master') {
+      if (opts.upstreamBranch !== branch) {
+        logToFile(`auto-commit: skipping - protected branch ${branch}`);
+        emitCompleted(
+          onEvent,
+          {
+            success: true,
+            message: `Skipped: cannot commit to ${branch}`,
+            skipped: true,
+          },
+          messageId
+        );
+        return { success: true, skipped: true };
+      }
+      logToFile(
+        `auto-commit: allowing commit to ${branch} (explicit upstreamBranch=${opts.upstreamBranch})`
       );
-      return { success: true, skipped: true };
     }
+
+    // Check actual git upstream (not stale config) to decide push strategy
+    const trackingUpstream = await hasGitUpstream(workspacePath, GIT_LOCAL_TIMEOUT_MS);
+    logToFile(`auto-commit: hasGitUpstream=${trackingUpstream}`);
 
     // Check for uncommitted changes
     const status = await git(['status', '--porcelain'], {
@@ -191,7 +201,7 @@ export async function runAutoCommit(opts: AutoCommitOptions): Promise<AutoCommit
     }
 
     // Push
-    const pushArgs = hasUpstream ? ['push'] : ['push', '-u', 'origin', branch];
+    const pushArgs = trackingUpstream ? ['push'] : ['push', '-u', 'origin', branch];
     logToFile(`auto-commit: pushing with args: git ${pushArgs.join(' ')}`);
 
     const pushResult = await git(pushArgs, { cwd: workspacePath, timeoutMs: GIT_PUSH_TIMEOUT_MS });

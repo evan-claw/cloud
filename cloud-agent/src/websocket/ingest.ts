@@ -36,6 +36,7 @@ const HEARTBEAT_DEBOUNCE_MS = 30_000;
 const completeEventSchema = z.object({
   exitCode: z.number(),
   currentBranch: z.string().optional(),
+  gateResult: z.enum(['pass', 'fail']).optional(),
 });
 
 const kilocodeEventSchema = z
@@ -60,8 +61,9 @@ const createExecutionLifecycleContext = (doContext: IngestDOContext) => ({
   updateExecutionStatus: (
     id: string,
     status: 'completed' | 'failed' | 'interrupted',
-    err?: string
-  ) => doContext.updateExecutionStatus(id, status, err),
+    err?: string,
+    gateResult?: 'pass' | 'fail'
+  ) => doContext.updateExecutionStatus(id, status, err, gateResult),
   clearActiveExecution: () => doContext.clearActiveExecution(),
   advanceQueue: () => doContext.maybeStartNextExecution(),
   logger: console,
@@ -129,7 +131,8 @@ export type IngestDOContext = {
   updateExecutionStatus: (
     executionId: string,
     status: 'completed' | 'failed' | 'interrupted',
-    error?: string
+    error?: string,
+    gateResult?: 'pass' | 'fail'
   ) => Promise<void>;
 };
 
@@ -373,7 +376,9 @@ export function createIngestHandler(
           await handleExecutionComplete(
             executionId,
             'completed',
-            createExecutionLifecycleContext(doContext)
+            createExecutionLifecycleContext(doContext),
+            undefined,
+            parsedComplete.data.gateResult
           );
         }
 

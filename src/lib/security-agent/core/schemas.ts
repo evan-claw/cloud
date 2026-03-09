@@ -38,24 +38,27 @@ export const SaveSecurityConfigInputSchema = z.object({
   autoAnalysisIncludeExisting: z.boolean().optional(),
 });
 
-export const ExploitabilityFilterSchema = z.enum(['all', 'exploitable', 'not_exploitable']);
-export const SuggestedActionFilterSchema = z.enum(['all', 'dismissable']);
-export const AnalysisStatusFilterSchema = z.enum([
+export const OutcomeFilterSchema = z.enum([
   'all',
   'not_analyzed',
-  'pending',
-  'running',
-  'completed',
+  'analyzing',
   'failed',
+  'exploitable',
+  'not_exploitable',
+  'safe_to_dismiss',
+  'needs_review',
+  'triage_complete',
+  'fixed',
+  'dismissed',
 ]);
 
 export const ListFindingsInputSchema = z.object({
   repoFullName: z.string().optional(),
   status: SecurityFindingStatusSchema.optional(),
   severity: SecuritySeveritySchema.optional(),
-  exploitability: ExploitabilityFilterSchema.optional(),
-  suggestedAction: SuggestedActionFilterSchema.optional(),
-  analysisStatus: AnalysisStatusFilterSchema.optional(),
+  outcomeFilter: OutcomeFilterSchema.optional(),
+  overdue: z.boolean().optional(),
+  sortBy: z.enum(['severity_desc', 'severity_asc', 'sla_due_at_asc']).default('severity_desc'),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
 });
@@ -141,13 +144,12 @@ export const GetAnalysisInputSchema = z.object({
   findingId: z.string().uuid(),
 });
 
-export const ListAnalysisJobsInputSchema = z.object({
-  limit: z.number().min(1).max(100).default(10),
-  offset: z.number().min(0).default(0),
-});
-
 export const DeleteFindingsByRepoInputSchema = z.object({
   repoFullName: z.string().min(1),
+});
+
+export const GetDashboardStatsInputSchema = z.object({
+  repoFullName: z.string().optional(),
 });
 
 export type SaveSecurityConfigInput = z.infer<typeof SaveSecurityConfigInputSchema>;
@@ -164,5 +166,5 @@ export type SecurityFindingSandboxAnalysisResponse = z.infer<
 >;
 export type StartAnalysisInput = z.infer<typeof StartAnalysisInputSchema>;
 export type GetAnalysisInput = z.infer<typeof GetAnalysisInputSchema>;
-export type ListAnalysisJobsInput = z.infer<typeof ListAnalysisJobsInputSchema>;
 export type DeleteFindingsByRepoInput = z.infer<typeof DeleteFindingsByRepoInputSchema>;
+export type GetDashboardStatsInput = z.infer<typeof GetDashboardStatsInputSchema>;

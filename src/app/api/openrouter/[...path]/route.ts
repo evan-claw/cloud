@@ -134,9 +134,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   const requestedModel = parsedRequest.body.model.trim();
   const requestedModelLowerCased = requestedModel.toLowerCase();
 
-  // "kilo/auto" is a quasi-model id that resolves to a real model based on x-kilocode-mode.
-  // After this resolution, the rest of the proxy flow behaves as if the client requested
-  // the resolved model directly.
   const modeHeader = extractHeaderAndLimitLength(request, 'x-kilocode-mode');
   let autoModel: string | null = null;
   if (isKiloAutoModel(requestedModelLowerCased)) {
@@ -268,8 +265,12 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   console.debug(`Routing request to ${provider.id}`);
 
-  // Abuse classification is only meaningful for Chat Completions where we can inspect messages.
-  // For the Responses API the classify result will be null.
+  const isLegacyOpenRouterPath = url.pathname.includes('/openrouter');
+  const feature = validateFeatureHeader(
+    request.headers.get(FEATURE_HEADER) || (isLegacyOpenRouterPath ? '' : 'direct-gateway')
+  );
+
+  // Start abuse classification early (non-blocking) - we'll await it before creating usage context
   const classifyPromise =
     parsedRequest.kind === 'chat_completions'
       ? classifyAbuse(request, parsedRequest.body, {
@@ -278,6 +279,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
           projectId,
           provider: provider.id,
           isByok: !!userByok,
+          feature,
         })
       : Promise.resolve(null);
 
@@ -312,7 +314,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     parsedRequest.kind === 'chat_completions'
       ? extractPromptInfo(parsedRequest.body)
       : extractResponsesPromptInfo(parsedRequest.body);
-  const isLegacyOpenRouterPath = url.pathname.includes('/openrouter');
 
   const usageContext: MicrodollarUsageContext = {
     kiloUserId: user.id,
@@ -342,9 +343,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     has_tools: (parsedRequest.body.tools?.length ?? 0) > 0,
     botId,
     tokenSource,
-    feature: validateFeatureHeader(
-      request.headers.get(FEATURE_HEADER) || (isLegacyOpenRouterPath ? '' : 'direct-gateway')
-    ),
+    feature,
     session_id: taskId ?? null,
     mode: modeHeader,
     auto_model: autoModel,

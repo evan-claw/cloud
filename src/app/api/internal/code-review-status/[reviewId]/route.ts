@@ -26,12 +26,16 @@ import {
   addReactionToPR,
   findKiloReviewComment,
   updateKiloReviewComment,
+  updateCheckRun,
 } from '@/lib/integrations/platforms/github/adapter';
+import type { CheckRunConclusion } from '@/lib/integrations/platforms/github/adapter';
 import {
   addReactionToMR,
   findKiloReviewNote,
   updateKiloReviewNote,
+  setCommitStatus,
 } from '@/lib/integrations/platforms/gitlab/adapter';
+import type { GitLabCommitStatusState } from '@/lib/integrations/platforms/gitlab/adapter';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
 import {
   getValidGitLabToken,
@@ -41,6 +45,8 @@ import { captureException, captureMessage } from '@sentry/nextjs';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { PLATFORM } from '@/lib/integrations/core/constants';
 import { appendUsageFooter } from '@/lib/code-reviews/summary/usage-footer';
+import { APP_URL } from '@/lib/constants';
+import type { CloudAgentCodeReview, PlatformIntegration } from '@kilocode/db/schema';
 
 /**
  * Payload from the orchestrator DO (legacy format).
@@ -50,6 +56,7 @@ type OrchestratorPayload = {
   cliSessionId?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   errorMessage?: string;
+  gateResult?: 'pass' | 'fail';
 };
 
 /**
@@ -63,6 +70,7 @@ type CloudAgentNextCallbackPayload = {
   status: 'completed' | 'failed' | 'interrupted';
   errorMessage?: string;
   lastSeenBranch?: string;
+  gateResult?: 'pass' | 'fail';
 };
 
 type StatusUpdatePayload = OrchestratorPayload | CloudAgentNextCallbackPayload;
@@ -76,6 +84,7 @@ function normalizePayload(raw: StatusUpdatePayload): {
   sessionId?: string;
   cliSessionId?: string;
   errorMessage?: string;
+  gateResult?: 'pass' | 'fail';
 } {
   // Map cloud-agent-next 'interrupted' → 'cancelled'
   const status = raw.status === 'interrupted' ? 'cancelled' : raw.status;
@@ -97,6 +106,7 @@ function normalizePayload(raw: StatusUpdatePayload): {
     sessionId,
     cliSessionId,
     errorMessage: raw.errorMessage,
+    gateResult: raw.gateResult,
   };
 }
 
@@ -122,6 +132,169 @@ async function getReviewUsageData(reviewId: string) {
   };
 }
 
+/**
+ * Maps a review status to a GitHub Check Run update.
+ * Returns null for statuses that don't have a check run mapping (e.g. 'queued').
+ *
+ * When `gateResult` is `'fail'` and the review completed successfully (no system error),
+ * the conclusion is set to `'failure'` — the agent determined that the review found
+ * blocking issues (based on the `gate_threshold` setting in the agent config).
+ */
+function mapStatusToCheckRun(
+  reviewStatus: string,
+  errorMessage?: string,
+  gateResult?: 'pass' | 'fail'
+) {
+  const statusMap: Record<string, 'in_progress' | 'completed'> = {
+    running: 'in_progress',
+    completed: 'completed',
+    failed: 'completed',
+    cancelled: 'completed',
+  };
+
+  const checkStatus = statusMap[reviewStatus];
+  if (!checkStatus) return null;
+
+  // When the review completed but the agent reported a gate failure
+  // (e.g. findings exceeding the gate_threshold), fail the check.
+  const reviewFailed = reviewStatus === 'completed' && gateResult === 'fail';
+
+  const conclusionMap: Record<string, CheckRunConclusion> = {
+    completed: reviewFailed ? 'failure' : 'success',
+    failed: 'failure',
+    cancelled: 'cancelled',
+  };
+
+  const titleMap: Record<string, string> = {
+    running: 'Kilo Code Review in progress',
+    completed: reviewFailed ? 'Kilo Code Review found issues' : 'Kilo Code Review completed',
+    failed: 'Kilo Code Review failed',
+    cancelled: 'Kilo Code Review cancelled',
+  };
+
+  const summaryMap: Record<string, string> = {
+    running: 'Review is running...',
+    completed: reviewFailed
+      ? 'Code review completed with findings that require attention.'
+      : 'Code review completed successfully.',
+    failed: errorMessage ? `Review failed: ${errorMessage}` : 'Review failed.',
+    cancelled: 'Review was cancelled.',
+  };
+
+  return {
+    status: checkStatus,
+    conclusion: conclusionMap[reviewStatus],
+    title: titleMap[reviewStatus] ?? 'Kilo Code Review',
+    summary: summaryMap[reviewStatus] ?? '',
+  };
+}
+
+/**
+ * Maps a review status to a GitLab commit status state.
+ */
+function mapStatusToGitLabState(
+  reviewStatus: string,
+  gateResult?: 'pass' | 'fail'
+): GitLabCommitStatusState {
+  if (reviewStatus === 'completed' && gateResult === 'fail') return 'failed';
+  const stateMap: Record<string, GitLabCommitStatusState> = {
+    running: 'running',
+    completed: 'success',
+    failed: 'failed',
+    cancelled: 'canceled',
+  };
+  return stateMap[reviewStatus] ?? 'pending';
+}
+
+/**
+ * Resolves a GitLab access token for a review's project.
+ * Prefers a stored Project Access Token; falls back to the user's OAuth token.
+ */
+async function resolveGitLabAccessToken(
+  integration: PlatformIntegration,
+  projectId: number | null
+): Promise<string> {
+  const storedPrat = projectId ? getStoredProjectAccessToken(integration, projectId) : null;
+  return storedPrat ? storedPrat.token : await getValidGitLabToken(integration);
+}
+
+/**
+ * Extracts the GitLab instance URL from an integration's metadata.
+ */
+function getGitLabInstanceUrl(integration: PlatformIntegration): string {
+  const metadata = integration.metadata as { gitlab_instance_url?: string } | null;
+  return metadata?.gitlab_instance_url || 'https://gitlab.com';
+}
+
+/**
+ * Update the GitHub Check Run or GitLab commit status for a review.
+ * Non-blocking — errors are logged but don't fail the callback.
+ */
+async function updatePRGateCheck(
+  review: CloudAgentCodeReview,
+  integration: PlatformIntegration,
+  reviewStatus: string,
+  errorMessage?: string,
+  gitlabAccessToken?: string,
+  gateResult?: 'pass' | 'fail'
+) {
+  const platform = review.platform || 'github';
+  const detailsUrl = `${APP_URL}/code-reviews/${review.id}`;
+
+  const checkRunMapping = mapStatusToCheckRun(reviewStatus, errorMessage, gateResult);
+  if (!checkRunMapping) return; // unsupported status (e.g. 'queued') — nothing to update
+
+  if (platform === 'github' && integration.platform_installation_id) {
+    // GitHub: update Check Run (only if we have a check_run_id)
+    if (!review.check_run_id) return;
+
+    const [repoOwner, repoName] = review.repo_full_name.split('/');
+
+    await updateCheckRun(
+      integration.platform_installation_id,
+      repoOwner,
+      repoName,
+      review.check_run_id,
+      {
+        status: checkRunMapping.status,
+        conclusion: checkRunMapping.conclusion,
+        detailsUrl,
+        output: { title: checkRunMapping.title, summary: checkRunMapping.summary },
+      }
+    );
+
+    logExceptInTest(
+      `[code-review-status] Updated check run for ${review.repo_full_name}#${review.pr_number}`,
+      { status: checkRunMapping.status, conclusion: checkRunMapping.conclusion }
+    );
+  } else if (platform === PLATFORM.GITLAB) {
+    // GitLab: update commit status
+    const instanceUrl = getGitLabInstanceUrl(integration);
+    const projectId = review.platform_project_id;
+    const accessToken =
+      gitlabAccessToken ?? (await resolveGitLabAccessToken(integration, projectId));
+
+    const state = mapStatusToGitLabState(reviewStatus, gateResult);
+
+    await setCommitStatus(
+      accessToken,
+      projectId ?? review.repo_full_name,
+      review.head_sha,
+      state,
+      {
+        targetUrl: detailsUrl,
+        description: checkRunMapping.title,
+      },
+      instanceUrl
+    );
+
+    logExceptInTest(
+      `[code-review-status] Updated commit status for GitLab MR ${review.repo_full_name}!${review.pr_number}`,
+      { state }
+    );
+  }
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ reviewId: string }> }
@@ -135,11 +308,20 @@ export async function POST(
 
     const { reviewId } = await params;
     const rawPayload: StatusUpdatePayload = await req.json();
-    const { status, sessionId, cliSessionId, errorMessage } = normalizePayload(rawPayload);
+    const { status, sessionId, cliSessionId, errorMessage, gateResult } =
+      normalizePayload(rawPayload);
 
     // Validate payload
     if (!status) {
       return NextResponse.json({ error: 'Missing required field: status' }, { status: 400 });
+    }
+
+    // Warn on unexpected gateResult values so agent-side typos surface early
+    const validGateResult = gateResult === 'pass' || gateResult === 'fail' ? gateResult : undefined;
+    if (gateResult && !validGateResult) {
+      logExceptInTest('[code-review-status] Unexpected gateResult value, ignoring', {
+        gateResult,
+      });
     }
 
     logExceptInTest('[code-review-status] Received status update', {
@@ -182,6 +364,48 @@ export async function POST(
     // - running -> running (sessionId update)
     // - running -> completed/failed (callback)
     // - queued -> completed/failed (edge case: immediate failure)
+
+    // Fetch integration once — used for gate check updates and post-completion actions
+    const integration = review.platform_integration_id
+      ? await getIntegrationById(review.platform_integration_id)
+      : null;
+
+    // Resolve GitLab token once, shared between gate check and reaction/footer logic
+    const isGitLab = (review.platform || 'github') === PLATFORM.GITLAB;
+    const gitlabAccessToken =
+      integration && isGitLab
+        ? await resolveGitLabAccessToken(integration, review.platform_project_id).catch(
+            () => undefined
+          )
+        : undefined;
+
+    // Update PR gate check BEFORE writing terminal DB state.
+    // Once the DB moves to a terminal status, subsequent callbacks hit the early-return
+    // above, so a flaky gate update would be unrecoverable.
+    if (integration) {
+      try {
+        await updatePRGateCheck(
+          review,
+          integration,
+          status,
+          errorMessage,
+          gitlabAccessToken,
+          validGateResult
+        );
+      } catch (gateCheckError) {
+        logExceptInTest('[code-review-status] Failed to update PR gate check:', gateCheckError);
+        const isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+        if (isTerminal) {
+          captureException(gateCheckError, {
+            tags: { source: 'code-review-status-gate-check' },
+            extra: { reviewId, status, checkRunId: String(review.check_run_id ?? '') },
+          });
+          // Abort so the caller retries — once the DB moves to a terminal status
+          // the early-return above prevents any later attempt to update the gate.
+          throw gateCheckError;
+        }
+      }
+    }
 
     // Update review status in database
     await updateCodeReviewStatus(reviewId, status, {
@@ -254,134 +478,126 @@ export async function POST(
 
       // Add reaction to indicate review completion status AND update usage footer
       if (status === 'completed' || status === 'failed') {
-        if (review.platform_integration_id) {
+        if (integration) {
           try {
-            const integration = await getIntegrationById(review.platform_integration_id);
-            if (integration) {
-              const platform = review.platform || 'github';
+            const platform = review.platform || 'github';
 
-              if (platform === 'github' && integration.platform_installation_id) {
-                const [repoOwner, repoName] = review.repo_full_name.split('/');
+            if (platform === 'github' && integration.platform_installation_id) {
+              const [repoOwner, repoName] = review.repo_full_name.split('/');
 
-                // Reaction
-                const reaction = status === 'completed' ? 'hooray' : 'confused';
-                await addReactionToPR(
-                  integration.platform_installation_id,
-                  repoOwner,
-                  repoName,
-                  review.pr_number,
-                  reaction
-                );
-                logExceptInTest(
-                  `[code-review-status] Added ${reaction} reaction to ${review.repo_full_name}#${review.pr_number}`
-                );
+              // Reaction
+              const reaction = status === 'completed' ? 'hooray' : 'confused';
+              await addReactionToPR(
+                integration.platform_installation_id,
+                repoOwner,
+                repoName,
+                review.pr_number,
+                reaction
+              );
+              logExceptInTest(
+                `[code-review-status] Added ${reaction} reaction to ${review.repo_full_name}#${review.pr_number}`
+              );
 
-                // Usage footer (completed only)
-                if (status === 'completed') {
-                  const { model, tokensIn, tokensOut } = await getReviewUsageData(reviewId);
+              // Usage footer (completed only)
+              if (status === 'completed') {
+                const { model, tokensIn, tokensOut } = await getReviewUsageData(reviewId);
 
-                  if (model && tokensIn != null && tokensOut != null) {
-                    const existing = await findKiloReviewComment(
+                if (model && tokensIn != null && tokensOut != null) {
+                  const existing = await findKiloReviewComment(
+                    integration.platform_installation_id,
+                    repoOwner,
+                    repoName,
+                    review.pr_number
+                  );
+                  if (existing) {
+                    const updatedBody = appendUsageFooter(
+                      existing.body,
+                      model,
+                      tokensIn,
+                      tokensOut
+                    );
+                    await updateKiloReviewComment(
                       integration.platform_installation_id,
                       repoOwner,
                       repoName,
-                      review.pr_number
+                      existing.commentId,
+                      updatedBody
                     );
-                    if (existing) {
-                      const updatedBody = appendUsageFooter(
-                        existing.body,
-                        model,
-                        tokensIn,
-                        tokensOut
-                      );
-                      await updateKiloReviewComment(
-                        integration.platform_installation_id,
-                        repoOwner,
-                        repoName,
-                        existing.commentId,
-                        updatedBody
-                      );
-                      logExceptInTest(
-                        `[code-review-status] Updated summary comment with usage footer on ${review.repo_full_name}#${review.pr_number}`
-                      );
-                    }
-                  } else {
                     logExceptInTest(
-                      '[code-review-status] Usage data not available for footer update',
-                      {
-                        reviewId,
-                        model,
-                        tokensIn,
-                        tokensOut,
-                      }
+                      `[code-review-status] Updated summary comment with usage footer on ${review.repo_full_name}#${review.pr_number}`
                     );
                   }
+                } else {
+                  logExceptInTest(
+                    '[code-review-status] Usage data not available for footer update',
+                    {
+                      reviewId,
+                      model,
+                      tokensIn,
+                      tokensOut,
+                    }
+                  );
                 }
-              } else if (platform === PLATFORM.GITLAB) {
-                const metadata = integration.metadata as { gitlab_instance_url?: string } | null;
-                const instanceUrl = metadata?.gitlab_instance_url || 'https://gitlab.com';
-                const projectId = review.platform_project_id;
-                const storedPrat = projectId
-                  ? getStoredProjectAccessToken(integration, projectId)
-                  : null;
-                const accessToken = storedPrat
-                  ? storedPrat.token
-                  : await getValidGitLabToken(integration);
+              }
+            } else if (platform === PLATFORM.GITLAB) {
+              const instanceUrl = getGitLabInstanceUrl(integration);
+              const accessToken =
+                gitlabAccessToken ??
+                (await resolveGitLabAccessToken(integration, review.platform_project_id));
 
-                // Reaction
-                const emoji = status === 'completed' ? 'tada' : 'confused';
-                await addReactionToMR(
-                  accessToken,
-                  review.repo_full_name,
-                  review.pr_number,
-                  emoji,
-                  instanceUrl
-                );
-                logExceptInTest(
-                  `[code-review-status] Added ${emoji} reaction to GitLab MR ${review.repo_full_name}!${review.pr_number}`
-                );
+              // Reaction
+              const emoji = status === 'completed' ? 'tada' : 'confused';
+              await addReactionToMR(
+                accessToken,
+                review.repo_full_name,
+                review.pr_number,
+                emoji,
+                instanceUrl
+              );
+              logExceptInTest(
+                `[code-review-status] Added ${emoji} reaction to GitLab MR ${review.repo_full_name}!${review.pr_number}`
+              );
 
-                // Usage footer (completed only)
-                if (status === 'completed') {
-                  const { model, tokensIn, tokensOut } = await getReviewUsageData(reviewId);
+              // Usage footer (completed only)
+              if (status === 'completed') {
+                const { model, tokensIn, tokensOut } = await getReviewUsageData(reviewId);
 
-                  if (model && tokensIn != null && tokensOut != null) {
-                    const existing = await findKiloReviewNote(
+                if (model && tokensIn != null && tokensOut != null) {
+                  const existing = await findKiloReviewNote(
+                    accessToken,
+                    review.repo_full_name,
+                    review.pr_number,
+                    instanceUrl
+                  );
+                  if (existing) {
+                    const updatedBody = appendUsageFooter(
+                      existing.body,
+                      model,
+                      tokensIn,
+                      tokensOut
+                    );
+                    await updateKiloReviewNote(
                       accessToken,
                       review.repo_full_name,
                       review.pr_number,
+                      existing.noteId,
+                      updatedBody,
                       instanceUrl
                     );
-                    if (existing) {
-                      const updatedBody = appendUsageFooter(
-                        existing.body,
-                        model,
-                        tokensIn,
-                        tokensOut
-                      );
-                      await updateKiloReviewNote(
-                        accessToken,
-                        review.repo_full_name,
-                        review.pr_number,
-                        existing.noteId,
-                        updatedBody,
-                        instanceUrl
-                      );
-                      logExceptInTest(
-                        `[code-review-status] Updated summary note with usage footer on GitLab MR ${review.repo_full_name}!${review.pr_number}`
-                      );
-                    }
-                  } else {
                     logExceptInTest(
-                      '[code-review-status] Usage data not available for footer update',
-                      {
-                        reviewId,
-                        model,
-                        tokensIn,
-                        tokensOut,
-                      }
+                      `[code-review-status] Updated summary note with usage footer on GitLab MR ${review.repo_full_name}!${review.pr_number}`
                     );
                   }
+                } else {
+                  logExceptInTest(
+                    '[code-review-status] Usage data not available for footer update',
+                    {
+                      reviewId,
+                      model,
+                      tokensIn,
+                      tokensOut,
+                    }
+                  );
                 }
               }
             }

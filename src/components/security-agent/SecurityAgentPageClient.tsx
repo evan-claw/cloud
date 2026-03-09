@@ -1,37 +1,25 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { SecurityFindingsCard } from './SecurityFindingsCard';
 import { FindingDetailDialog } from './FindingDetailDialog';
 import { DismissFindingDialog, type DismissReason } from './DismissFindingDialog';
 import { SecurityConfigForm, type SlaConfig } from './SecurityConfigForm';
-import { AnalysisJobsCard } from './AnalysisJobsCard';
 import { ClearFindingsCard } from './ClearFindingsCard';
 import { useTRPC } from '@/lib/trpc/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  AlertTriangle,
-  ExternalLink,
-  Rocket,
-  ListChecks,
-  Settings2,
-  Brain,
-  RefreshCw,
-} from 'lucide-react';
+import { AlertTriangle, ExternalLink, ListChecks, Settings2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SecurityFinding } from '@kilocode/db/schema';
+import {
+  SecurityFindingStatusSchema,
+  SecuritySeveritySchema,
+  OutcomeFilterSchema,
+} from '@/lib/security-agent/core/schemas';
 import Link from 'next/link';
 import { isGitHubIntegrationError } from '@/lib/security-agent/core/error-display';
 
@@ -61,17 +49,24 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
     status?: string;
     severity?: string;
     repoFullName?: string;
-    exploitability?: string;
-    suggestedAction?: string;
-    analysisStatus?: string;
+    outcomeFilter?: string;
   }>({ status: 'open' });
   const [selectedFinding, setSelectedFinding] = useState<SecurityFinding | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [dismissDialogOpen, setDismissDialogOpen] = useState(false);
-  const [startingAnalysisId, setStartingAnalysisId] = useState<string | null>(null);
+  const [startingAnalysisIds, setStartingAnalysisIds] = useState<Set<string>>(new Set());
   const [gitHubError, setGitHubError] = useState<string | null>(null);
-  const configHasChanges = useRef(false);
-  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'severity_desc' | 'severity_asc' | 'sla_due_at_asc'>(
+    'severity_desc'
+  );
+
+  const handleSortByChange = useCallback(
+    (newSortBy: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc') => {
+      setSortBy(newSortBy);
+      setPage(1);
+    },
+    []
+  );
 
   // Determine which router to use based on organizationId
   const isOrg = !!organizationId;
@@ -104,59 +99,41 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
       : trpc.securityAgent.getRepositories.queryOptions()
   );
 
+  // Derived query params — computed once and shared by both org/personal branches.
+  // Parse filter strings through their Zod schemas to get correctly-typed values
+  // without unsafe `as` casts.
+  const findingsQueryParams = useMemo(() => {
+    const parsedStatus = SecurityFindingStatusSchema.safeParse(filters.status);
+    const parsedSeverity = SecuritySeveritySchema.safeParse(filters.severity);
+    const parsedOutcome = OutcomeFilterSchema.safeParse(filters.outcomeFilter);
+    return {
+      status: parsedStatus.success ? parsedStatus.data : undefined,
+      severity: parsedSeverity.success ? parsedSeverity.data : undefined,
+      outcomeFilter: parsedOutcome.success ? parsedOutcome.data : undefined,
+      sortBy,
+      repoFullName: filters.repoFullName,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    };
+  }, [filters, sortBy, page]);
+
   // Findings query - polls when there are active analysis jobs
   const { data: findingsData, isLoading: isLoadingFindings } = useQuery({
     ...(isOrg
       ? trpc.organizations.securityAgent.listFindings.queryOptions({
           organizationId,
-          status: filters.status as 'open' | 'fixed' | 'ignored' | 'closed' | undefined,
-          severity: filters.severity as 'critical' | 'high' | 'medium' | 'low' | undefined,
-          exploitability: filters.exploitability as
-            | 'all'
-            | 'exploitable'
-            | 'not_exploitable'
-            | undefined,
-          suggestedAction: filters.suggestedAction as 'all' | 'dismissable' | undefined,
-          analysisStatus: filters.analysisStatus as
-            | 'all'
-            | 'not_analyzed'
-            | 'pending'
-            | 'running'
-            | 'completed'
-            | 'failed'
-            | undefined,
-          repoFullName: filters.repoFullName,
-          limit: PAGE_SIZE,
-          offset: (page - 1) * PAGE_SIZE,
+          ...findingsQueryParams,
         })
-      : trpc.securityAgent.listFindings.queryOptions({
-          status: filters.status as 'open' | 'fixed' | 'ignored' | 'closed' | undefined,
-          severity: filters.severity as 'critical' | 'high' | 'medium' | 'low' | undefined,
-          exploitability: filters.exploitability as
-            | 'all'
-            | 'exploitable'
-            | 'not_exploitable'
-            | undefined,
-          suggestedAction: filters.suggestedAction as 'all' | 'dismissable' | undefined,
-          analysisStatus: filters.analysisStatus as
-            | 'all'
-            | 'not_analyzed'
-            | 'pending'
-            | 'running'
-            | 'completed'
-            | 'failed'
-            | undefined,
-          repoFullName: filters.repoFullName,
-          limit: PAGE_SIZE,
-          offset: (page - 1) * PAGE_SIZE,
-        })),
+      : trpc.securityAgent.listFindings.queryOptions(findingsQueryParams)),
     refetchInterval: query => {
       const result = query.state.data;
-      if (!result || !Array.isArray(result)) return false;
-      // Poll every 5s if any finding has an active analysis job
-      const hasActiveAnalysis = result.some(
-        f => f.analysis_status === 'pending' || f.analysis_status === 'running'
-      );
+      if (!result) return false;
+      // Poll every 5s if any analysis is running (globally or on current page)
+      const hasActiveAnalysis =
+        (result.runningCount ?? 0) > 0 ||
+        result.findings.some(
+          f => f.analysis_status === 'pending' || f.analysis_status === 'running'
+        );
       return hasActiveAnalysis ? 5000 : false;
     },
   });
@@ -321,13 +298,17 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
   // Analysis mutations - Organization
   const { mutate: orgStartAnalysisMutate, isPending: _isOrgStartAnalysisPending } = useMutation(
     trpc.organizations.securityAgent.startAnalysis.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (_data, variables) => {
         setGitHubError(null); // Clear any previous error on success
         toast.success('Analysis started');
         void queryClient.invalidateQueries();
-        setStartingAnalysisId(null);
+        setStartingAnalysisIds(prev => {
+          const next = new Set(prev);
+          next.delete(variables.findingId);
+          return next;
+        });
       },
-      onError: error => {
+      onError: (error, variables) => {
         const message = error instanceof Error ? error.message : String(error);
         if (isGitHubIntegrationError(error)) {
           setGitHubError(message);
@@ -341,7 +322,13 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
             duration: 8000,
           });
         }
-        setStartingAnalysisId(null);
+        // Refetch so the row picks up analysis_status = 'failed' and shows "Retry"
+        void queryClient.invalidateQueries();
+        setStartingAnalysisIds(prev => {
+          const next = new Set(prev);
+          next.delete(variables.findingId);
+          return next;
+        });
       },
     })
   );
@@ -350,13 +337,17 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
   const { mutate: personalStartAnalysisMutate, isPending: _isPersonalStartAnalysisPending } =
     useMutation(
       trpc.securityAgent.startAnalysis.mutationOptions({
-        onSuccess: async () => {
+        onSuccess: async (_data, variables) => {
           setGitHubError(null); // Clear any previous error on success
           toast.success('Analysis started');
           void queryClient.invalidateQueries();
-          setStartingAnalysisId(null);
+          setStartingAnalysisIds(prev => {
+            const next = new Set(prev);
+            next.delete(variables.findingId);
+            return next;
+          });
         },
-        onError: error => {
+        onError: (error, variables) => {
           const message = error instanceof Error ? error.message : String(error);
           if (isGitHubIntegrationError(error)) {
             setGitHubError(message);
@@ -370,7 +361,13 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
               duration: 8000,
             });
           }
-          setStartingAnalysisId(null);
+          // Refetch so the row picks up analysis_status = 'failed' and shows "Retry"
+          void queryClient.invalidateQueries();
+          setStartingAnalysisIds(prev => {
+            const next = new Set(prev);
+            next.delete(variables.findingId);
+            return next;
+          });
         },
       })
     );
@@ -558,7 +555,7 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
 
   const handleStartAnalysis = useCallback(
     (findingId: string, { retrySandboxOnly }: { retrySandboxOnly?: boolean } = {}) => {
-      setStartingAnalysisId(findingId);
+      setStartingAnalysisIds(prev => new Set(prev).add(findingId));
       if (isOrg && organizationId) {
         orgStartAnalysisMutate({ organizationId, findingId, retrySandboxOnly });
       } else {
@@ -618,24 +615,35 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
     ignored: 0,
   };
 
-  // Get findings data - API returns array directly
-  const findings = findingsData ?? [];
-  // For total count: use stats.total when no filters are applied,
-  // otherwise we can only know if there are more pages by checking if we got a full page
-  const hasFilters =
-    filters.status ||
-    filters.severity ||
-    filters.repoFullName ||
-    filters.exploitability ||
-    filters.suggestedAction ||
-    filters.analysisStatus;
-  const totalCount = hasFilters
-    ? // When filters are applied, we don't have an exact count
-      // Use a heuristic: if we got a full page, there might be more
-      findings.length === PAGE_SIZE
-      ? page * PAGE_SIZE + 1 // Indicate there's at least one more
-      : (page - 1) * PAGE_SIZE + findings.length
-    : stats.total;
+  // Get findings data
+  const findings = findingsData?.findings ?? [];
+  const totalCount = findingsData?.totalCount ?? 0;
+  const serverRunningCount = findingsData?.runningCount ?? 0;
+  const concurrencyLimit = findingsData?.concurrencyLimit ?? 3;
+
+  // Compute effective running count that includes optimistic additions from
+  // in-flight startAnalysis mutations (whose results haven't been reflected in
+  // the server data yet). This ensures the capacity badge updates immediately
+  // when the user clicks "Analyze".
+  const runningCount = useMemo(() => {
+    if (startingAnalysisIds.size === 0) return serverRunningCount;
+
+    let optimisticAdditional = 0;
+    for (const id of startingAnalysisIds) {
+      const finding = findings.find(f => f.id === id);
+      // Skip findings not on the current page — serverRunningCount is global
+      // and will already include them once the server processes the mutation.
+      // Previously `!finding` counted as additional, which double-counted when
+      // the user changed page/filter while the mutation was in-flight.
+      if (!finding) continue;
+      // Only count as additional if the server data doesn't already reflect
+      // this analysis (i.e. the finding's status hasn't moved to pending/running yet).
+      if (finding.analysis_status !== 'pending' && finding.analysis_status !== 'running') {
+        optimisticAdditional++;
+      }
+    }
+    return serverRunningCount + optimisticAdditional;
+  }, [serverRunningCount, startingAnalysisIds, findings]);
 
   // Get repositories - filter to only show selected repositories in the findings tab
   const allRepositories = reposData ?? [];
@@ -661,9 +669,6 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
   // Orphaned repositories data
   const orphanedRepositories = orphanedReposData ?? [];
 
-  // GitHub App not installed - show install prompt
-  const showGitHubAppRequired = !hasIntegration && !isLoadingPermission;
-
   // GitHub App installed but missing permissions - show reauthorize prompt
   const showPermissionRequired = hasIntegration && !hasPermission && !isLoadingPermission;
 
@@ -688,30 +693,6 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
           <ExternalLink className="size-4" />
         </a>
       </div>
-
-      {/* GitHub App Required Alert */}
-      {showGitHubAppRequired && (
-        <Alert>
-          <Rocket className="h-4 w-4" />
-          <AlertTitle>GitHub App Required</AlertTitle>
-          <AlertDescription className="space-y-3">
-            <p>
-              The Kilo GitHub App must be installed to use Security Agent. The app automatically
-              syncs Dependabot alerts and manages security findings.
-            </p>
-            <Link
-              href={
-                isOrg ? `/organizations/${organizationId}/integrations` : '/integrations/github'
-              }
-            >
-              <Button variant="default" size="sm">
-                Install GitHub App
-                <ExternalLink className="ml-2 h-3 w-3" />
-              </Button>
-            </Link>
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* Additional Permissions Required Alert */}
       {showPermissionRequired && (
@@ -771,68 +752,19 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
         </Alert>
       )}
 
-      {/* Unsaved Changes Confirmation Dialog */}
-      <Dialog
-        open={pendingTabChange !== null}
-        onOpenChange={open => !open && setPendingTabChange(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Unsaved Changes</DialogTitle>
-            <DialogDescription>
-              You have unsaved configuration changes. Do you want to discard them?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingTabChange(null)}>
-              Go Back
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                const tab = pendingTabChange;
-                setPendingTabChange(null);
-                if (tab) setActiveTab(tab);
-              }}
-            >
-              Discard Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Tabs - only show config and jobs tabs when GitHub integration is available */}
-      <Tabs
-        value={effectiveTab}
-        onValueChange={tab => {
-          if (effectiveTab === 'config' && tab !== 'config' && configHasChanges.current) {
-            setPendingTabChange(tab);
-          } else {
-            setActiveTab(tab);
-          }
-        }}
-        className="w-full"
-      >
-        <TabsList
-          className={`grid w-full max-w-lg ${hasIntegration ? 'grid-cols-3' : 'grid-cols-1'}`}
-        >
-          <TabsTrigger value="findings" className="flex items-center gap-2">
-            <ListChecks className="h-4 w-4" />
-            Findings
-          </TabsTrigger>
-          {hasIntegration && (
-            <>
-              <TabsTrigger value="jobs" className="flex items-center gap-2">
-                <Brain className="h-4 w-4" />
-                Analysis Jobs
-              </TabsTrigger>
-              <TabsTrigger value="config" className="flex items-center gap-2">
-                <Settings2 className="h-4 w-4" />
-                Config
-              </TabsTrigger>
-            </>
-          )}
-        </TabsList>
+      <Tabs value={effectiveTab} onValueChange={setActiveTab} className="w-full">
+        {hasIntegration && (
+          <TabsList className="grid w-full max-w-lg grid-cols-2">
+            <TabsTrigger value="findings" className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4" />
+              Findings
+            </TabsTrigger>
+            <TabsTrigger value="config" className="flex items-center gap-2">
+              <Settings2 className="h-4 w-4" />
+              Config
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         {/* Findings Tab */}
         <TabsContent value="findings" className="space-y-6">
@@ -852,19 +784,19 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
             onFiltersChange={setFilters}
             isEnabled={isEnabled}
             hasIntegration={hasIntegration}
+            installUrl={
+              isOrg ? `/organizations/${organizationId}/integrations` : '/integrations/github'
+            }
             onEnableClick={() => setActiveTab('config')}
             lastSyncTime={lastSyncData?.lastSyncTime}
             onStartAnalysis={handleStartAnalysis}
-            startingAnalysisId={startingAnalysisId}
+            startingAnalysisIds={startingAnalysisIds}
+            sortBy={sortBy}
+            onSortByChange={handleSortByChange}
+            runningCount={runningCount}
+            concurrencyLimit={concurrencyLimit}
           />
         </TabsContent>
-
-        {/* Analysis Jobs Tab - only available when GitHub integration exists */}
-        {hasIntegration && (
-          <TabsContent value="jobs" className="space-y-6">
-            <AnalysisJobsCard organizationId={organizationId} onGitHubError={setGitHubError} />
-          </TabsContent>
-        )}
 
         {/* Config Tab - only available when GitHub integration exists */}
         {hasIntegration && (
@@ -887,9 +819,6 @@ export function SecurityAgentPageClient({ organizationId }: SecurityAgentPageCli
               repositories={allRepositories}
               onSave={handleSaveConfig}
               onToggleEnabled={handleToggleEnabled}
-              onHasChangesChange={v => {
-                configHasChanges.current = v;
-              }}
               isSaving={isSavingConfig}
               isToggling={isTogglingEnabled}
             />

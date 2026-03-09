@@ -1,4 +1,5 @@
 catalog:
+  '@cloudflare/workers-types': ^4.20260305.0
   '@eslint/eslintrc': ^3.3.3
   '@eslint/js': ^9.39.3
   '@octokit/auth-app': ^8.1.2
@@ -14,7 +15,7 @@ catalog:
   typescript: ^5.9.3
   typescript-eslint: ^8.46.3
   workers-tagged-logger: ^1.0.0
-  wrangler: ^4.67.0
+  wrangler: ^4.69.0
   zod: ^4.3.6
 
 packages:
@@ -43,6 +44,7 @@ packages:
   - 'cloudflare-security-sync'
   - 'cloudflare-security-auto-analysis'
   - 'kiloclaw'
+  - 'kiloclaw/packages/secret-catalog'
   - 'cloudflare-gastown'
   - 'cloudflare-gastown/container'
 

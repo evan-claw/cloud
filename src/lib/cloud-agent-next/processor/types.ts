@@ -107,6 +107,9 @@ export type EventProcessorCallbacks = {
 
   /** Called when an autocommit event (started/completed) is received with a messageId */
   onAutocommitUpdated?: (messageId: string, status: AutocommitStatus) => void;
+
+  /** Called when the current branch changes (from complete event) */
+  onBranchChanged?: (branch: string) => void;
 };
 
 /**

@@ -1542,7 +1542,7 @@ export const gastownRouter = router({
         rigId: z.string().uuid(),
         title: z.string(),
         body: z.string().optional(),
-        model: z.string().default('kilo/auto'),
+        model: z.string().default('kilo/kilo-auto/frontier'),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1559,7 +1559,7 @@ export const gastownRouter = router({
       z.object({
         townId: z.string().uuid(),
         message: z.string(),
-        model: z.string().default('kilo/auto'),
+        model: z.string().default('kilo/kilo-auto/frontier'),
       })
     )
     .mutation(async ({ ctx, input }) => {

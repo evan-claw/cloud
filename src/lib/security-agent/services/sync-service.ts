@@ -6,11 +6,12 @@ import { eq, and, isNotNull } from 'drizzle-orm';
 import { fetchAllDependabotAlerts } from '../github/dependabot-api';
 import { hasSecurityReviewPermissions } from '../github/permissions';
 import { parseDependabotAlerts } from '../parsers/dependabot-parser';
-import { upsertSecurityFinding } from '../db/security-findings';
+import { upsertSecurityFinding, supersedeDuplicateFindings } from '../db/security-findings';
 import { getSecurityAgentConfig, getSecurityAgentConfigWithStatus } from '../db/security-config';
 import {
   getOwnerAutoAnalysisEnabledAt,
   syncAutoAnalysisQueueForFinding,
+  dequeueSupersededFindings,
   type AutoAnalysisQueueSyncResult,
 } from '../db/security-analysis';
 import { upsertAgentConfigForOwner } from '@/lib/agent-config/db/agent-configs';
@@ -115,7 +116,7 @@ export async function syncDependabotAlertsForRepo(params: {
             findingId: upsertResult.findingId,
             findingCreatedAt: upsertResult.findingCreatedAt,
             previousStatus: upsertResult.previousStatus,
-            currentStatus: finding.status,
+            currentStatus: upsertResult.effectiveStatus,
             severity: finding.severity,
             isAgentEnabled,
             autoAnalysisEnabled: config.auto_analysis_enabled,
@@ -153,6 +154,24 @@ export async function syncDependabotAlertsForRepo(params: {
           extra: { repoFullName, alertNumber: finding.source_id },
         });
       }
+    }
+
+    try {
+      const { count: supersededCount, supersededFindingIds } =
+        await supersedeDuplicateFindings(repoFullName);
+      if (supersededCount > 0) {
+        log(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
+        const dequeued = await dequeueSupersededFindings(supersededFindingIds);
+        if (dequeued > 0) {
+          log(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
+        }
+      }
+    } catch (error) {
+      logError(`Error superseding duplicate findings for ${repoFullName}`, { error });
+      captureException(error, {
+        tags: { operation: 'syncDependabotAlertsForRepo', step: 'supersedeDuplicates' },
+        extra: { repoFullName },
+      });
     }
 
     const repoDurationMs = Math.round(performance.now() - repoStartTime);

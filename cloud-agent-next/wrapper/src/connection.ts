@@ -54,12 +54,22 @@ export type ConnectionCallbacks = {
   onDisconnect: (reason: string) => void;
   /** Called on any completion event to signal post-processing waiters */
   onCompletionSignal: () => void;
+  /** Called when the ingest WS starts reconnecting */
+  onReconnecting?: (attempt: number) => void;
+  /** Called when the ingest WS successfully reconnects */
+  onReconnected?: () => void;
 };
 
 type WebSocketCtor = new (
   url: string,
   options?: { headers?: Record<string, string> } | string | string[]
 ) => WebSocket;
+
+/** Maximum number of reconnection attempts before giving up.
+ *  3 attempts ≈ 7s total (1+2+4), fitting within the DO's 10s grace period. */
+const MAX_RECONNECT_ATTEMPTS = 3;
+/** Base delay for exponential backoff (1 second) */
+const RECONNECT_BASE_DELAY_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Connection Manager
@@ -72,6 +82,8 @@ export type ConnectionManager = {
   close: () => Promise<void>;
   /** Check if currently connected. */
   isConnected: () => boolean;
+  /** Whether the ingest WS is currently attempting to reconnect */
+  isReconnecting: () => boolean;
 };
 
 /**
@@ -88,6 +100,12 @@ export function createConnectionManager(
   let sseConsumer: SSEConsumer | null = null;
   let ingestWs: WebSocket | null = null;
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  let closedByUs = false;
+  let reconnecting = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
 
   // Event buffer for disconnection periods
   const MAX_BUFFER_SIZE = 1000;
@@ -138,8 +156,11 @@ export function createConnectionManager(
 
   /**
    * Open the ingest WebSocket connection.
+   * @param expectedGeneration If provided, the connection is only accepted when
+   *   `generation` still matches. This prevents a stale reconnect from assigning
+   *   `ingestWs` and flushing buffered events after `close()` was called.
    */
-  async function openIngestWs(): Promise<void> {
+  async function openIngestWs(expectedGeneration?: number): Promise<void> {
     const job = state.currentJob;
     if (!job) {
       throw new Error('Cannot open ingest WS: no job context');
@@ -166,17 +187,42 @@ export function createConnectionManager(
 
       ws.onopen = () => {
         logToFile(`ingest WS connected to: ${wsUrl}`);
+        // Guard against stale reconnect: if close() was called while we were
+        // connecting, generation will have advanced and we must not adopt
+        // this socket or flush buffered events through it.
+        if (expectedGeneration !== undefined && expectedGeneration !== generation) {
+          logToFile('stale reconnect detected in onopen — discarding socket');
+          try {
+            ws.close();
+          } catch {
+            /* ignore */
+          }
+          reject(new Error('Stale reconnect'));
+          return;
+        }
         ingestWs = ws;
         flushBuffer();
         resolve();
       };
 
-      ws.onclose = () => {
-        logToFile(`ingest WS closed: ${wsUrl}`);
-        if (ingestWs === ws) {
-          ingestWs = null;
-          callbacks.onDisconnect('ingest websocket closed');
+      ws.onclose = (event: CloseEvent) => {
+        logToFile(
+          `ingest WS closed: code=${event.code} reason=${event.reason || '(none)'} url=${wsUrl}`
+        );
+        if (ingestWs !== ws) return; // Stale socket — ignore
+
+        ingestWs = null;
+
+        if (closedByUs) {
+          // Expected close (during drain/shutdown) — don't reconnect
+          closedByUs = false;
+          return;
         }
+
+        // Unexpected close — attempt reconnection
+        logToFile('ingest WS closed unexpectedly — starting reconnection');
+        stopHeartbeat();
+        attemptReconnect();
       };
 
       ws.onerror = () => {
@@ -351,6 +397,80 @@ export function createConnectionManager(
     }
   }
 
+  function attemptReconnect(): void {
+    if (reconnecting) return;
+    reconnecting = true;
+    reconnectAttempt = 0;
+    scheduleReconnect();
+  }
+
+  function completeReconnect(): void {
+    logToFile(`reconnected successfully on attempt ${reconnectAttempt}`);
+    reconnecting = false;
+    reconnectAttempt = 0;
+    startHeartbeat();
+    const sseAbort = state.sseAbortController;
+    if (ingestWs && sseAbort) {
+      state.setConnections(ingestWs, sseAbort);
+    }
+    callbacks.onReconnected?.();
+  }
+
+  function discardStaleReconnect(): void {
+    logToFile('reconnect succeeded but connection was closed — discarding stale socket');
+    if (ingestWs) {
+      try {
+        ingestWs.close();
+      } catch {
+        /* ignore */
+      }
+      ingestWs = null;
+    }
+  }
+
+  function scheduleReconnect(): void {
+    reconnectAttempt++;
+    if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+      logToFile(`reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts — giving up`);
+      reconnecting = false;
+      reconnectAttempt = 0;
+      callbacks.onDisconnect('ingest websocket closed (reconnection failed)');
+      return;
+    }
+
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempt - 1);
+    logToFile(`reconnect attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
+    callbacks.onReconnecting?.(reconnectAttempt);
+
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      const gen = generation;
+      openIngestWs(gen)
+        .then(() => {
+          if (gen !== generation) {
+            discardStaleReconnect();
+            return;
+          }
+          completeReconnect();
+        })
+        .catch((err: unknown) => {
+          if (gen !== generation) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          logToFile(`reconnect attempt ${reconnectAttempt} failed: ${msg}`);
+          scheduleReconnect();
+        });
+    }, delay);
+  }
+
+  function cancelReconnect(): void {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnecting = false;
+    reconnectAttempt = 0;
+  }
+
   return {
     open: async () => {
       logToFile('opening connections');
@@ -367,8 +487,8 @@ export function createConnectionManager(
 
     close: async () => {
       logToFile('closing connections');
-
-      // Stop heartbeat
+      generation++;
+      cancelReconnect();
       stopHeartbeat();
 
       // Stop SSE consumer
@@ -379,6 +499,7 @@ export function createConnectionManager(
 
       // Close ingest WS
       if (ingestWs) {
+        closedByUs = true;
         try {
           ingestWs.close();
         } catch {
@@ -386,6 +507,7 @@ export function createConnectionManager(
         }
         ingestWs = null;
       }
+      closedByUs = false;
 
       // Clear state references
       state.clearConnections();
@@ -397,5 +519,7 @@ export function createConnectionManager(
     isConnected: () => {
       return ingestWs !== null && ingestWs.readyState === WebSocket.OPEN && sseConsumer !== null;
     },
+
+    isReconnecting: () => reconnecting,
   };
 }

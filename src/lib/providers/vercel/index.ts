@@ -1,6 +1,5 @@
 import type { BYOKResult } from '@/lib/byok';
 import { kiloFreeModels, preferredModels } from '@/lib/models';
-import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { getGatewayErrorRate } from '@/lib/providers/gateway-error-rate';
 import { isOpenAiModel } from '@/lib/providers/openai';
 import type { VercelUserByokInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
@@ -63,6 +62,13 @@ export async function shouldRouteToVercel(
     return false;
   }
 
+  if ((request.provider?.ignore?.length ?? 0) > 0) {
+    console.debug(
+      `[shouldRouteToVercel] not routing to Vercel because provider.ignore is not supported`
+    );
+    return false;
+  }
+
   if (!isLikelyAvailableOnAllGateways(requestedModel)) {
     console.debug(`[shouldRouteToVercel] model not available on all gateways`);
     return false;
@@ -73,15 +79,8 @@ export async function shouldRouteToVercel(
     return true;
   }
 
-  if (isAnthropicModel(requestedModel)) {
-    console.debug(
-      `[shouldRouteToVercel] Anthropic models are not routed to Vercel pending fine-grained tool streaming support`
-    );
-    return false;
-  }
-
   if (isOpenAiModel(requestedModel)) {
-    // 2026-03-03 Vercel returns this error: The model `gpt-5.3-codex-api-preview` does not exist or you do not have access to it.
+    // pending safety identifier clarification: https://kilo-code.slack.com/archives/C08UR25T02V/p1772486004882759
     console.debug(`[shouldRouteToVercel] OpenAI models are not routed to Vercel`);
     return false;
   }

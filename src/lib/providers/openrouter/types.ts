@@ -12,6 +12,7 @@ export type OpenRouterResponsesRequest = OpenAI.Responses.ResponseCreateParams;
 export type OpenRouterProviderConfig = {
   order?: string[];
   only?: string[];
+  ignore?: string[];
   data_collection?: 'allow' | 'deny';
   zdr?: boolean;
 };

@@ -53,10 +53,5 @@ export const SessionItemSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export const SessionSyncInputSchema = z.object({
-  data: z.array(SessionItemSchema),
-});
-
-export type SessionSyncInput = z.infer<typeof SessionSyncInputSchema>;
-export type IngestBatch = SessionSyncInput['data'];
-export type SessionDataItem = SessionSyncInput['data'][number];
+export type SessionDataItem = z.infer<typeof SessionItemSchema>;
+export type IngestBatch = SessionDataItem[];
