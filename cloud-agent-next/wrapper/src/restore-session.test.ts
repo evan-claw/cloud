@@ -329,6 +329,21 @@ describe('restoreSession', () => {
     expect(fs.existsSync(TMP_PATH)).toBe(false);
   });
 
+  it('cleans up temp file when Bun.write throws during download', async () => {
+    // Simulate a partial write: pre-create the temp file so it exists on disk,
+    // then have fetch() reject — the catch path should still unlink it.
+    fs.writeFileSync(TMP_PATH, 'partial snapshot data');
+
+    globalThis.fetch = asFetch(() => Promise.reject(new Error('connection reset')));
+
+    const result = await restoreSession(SESSION_ID, workspace);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.step).toBe('download');
+    }
+    expect(fs.existsSync(TMP_PATH)).toBe(false);
+  });
+
   it('cleans up temp file on import failure', async () => {
     mockFetchOk(makeSnapshot([{ file: 'a.txt', after: 'content', status: 'modified' }]));
     writeMockKilo(binDir, 1);

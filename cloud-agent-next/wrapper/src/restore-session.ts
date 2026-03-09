@@ -120,6 +120,7 @@ export async function restoreSession(
     const bytesWritten = await Bun.write(tmpPath, res);
     log(`snapshot downloaded bytes=${bytesWritten}`);
   } catch (err) {
+    tryUnlink(tmpPath);
     const message = err instanceof Error ? err.message : String(err);
     return fail(message, null, 'download');
   }
