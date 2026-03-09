@@ -12,7 +12,7 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 	&& mkdir -p -m 755 /etc/apt/sources.list.d \
 	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 	&& apt update \
-	&& apt install gh -y
+	&& apt install gh jq -y
 
 # Install GitLab CLI (glab) - download official .deb from GitLab releases
 RUN GLAB_VERSION="1.80.4" \
@@ -39,9 +39,10 @@ RUN npm install -g pnpm @kilocode/cli@${KILOCODE_CLI_VERSION}
 COPY wrapper /tmp/wrapper-build/wrapper
 COPY src/shared /tmp/wrapper-build/src/shared
 
-# Build the wrapper bundle
+# Build the wrapper bundle and restore-session script
 RUN cd /tmp/wrapper-build/wrapper && \
     bun build src/main.ts --outfile=/usr/local/bin/kilocode-wrapper.js --target=bun --minify && \
+    bun build src/restore-session.ts --outfile=/usr/local/bin/kilo-restore-session.js --target=bun --minify && \
     rm -rf /tmp/wrapper-build
 
 # DO NOT override USER, WORKDIR, or ENTRYPOINT from the base image

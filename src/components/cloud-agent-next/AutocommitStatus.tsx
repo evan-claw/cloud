@@ -57,7 +57,9 @@ function StatusIndicator({ status }: { status: AutocommitStatusType }) {
                   {truncateCommitMessage(status.commitMessage ?? status.message)}
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="top">{status.commitMessage ?? status.message}</TooltipContent>
+              <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap">
+                {status.commitMessage ?? status.message}
+              </TooltipContent>
             </Tooltip>
           ) : (
             <span>{status.message}</span>
