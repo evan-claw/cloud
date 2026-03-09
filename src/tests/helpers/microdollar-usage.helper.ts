@@ -100,8 +100,6 @@ export function createMockUsageContext(
     },
     max_tokens: null,
     has_middle_out_transform: null,
-    estimatedInputTokens: 100,
-    estimatedOutputTokens: 50,
     isStreaming: false,
     prior_microdollar_usage,
     posthog_distinct_id,

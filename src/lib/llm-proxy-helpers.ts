@@ -353,47 +353,6 @@ export function extractFimPromptInfo(body: { prompt: string; suffix?: string | n
   };
 }
 
-export function estimateChatTokens_ignoringToolDefinitions(body: OpenRouterChatCompletionRequest): {
-  estimatedInputTokens: number;
-  estimatedOutputTokens: number;
-} {
-  if (!body.messages || !Array.isArray(body.messages)) {
-    return { estimatedInputTokens: 0, estimatedOutputTokens: 0 };
-  }
-  const overallLength = body.messages.reduce(
-    (sum, m) =>
-      sum +
-      (typeof m.content === 'string'
-        ? m.content?.length
-        : Array.isArray(m.content)
-          ? m.content
-              .filter(c => c.type === 'text')
-              .map(c => (c.text ?? '').length)
-              .reduce((l, str) => str + 1 + l, 0)
-          : 0),
-    0
-  );
-  return {
-    estimatedInputTokens: overallLength / 4,
-    estimatedOutputTokens: overallLength / 4, // Conservative estimate
-  };
-}
-
-export function estimateFimTokens(body: {
-  prompt: string;
-  suffix?: string | null;
-  max_tokens?: number | null;
-}): {
-  estimatedInputTokens: number;
-  estimatedOutputTokens: number;
-} {
-  const promptLength = body.prompt.length + (body.suffix?.length || 0);
-  return {
-    estimatedInputTokens: promptLength / 4,
-    estimatedOutputTokens: (body.max_tokens || 1024) / 2,
-  };
-}
-
 // ============================================================================
 // FIM-Specific Code
 // ============================================================================

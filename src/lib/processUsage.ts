@@ -164,8 +164,6 @@ export type MicrodollarUsageContext = {
   promptInfo: PromptInfo;
   max_tokens: number | null;
   has_middle_out_transform: boolean | null;
-  estimatedInputTokens: number;
-  estimatedOutputTokens: number;
   isStreaming: boolean;
   prior_microdollar_usage: number;
   /** User email for authenticated users - used as PostHog distinctId. Undefined for anonymous users. */

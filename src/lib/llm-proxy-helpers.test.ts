@@ -1,9 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import {
-  checkOrganizationModelRestrictions,
-  estimateChatTokens_ignoringToolDefinitions,
-} from './llm-proxy-helpers';
-import type { OpenRouterChatCompletionRequest } from './providers/openrouter/types';
+import { checkOrganizationModelRestrictions } from './llm-proxy-helpers';
 
 describe('checkOrganizationModelRestrictions', () => {
   describe('enterprise plan - model deny list restrictions', () => {
@@ -207,60 +203,5 @@ describe('checkOrganizationModelRestrictions', () => {
       expect(result.error).toBeNull();
       expect(result.providerConfig).toBeUndefined();
     });
-  });
-});
-
-describe('estimateChatTokens', () => {
-  it('should estimate tokens from valid messages', () => {
-    const body = {
-      model: 'anthropic/claude-3-opus',
-      messages: [
-        { role: 'user', content: 'Hello, how are you?' },
-        { role: 'assistant', content: 'I am doing well, thank you!' },
-      ],
-    } as OpenRouterChatCompletionRequest;
-
-    const result = estimateChatTokens_ignoringToolDefinitions(body);
-
-    expect(result.estimatedInputTokens).toBeGreaterThan(0);
-    expect(result.estimatedOutputTokens).toBeGreaterThan(0);
-  });
-
-  it('should handle missing messages gracefully (regression test for KILOCODE-WEB-5ND)', () => {
-    // This test ensures we don't crash when messages is undefined/null/invalid
-    // which can happen with malformed API requests from abuse attempts
-    const undefinedMessages = { model: 'test' } as OpenRouterChatCompletionRequest;
-    const nullMessages = {
-      model: 'test',
-      messages: null,
-    } as unknown as OpenRouterChatCompletionRequest;
-
-    expect(estimateChatTokens_ignoringToolDefinitions(undefinedMessages)).toEqual({
-      estimatedInputTokens: 0,
-      estimatedOutputTokens: 0,
-    });
-    expect(estimateChatTokens_ignoringToolDefinitions(nullMessages)).toEqual({
-      estimatedInputTokens: 0,
-      estimatedOutputTokens: 0,
-    });
-  });
-
-  it('should handle content parts with undefined text', () => {
-    const body = {
-      model: 'test',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: undefined },
-            { type: 'text', text: 'hello' },
-          ],
-        },
-      ],
-    } as unknown as OpenRouterChatCompletionRequest;
-
-    const result = estimateChatTokens_ignoringToolDefinitions(body);
-    expect(result.estimatedInputTokens).toBeGreaterThan(0);
-    expect(result.estimatedOutputTokens).toBeGreaterThan(0);
   });
 });

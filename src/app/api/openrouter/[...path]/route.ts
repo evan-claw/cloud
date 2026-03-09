@@ -22,7 +22,6 @@ import {
   captureProxyError,
   checkOrganizationModelRestrictions,
   dataCollectionRequiredResponse,
-  estimateChatTokens_ignoringToolDefinitions,
   extractFraudAndProjectHeaders,
   invalidPathResponse,
   invalidRequestResponse,
@@ -268,7 +267,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   }
 
   // Extract properties for usage context
-  const tokenEstimates = estimateChatTokens_ignoringToolDefinitions(requestBodyParsed);
   const promptInfo = extractPromptInfo(requestBodyParsed);
 
   const usageContext: MicrodollarUsageContext = {
@@ -278,8 +276,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     promptInfo,
     max_tokens: requestBodyParsed.max_tokens ?? null,
     has_middle_out_transform: requestBodyParsed.transforms?.includes('middle-out') ?? false,
-    estimatedInputTokens: tokenEstimates.estimatedInputTokens,
-    estimatedOutputTokens: tokenEstimates.estimatedOutputTokens,
     fraudHeaders,
     isStreaming: requestBodyParsed.stream === true,
     organizationId,
