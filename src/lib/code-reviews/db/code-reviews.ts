@@ -420,6 +420,41 @@ export async function findActiveReviewsForPR(
 }
 
 /**
+ * Finds the most recent completed review for the same PR with a different SHA.
+ * Used for incremental reviews: returns the previous HEAD SHA so the agent
+ * can diff against it instead of re-reviewing the entire PR.
+ */
+export async function findPreviousCompletedReview(
+  repoFullName: string,
+  prNumber: number,
+  excludeSha: string
+): Promise<{ head_sha: string } | null> {
+  try {
+    const [review] = await db
+      .select({ head_sha: cloud_agent_code_reviews.head_sha })
+      .from(cloud_agent_code_reviews)
+      .where(
+        and(
+          eq(cloud_agent_code_reviews.repo_full_name, repoFullName),
+          eq(cloud_agent_code_reviews.pr_number, prNumber),
+          ne(cloud_agent_code_reviews.head_sha, excludeSha),
+          eq(cloud_agent_code_reviews.status, 'completed')
+        )
+      )
+      .orderBy(desc(cloud_agent_code_reviews.completed_at))
+      .limit(1);
+
+    return review || null;
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'findPreviousCompletedReview' },
+      extra: { repoFullName, prNumber, excludeSha },
+    });
+    throw error;
+  }
+}
+
+/**
  * Verifies that a user owns (or is a member of the org that owns) a code review
  * Returns true if the user has access, false otherwise
  */
