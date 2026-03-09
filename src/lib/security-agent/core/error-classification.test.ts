@@ -75,6 +75,27 @@ describe('classifyAnalysisError', () => {
     });
   });
 
+  describe('SANDBOX_FAILED', () => {
+    it.each([
+      'ConfigInvalidError: bad file reference: "{file:.opencode/prompts/agents/planner.txt}"',
+      'Failed to create workspace directory /tmp/sandbox-123',
+      'Failed to create kilo CLI session for repo foo/bar',
+      'prepareSession call failed with HTTP 500',
+      'FileSystemError: mkdir operation failed with exit code NaN',
+    ])('classifies %j as SANDBOX_FAILED', message => {
+      expect(classifyAnalysisError(new Error(message)).code).toBe('SANDBOX_FAILED');
+    });
+
+    it('does not match generic filesystem or config errors without sandbox context', () => {
+      expect(classifyAnalysisError(new Error('Invalid config option')).code).not.toBe(
+        'SANDBOX_FAILED'
+      );
+      expect(classifyAnalysisError(new Error('ENOENT: no such file or directory')).code).not.toBe(
+        'SANDBOX_FAILED'
+      );
+    });
+  });
+
   describe('UNKNOWN', () => {
     it('returns UNKNOWN for unrecognized errors', () => {
       const result = classifyAnalysisError(new Error('something unexpected'));
