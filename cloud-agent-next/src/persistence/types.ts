@@ -181,7 +181,7 @@ export type PersistenceEnv = {
   KILO_SESSION_INGEST_URL?: string;
 
   /** Shared secret for internal service-to-service authentication */
-  INTERNAL_SERVICE_SECRET: SecretsStoreSecret;
+  INTERNAL_API_SECRET_PROD: SecretsStoreSecret;
 
   R2_ENDPOINT?: string;
   R2_ATTACHMENTS_READONLY_ACCESS_KEY_ID?: string;

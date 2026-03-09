@@ -70,9 +70,9 @@ describe('SessionService', () => {
     SESSION_INGEST: {
       fetch: vi.fn(),
     } as unknown as PersistenceEnv['SESSION_INGEST'],
-    INTERNAL_SERVICE_SECRET: {
+    INTERNAL_API_SECRET_PROD: {
       get: vi.fn().mockResolvedValue('test-secret'),
-    } as unknown as PersistenceEnv['INTERNAL_SERVICE_SECRET'],
+    } as unknown as PersistenceEnv['INTERNAL_API_SECRET_PROD'],
   };
 
   const createMetadataEnv = (

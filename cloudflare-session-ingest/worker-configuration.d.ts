@@ -12,7 +12,7 @@ declare namespace Cloudflare {
 		HYPERDRIVE: Hyperdrive;
 		INGEST_QUEUE: Queue;
 		NEXTAUTH_SECRET_PROD: SecretsStoreSecret;
-		INTERNAL_SERVICE_SECRET: SecretsStoreSecret;
+		INTERNAL_API_SECRET_PROD: SecretsStoreSecret;
 		SESSION_INGEST_DO: DurableObjectNamespace<import("./src/index").SessionIngestDO>;
 		SESSION_ACCESS_CACHE_DO: DurableObjectNamespace<import("./src/index").SessionAccessCacheDO>;
 		O11Y: Fetcher /* o11y */;

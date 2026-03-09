@@ -296,9 +296,9 @@ describe('router sessionId validation', () => {
               } as unknown as TRPCContext['env']['SESSION_INGEST'],
               R2_BUCKET: {} as TRPCContext['env']['R2_BUCKET'],
               NEXTAUTH_SECRET: 'test-secret',
-              INTERNAL_SERVICE_SECRET: {
+              INTERNAL_API_SECRET_PROD: {
                 get: vi.fn().mockResolvedValue('test-secret'),
-              } as unknown as TRPCContext['env']['INTERNAL_SERVICE_SECRET'],
+              } as unknown as TRPCContext['env']['INTERNAL_API_SECRET_PROD'],
             },
           };
           cloudAgentSession = mockContext.env.CLOUD_AGENT_SESSION as unknown as MockCAS;
@@ -641,9 +641,9 @@ describe('router sessionId validation', () => {
             } as unknown as TRPCContext['env']['SESSION_INGEST'],
             R2_BUCKET: {} as TRPCContext['env']['R2_BUCKET'],
             NEXTAUTH_SECRET: 'test-secret',
-            INTERNAL_SERVICE_SECRET: {
+            INTERNAL_API_SECRET_PROD: {
               get: vi.fn().mockResolvedValue('test-secret'),
-            } as unknown as TRPCContext['env']['INTERNAL_SERVICE_SECRET'],
+            } as unknown as TRPCContext['env']['INTERNAL_API_SECRET_PROD'],
           },
         };
         cloudAgentSession = mockContext.env.CLOUD_AGENT_SESSION as unknown as MockCAS;

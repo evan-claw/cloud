@@ -73,7 +73,7 @@ app.get('/session/:sessionId', async c => {
 // Internal route for service-binding HTTP fetch (secret-protected)
 app.get('/internal/session/:sessionId/export', async c => {
   const secret = c.req.header('X-Internal-Secret');
-  const expected = await c.env.INTERNAL_SERVICE_SECRET.get();
+  const expected = await c.env.INTERNAL_API_SECRET_PROD.get();
 
   if (!secret || !expected) {
     return c.json({ success: false, error: 'Unauthorized' }, 401);

@@ -78,9 +78,9 @@
   ],
   "secrets_store_secrets": [
     {
-      "binding": "INTERNAL_SERVICE_SECRET",
+      "binding": "INTERNAL_API_SECRET_PROD",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
-      "secret_name": "INTERNAL_SERVICE_SECRET",
+      "secret_name": "INTERNAL_API_SECRET_PROD",
     },
   ],
   /**
@@ -240,9 +240,9 @@
       ],
       "secrets_store_secrets": [
         {
-          "binding": "INTERNAL_SERVICE_SECRET",
+          "binding": "INTERNAL_API_SECRET_PROD",
           "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
-          "secret_name": "INTERNAL_SERVICE_SECRET",
+          "secret_name": "INTERNAL_API_SECRET_PROD",
         },
       ],
       "r2_buckets": [

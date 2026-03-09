@@ -1474,7 +1474,7 @@ export class SessionService {
     await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
     // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
-    const internalSecret = await env.INTERNAL_SERVICE_SECRET.get();
+    const internalSecret = await env.INTERNAL_API_SECRET_PROD.get();
     const response = await env.SESSION_INGEST.fetch(
       new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
         headers: {
