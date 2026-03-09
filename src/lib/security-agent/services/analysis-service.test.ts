@@ -34,12 +34,17 @@ jest.mock('@/lib/security-agent/db/security-findings', () => ({
   getSecurityFindingById: mockGetSecurityFindingById,
 }));
 
+const mockClearAnalysisStatus = jest.fn() as jest.MockedFunction<
+  typeof securityAnalysisModule.clearAnalysisStatus
+>;
+
 jest.mock('@/lib/security-agent/db/security-analysis', () => {
   const actual: { isFindingEligibleForAutoAnalysis: unknown } = jest.requireActual(
     '@/lib/security-agent/db/security-analysis'
   );
   return {
     updateAnalysisStatus: mockUpdateAnalysisStatus,
+    clearAnalysisStatus: mockClearAnalysisStatus,
     tryAcquireAnalysisStartLease: mockTryAcquireAnalysisStartLease,
     isFindingEligibleForAutoAnalysis: actual.isFindingEligibleForAutoAnalysis,
     AUTO_ANALYSIS_MAX_ATTEMPTS: 5,
@@ -151,7 +156,7 @@ describe('analysis-service', () => {
     mockGetSecurityFindingById.mockResolvedValue(
       mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
     );
-    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockUpdateAnalysisStatus.mockResolvedValue(true);
     mockTriageSecurityFinding.mockResolvedValue({
       needsSandboxAnalysis: true,
       needsSandboxReasoning: 'Runtime dependency with high severity',
@@ -228,7 +233,7 @@ describe('analysis-service', () => {
     mockGetSecurityFindingById.mockResolvedValue(
       mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
     );
-    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockUpdateAnalysisStatus.mockResolvedValue(true);
     mockTriageSecurityFinding.mockResolvedValue({
       needsSandboxAnalysis: true,
       needsSandboxReasoning: 'Needs analysis',
@@ -289,7 +294,7 @@ describe('analysis-service', () => {
     mockGetSecurityFindingById.mockResolvedValue(
       mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
     );
-    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockUpdateAnalysisStatus.mockResolvedValue(true);
     mockTriageSecurityFinding.mockResolvedValue({
       needsSandboxAnalysis: true,
       needsSandboxReasoning: 'Needs analysis',
@@ -347,7 +352,7 @@ describe('analysis-service', () => {
     mockGetSecurityFindingById.mockResolvedValue(
       mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
     );
-    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockUpdateAnalysisStatus.mockResolvedValue(true);
     mockTriageSecurityFinding.mockResolvedValue({
       needsSandboxAnalysis: false,
       needsSandboxReasoning: 'Dev dependency, low severity',
@@ -394,7 +399,7 @@ describe('analysis-service', () => {
     mockGetSecurityFindingById.mockResolvedValue(
       mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
     );
-    mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+    mockUpdateAnalysisStatus.mockResolvedValue(true);
     mockTriageSecurityFinding.mockResolvedValue({
       needsSandboxAnalysis: true,
       needsSandboxReasoning: 'Needs analysis',
@@ -462,7 +467,7 @@ describe('analysis-service', () => {
       mockGetSecurityFindingById.mockResolvedValue(
         mockFinding as Awaited<ReturnType<typeof mockGetSecurityFindingById>>
       );
-      mockUpdateAnalysisStatus.mockResolvedValue(undefined);
+      mockUpdateAnalysisStatus.mockResolvedValue(true);
       mockGenerateApiToken.mockReturnValue('test-token');
       mockPrepareSession.mockResolvedValue({
         cloudAgentSessionId: 'ses-agent-mode',

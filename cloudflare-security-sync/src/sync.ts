@@ -6,12 +6,13 @@
  */
 
 import { z } from 'zod';
-import { eq, and, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { WorkerDb } from '@kilocode/db/client';
 import {
   agent_configs,
   platform_integrations,
   security_findings,
+  security_analysis_queue,
   security_audit_log,
 } from '@kilocode/db/schema';
 import { SecurityAuditLogAction } from '@kilocode/db/schema-types';
@@ -124,13 +125,17 @@ type SecurityReviewOwner =
 type SyncResult = {
   synced: number;
   errors: number;
+  /** Repos where Dependabot alerts are permanently disabled (safe to skip) */
+  skipped: number;
+  /** Repos that returned 404 or are access-blocked (deleted/transferred/inaccessible) */
   staleRepos: string[];
 };
 
 type FetchAlertsResult =
   | { status: 'success'; alerts: DependabotAlertRaw[] }
   | { status: 'repo_not_found' }
-  | { status: 'alerts_disabled' };
+  | { status: 'alerts_disabled' }
+  | { status: 'access_blocked' };
 
 function isOrgOwner(
   owner: SecurityReviewOwner
@@ -159,6 +164,9 @@ type EnabledOwnerConfig = {
   repositories: string[];
   repoNameToId: Map<string, number>;
   slaConfig: SecurityAgentConfig;
+  /** Number of selected_repository_ids that are no longer accessible via the installation.
+   *  Non-zero means the app lost access to a configured repo — freshness must not advance. */
+  missingSelectedRepoCount: number;
 };
 
 export async function getOwnerConfig(
@@ -231,18 +239,28 @@ export async function getOwnerConfig(
   }
   const securityConfig = parsed.data;
   let selectedRepos: string[];
-  if (
-    securityConfig.repository_selection_mode === 'selected' &&
-    securityConfig.selected_repository_ids &&
-    securityConfig.selected_repository_ids.length > 0
-  ) {
-    const selectedIds = new Set(securityConfig.selected_repository_ids);
-    selectedRepos = allRepos.filter(r => selectedIds.has(r.id)).map(r => r.full_name);
+  let missingSelectedRepoCount = 0;
+  if (securityConfig.repository_selection_mode === 'selected') {
+    const selectedIds = new Set(securityConfig.selected_repository_ids ?? []);
+    if (selectedIds.size > 0) {
+      const accessibleIds = new Set(allRepos.map(r => r.id));
+      selectedRepos = allRepos.filter(r => selectedIds.has(r.id)).map(r => r.full_name);
+      missingSelectedRepoCount = [...selectedIds].filter(id => !accessibleIds.has(id)).length;
+    } else {
+      // Mode is 'selected' but no repos are configured — don't fall through to 'all'
+      selectedRepos = [];
+    }
   } else {
     selectedRepos = allRepos.map(r => r.full_name);
   }
 
-  if (selectedRepos.length === 0) return null;
+  if (selectedRepos.length === 0 && missingSelectedRepoCount === 0) return null;
+
+  if (missingSelectedRepoCount > 0) {
+    console.warn(`${missingSelectedRepoCount} selected repo(s) no longer accessible for owner`, {
+      owner,
+    });
+  }
 
   return {
     owner,
@@ -251,6 +269,7 @@ export async function getOwnerConfig(
     repositories: selectedRepos,
     repoNameToId,
     slaConfig: { ...DEFAULT_SLA_CONFIG, ...securityConfig },
+    missingSelectedRepoCount,
   };
 }
 
@@ -277,13 +296,27 @@ async function fetchAllDependabotAlerts(
       return { status: 'repo_not_found' };
     }
 
+    // 451 "Unavailable for Legal Reasons" — repo is blocked, won't recover.
+    if (response.status === 451) {
+      return { status: 'access_blocked' };
+    }
+
     if (!response.ok) {
       const body = await response.text();
 
       if (
-        response.status === 403 &&
+        (response.status === 403 || response.status === 422) &&
+        body.includes('repository access blocked')
+      ) {
+        return { status: 'access_blocked' };
+      }
+
+      if (
+        (response.status === 403 || response.status === 422) &&
         (body.includes('Dependabot alerts are disabled') ||
-          body.includes('Dependabot alerts are not available'))
+          body.includes('Dependabot alerts are not available') ||
+          body.includes('archived repositories') ||
+          body.includes('archived repository'))
       ) {
         return { status: 'alerts_disabled' };
       }
@@ -391,7 +424,9 @@ async function upsertSecurityFinding(
 ): Promise<void> {
   const { finding, owner, platformIntegrationId, repoFullName, slaDueAt } = params;
 
-  // Fields that are updated on conflict (shared between insert and upsert)
+  // Fields that are updated on conflict (shared between insert and upsert).
+  // status, ignored_reason, and ignored_by are excluded here because the
+  // ON CONFLICT clause needs conditional logic to preserve superseded state.
   const mutableFields = {
     severity: finding.severity,
     ghsa_id: finding.ghsa_id,
@@ -400,9 +435,6 @@ async function upsertSecurityFinding(
     patched_version: finding.patched_version,
     title: finding.title,
     description: finding.description,
-    status: finding.status,
-    ignored_reason: finding.ignored_reason,
-    ignored_by: finding.ignored_by,
     fixed_at: finding.fixed_at,
     sla_due_at: slaDueAt,
     dependabot_html_url: finding.dependabot_html_url,
@@ -425,6 +457,9 @@ async function upsertSecurityFinding(
       package_ecosystem: finding.package_ecosystem,
       manifest_path: finding.manifest_path,
       first_detected_at: finding.first_detected_at,
+      status: finding.status,
+      ignored_reason: finding.ignored_reason,
+      ignored_by: finding.ignored_by,
       ...mutableFields,
     })
     .onConflictDoUpdate({
@@ -435,10 +470,123 @@ async function upsertSecurityFinding(
       ],
       set: {
         ...mutableFields,
+        status: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.status} ELSE ${finding.status} END`,
+        ignored_reason: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.ignored_reason} ELSE ${finding.ignored_reason} END`,
+        ignored_by: sql`CASE WHEN ${security_findings.ignored_reason} LIKE 'superseded:%' THEN ${security_findings.ignored_by} ELSE ${finding.ignored_by} END`,
         last_synced_at: sql`now()`,
         updated_at: sql`now()`,
       },
     });
+}
+
+type SupersedeResult = { count: number; supersededFindingIds: string[] };
+
+async function supersedeDuplicateFindings(
+  db: WorkerDb,
+  repoFullName: string
+): Promise<SupersedeResult> {
+  try {
+    const result = await db.execute<{ id: string }>(sql`
+      WITH ranked AS (
+        SELECT
+          id,
+          ROW_NUMBER() OVER (
+            PARTITION BY repo_full_name, source, ghsa_id, package_name, manifest_path
+            ORDER BY CASE WHEN source_id ~ '^[0-9]+$' THEN source_id::int ELSE 0 END DESC
+          ) AS rn,
+          FIRST_VALUE(id) OVER (
+            PARTITION BY repo_full_name, source, ghsa_id, package_name, manifest_path
+            ORDER BY CASE WHEN source_id ~ '^[0-9]+$' THEN source_id::int ELSE 0 END DESC
+          ) AS canonical_id
+        FROM security_findings
+        WHERE repo_full_name = ${repoFullName}
+          AND source = 'dependabot'
+          AND ghsa_id IS NOT NULL
+          AND status = 'open'
+      ),
+      superseded AS (
+        UPDATE security_findings
+        SET
+          status = 'ignored',
+          ignored_reason = 'superseded:' || ranked.canonical_id,
+          ignored_by = 'system',
+          updated_at = now()
+        FROM ranked
+        WHERE security_findings.id = ranked.id
+          AND ranked.rn > 1
+        RETURNING security_findings.id
+      )
+      SELECT id FROM superseded
+    `);
+    const supersededFindingIds = result.rows.map(r => r.id);
+    return { count: supersededFindingIds.length, supersededFindingIds };
+  } catch (error) {
+    // Best-effort: don't let dedup failures break the sync.
+    console.error(`Error superseding duplicate findings for ${repoFullName}`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { count: 0, supersededFindingIds: [] };
+  }
+}
+
+/**
+ * Remove superseded findings from the auto-analysis queue so the worker
+ * doesn't analyze findings that are no longer open.
+ *
+ * Clears `analysis_status` for `pending` findings so they no longer count
+ * against the owner's concurrency cap. Already-running analyses are left
+ * alone — the callback route transitions their queue rows when the job
+ * reports back, releasing the concurrency slot at that point.
+ */
+async function dequeueSupersededFindings(db: WorkerDb, findingIds: string[]): Promise<number> {
+  if (findingIds.length === 0) return 0;
+
+  try {
+    const result = await db
+      .update(security_analysis_queue)
+      .set({
+        queue_status: 'completed',
+        failure_code: 'SKIPPED_NO_LONGER_ELIGIBLE',
+        claim_token: null,
+        claimed_at: null,
+        claimed_by_job_id: null,
+        updated_at: sql`now()`,
+      })
+      .where(
+        and(
+          inArray(security_analysis_queue.finding_id, findingIds),
+          or(
+            eq(security_analysis_queue.queue_status, 'queued'),
+            eq(security_analysis_queue.queue_status, 'pending')
+          )
+        )
+      )
+      .returning({ id: security_analysis_queue.id });
+
+    // Clear pending analysis_status so countRunningAnalyses no longer counts
+    // these superseded findings against the owner's concurrency cap.
+    // Running analyses are left alone — the callback route transitions their
+    // queue rows when the job completes, releasing the concurrency slot.
+    await db
+      .update(security_findings)
+      .set({
+        analysis_status: null,
+        updated_at: sql`now()`,
+      })
+      .where(
+        and(
+          inArray(security_findings.id, findingIds),
+          eq(security_findings.analysis_status, 'pending')
+        )
+      );
+
+    return result.length;
+  } catch (error) {
+    console.error('Error dequeuing superseded findings from analysis queue', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
 }
 
 async function writeAuditLog(
@@ -525,6 +673,56 @@ async function pruneStaleReposFromConfig(
   );
 }
 
+/** Remove selected_repository_ids that are no longer accessible via the GitHub installation.
+ *  Unlike pruneStaleReposFromConfig (which prunes by repo name after sync), this handles
+ *  repos that silently vanished from the installation and were never synced at all. */
+async function pruneMissingSelectedRepos(
+  db: WorkerDb,
+  owner: SecurityReviewOwner,
+  accessibleRepoIds: Set<number>
+): Promise<void> {
+  const rows = await db
+    .select({
+      id: agent_configs.id,
+      config: agent_configs.config,
+    })
+    .from(agent_configs)
+    .where(
+      and(
+        eq(agent_configs.agent_type, 'security_scan'),
+        eq(agent_configs.platform, 'github'),
+        ownerFilter(owner)
+      )
+    )
+    .limit(1);
+
+  if (rows.length === 0) return;
+
+  const parsed = securityAgentConfigSchema.partial().safeParse(rows[0].config);
+  if (!parsed.success) return;
+  const config = parsed.data;
+
+  if (
+    config.repository_selection_mode !== 'selected' ||
+    !config.selected_repository_ids ||
+    config.selected_repository_ids.length === 0
+  ) {
+    return;
+  }
+
+  const prunedIds = config.selected_repository_ids.filter(id => accessibleRepoIds.has(id));
+  if (prunedIds.length === config.selected_repository_ids.length) return;
+
+  const removedCount = config.selected_repository_ids.length - prunedIds.length;
+  const updatedConfig = { ...config, selected_repository_ids: prunedIds };
+  await db
+    .update(agent_configs)
+    .set({ config: updatedConfig, updated_at: sql`now()` })
+    .where(eq(agent_configs.id, rows[0].id));
+
+  console.warn(`Pruned ${removedCount} inaccessible repo ID(s) from config`);
+}
+
 export async function syncOwner(params: {
   db: WorkerDb;
   gitTokenService: GitTokenService;
@@ -532,14 +730,15 @@ export async function syncOwner(params: {
   runId: string;
 }): Promise<SyncResult> {
   const { db: database, gitTokenService, owner, runId } = params;
+  const startTime = Date.now();
 
   const config = await getOwnerConfig(database, owner);
   if (!config) {
     console.info(`No enabled config for owner, skipping`, { runId, owner });
-    return { synced: 0, errors: 0, staleRepos: [] };
+    return { synced: 0, errors: 0, skipped: 0, staleRepos: [] };
   }
 
-  const totalResult: SyncResult = { synced: 0, errors: 0, staleRepos: [] };
+  const totalResult: SyncResult = { synced: 0, errors: 0, skipped: 0, staleRepos: [] };
   let firstError: Error | null = null;
   let successfulRepos = 0;
 
@@ -556,6 +755,7 @@ export async function syncOwner(params: {
       });
       totalResult.synced += repoResult.synced;
       totalResult.errors += repoResult.errors;
+      totalResult.skipped += repoResult.skipped;
       totalResult.staleRepos.push(...repoResult.staleRepos);
       successfulRepos++;
     } catch (error) {
@@ -579,6 +779,18 @@ export async function syncOwner(params: {
       await pruneStaleReposFromConfig(database, owner, totalResult.staleRepos, config.repoNameToId);
     } catch (error) {
       console.error('Failed to prune stale repos from config', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // Prune selected repo IDs that silently vanished from the installation
+  if (config.missingSelectedRepoCount > 0) {
+    try {
+      const accessibleRepoIds = new Set(config.repoNameToId.values());
+      await pruneMissingSelectedRepos(database, owner, accessibleRepoIds);
+    } catch (error) {
+      console.error('Failed to prune missing selected repos from config', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -608,6 +820,60 @@ export async function syncOwner(params: {
     });
   }
 
+  // Only advance owner-level freshness when every repo was actually synced.
+  // Stale repos (deleted/transferred/access-blocked) block the update because
+  // they were selected for sync but never refreshed.  Skipped repos
+  // (Dependabot permanently disabled) do NOT block — that's a permanent
+  // repo-level setting, and blocking here would leave the timestamp stuck.
+  // Missing selected repos (installation lost access) also block — the repo
+  // was configured but silently dropped from the accessible list.
+  if (
+    totalResult.errors === 0 &&
+    totalResult.staleRepos.length === 0 &&
+    config.missingSelectedRepoCount === 0
+  ) {
+    try {
+      await database
+        .update(agent_configs)
+        .set({
+          runtime_state: sql`jsonb_set(
+            COALESCE(${agent_configs.runtime_state}, '{}'::jsonb),
+            '{last_synced_at}',
+            to_jsonb(now())
+          )`,
+        })
+        .where(
+          and(
+            eq(agent_configs.agent_type, 'security_scan'),
+            eq(agent_configs.platform, 'github'),
+            ownerFilter(owner)
+          )
+        );
+    } catch (error) {
+      console.error('Failed to update last_synced_at in runtime_state', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const syncSummary = {
+    runId,
+    ownerId,
+    reposScanned: config.repositories.length,
+    findingsSynced: totalResult.synced,
+    errors: totalResult.errors,
+    skippedRepos: totalResult.skipped,
+    staleRepos: totalResult.staleRepos,
+    missingSelectedRepos: config.missingSelectedRepoCount,
+    durationMs: Date.now() - startTime,
+  };
+
+  if (totalResult.synced === 0 && totalResult.errors === 0 && totalResult.skipped === 0) {
+    console.warn('Sync completed with zero findings processed across all repos', syncSummary);
+  } else {
+    console.info('Sync cycle summary', syncSummary);
+  }
+
   return totalResult;
 }
 
@@ -630,7 +896,7 @@ async function syncRepo(params: {
     slaConfig,
   } = params;
   const token = await gitTokenService.getToken(installationId);
-  const result: SyncResult = { synced: 0, errors: 0, staleRepos: [] };
+  const result: SyncResult = { synced: 0, errors: 0, skipped: 0, staleRepos: [] };
 
   const [repoOwner, repoName] = repoFullName.split('/');
   if (!repoOwner || !repoName) {
@@ -647,6 +913,13 @@ async function syncRepo(params: {
 
   if (fetchResult.status === 'alerts_disabled') {
     console.info(`Dependabot alerts disabled for ${repoFullName}, skipping`);
+    result.skipped = 1;
+    return result;
+  }
+
+  if (fetchResult.status === 'access_blocked') {
+    console.warn(`Repository ${repoFullName} access blocked, marking as stale`);
+    result.staleRepos.push(repoFullName);
     return result;
   }
 
@@ -674,6 +947,18 @@ async function syncRepo(params: {
         alertNumber: finding.source_id,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  const { count: supersededCount, supersededFindingIds } = await supersedeDuplicateFindings(
+    database,
+    repoFullName
+  );
+  if (supersededCount > 0) {
+    console.info(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
+    const dequeued = await dequeueSupersededFindings(database, supersededFindingIds);
+    if (dequeued > 0) {
+      console.info(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
     }
   }
 

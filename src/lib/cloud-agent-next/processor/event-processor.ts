@@ -513,10 +513,13 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
    * Handle the wrapper's "complete" event — the execution is fully done
    * (including autocommit). This is the definitive "safe to send another message" signal.
    */
-  function handleExecutionComplete(): void {
+  function handleExecutionComplete(data: Record<string, unknown>): void {
     if (streaming) {
       streaming = false;
       callbacks.onStreamingChanged?.(false);
+    }
+    if (typeof data.currentBranch === 'string' && data.currentBranch) {
+      callbacks.onBranchChanged?.(data.currentBranch);
     }
   }
 
@@ -649,7 +652,7 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
         break;
 
       case 'complete':
-        handleExecutionComplete();
+        handleExecutionComplete((data ?? {}) as Record<string, unknown>);
         break;
 
       case 'autocommit_started':

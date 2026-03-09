@@ -25,7 +25,7 @@ vi.mock('./dos/SessionIngestDO', () => ({
   getSessionIngestDO: vi.fn(),
 }));
 
-import app from './index';
+import { app } from './index';
 import { getWorkerDb } from '@kilocode/db/client';
 import { getSessionIngestDO } from './dos/SessionIngestDO';
 
@@ -92,7 +92,7 @@ describe('public session route', () => {
     ]);
 
     const stub = {
-      getAll: vi.fn(async () => '{"ok":true}'),
+      getAllStream: vi.fn(async () => new Response('{"ok":true}').body!),
     };
     vi.mocked(getSessionIngestDO).mockReturnValue(
       stub as unknown as ReturnType<typeof getSessionIngestDO>

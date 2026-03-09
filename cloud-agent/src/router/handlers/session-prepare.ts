@@ -206,6 +206,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         appendSystemPrompt: input.appendSystemPrompt,
         callbackTarget: input.callbackTarget,
         images: input.images,
+        gateThreshold: input.gateThreshold,
       });
 
       if (!result.success) {

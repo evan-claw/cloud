@@ -2,15 +2,16 @@ import { captureException } from '@sentry/nextjs';
 import { trackSecurityAgentFullSync } from '../posthog-tracking';
 import { db } from '@/lib/drizzle';
 import { platform_integrations, agent_configs } from '@kilocode/db/schema';
-import { eq, and, isNotNull } from 'drizzle-orm';
+import { eq, and, isNotNull, sql } from 'drizzle-orm';
 import { fetchAllDependabotAlerts } from '../github/dependabot-api';
 import { hasSecurityReviewPermissions } from '../github/permissions';
 import { parseDependabotAlerts } from '../parsers/dependabot-parser';
-import { upsertSecurityFinding } from '../db/security-findings';
+import { upsertSecurityFinding, supersedeDuplicateFindings } from '../db/security-findings';
 import { getSecurityAgentConfig, getSecurityAgentConfigWithStatus } from '../db/security-config';
 import {
   getOwnerAutoAnalysisEnabledAt,
   syncAutoAnalysisQueueForFinding,
+  dequeueSupersededFindings,
   type AutoAnalysisQueueSyncResult,
 } from '../db/security-analysis';
 import { upsertAgentConfigForOwner } from '@/lib/agent-config/db/agent-configs';
@@ -27,6 +28,38 @@ import { logSecurityAuditAndWait, SecurityAuditLogAction } from './audit-log-ser
 const log = sentryLogger('security-agent:sync', 'info');
 const warn = sentryLogger('security-agent:sync', 'warning');
 const logError = sentryLogger('security-agent:sync', 'error');
+
+export async function updateLastSyncedAt(owner: SecurityReviewOwner): Promise<void> {
+  try {
+    const { type, id } = toAgentConfigOwner(owner);
+    const ownerCondition =
+      type === 'org'
+        ? eq(agent_configs.owned_by_organization_id, id)
+        : eq(agent_configs.owned_by_user_id, id);
+
+    await db
+      .update(agent_configs)
+      .set({
+        runtime_state: sql`jsonb_set(
+          COALESCE(${agent_configs.runtime_state}, '{}'::jsonb),
+          '{last_synced_at}',
+          to_jsonb(now())
+        )`,
+      })
+      .where(
+        and(
+          eq(agent_configs.agent_type, 'security_scan'),
+          eq(agent_configs.platform, 'github'),
+          ownerCondition
+        )
+      );
+  } catch (error) {
+    logError('Failed to update last_synced_at in runtime_state', { error });
+    captureException(error, {
+      tags: { operation: 'updateLastSyncedAt' },
+    });
+  }
+}
 
 function toAgentConfigOwner(owner: SecurityReviewOwner): Owner {
   if (owner.organizationId) {
@@ -54,6 +87,7 @@ export async function syncDependabotAlertsForRepo(params: {
     created: 0,
     updated: 0,
     errors: 0,
+    skipped: 0,
     staleRepos: [],
   };
   const queueSyncTotals: AutoAnalysisQueueSyncResult = {
@@ -77,8 +111,15 @@ export async function syncDependabotAlertsForRepo(params: {
       return result;
     }
 
-    if (fetchResult.status === 'alerts_unavailable') {
-      warn(`Dependabot alerts unavailable for ${repoFullName}, skipping`);
+    if (fetchResult.status === 'alerts_disabled') {
+      warn(`Dependabot alerts disabled for ${repoFullName}, skipping`);
+      result.skipped = 1;
+      return result;
+    }
+
+    if (fetchResult.status === 'access_blocked') {
+      warn(`Repository ${repoFullName} access blocked, marking as stale`);
+      result.staleRepos.push(repoFullName);
       return result;
     }
 
@@ -108,6 +149,11 @@ export async function syncDependabotAlertsForRepo(params: {
         });
 
         result.synced++;
+        if (upsertResult.wasInserted) {
+          result.created++;
+        } else {
+          result.updated++;
+        }
 
         try {
           const queueSyncResult = await syncAutoAnalysisQueueForFinding({
@@ -115,7 +161,7 @@ export async function syncDependabotAlertsForRepo(params: {
             findingId: upsertResult.findingId,
             findingCreatedAt: upsertResult.findingCreatedAt,
             previousStatus: upsertResult.previousStatus,
-            currentStatus: finding.status,
+            currentStatus: upsertResult.effectiveStatus,
             severity: finding.severity,
             isAgentEnabled,
             autoAnalysisEnabled: config.auto_analysis_enabled,
@@ -155,6 +201,24 @@ export async function syncDependabotAlertsForRepo(params: {
       }
     }
 
+    try {
+      const { count: supersededCount, supersededFindingIds } =
+        await supersedeDuplicateFindings(repoFullName);
+      if (supersededCount > 0) {
+        log(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
+        const dequeued = await dequeueSupersededFindings(supersededFindingIds);
+        if (dequeued > 0) {
+          log(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
+        }
+      }
+    } catch (error) {
+      logError(`Error superseding duplicate findings for ${repoFullName}`, { error });
+      captureException(error, {
+        tags: { operation: 'syncDependabotAlertsForRepo', step: 'supersedeDuplicates' },
+        extra: { repoFullName },
+      });
+    }
+
     const repoDurationMs = Math.round(performance.now() - repoStartTime);
     log(`Repo sync complete`, {
       repo: repoFullName,
@@ -188,14 +252,23 @@ export async function syncAllReposForOwner(params: {
   platformIntegrationId: string;
   installationId: string;
   repositories: string[];
+  missingSelectedRepoCount?: number;
 }): Promise<SyncResult> {
-  const { owner, platformIntegrationId, installationId, repositories } = params;
+  const {
+    owner,
+    platformIntegrationId,
+    installationId,
+    repositories,
+    missingSelectedRepoCount = 0,
+  } = params;
+  const syncStartTime = performance.now();
 
   const totalResult: SyncResult = {
     synced: 0,
     created: 0,
     updated: 0,
     errors: 0,
+    skipped: 0,
     staleRepos: [],
   };
 
@@ -215,6 +288,7 @@ export async function syncAllReposForOwner(params: {
       totalResult.created += result.created;
       totalResult.updated += result.updated;
       totalResult.errors += result.errors;
+      totalResult.skipped += result.skipped;
       totalResult.staleRepos.push(...result.staleRepos);
       successfulRepos++;
     } catch (error) {
@@ -230,6 +304,41 @@ export async function syncAllReposForOwner(params: {
     throw firstError;
   }
 
+  // Only advance owner-level freshness when every repo was actually synced.
+  // Stale repos (deleted/transferred/access-blocked) block the update because
+  // they were selected for sync but never refreshed.  Skipped repos
+  // (Dependabot permanently disabled) do NOT block — that's a permanent
+  // repo-level setting, and blocking here would leave the timestamp stuck.
+  // Missing selected repos (installation lost access) also block — the repo
+  // was configured but silently dropped from the accessible list.
+  if (
+    totalResult.errors === 0 &&
+    totalResult.staleRepos.length === 0 &&
+    missingSelectedRepoCount === 0
+  ) {
+    await updateLastSyncedAt(owner);
+  }
+
+  const totalDurationMs = Math.round(performance.now() - syncStartTime);
+  if (totalResult.synced === 0 && totalResult.errors === 0 && totalResult.skipped === 0) {
+    warn('Sync completed with zero findings processed across all repos', {
+      reposScanned: repositories.length,
+      missingSelectedRepos: missingSelectedRepoCount,
+      durationMs: totalDurationMs,
+    });
+  } else {
+    log('Sync cycle summary', {
+      reposScanned: repositories.length,
+      findingsSynced: totalResult.synced,
+      findingsCreated: totalResult.created,
+      findingsUpdated: totalResult.updated,
+      errors: totalResult.errors,
+      skippedRepos: totalResult.skipped,
+      missingSelectedRepos: missingSelectedRepoCount,
+      durationMs: totalDurationMs,
+    });
+  }
+
   return totalResult;
 }
 
@@ -240,6 +349,9 @@ type EnabledSecurityReviewConfig = {
   repositories: string[];
   /** Maps repo full_name to its numeric ID for pruning stale repos from selected_repository_ids */
   repoNameToId: Map<string, number>;
+  /** Number of selected_repository_ids that are no longer accessible via the installation.
+   *  Non-zero means the app lost access to a configured repo — freshness must not advance. */
+  missingSelectedRepoCount: number;
 };
 
 export async function getEnabledSecurityReviewConfigs(): Promise<EnabledSecurityReviewConfig[]> {
@@ -303,25 +415,36 @@ export async function getEnabledSecurityReviewConfigs(): Promise<EnabledSecurity
     };
 
     let selectedRepos: string[];
-    if (
-      securityConfig.repository_selection_mode === 'selected' &&
-      securityConfig.selected_repository_ids &&
-      securityConfig.selected_repository_ids.length > 0
-    ) {
-      const selectedIds = new Set(securityConfig.selected_repository_ids);
-      selectedRepos = allRepositories.filter(r => selectedIds.has(r.id)).map(r => r.full_name);
+    let missingSelectedRepoCount = 0;
+    if (securityConfig.repository_selection_mode === 'selected') {
+      const selectedIds = new Set(securityConfig.selected_repository_ids ?? []);
+      if (selectedIds.size > 0) {
+        const accessibleIds = new Set(allRepositories.map(r => r.id));
+        selectedRepos = allRepositories.filter(r => selectedIds.has(r.id)).map(r => r.full_name);
+        missingSelectedRepoCount = [...selectedIds].filter(id => !accessibleIds.has(id)).length;
+      } else {
+        // Mode is 'selected' but no repos are configured — don't fall through to 'all'
+        selectedRepos = [];
+      }
     } else {
       selectedRepos = allRepositories.map(r => r.full_name);
-    }
-
-    if (selectedRepos.length === 0) {
-      log(`No selected repositories for config ${config.id}, skipping`);
-      continue;
     }
 
     const owner: SecurityReviewOwner = orgId
       ? { organizationId: orgId }
       : { userId: userId as string };
+
+    if (selectedRepos.length === 0 && missingSelectedRepoCount === 0) {
+      log(`No selected repositories for config ${config.id}, skipping`);
+      continue;
+    }
+
+    if (missingSelectedRepoCount > 0) {
+      warn(
+        `${missingSelectedRepoCount} selected repo(s) no longer accessible for config ${config.id}`,
+        { owner }
+      );
+    }
 
     results.push({
       owner,
@@ -329,6 +452,7 @@ export async function getEnabledSecurityReviewConfigs(): Promise<EnabledSecurity
       installationId: integration.platform_installation_id,
       repositories: selectedRepos,
       repoNameToId,
+      missingSelectedRepoCount,
     });
   }
 
@@ -385,6 +509,43 @@ async function pruneStaleReposFromConfig(
   });
 }
 
+/** Remove selected_repository_ids that are no longer accessible via the GitHub installation.
+ *  Unlike pruneStaleReposFromConfig (which prunes by repo name after sync), this handles
+ *  repos that silently vanished from the installation and were never synced at all. */
+async function pruneMissingSelectedRepos(
+  owner: SecurityReviewOwner,
+  accessibleRepoIds: Set<number>
+): Promise<void> {
+  const agentOwner = toAgentConfigOwner(owner);
+  const configWithStatus = await getSecurityAgentConfigWithStatus(agentOwner);
+  if (!configWithStatus) return;
+
+  const { config, isEnabled } = configWithStatus;
+
+  if (
+    config.repository_selection_mode !== 'selected' ||
+    !config.selected_repository_ids ||
+    config.selected_repository_ids.length === 0
+  ) {
+    return;
+  }
+
+  const prunedIds = config.selected_repository_ids.filter(id => accessibleRepoIds.has(id));
+  if (prunedIds.length === config.selected_repository_ids.length) return;
+
+  const removedCount = config.selected_repository_ids.length - prunedIds.length;
+  warn(`Pruning ${removedCount} inaccessible repo ID(s) from security config`, { owner });
+
+  await upsertAgentConfigForOwner({
+    owner: agentOwner,
+    agentType: SECURITY_SCAN_AGENT_TYPE,
+    platform: SECURITY_SCAN_PLATFORM,
+    config: { ...config, selected_repository_ids: prunedIds },
+    isEnabled,
+    createdBy: 'system-sync-prune',
+  });
+}
+
 export async function runFullSync(): Promise<{
   totalSynced: number;
   totalErrors: number;
@@ -417,6 +578,23 @@ export async function runFullSync(): Promise<{
           captureException(pruneError, {
             tags: { operation: 'runFullSync', step: 'pruneStaleRepos' },
             extra: { owner: config.owner, staleRepos: result.staleRepos },
+          });
+        }
+      }
+
+      if (config.missingSelectedRepoCount > 0) {
+        try {
+          const accessibleRepoIds = new Set(config.repoNameToId.values());
+          await pruneMissingSelectedRepos(config.owner, accessibleRepoIds);
+        } catch (pruneError) {
+          logError('Failed to prune missing selected repos from config', {
+            error: pruneError,
+            missingCount: config.missingSelectedRepoCount,
+            owner: config.owner,
+          });
+          captureException(pruneError, {
+            tags: { operation: 'runFullSync', step: 'pruneMissingSelectedRepos' },
+            extra: { owner: config.owner, missingCount: config.missingSelectedRepoCount },
           });
         }
       }

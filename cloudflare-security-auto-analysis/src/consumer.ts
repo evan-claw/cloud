@@ -187,10 +187,9 @@ function isEligibleForAutoLaunch(params: {
     return false;
   }
 
-  const severityRank = getSeverityRankForAutoAnalysis(params.findingSeverity);
-  if (severityRank == null) {
-    return false;
-  }
+  // Treat null/unknown severity as low (rank 3) so these findings are not
+  // silently skipped. They still respect the severity threshold.
+  const severityRank = getSeverityRankForAutoAnalysis(params.findingSeverity) ?? 3;
 
   return severityRank <= maxSeverityRankForThreshold(params.config.auto_analysis_min_severity);
 }

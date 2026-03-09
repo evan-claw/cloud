@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import type { WorkerDb } from '@kilocode/db/client';
 import {
+  clearAnalysisStatus,
   getSecurityFindingById,
   setFindingCompleted,
   setFindingFailed,
@@ -156,7 +157,13 @@ export async function startSecurityAnalysis(
         triggeredByUserId: params.actorUser.id,
         correlationId,
       };
-      await setFindingCompleted(params.db, params.findingId, triageOnlyAnalysis);
+      const written = await setFindingCompleted(params.db, params.findingId, triageOnlyAnalysis);
+      if (!written) {
+        // Finding was superseded between lease acquisition and completion.
+        // Clear stale analysis_status so it doesn't count against the concurrency cap.
+        await clearAnalysisStatus(params.db, params.findingId);
+        return { started: false, error: 'Finding was superseded during analysis' };
+      }
       return { started: true, triageOnly: true };
     }
 
@@ -202,13 +209,23 @@ export async function startSecurityAnalysis(
 
     if (!prepareResponse.ok) {
       const errorText = await prepareResponse.text();
-      await setFindingFailed(params.db, params.findingId, errorText);
+      if (!(await setFindingFailed(params.db, params.findingId, errorText))) {
+        await clearAnalysisStatus(params.db, params.findingId);
+      }
       return { started: false, error: errorText };
     }
 
     const parsedPrepare = PrepareSessionResponseSchema.safeParse(await prepareResponse.json());
     if (!parsedPrepare.success) {
-      await setFindingFailed(params.db, params.findingId, 'Invalid prepareSession response shape');
+      if (
+        !(await setFindingFailed(
+          params.db,
+          params.findingId,
+          'Invalid prepareSession response shape'
+        ))
+      ) {
+        await clearAnalysisStatus(params.db, params.findingId);
+      }
       return { started: false, error: 'Invalid prepareSession response shape' };
     }
 
@@ -228,7 +245,9 @@ export async function startSecurityAnalysis(
 
     if (!initiateResponse.ok) {
       const errorText = await initiateResponse.text();
-      await setFindingFailed(params.db, params.findingId, errorText);
+      if (!(await setFindingFailed(params.db, params.findingId, errorText))) {
+        await clearAnalysisStatus(params.db, params.findingId);
+      }
 
       if (initiateResponse.status === 402) {
         throw new InsufficientCreditsError(errorText || 'Insufficient credits');
@@ -242,11 +261,15 @@ export async function startSecurityAnalysis(
 
     const parsedInitiate = InitiateResponseSchema.safeParse(await initiateResponse.json());
     if (!parsedInitiate.success) {
-      await setFindingFailed(
-        params.db,
-        params.findingId,
-        'Invalid initiateFromKilocodeSessionV2 response shape'
-      );
+      if (
+        !(await setFindingFailed(
+          params.db,
+          params.findingId,
+          'Invalid initiateFromKilocodeSessionV2 response shape'
+        ))
+      ) {
+        await clearAnalysisStatus(params.db, params.findingId);
+      }
       return {
         started: false,
         error: 'Invalid initiateFromKilocodeSessionV2 response shape',
@@ -267,7 +290,9 @@ export async function startSecurityAnalysis(
       error: errorMessage,
     });
 
-    await setFindingFailed(params.db, params.findingId, errorMessage);
+    if (!(await setFindingFailed(params.db, params.findingId, errorMessage))) {
+      await clearAnalysisStatus(params.db, params.findingId);
+    }
     return { started: false, error: errorMessage };
   }
 }

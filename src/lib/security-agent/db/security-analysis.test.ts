@@ -100,4 +100,38 @@ describe('isFindingEligibleForAutoAnalysis', () => {
     });
     expect(result.eligible).toBe(false);
   });
+
+  it('treats null severity as eligible with low rank when threshold is "all"', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      severity: null,
+      autoAnalysisMinSeverity: 'all',
+      findingCreatedAt: '2025-08-01T00:00:00Z',
+    });
+    expect(result.eligible).toBe(true);
+    expect(result.severityRank).toBe(3);
+  });
+
+  it('rejects null severity when threshold is stricter than "all"', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      severity: null,
+      autoAnalysisMinSeverity: 'high',
+      findingCreatedAt: '2025-08-01T00:00:00Z',
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.severityRank).toBe(3);
+  });
+
+  it('treats null severity as eligible when threshold is medium', () => {
+    const result = isFindingEligibleForAutoAnalysis({
+      ...baseParams,
+      severity: null,
+      autoAnalysisMinSeverity: 'medium',
+      findingCreatedAt: '2025-08-01T00:00:00Z',
+    });
+    // low rank (3) > medium max rank (2), so not eligible
+    expect(result.eligible).toBe(false);
+    expect(result.severityRank).toBe(3);
+  });
 });

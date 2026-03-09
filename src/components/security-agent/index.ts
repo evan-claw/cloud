@@ -10,3 +10,8 @@ export { SecurityAgentPageClient } from './SecurityAgentPageClient';
 export { MarkdownProse } from './MarkdownProse';
 export { FindingStatusBadge } from './FindingStatusBadge';
 export { ClearFindingsCard } from './ClearFindingsCard';
+export { SecurityAgentLayout } from './SecurityAgentLayout';
+export { SecurityAgentProvider, useSecurityAgent } from './SecurityAgentContext';
+export { SecurityFindingsPage } from './SecurityFindingsPage';
+export { SecurityConfigPage } from './SecurityConfigPage';
+export { SecurityDashboard } from './SecurityDashboard';

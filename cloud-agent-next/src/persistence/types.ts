@@ -103,6 +103,8 @@ export type CloudAgentSessionState = {
   condenseOnComplete?: boolean;
   /** Custom text to append to the system prompt */
   appendSystemPrompt?: string;
+  /** PR gate threshold — when not "off", the agent evaluates findings and reports gateResult */
+  gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
 
   // Lifecycle timestamps (for state machine)
   /** Timestamp when session was prepared (state machine: prepared) */
@@ -179,6 +181,9 @@ export type PersistenceEnv = {
 
   /** URL for session ingest service, injected into sandbox session env vars */
   KILO_SESSION_INGEST_URL?: string;
+
+  /** Shared secret for internal service-to-service authentication */
+  INTERNAL_API_SECRET_PROD: SecretsStoreSecret;
 
   R2_ENDPOINT?: string;
   R2_ATTACHMENTS_READONLY_ACCESS_KEY_ID?: string;

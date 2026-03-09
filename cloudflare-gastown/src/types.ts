@@ -134,6 +134,8 @@ export type ReviewQueueInput = {
   branch: string;
   pr_url?: string;
   summary?: string;
+  /** The rig's default branch. Used as target when not overridden by convoy feature branch. */
+  default_branch?: string;
 };
 
 // -- Molecules (now beads with type='molecule' + child step beads) --
@@ -295,6 +297,6 @@ export type AgentConfigOverrides = z.infer<typeof AgentConfigOverridesSchema>;
 export type { AgentMetadataRecord } from './db/tables/agent-metadata.table';
 export type { ReviewMetadataRecord } from './db/tables/review-metadata.table';
 export type { EscalationMetadataRecord } from './db/tables/escalation-metadata.table';
-export type { ConvoyMetadataRecord } from './db/tables/convoy-metadata.table';
+export type { ConvoyMetadataRecord, ConvoyMergeMode } from './db/tables/convoy-metadata.table';
 export type { BeadEventRecord } from './db/tables/bead-events.table';
 export type { BeadDependencyRecord } from './db/tables/bead-dependencies.table';

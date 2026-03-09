@@ -1,6 +1,6 @@
 import { db } from '@/lib/drizzle';
-import { security_findings } from '@kilocode/db/schema';
-import { eq, and, desc, count, sql, max, or } from 'drizzle-orm';
+import { security_findings, agent_configs } from '@kilocode/db/schema';
+import { eq, and, desc, count, sql, max, or, type SQL } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type { SecurityFinding, NewSecurityFinding } from '@kilocode/db/schema';
 import type {
@@ -83,6 +83,8 @@ export type UpsertSecurityFindingResult = {
   findingId: string;
   wasInserted: boolean;
   previousStatus: SecurityFindingStatus | null;
+  /** The status actually persisted — may differ from the input when a superseded row is preserved. */
+  effectiveStatus: SecurityFindingStatus;
   findingCreatedAt: string;
 };
 
@@ -97,11 +99,14 @@ export async function upsertSecurityFinding(
       findingId: string;
       wasInserted: boolean;
       previousStatus: SecurityFindingStatus | null;
+      effectiveStatus: SecurityFindingStatus;
       findingCreatedAt: string;
     }>(sql`
       WITH existing_match AS (
         SELECT ${security_findings.id} AS id,
                ${security_findings.status} AS previous_status,
+               ${security_findings.ignored_reason} AS ignored_reason,
+               ${security_findings.ignored_by} AS ignored_by,
                ${security_findings.created_at} AS created_at
         FROM ${security_findings}
         WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
@@ -119,9 +124,18 @@ export async function upsertSecurityFinding(
           ${sql.identifier(security_findings.patched_version.name)} = ${params.patched_version},
           ${sql.identifier(security_findings.title.name)} = ${params.title},
           ${sql.identifier(security_findings.description.name)} = ${params.description},
-          ${sql.identifier(security_findings.status.name)} = ${params.status},
-          ${sql.identifier(security_findings.ignored_reason.name)} = ${params.ignored_reason},
-          ${sql.identifier(security_findings.ignored_by.name)} = ${params.ignored_by},
+          ${sql.identifier(security_findings.status.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.previous_status
+            ELSE ${params.status}
+          END,
+          ${sql.identifier(security_findings.ignored_reason.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.ignored_reason
+            ELSE ${params.ignored_reason}
+          END,
+          ${sql.identifier(security_findings.ignored_by.name)} = CASE
+            WHEN existing_match.ignored_reason LIKE 'superseded:%' THEN existing_match.ignored_by
+            ELSE ${params.ignored_by}
+          END,
           ${sql.identifier(security_findings.fixed_at.name)} = ${params.fixed_at},
           ${sql.identifier(security_findings.sla_due_at.name)} = ${params.slaDueAt?.toISOString() || null},
           ${sql.identifier(security_findings.dependabot_html_url.name)} = ${params.dependabot_html_url},
@@ -136,6 +150,7 @@ export async function upsertSecurityFinding(
         RETURNING
           ${security_findings.id} AS id,
           existing_match.previous_status AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
       ),
       inserted AS (
@@ -200,6 +215,7 @@ export async function upsertSecurityFinding(
         ON CONFLICT (${sql.identifier(security_findings.repo_full_name.name)}, ${sql.identifier(security_findings.source.name)}, ${sql.identifier(security_findings.source_id.name)}) DO NOTHING
         RETURNING ${security_findings.id} AS id,
           NULL::text AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
       ),
       -- fallback: concurrent insert race — previous_status reflects the current row state
@@ -210,6 +226,7 @@ export async function upsertSecurityFinding(
         SELECT
           ${security_findings.id} AS id,
           ${security_findings.status} AS previous_status,
+          ${security_findings.status} AS effective_status,
           ${security_findings.created_at} AS created_at
         FROM ${security_findings}
         WHERE ${security_findings.repo_full_name} = ${params.repoFullName}
@@ -220,16 +237,17 @@ export async function upsertSecurityFinding(
         LIMIT 1
       ),
       chosen AS (
-        SELECT id, false AS was_inserted, previous_status, created_at FROM updated
+        SELECT id, false AS was_inserted, previous_status, effective_status, created_at FROM updated
         UNION ALL
-        SELECT id, true AS was_inserted, previous_status, created_at FROM inserted
+        SELECT id, true AS was_inserted, previous_status, effective_status, created_at FROM inserted
         UNION ALL
-        SELECT id, false AS was_inserted, previous_status, created_at FROM fallback
+        SELECT id, false AS was_inserted, previous_status, effective_status, created_at FROM fallback
       )
       SELECT
         chosen.id AS "findingId",
         chosen.was_inserted AS "wasInserted",
         chosen.previous_status AS "previousStatus",
+        chosen.effective_status AS "effectiveStatus",
         chosen.created_at AS "findingCreatedAt"
       FROM chosen
       LIMIT 1
@@ -245,6 +263,67 @@ export async function upsertSecurityFinding(
     captureException(error, {
       tags: { operation: 'upsertSecurityFinding' },
       extra: { params },
+    });
+    throw error;
+  }
+}
+
+/**
+ * GitHub sometimes creates a new Dependabot alert (new alert number) for the
+ * same GHSA/package/manifest when an advisory is updated. Keep the newest
+ * alert open and mark older duplicates as ignored with a superseded reference.
+ */
+export type SupersedeResult = { count: number; supersededFindingIds: string[] };
+
+export async function supersedeDuplicateFindings(repoFullName: string): Promise<SupersedeResult> {
+  try {
+    const { rows } = await db.execute<{ id: string }>(sql`
+    WITH ranked AS (
+      SELECT
+        ${security_findings.id} AS id,
+        ROW_NUMBER() OVER (
+          PARTITION BY ${security_findings.repo_full_name},
+                       ${security_findings.source},
+                       ${security_findings.ghsa_id},
+                       ${security_findings.package_name},
+                       ${security_findings.manifest_path}
+          ORDER BY CASE WHEN ${security_findings.source_id} ~ '^[0-9]+$' THEN ${security_findings.source_id}::int ELSE 0 END DESC
+        ) AS rn,
+        FIRST_VALUE(${security_findings.id}) OVER (
+          PARTITION BY ${security_findings.repo_full_name},
+                       ${security_findings.source},
+                       ${security_findings.ghsa_id},
+                       ${security_findings.package_name},
+                       ${security_findings.manifest_path}
+          ORDER BY CASE WHEN ${security_findings.source_id} ~ '^[0-9]+$' THEN ${security_findings.source_id}::int ELSE 0 END DESC
+        ) AS canonical_id
+      FROM ${security_findings}
+      WHERE ${security_findings.repo_full_name} = ${repoFullName}
+        AND ${security_findings.source} = 'dependabot'
+        AND ${security_findings.ghsa_id} IS NOT NULL
+        AND ${security_findings.status} = 'open'
+    ),
+    superseded AS (
+      UPDATE ${security_findings}
+      SET
+        ${sql.identifier(security_findings.status.name)} = 'ignored',
+        ${sql.identifier(security_findings.ignored_reason.name)} = 'superseded:' || ranked.canonical_id,
+        ${sql.identifier(security_findings.ignored_by.name)} = 'system',
+        ${sql.identifier(security_findings.updated_at.name)} = now()
+      FROM ranked
+      WHERE ${security_findings.id} = ranked.id
+        AND ranked.rn > 1
+      RETURNING ${security_findings.id}
+    )
+    SELECT id FROM superseded
+  `);
+
+    const supersededFindingIds = rows.map(r => r.id);
+    return { count: supersededFindingIds.length, supersededFindingIds };
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'supersedeDuplicateFindings' },
+      extra: { repoFullName },
     });
     throw error;
   }
@@ -268,9 +347,18 @@ export async function getSecurityFindingById(findingId: string): Promise<Securit
   }
 }
 
-type ExploitabilityFilter = 'all' | 'exploitable' | 'not_exploitable';
-type SuggestedActionFilter = 'all' | 'dismissable';
-type AnalysisStatusFilter = 'all' | 'not_analyzed' | 'pending' | 'running' | 'completed' | 'failed';
+type OutcomeFilter =
+  | 'all'
+  | 'not_analyzed'
+  | 'analyzing'
+  | 'failed'
+  | 'exploitable'
+  | 'not_exploitable'
+  | 'safe_to_dismiss'
+  | 'needs_review'
+  | 'triage_complete'
+  | 'fixed'
+  | 'dismissed';
 
 type ListFindingsParams = {
   owner: SecurityReviewOwner;
@@ -280,12 +368,14 @@ type ListFindingsParams = {
   severity?: SecuritySeverity;
   repoFullName?: string;
   packageName?: string;
-  exploitability?: ExploitabilityFilter;
-  suggestedAction?: SuggestedActionFilter;
-  analysisStatus?: AnalysisStatusFilter;
+  outcomeFilter?: OutcomeFilter;
+  overdue?: boolean;
+  sortBy?: 'severity_desc' | 'severity_asc' | 'sla_due_at_asc';
 };
 
-export async function listSecurityFindings(params: ListFindingsParams): Promise<SecurityFinding[]> {
+export async function listSecurityFindings(
+  params: ListFindingsParams
+): Promise<{ findings: SecurityFinding[]; totalCount: number }> {
   try {
     const {
       owner,
@@ -295,9 +385,9 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
       severity,
       repoFullName,
       packageName,
-      exploitability,
-      suggestedAction,
-      analysisStatus,
+      outcomeFilter,
+      overdue,
+      sortBy,
     } = params;
     const ownerConverted = toOwner(owner);
 
@@ -327,37 +417,90 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
     if (packageName) {
       conditions.push(eq(security_findings.package_name, packageName));
     }
-    if (exploitability && exploitability !== 'all') {
-      if (exploitability === 'exploitable') {
-        // isExploitable === true
-        conditions.push(
-          sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable')::boolean = true`
-        );
-      } else if (exploitability === 'not_exploitable') {
-        // isExploitable === false
-        conditions.push(
-          sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable')::boolean = false`
-        );
-      }
+    if (overdue) {
+      conditions.push(
+        sql`${security_findings.sla_due_at} IS NOT NULL AND ${security_findings.sla_due_at} < now()`
+      );
     }
-    if (suggestedAction && suggestedAction !== 'all') {
-      if (suggestedAction === 'dismissable') {
-        conditions.push(
-          or(
-            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'dismiss'`,
-            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'suggestedAction') = 'dismiss'`
-          )
-        );
-      }
-    }
-    if (analysisStatus && analysisStatus !== 'all') {
-      if (analysisStatus === 'not_analyzed') {
-        conditions.push(sql`${security_findings.analysis_status} IS NULL`);
-      } else {
-        conditions.push(eq(security_findings.analysis_status, analysisStatus));
+    if (outcomeFilter && outcomeFilter !== 'all') {
+      switch (outcomeFilter) {
+        case 'not_analyzed':
+          conditions.push(sql`${security_findings.analysis_status} IS NULL`);
+          break;
+        case 'analyzing':
+          conditions.push(
+            or(
+              eq(security_findings.analysis_status, 'pending'),
+              eq(security_findings.analysis_status, 'running')
+            )
+          );
+          break;
+        case 'failed':
+          conditions.push(eq(security_findings.analysis_status, 'failed'));
+          break;
+        case 'exploitable':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'true'`
+          );
+          break;
+        case 'not_exploitable':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'false'`
+          );
+          break;
+        case 'safe_to_dismiss':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'dismiss'`
+          );
+          // Exclude findings where sandbox has a definitive result, since
+          // getOutcome() gives sandbox priority over triage. Without this a
+          // finding triaged as "dismiss" but sandbox-confirmed as exploitable
+          // would appear under "Safe to Dismiss" yet display as "Exploitable".
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown'`
+          );
+          break;
+        case 'needs_review':
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'manual_review'`
+          );
+          // Same as safe_to_dismiss: exclude findings where sandbox overrides triage.
+          conditions.push(
+            sql`(${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown'`
+          );
+          break;
+        case 'triage_complete':
+          // Triage done but no sandbox analysis yet; matches TriageSuggestedActionSchema = 'analyze_codebase'.
+          // Coupled with OutcomeFilterSchema and getOutcome() in SecurityFindingRow.tsx.
+          conditions.push(eq(security_findings.status, 'open'));
+          conditions.push(eq(security_findings.analysis_status, 'completed'));
+          conditions.push(
+            sql`((${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') IS NULL OR (${security_findings.analysis}->'sandboxAnalysis'->>'isExploitable') = 'unknown')`
+          );
+          conditions.push(
+            sql`(${security_findings.analysis}->'triage'->>'suggestedAction') = 'analyze_codebase'`
+          );
+          break;
+        case 'fixed':
+          conditions.push(eq(security_findings.status, 'fixed'));
+          break;
+        case 'dismissed':
+          conditions.push(eq(security_findings.status, 'ignored'));
+          break;
       }
     }
 
+    const whereClause = and(...conditions);
+
+    // Sort order
     const severityOrder = sql`CASE ${security_findings.severity}
       WHEN 'critical' THEN 1
       WHEN 'high' THEN 2
@@ -366,15 +509,40 @@ export async function listSecurityFindings(params: ListFindingsParams): Promise<
       ELSE 5
     END`;
 
-    const findings = await db
-      .select()
-      .from(security_findings)
-      .where(and(...conditions))
-      .orderBy(severityOrder, desc(security_findings.created_at))
-      .limit(limit)
-      .offset(offset);
+    const severityOrderReversed = sql`CASE ${security_findings.severity}
+      WHEN 'low' THEN 1
+      WHEN 'medium' THEN 2
+      WHEN 'high' THEN 3
+      WHEN 'critical' THEN 4
+      ELSE 0
+    END`;
 
-    return findings;
+    let orderByClause: SQL[];
+    if (sortBy === 'sla_due_at_asc') {
+      orderByClause = [
+        sql`${security_findings.sla_due_at} ASC NULLS LAST`,
+        severityOrder,
+        desc(security_findings.created_at),
+      ];
+    } else if (sortBy === 'severity_asc') {
+      orderByClause = [severityOrderReversed, desc(security_findings.created_at)];
+    } else {
+      orderByClause = [severityOrder, desc(security_findings.created_at)];
+    }
+
+    // Run paginated query and count query in parallel
+    const [findings, countResult] = await Promise.all([
+      db
+        .select()
+        .from(security_findings)
+        .where(whereClause)
+        .orderBy(...orderByClause)
+        .limit(limit)
+        .offset(offset),
+      db.select({ count: count() }).from(security_findings).where(whereClause),
+    ]);
+
+    return { findings, totalCount: countResult[0]?.count ?? 0 };
   } catch (error) {
     captureException(error, {
       tags: { operation: 'listSecurityFindings' },
@@ -608,6 +776,30 @@ export async function findSecurityFindingBySource(
   }
 }
 
+/** Read owner-level last_synced_at from agent_configs.runtime_state. */
+async function getOwnerLastSyncedAt(ownerConverted: Owner): Promise<string | null> {
+  const ownerCondition =
+    ownerConverted.type === 'org'
+      ? eq(agent_configs.owned_by_organization_id, ownerConverted.id)
+      : eq(agent_configs.owned_by_user_id, ownerConverted.id);
+
+  const configResult = await db
+    .select({
+      lastSyncedAt: sql<string | null>`${agent_configs.runtime_state}->>'last_synced_at'`,
+    })
+    .from(agent_configs)
+    .where(
+      and(
+        ownerCondition,
+        eq(agent_configs.agent_type, 'security_scan'),
+        eq(agent_configs.platform, 'github')
+      )
+    )
+    .limit(1);
+
+  return configResult[0]?.lastSyncedAt ?? null;
+}
+
 export async function getLastSyncTime(params: {
   owner: SecurityReviewOwner;
   repoFullName?: string;
@@ -616,26 +808,31 @@ export async function getLastSyncTime(params: {
     const { owner, repoFullName } = params;
     const ownerConverted = toOwner(owner);
 
-    const conditions = [];
+    // Owner-level: read from agent_configs.runtime_state (set by sync jobs).
+    // Return null (not MAX(findings)) when runtime_state is missing — falling back to
+    // findings would overstate freshness after partial sync failures.
+    if (!repoFullName) {
+      return await getOwnerLastSyncedAt(ownerConverted);
+    }
 
-    // Owner condition
+    // Repo-specific: read MAX(last_synced_at) from findings for this repo.
+    // Returns null for repos with zero findings — we lack per-repo sync metadata,
+    // so falling back to the owner-level timestamp would overstate freshness for
+    // repos added after the last full sync.
+    const findingConditions: SQL[] = [];
     if (ownerConverted.type === 'org') {
-      conditions.push(eq(security_findings.owned_by_organization_id, ownerConverted.id));
+      findingConditions.push(eq(security_findings.owned_by_organization_id, ownerConverted.id));
     } else {
-      conditions.push(eq(security_findings.owned_by_user_id, ownerConverted.id));
+      findingConditions.push(eq(security_findings.owned_by_user_id, ownerConverted.id));
     }
-
-    // Optional repo filter
-    if (repoFullName) {
-      conditions.push(eq(security_findings.repo_full_name, repoFullName));
-    }
+    findingConditions.push(eq(security_findings.repo_full_name, repoFullName));
 
     const result = await db
       .select({ lastSyncedAt: max(security_findings.last_synced_at) })
       .from(security_findings)
-      .where(and(...conditions));
+      .where(and(...findingConditions));
 
-    return result[0]?.lastSyncedAt || null;
+    return result[0]?.lastSyncedAt ?? null;
   } catch (error) {
     captureException(error, {
       tags: { operation: 'getLastSyncTime' },

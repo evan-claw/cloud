@@ -28,7 +28,6 @@ import {
 } from '@/lib/byok';
 import type { CustomLlm } from '@kilocode/db/schema';
 import { custom_llm, type User } from '@kilocode/db/schema';
-import type { OpenRouterInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
 import { OpenRouterInferenceProviderIdSchema } from '@/lib/providers/openrouter/inference-provider-id';
 import { applyCoreThinkProviderSettings } from '@/lib/providers/corethink';
 import { hasAttemptCompletionTool } from '@/lib/tool-calling';
@@ -188,7 +187,7 @@ function applyToolChoiceSetting(
   }
 }
 
-function getPreferredProviderOrder(requestedModel: string): OpenRouterInferenceProviderId[] {
+function getPreferredProviderOrder(requestedModel: string): string[] {
   if (isAnthropicModel(requestedModel)) {
     // Use `order` (set below in applyPreferredProvider) to preferentially
     // route Anthropic models to Bedrock and Anthropic. Google Vertex doesn't
@@ -200,7 +199,7 @@ function getPreferredProviderOrder(requestedModel: string): OpenRouterInferenceP
     ];
   }
   if (requestedModel.startsWith('minimax/')) {
-    return [OpenRouterInferenceProviderIdSchema.enum.minimax];
+    return ['minimax/fp8']; // do not prefer minimax/highspeed
   }
   if (isMistralModel(requestedModel)) {
     return [OpenRouterInferenceProviderIdSchema.enum.mistral];
@@ -242,8 +241,12 @@ export function applyProviderSpecificLogic(
   const kiloFreeModel = kiloFreeModels.find(m => m.public_id === requestedModel);
   if (kiloFreeModel) {
     requestToMutate.model = kiloFreeModel.internal_id;
-    if (kiloFreeModel.inference_providers.length > 0) {
-      requestToMutate.provider = { only: kiloFreeModel.inference_providers };
+    if (kiloFreeModel.inference_provider) {
+      if (requestToMutate.provider) {
+        requestToMutate.provider.only = [kiloFreeModel.inference_provider];
+      } else {
+        requestToMutate.provider = { only: [kiloFreeModel.inference_provider] };
+      }
     }
   }
 

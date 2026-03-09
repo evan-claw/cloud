@@ -8,6 +8,7 @@ import { SessionInfoDialog } from './SessionInfoDialog';
 import { SessionActionsDialog } from './SessionActionsDialog';
 import { SoundToggleButton } from '@/components/shared/SoundToggleButton';
 import { FeedbackDialog } from './FeedbackDialog';
+import { buildRepoBrowseUrl, detectGitPlatform } from './utils/git-utils';
 
 type ChatHeaderProps = {
   /** The cloud-agent session ID (e.g., agent_xxx format) */
@@ -16,6 +17,7 @@ type ChatHeaderProps = {
   kiloSessionId?: string;
   repository: string;
   branch?: string;
+  gitUrl?: string | null;
   model?: string;
   isStreaming?: boolean;
   totalCost?: number;
@@ -29,6 +31,7 @@ export function ChatHeader({
   cloudAgentSessionId,
   repository,
   branch,
+  gitUrl,
   model = 'Unknown',
   isStreaming = false,
   totalCost = 0,
@@ -41,9 +44,12 @@ export function ChatHeader({
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [showActionsDialog, setShowActionsDialog] = useState(false);
 
-  const githubUrl = branch
-    ? `https://github.com/${repository}/compare/session/${branch}?expand=1`
-    : `https://github.com/${repository}`;
+  const browseUrl = buildRepoBrowseUrl(gitUrl);
+  // Compare URL for GitHub only; GitLab MR links are not yet supported.
+  const repoUrl =
+    browseUrl && branch && detectGitPlatform(gitUrl) === 'github'
+      ? `${browseUrl}/compare/${branch}?expand=1`
+      : browseUrl;
 
   return (
     <>
@@ -124,15 +130,20 @@ export function ChatHeader({
               {repository && (
                 <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-gray-400 md:text-sm">
                   <GitBranch className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{repository}</span>
-                  <a
-                    href={githubUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 text-blue-400 transition-colors hover:text-blue-300"
-                  >
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
+                  <span className="truncate">
+                    {repository}
+                    {branch && <span className="text-gray-500"> : {branch}</span>}
+                  </span>
+                  {repoUrl && (
+                    <a
+                      href={repoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 text-blue-400 transition-colors hover:text-blue-300"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
                 </div>
               )}
             </div>

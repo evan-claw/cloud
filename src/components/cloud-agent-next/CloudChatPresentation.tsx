@@ -103,6 +103,8 @@ export type CloudChatPresentationProps = {
   currentSessionId: string | null;
   currentDbSessionId: string | null;
   cloudAgentSessionId: string | null;
+  gitUrl?: string | null;
+  gitBranch?: string | null;
   sessionConfig: SessionConfig | null;
   totalCost: number;
   error: string | null;
@@ -198,6 +200,8 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
   currentSessionId,
   currentDbSessionId,
   cloudAgentSessionId,
+  gitUrl,
+  gitBranch,
   sessionConfig,
   totalCost,
   error,
@@ -322,7 +326,8 @@ export const CloudChatPresentation = memo(function CloudChatPresentation({
               cloudAgentSessionId={currentSessionId || 'Starting session...'}
               kiloSessionId={currentDbSessionId || undefined}
               repository={sessionConfig?.repository ?? ''}
-              branch={currentSessionId || undefined}
+              branch={gitBranch || undefined}
+              gitUrl={gitUrl}
               model={sessionConfig?.model}
               isStreaming={isStreaming}
               totalCost={totalCost}

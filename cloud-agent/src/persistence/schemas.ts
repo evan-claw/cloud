@@ -171,6 +171,7 @@ export const MetadataSchema = z.object({
   autoCommit: z.boolean().optional(),
   condenseOnComplete: z.boolean().optional(),
   appendSystemPrompt: z.string().max(10000).optional(),
+  gateThreshold: z.enum(['off', 'all', 'warning', 'critical']).optional(),
 
   // Lifecycle
   preparedAt: z.number().optional(),

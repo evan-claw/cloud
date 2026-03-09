@@ -4,7 +4,8 @@ export type ExecutionLifecycleContext = {
   updateExecutionStatus: (
     executionId: string,
     status: ExecutionStatus,
-    error?: string
+    error?: string,
+    gateResult?: 'pass' | 'fail'
   ) => Promise<void>;
   clearActiveExecution: () => Promise<void>;
   advanceQueue: () => Promise<void>;
@@ -18,12 +19,13 @@ export async function handleExecutionComplete(
   executionId: string,
   status: ExecutionStatus,
   ctx: ExecutionLifecycleContext,
-  error?: string
+  error?: string,
+  gateResult?: 'pass' | 'fail'
 ): Promise<void> {
-  ctx.logger.info('Execution complete', { executionId, status, error });
+  ctx.logger.info('Execution complete', { executionId, status, error, gateResult });
 
   // Update the execution status and completedAt in storage
-  await ctx.updateExecutionStatus(executionId, status, error);
+  await ctx.updateExecutionStatus(executionId, status, error, gateResult);
 
   await ctx.clearActiveExecution();
   await ctx.advanceQueue();

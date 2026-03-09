@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getAuthorizedOrgContext } from '@/lib/organizations/organization-auth';
 import type { NextRequest } from 'next/server';
-import { preferredModels, PRIMARY_DEFAULT_MODEL } from '@/lib/models';
+import { PRIMARY_DEFAULT_MODEL } from '@/lib/models';
 import { getEnhancedOpenRouterModels } from '@/lib/providers/openrouter';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
 import { getModelIdToProviderSlugsIndex } from '@/lib/providers/openrouter/models-by-provider-index.server';
 import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
@@ -27,9 +27,10 @@ export async function GET(
   // Get organization's default model setting
   let defaultModel = organization.settings?.default_model;
 
-  const allowList = organization.settings?.model_allow_list;
+  const modelDenyList = organization.settings?.model_deny_list;
+  const providerDenyList = organization.settings?.provider_deny_list;
 
-  const isAllowed = createProviderAwareModelAllowPredicate(allowList ?? []);
+  const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
 
   const findFirstAllowedModel = async (modelIds: readonly string[]) => {
     for (const modelId of modelIds) {
@@ -71,34 +72,29 @@ export async function GET(
 
   // Fallback to global default if no organization default is set or it's not allowed
   if (!defaultModel) {
-    defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL]);
+    if (!modelDenyList?.length && !providerDenyList?.length) {
+      // No restrictions - use PRIMARY_DEFAULT_MODEL directly
+      defaultModel = PRIMARY_DEFAULT_MODEL;
+    } else {
+      defaultModel = await findFirstAllowedModel([PRIMARY_DEFAULT_MODEL]);
 
-    if (!defaultModel) {
-      if (!allowList?.length) {
-        defaultModel = PRIMARY_DEFAULT_MODEL;
-      } else {
-        const firstConcreteAllowedModel = allowList.find(modelId => !modelId.endsWith('/*'));
-        defaultModel = firstConcreteAllowedModel;
+      if (!defaultModel) {
+        defaultModel = await findFirstAllowedModelFromDbSnapshot();
       }
-    }
 
-    if (!defaultModel && allowList?.length) {
-      defaultModel = await findFirstAllowedModel(preferredModels);
-    }
+      if (!defaultModel) {
+        defaultModel = await findFirstAllowedModelFromOpenRouter();
+      }
 
-    if (!defaultModel && allowList?.length) {
-      defaultModel = await findFirstAllowedModelFromDbSnapshot();
-    }
-
-    if (!defaultModel && allowList?.length) {
-      defaultModel = await findFirstAllowedModelFromOpenRouter();
-    }
-
-    if (!defaultModel) {
-      return NextResponse.json(
-        { error: "No valid models are allowed by this organization's allow list." },
-        { status: 409 }
-      );
+      if (!defaultModel) {
+        return NextResponse.json(
+          {
+            error:
+              "No valid models are available — all models are blocked by this organization's deny list.",
+          },
+          { status: 409 }
+        );
+      }
     }
   }
 

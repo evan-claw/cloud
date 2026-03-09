@@ -141,10 +141,11 @@ export async function handleCommentReply(
     return { ok: false, error: 'Ticket not found', status: 404 };
   }
 
-  if (ticket.trigger_source !== 'review_comment' || !ticket.review_comment_id) {
+  if (!ticket.review_comment_id) {
     logExceptInTest('[auto-fix-comment-reply] Not a review comment ticket', {
       ticketId,
       triggerSource: ticket.trigger_source,
+      reviewCommentId: ticket.review_comment_id,
     });
     return { ok: false, error: 'Ticket is not a review comment trigger', status: 400 };
   }

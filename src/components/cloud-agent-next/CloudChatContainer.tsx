@@ -53,7 +53,11 @@ import { useResumeConfigModal } from './hooks/useResumeConfigModal';
 import { useSessionConfigCommand } from './hooks/useSessionConfigCommand';
 import { useOrgContextCommand } from './hooks/useOrgContextCommand';
 import { usePreparedSession } from './hooks/usePreparedSession';
-import { buildPrepareSessionRepoParams, extractRepoFromGitUrl } from './utils/git-utils';
+import {
+  buildPrepareSessionRepoParams,
+  detectGitPlatform,
+  extractRepoFromGitUrl,
+} from './utils/git-utils';
 import { useSlashCommandSets } from '@/hooks/useSlashCommandSets';
 import { CloudChatPresentation } from './CloudChatPresentation';
 import { QuestionContextProvider } from './QuestionContext';
@@ -301,6 +305,9 @@ export function CloudChatContainer({
     onSessionInitiated: handleSessionInitiated,
     onQuestionAsked: playNotification,
     onSendFailed: handleSendFailed,
+    onBranchChanged: useCallback((branch: string) => {
+      setLoadedDbSession(prev => (prev ? { ...prev, git_branch: branch } : prev));
+    }, []),
   });
 
   // Wrapper for sendMessage that doesn't use sessionIdOverride
@@ -441,7 +448,7 @@ export function CloudChatContainer({
             last_mode: runtimeState?.mode,
             last_model: runtimeState?.model,
             git_url: sessionData.git_url,
-            git_branch: sessionData.git_branch,
+            git_branch: runtimeState?.upstreamBranch ?? sessionData.git_branch,
           };
 
           // Check if session has been initiated - prefer DO state, fallback to message check
@@ -776,9 +783,12 @@ export function CloudChatContainer({
           const resumeRepo =
             extractRepoFromGitUrl(loadedDbSession?.git_url) || sessionConfig.repository;
           const gitUrl = currentIndexedDbSession?.gitUrl || loadedDbSession?.git_url || null;
+          // Self-hosted git hosts (not github.com or gitlab.com) fall through to 'gitlab'
+          // because the prepare API only supports github/gitlab and GitLab API is closer
+          // to what most self-hosted forges expose. No gitUrl → default to 'github'.
           const repoParams = buildPrepareSessionRepoParams({
             repo: resumeRepo,
-            platform: gitUrl ? 'gitlab' : 'github',
+            platform: !gitUrl || detectGitPlatform(gitUrl) === 'github' ? 'github' : 'gitlab',
           });
           if (!repoParams) {
             setError('Cannot prepare session without a repository.');
@@ -831,7 +841,7 @@ export function CloudChatContainer({
           const gitUrl = currentIndexedDbSession?.gitUrl || loadedDbSession?.git_url || null;
           const repoParams = buildPrepareSessionRepoParams({
             repo: resumeRepo,
-            platform: gitUrl ? 'gitlab' : 'github',
+            platform: !gitUrl || detectGitPlatform(gitUrl) === 'github' ? 'github' : 'gitlab',
           });
           if (!repoParams) {
             setError('Cannot prepare session without a repository.');
@@ -945,6 +955,8 @@ export function CloudChatContainer({
         currentSessionId={currentSessionId}
         currentDbSessionId={currentDbSessionId}
         cloudAgentSessionId={cloudAgentSessionId}
+        gitUrl={currentIndexedDbSession?.gitUrl ?? loadedDbSession?.git_url ?? null}
+        gitBranch={loadedDbSession?.git_branch ?? null}
         sessionConfig={sessionConfig}
         totalCost={totalCost}
         error={error}

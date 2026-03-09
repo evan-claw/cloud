@@ -51,12 +51,25 @@ export function git(
   });
 }
 
-export async function getCurrentBranch(workspacePath: string): Promise<string> {
+export async function getCurrentBranch(workspacePath: string, timeoutMs?: number): Promise<string> {
   try {
-    const result = await git(['branch', '--show-current'], { cwd: workspacePath });
+    const result = await git(['branch', '--show-current'], { cwd: workspacePath, timeoutMs });
     return result.stdout.trim();
   } catch {
     return '';
+  }
+}
+
+/** Check if the current branch has a remote tracking branch configured in git. */
+export async function hasGitUpstream(workspacePath: string, timeoutMs?: number): Promise<boolean> {
+  try {
+    const result = await git(['rev-parse', '--abbrev-ref', '@{upstream}'], {
+      cwd: workspacePath,
+      timeoutMs,
+    });
+    return result.exitCode === 0 && result.stdout.trim() !== '';
+  } catch {
+    return false;
   }
 }
 

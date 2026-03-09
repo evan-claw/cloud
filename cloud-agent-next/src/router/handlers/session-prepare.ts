@@ -19,9 +19,16 @@ import {
 } from '../schemas.js';
 import { generateSandboxId } from '../../sandbox-id.js';
 import type { SandboxId } from '../../types.js';
-import { setupWorkspace, cloneGitHubRepo, cloneGitRepo, manageBranch } from '../../workspace.js';
+import {
+  checkDiskAndCleanBeforeSetup,
+  setupWorkspace,
+  cloneGitHubRepo,
+  cloneGitRepo,
+  manageBranch,
+} from '../../workspace.js';
 import { ensureKiloServer, createKiloCliSession } from '../../kilo/server-manager.js';
 import { withDORetry } from '../../utils/do-retry.js';
+import { SANDBOX_SLEEP_AFTER_SECONDS } from '../../core/lease.js';
 
 type SessionPrepareHandlers = {
   prepareSession: typeof prepareSessionHandler;
@@ -192,9 +199,19 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       // 3. Get sandbox
       logger.info('Getting sandbox');
-      const sandbox = getSandbox(ctx.env.Sandbox, sandboxId, { sleepAfter: 900 });
+      const sandbox = getSandbox(ctx.env.Sandbox, sandboxId, {
+        sleepAfter: SANDBOX_SLEEP_AFTER_SECONDS,
+      });
 
-      // 4. Setup workspace directories
+      // 4. Check disk space before creating directories; clean stale workspaces if low
+      await checkDiskAndCleanBeforeSetup(
+        sandbox,
+        input.kilocodeOrganizationId,
+        ctx.userId,
+        cloudAgentSessionId
+      );
+
+      // 5. Setup workspace directories
       logger.info('Setting up workspace directories');
       const { workspacePath, sessionHome } = await setupWorkspace(
         sandbox,
@@ -203,7 +220,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         cloudAgentSessionId
       );
 
-      // 5. Build context and create execution session
+      // 6. Build context and create execution session
       const branchName = determineBranchName(cloudAgentSessionId, input.upstreamBranch);
       const context = sessionService.buildContext({
         sandboxId,
@@ -235,7 +252,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         input.mcpServers
       );
 
-      // 6. Clone repository
+      // 7. Clone repository
       const cloneOptions = input.shallow ? { shallow: true } : undefined;
       logger.info('Cloning repository');
       if (input.gitUrl) {
@@ -266,7 +283,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         });
       }
 
-      // 7. Branch management
+      // 8. Branch management
       logger
         .withFields({ branchName, upstreamBranch: input.upstreamBranch })
         .info('Managing branch');
@@ -284,16 +301,16 @@ const prepareSessionHandler = internalApiProtectedProcedure
         }
       }
 
-      // 8. Run setup commands
+      // 9. Run setup commands
       if (input.setupCommands && input.setupCommands.length > 0) {
         logger.withFields({ count: input.setupCommands.length }).info('Running setup commands');
         await runSetupCommands(session, context, input.setupCommands, true); // fail-fast
       }
 
-      // 9. Write auth file for session ingest
+      // 10. Write auth file for session ingest
       await writeAuthFile(sandbox, sessionHome, ctx.authToken);
 
-      // 10. Start kilo server
+      // 11. Start kilo server
       logger.info('Starting kilo server');
       const kiloServerPort = await ensureKiloServer(
         sandbox,
@@ -302,7 +319,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         workspacePath
       );
 
-      // 11. Create kilo CLI session
+      // 12. Create kilo CLI session
       logger.info('Creating kilo CLI session');
       const kiloSession = await createKiloCliSession(session, kiloServerPort);
       const kiloSessionId = kiloSession.id;
@@ -310,7 +327,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
       logger.setTags({ kiloSessionId });
       logger.info('Created kilo CLI session');
 
-      // 12. Create cli_sessions_v2 record via session-ingest RPC (blocking)
+      // 13. Create cli_sessions_v2 record via session-ingest RPC (blocking)
       logger.info('Creating cli_sessions_v2 record via session-ingest');
       try {
         await sessionService.createCliSessionViaSessionIngest(
@@ -346,7 +363,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           });
       };
 
-      // 13. Get DO stub and store metadata
+      // 14. Get DO stub and store metadata
       const doId = ctx.env.CLOUD_AGENT_SESSION.idFromName(`${ctx.userId}:${cloudAgentSessionId}`);
       const stub = ctx.env.CLOUD_AGENT_SESSION.get(doId);
 
@@ -381,6 +398,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           callbackTarget: input.callbackTarget,
           images: input.images,
           createdOnPlatform: input.createdOnPlatform,
+          gateThreshold: input.gateThreshold,
           // Workspace metadata
           workspacePath,
           sessionHome,
@@ -404,7 +422,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         });
       }
 
-      // 14. Record kilo server activity for idle timeout tracking
+      // 15. Record kilo server activity for idle timeout tracking
       try {
         await withDORetry(
           () => ctx.env.CLOUD_AGENT_SESSION.get(doId),
@@ -420,7 +438,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       logger.info('Session prepared successfully');
 
-      // 15. Return both IDs
+      // 16. Return both IDs
       return { cloudAgentSessionId, kiloSessionId };
     });
   });

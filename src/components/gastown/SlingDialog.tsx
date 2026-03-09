@@ -29,7 +29,7 @@ type SlingDialogProps = {
 };
 
 const MODEL_OPTIONS = [
-  { value: 'kilo/auto', label: 'Auto' },
+  { value: 'kilo/kilo-auto/frontier', label: 'Auto' },
   { value: 'kilo/claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
   { value: 'kilo/claude-opus-4-20250514', label: 'Claude Opus 4' },
   { value: 'kilo/gpt-4.1', label: 'GPT 4.1' },
@@ -39,7 +39,7 @@ const MODEL_OPTIONS = [
 export function SlingDialog({ rigId, isOpen, onClose }: SlingDialogProps) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [model, setModel] = useState('kilo/auto');
+  const [model, setModel] = useState(MODEL_OPTIONS[0].value);
   const trpc = useGastownTRPC();
   const queryClient = useQueryClient();
 
@@ -52,7 +52,7 @@ export function SlingDialog({ rigId, isOpen, onClose }: SlingDialogProps) {
         toast.success(`Work slung to ${result.agent.name}`);
         setTitle('');
         setBody('');
-        setModel('kilo/auto');
+        setModel(MODEL_OPTIONS[0].value);
         onClose();
       },
       onError: err => {

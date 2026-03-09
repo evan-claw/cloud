@@ -46,6 +46,7 @@ export type WrapperCommand = { type: 'kill'; signal?: 'SIGTERM' | 'SIGKILL' } | 
 export type CompleteEventData = {
   exitCode: number;
   currentBranch?: string; // Omitted if detached HEAD
+  gateResult?: 'pass' | 'fail';
 };
 
 /**

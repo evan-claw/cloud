@@ -11,7 +11,7 @@
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260120.0",
+    "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
     "eslint": "catalog:",
     "typescript": "catalog:",

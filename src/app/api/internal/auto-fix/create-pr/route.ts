@@ -19,7 +19,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getFixTicketById, updateFixTicketStatus } from '@/lib/auto-fix/db/fix-tickets';
 import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';
-import { captureException } from '@sentry/nextjs';
+import { captureException, captureMessage } from '@sentry/nextjs';
 import { INTERNAL_API_SECRET } from '@/lib/config.server';
 import { createPullRequest } from '@/lib/auto-fix/github/create-pull-request';
 import { postIssueComment } from '@/lib/auto-fix/github/post-comment';
@@ -66,6 +66,44 @@ export async function POST(req: NextRequest) {
     if (!ticket) {
       logExceptInTest('[auto-fix-create-pr] Ticket not found', { ticketId });
       return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
+    }
+
+    // Review-comment tickets should never go through this endpoint.
+    // They are handled entirely via handleCommentReply in the pr-callback route.
+    if (ticket.review_comment_id != null) {
+      errorExceptInTest(
+        '[auto-fix-create-pr] Rejecting review-comment ticket — use pr-callback instead',
+        { ticketId, reviewCommentId: ticket.review_comment_id }
+      );
+      captureMessage('create-pr called for review-comment ticket', {
+        level: 'warning',
+        tags: { source: 'auto-fix-create-pr' },
+        extra: {
+          ticketId,
+          sessionId,
+          reviewCommentId: ticket.review_comment_id,
+          triggerSource: ticket.trigger_source,
+        },
+      });
+      return NextResponse.json(
+        { error: 'Review-comment tickets are handled via pr-callback, not create-pr' },
+        { status: 400 }
+      );
+    }
+
+    const isTerminalState =
+      ticket.status === 'completed' || ticket.status === 'failed' || ticket.status === 'cancelled';
+
+    if (isTerminalState) {
+      logExceptInTest('[auto-fix-create-pr] Ticket already in terminal state, skipping', {
+        ticketId,
+        currentStatus: ticket.status,
+      });
+      return NextResponse.json({
+        success: true,
+        message: 'Ticket already in terminal state',
+        currentStatus: ticket.status,
+      });
     }
 
     try {

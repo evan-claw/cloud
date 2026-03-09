@@ -255,43 +255,15 @@ export function createSessionManagementHandlers() {
                 .withFields({ executionId: activeExecutionId })
                 .info('No processes found during interrupt - clearing stale active execution');
 
-              const statusResult = await withDORetry(
+              await withDORetry(
                 getStub,
-                async stub => {
-                  const r = await stub.updateExecutionStatus({
+                stub =>
+                  stub.failExecutionRpc({
                     executionId: activeExecutionId,
-                    status: 'failed',
                     error: 'Interrupted - no running processes found',
-                    completedAt: Date.now(),
-                  });
-                  return { ok: r.ok } as { ok: boolean };
-                },
-                'updateExecutionStatus'
+                  }),
+                'failExecutionRpc'
               );
-
-              // If another codepath already moved the execution to a terminal
-              // state, skip cleanup to avoid spurious events.
-              if (!statusResult.ok) {
-                logger
-                  .withFields({ executionId: activeExecutionId })
-                  .info('Skipping interrupt cleanup - status transition failed');
-              } else {
-                await withDORetry(
-                  getStub,
-                  stub => stub.clearActiveExecution(),
-                  'clearActiveExecution'
-                );
-
-                await withDORetry(
-                  getStub,
-                  stub =>
-                    stub.emitExecutionError(
-                      activeExecutionId,
-                      'Interrupted - no running processes found'
-                    ),
-                  'emitExecutionError'
-                );
-              }
             }
 
             return result;

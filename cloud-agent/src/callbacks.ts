@@ -11,6 +11,8 @@ export interface CallbackPayload {
   sessionId: string;
   status: 'completed' | 'failed' | 'interrupted';
   errorMessage?: string;
+  /** Gate result reported by the agent when gate_threshold is active */
+  gateResult?: 'pass' | 'fail';
 }
 
 /**

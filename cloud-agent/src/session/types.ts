@@ -69,6 +69,7 @@ export type UpdateExecutionStatusParams = {
   status: ExecutionStatus;
   error?: string;
   completedAt?: number;
+  gateResult?: 'pass' | 'fail';
 };
 
 /**

@@ -10,14 +10,11 @@ import { DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN } from '@/l
 import { APP_URL } from '@/lib/constants';
 import { getOrganizationById } from '@/lib/organizations/organizations';
 import { getDefaultAllowedModel } from '@/lib/slack-bot/model-allow-list';
-import { createProviderAwareModelAllowPredicate } from '@/lib/model-allow.server';
-import { minimax_m25_free_model } from '@/lib/providers/minimax';
-import { CLAUDE_OPUS_CURRENT_MODEL_ID } from '@/lib/providers/anthropic';
+import { createAllowPredicateFromDenyList } from '@/lib/model-allow.server';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 // Default model for Discord integrations - mirrors the Slack default
-const DISCORD_DEFAULT_MODEL = minimax_m25_free_model.is_enabled
-  ? minimax_m25_free_model.public_id
-  : CLAUDE_OPUS_CURRENT_MODEL_ID;
+const DISCORD_DEFAULT_MODEL = KILO_AUTO_FREE_MODEL.id;
 
 // Discord OAuth2 scopes for the bot integration
 // 'bot' scope is needed for the bot to join servers
@@ -367,9 +364,10 @@ export async function updateModel(
   if (owner.type === 'org') {
     const organization = await getOrganizationById(owner.id);
     if (organization) {
-      const modelAllowList = organization.settings?.model_allow_list || [];
-      if (modelAllowList.length > 0) {
-        const isAllowed = createProviderAwareModelAllowPredicate(modelAllowList);
+      const modelDenyList = organization.settings?.model_deny_list || [];
+      const providerDenyList = organization.settings?.provider_deny_list || [];
+      if (modelDenyList.length > 0 || providerDenyList.length > 0) {
+        const isAllowed = createAllowPredicateFromDenyList(modelDenyList, providerDenyList);
         if (!(await isAllowed(modelSlug))) {
           return { success: false, error: 'Model is not allowed by organization policy' };
         }

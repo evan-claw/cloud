@@ -1,0 +1,157 @@
+name: Deploy Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: 'Worker folder to deploy (e.g. cloudflare-app-builder)'
+        required: true
+        type: choice
+        options:
+          - cloud-agent
+          - cloud-agent-next
+          - cloudflare-ai-attribution
+          - cloudflare-app-builder
+          - cloudflare-auto-fix-infra
+          - cloudflare-auto-triage-infra
+          - cloudflare-code-review-infra
+          - cloudflare-db-proxy
+          - cloudflare-deploy-infra/builder
+          - cloudflare-deploy-infra/dispatcher
+          - cloudflare-gastown
+          - cloudflare-git-token-service
+          - cloudflare-images-mcp
+          - cloudflare-o11y
+          - cloudflare-security-auto-analysis
+          - cloudflare-security-sync
+          - cloudflare-session-ingest
+          - cloudflare-webhook-agent-ingest
+
+concurrency:
+  group: deploy-workers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Manual dispatch: deploy a single specified worker ──────────────────────
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    name: Deploy ${{ inputs.worker }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.worker }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: ${{ inputs.worker }}
+          command: deploy
+
+  # ── Push to main: detect changed workers, deploy each one ─────────────────
+  detect-changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed workers
+        id: set-matrix
+        run: |
+          # All deployable workers (folders containing wrangler.jsonc).
+          # kiloclaw is excluded — it has a custom Docker-based deploy in deploy-production.yml.
+          # builder-docker-container is excluded — it is a build artifact, not a deployable worker.
+          #
+          # Diff against the SHA before the push so that multi-commit pushes
+          # (e.g. a merge commit that squashes several commits) don't miss workers
+          # that were only touched in earlier commits of the same push.
+          BASE_SHA="${{ github.event.before }}"
+          WORKERS=(
+            cloud-agent
+            cloud-agent-next
+            cloudflare-ai-attribution
+            cloudflare-app-builder
+            cloudflare-auto-fix-infra
+            cloudflare-auto-triage-infra
+            cloudflare-code-review-infra
+            cloudflare-db-proxy
+            cloudflare-deploy-infra/builder
+            cloudflare-deploy-infra/dispatcher
+            cloudflare-gastown
+            cloudflare-git-token-service
+            cloudflare-images-mcp
+            cloudflare-o11y
+            cloudflare-security-auto-analysis
+            cloudflare-security-sync
+            cloudflare-session-ingest
+            cloudflare-webhook-agent-ingest
+          )
+
+          CHANGED=()
+          for dir in "${WORKERS[@]}"; do
+            if git diff --name-only "$BASE_SHA" HEAD -- "$dir/" | grep -q .; then
+              CHANGED+=("$dir")
+            fi
+          done
+
+          if [ ${#CHANGED[@]} -eq 0 ]; then
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+          else
+            MATRIX=$(printf '%s\n' "${CHANGED[@]}" | jq -R . | jq -sc .)
+            echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-changed:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.matrix != '[]' && needs.detect-changes.outputs.matrix != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    name: Deploy ${{ matrix.worker }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.worker }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: ${{ matrix.worker }}
+          command: deploy

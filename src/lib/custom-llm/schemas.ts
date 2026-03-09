@@ -38,6 +38,11 @@ const OpenRouterChatCompletionBaseResponseSchema = z
       .nullish(),
   })
   .passthrough();
+
+export const PhaseSchema = z.enum(['commentary', 'final_answer']);
+
+export type Phase = z.infer<typeof PhaseSchema>;
+
 // limited version of the schema, focussed on what is needed for the implementation
 // this approach limits breakages when the API changes and increases efficiency
 export const OpenRouterNonStreamChatCompletionResponseSchema = z.union([
@@ -53,6 +58,7 @@ export const OpenRouterNonStreamChatCompletionResponseSchema = z.union([
               reasoning: z.string().nullable().optional(),
               reasoning_details: ReasoningDetailArraySchema.nullish(),
               images: ImageResponseArraySchema.nullish(),
+              phase: PhaseSchema.nullable().optional(),
 
               tool_calls: z
                 .array(
@@ -174,6 +180,7 @@ export const OpenRouterStreamChatCompletionChunkChoiceSchema = z
         reasoning: z.string().nullish().optional(),
         reasoning_details: ReasoningDetailArraySchema.nullish(),
         images: ImageResponseArraySchema.nullish(),
+        phase: PhaseSchema.nullable().optional(),
         tool_calls: z
           .array(
             z

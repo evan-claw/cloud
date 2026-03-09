@@ -146,8 +146,8 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
     if (!organizationData) return;
     if (state.status === 'ready') return;
     actions.initFromServer({
-      modelAllowList: organizationData.settings?.model_allow_list ?? [],
-      providerAllowList: organizationData.settings?.provider_allow_list ?? [],
+      modelDenyList: organizationData.settings?.model_deny_list ?? [],
+      providerDenyList: organizationData.settings?.provider_deny_list ?? [],
     });
   }, [actions, organizationData, state.status]);
 
@@ -174,14 +174,6 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
     [actions, canEdit]
   );
 
-  const handleToggleAllowFutureModelsForProvider = useCallback(
-    (providerSlug: string, nextAllowed: boolean) => {
-      if (!canEdit) return;
-      actions.toggleProviderWildcard({ providerSlug, nextAllowed });
-    },
-    [actions, canEdit]
-  );
-
   const handleCancelChanges = useCallback(() => {
     if (!canEdit) return;
     actions.resetToInitial();
@@ -194,8 +186,8 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
     try {
       await updateOrganizationSettings.mutateAsync({
         organizationId,
-        model_allow_list: state.draftModelAllowList,
-        provider_allow_list: state.draftProviderAllowList,
+        model_deny_list: state.draftModelDenyList,
+        provider_deny_list: state.draftProviderDenyList,
       });
 
       actions.markSaved();
@@ -414,13 +406,6 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
     return rows;
   }, [infoProvider, openRouterProviders, preferredIndexByModelId]);
 
-  const infoProviderAllowsAllModels = useMemo(() => {
-    if (!infoProvider) return false;
-    if (state.status !== 'ready') return false;
-    if (state.draftModelAllowList.length === 0) return false;
-    return state.draftModelAllowList.includes(`${infoProvider.providerSlug}/*`);
-  }, [infoProvider, state]);
-
   // NOTE: returns must happen after all hooks above, otherwise React will error
   // with "Rendered more hooks than during the previous render" as data loads.
   if (!organizationData) {
@@ -529,15 +514,10 @@ export function OrganizationProvidersAndModelsPage({ organizationId, role }: Pro
           canEdit={canEdit}
           infoProvider={infoProvider}
           enabledProviderSlugs={enabledProviderSlugs}
-          draftModelAllowListLength={
-            state.status === 'ready' ? state.draftModelAllowList.length : 0
-          }
-          infoProviderAllowsAllModels={infoProviderAllowsAllModels}
           infoProviderModels={infoProviderModels}
           allowedModelIds={allowedModelIds}
           formatPriceCompact={formatPriceCompact}
           onToggleProviderEnabled={handleToggleProviderEnabled}
-          onToggleAllowFutureModelsForProvider={handleToggleAllowFutureModelsForProvider}
           onToggleModelAllowed={handleToggleModelAllowed}
           onClose={() => actions.setInfoProviderSlug(null)}
         />

@@ -15,6 +15,7 @@ import { hasReceivedPromotion } from '@/lib/promotionalCredits';
 import { getKiloPassStateForUser } from '@/lib/kilo-pass/state';
 import { db } from '@/lib/drizzle';
 import { fromMicrodollars } from '@/lib/utils';
+import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
 export type KiloNotification = {
   id: string;
@@ -28,6 +29,8 @@ export type KiloNotification = {
   // When showIn is specified this can be used to target specific apps. When not specified all apps with notification support will show it:
   // CAUTION: use extension-native sparingly since it shows up as a native VSCode notification and is spammy
   showIn?: ('extension' | 'extension-native' | 'cli')[];
+  // ISO 8601 timestamp after which this notification should no longer be shown
+  expiresAt?: string;
 };
 
 const normalUnconditionalNotifications: KiloNotification[] = [
@@ -61,6 +64,17 @@ const normalUnconditionalNotifications: KiloNotification[] = [
     },
     showIn: ['extension', 'cli'],
   },
+  {
+    id: 'app-builder-promo-mar-6',
+    title: 'Try App Builder',
+    message: "Don't feel like coding? Try App Builder to build with natural language from the web",
+    action: {
+      actionText: 'Try App Builder',
+      actionURL: 'https://app.kilo.ai/app-builder',
+    },
+    showIn: ['extension'],
+    expiresAt: '2026-03-09T08:00:00Z',
+  },
 ];
 
 export async function generateUserNotifications(user: User): Promise<KiloNotification[]> {
@@ -78,7 +92,10 @@ export async function generateUserNotifications(user: User): Promise<KiloNotific
     await Promise.all(conditionalNotifications.map(f => f(user)))
   ).flat();
 
-  return [...resolvedConditionalNotifications, ...normalUnconditionalNotifications];
+  const now = new Date();
+  return [...resolvedConditionalNotifications, ...normalUnconditionalNotifications].filter(
+    n => !n.expiresAt || new Date(n.expiresAt) > now
+  );
 }
 
 async function generateLowCreditNotification(user: User): Promise<KiloNotification[]> {
@@ -313,7 +330,7 @@ async function generateKimiFreeEndingNotification(user: User): Promise<KiloNotif
         title: 'Kimi K2.5 Free Promotion Ending Soon',
         message:
           'We hope you enjoyed free use of Kimi K2.5! The promotion will be ending soon. You can switch to Kilo: Auto free mode or keep using Kimi with credits.',
-        suggestModelId: 'kilo/auto-free',
+        suggestModelId: KILO_AUTO_FREE_MODEL.id,
         action: {
           actionText: 'Switch to Kilo: Auto Free',
           actionURL: `${APP_URL}/credits`,

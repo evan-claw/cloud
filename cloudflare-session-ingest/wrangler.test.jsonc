@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Test configuration - stripped down for vitest-pool-workers
+  "name": "session-ingest-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-27",
+  "compatibility_flags": ["nodejs_compat", "service_binding_extra_handlers"],
+
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.sql"],
+      "fallthrough": true,
+    },
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION_INGEST_DO",
+        "class_name": "SessionIngestDO",
+      },
+      {
+        "name": "SESSION_ACCESS_CACHE_DO",
+        "class_name": "SessionAccessCacheDO",
+      },
+    ],
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SessionIngestDO", "SessionAccessCacheDO"],
+    },
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "SESSION_INGEST_R2",
+      "bucket_name": "session-ingest-test",
+    },
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "INGEST_QUEUE",
+        "queue": "session-ingest-processing-test",
+      },
+    ],
+  },
+}

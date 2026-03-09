@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 export declare const TownOutput: z.ZodObject<
   {
     id: z.ZodString;
@@ -150,6 +150,63 @@ export declare const PtySessionOutput: z.ZodObject<
       z.core.$loose
     >;
     wsUrl: z.ZodString;
+  },
+  z.core.$strip
+>;
+export declare const ConvoyOutput: z.ZodObject<
+  {
+    id: z.ZodString;
+    title: z.ZodString;
+    status: z.ZodEnum<{
+      active: 'active';
+      landed: 'landed';
+    }>;
+    total_beads: z.ZodNumber;
+    closed_beads: z.ZodNumber;
+    created_by: z.ZodNullable<z.ZodString>;
+    created_at: z.ZodString;
+    landed_at: z.ZodNullable<z.ZodString>;
+    feature_branch: z.ZodNullable<z.ZodString>;
+    merge_mode: z.ZodNullable<z.ZodString>;
+  },
+  z.core.$strip
+>;
+export declare const ConvoyDetailOutput: z.ZodObject<
+  {
+    id: z.ZodString;
+    title: z.ZodString;
+    status: z.ZodEnum<{
+      active: 'active';
+      landed: 'landed';
+    }>;
+    total_beads: z.ZodNumber;
+    closed_beads: z.ZodNumber;
+    created_by: z.ZodNullable<z.ZodString>;
+    created_at: z.ZodString;
+    landed_at: z.ZodNullable<z.ZodString>;
+    feature_branch: z.ZodNullable<z.ZodString>;
+    merge_mode: z.ZodNullable<z.ZodString>;
+    beads: z.ZodArray<
+      z.ZodObject<
+        {
+          bead_id: z.ZodString;
+          title: z.ZodString;
+          status: z.ZodString;
+          rig_id: z.ZodNullable<z.ZodString>;
+          assignee_agent_name: z.ZodNullable<z.ZodString>;
+        },
+        z.core.$strip
+      >
+    >;
+    dependency_edges: z.ZodArray<
+      z.ZodObject<
+        {
+          bead_id: z.ZodString;
+          depends_on_bead_id: z.ZodString;
+        },
+        z.core.$strip
+      >
+    >;
   },
   z.core.$strip
 >;
@@ -480,6 +537,69 @@ export declare const RpcPtySessionOutput: z.ZodPipe<
         z.core.$loose
       >;
       wsUrl: z.ZodString;
+    },
+    z.core.$strip
+  >
+>;
+export declare const RpcConvoyOutput: z.ZodPipe<
+  z.ZodAny,
+  z.ZodObject<
+    {
+      id: z.ZodString;
+      title: z.ZodString;
+      status: z.ZodEnum<{
+        active: 'active';
+        landed: 'landed';
+      }>;
+      total_beads: z.ZodNumber;
+      closed_beads: z.ZodNumber;
+      created_by: z.ZodNullable<z.ZodString>;
+      created_at: z.ZodString;
+      landed_at: z.ZodNullable<z.ZodString>;
+      feature_branch: z.ZodNullable<z.ZodString>;
+      merge_mode: z.ZodNullable<z.ZodString>;
+    },
+    z.core.$strip
+  >
+>;
+export declare const RpcConvoyDetailOutput: z.ZodPipe<
+  z.ZodAny,
+  z.ZodObject<
+    {
+      id: z.ZodString;
+      title: z.ZodString;
+      status: z.ZodEnum<{
+        active: 'active';
+        landed: 'landed';
+      }>;
+      total_beads: z.ZodNumber;
+      closed_beads: z.ZodNumber;
+      created_by: z.ZodNullable<z.ZodString>;
+      created_at: z.ZodString;
+      landed_at: z.ZodNullable<z.ZodString>;
+      feature_branch: z.ZodNullable<z.ZodString>;
+      merge_mode: z.ZodNullable<z.ZodString>;
+      beads: z.ZodArray<
+        z.ZodObject<
+          {
+            bead_id: z.ZodString;
+            title: z.ZodString;
+            status: z.ZodString;
+            rig_id: z.ZodNullable<z.ZodString>;
+            assignee_agent_name: z.ZodNullable<z.ZodString>;
+          },
+          z.core.$strip
+        >
+      >;
+      dependency_edges: z.ZodArray<
+        z.ZodObject<
+          {
+            bead_id: z.ZodString;
+            depends_on_bead_id: z.ZodString;
+          },
+          z.core.$strip
+        >
+      >;
     },
     z.core.$strip
   >

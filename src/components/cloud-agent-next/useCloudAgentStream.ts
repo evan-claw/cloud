@@ -70,6 +70,8 @@ export type UseCloudAgentStreamOptions = {
   onQuestionAsked?: () => void;
   /** Callback when sendMessage fails — receives the original message text for restoring to input */
   onSendFailed?: (messageText: string) => void;
+  /** Callback when the agent's current branch changes (from complete event) */
+  onBranchChanged?: (branch: string) => void;
 };
 
 export type UseCloudAgentStreamReturn = {
@@ -108,6 +110,7 @@ export function useCloudAgentStream({
   onSessionInitiated,
   onQuestionAsked,
   onSendFailed,
+  onBranchChanged,
 }: UseCloudAgentStreamOptions): UseCloudAgentStreamReturn {
   const trpcClient = useRawTRPCClient();
 
@@ -175,10 +178,15 @@ export function useCloudAgentStream({
   const onSessionInitiatedRef = useRef(onSessionInitiated);
   const onQuestionAskedRef = useRef(onQuestionAsked);
   const onSendFailedRef = useRef(onSendFailed);
+  const onBranchChangedRef = useRef(onBranchChanged);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+
+  useEffect(() => {
+    onBranchChangedRef.current = onBranchChanged;
+  }, [onBranchChanged]);
 
   useEffect(() => {
     onKiloSessionCreatedRef.current = onKiloSessionCreated;
@@ -400,6 +408,10 @@ export function useCloudAgentStream({
           next.set(messageId, status);
           return next;
         });
+      },
+
+      onBranchChanged: branch => {
+        onBranchChangedRef.current?.(branch);
       },
     }),
     [

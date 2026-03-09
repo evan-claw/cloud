@@ -36,6 +36,7 @@ const HEARTBEAT_DEBOUNCE_MS = 30_000;
 const completeEventSchema = z.object({
   exitCode: z.number(),
   currentBranch: z.string().optional(),
+  gateResult: z.enum(['pass', 'fail']).optional(),
 });
 
 const kilocodeEventSchema = z
@@ -60,9 +61,11 @@ const createExecutionLifecycleContext = (doContext: IngestDOContext) => ({
   updateExecutionStatus: (
     id: string,
     status: 'completed' | 'failed' | 'interrupted',
-    err?: string
-  ) => doContext.updateExecutionStatus(id, status, err),
+    err?: string,
+    gateResult?: 'pass' | 'fail'
+  ) => doContext.updateExecutionStatus(id, status, err, gateResult),
   clearActiveExecution: () => doContext.clearActiveExecution(),
+  getActiveExecutionId: () => doContext.getActiveExecutionId(),
   logger: console,
 });
 
@@ -114,6 +117,8 @@ export type IngestDOContext = {
   updateUpstreamBranch: (branch: string) => Promise<void>;
   /** Clear the active execution when done */
   clearActiveExecution: () => Promise<void>;
+  /** Get the currently active execution ID (if any) */
+  getActiveExecutionId: () => Promise<string | null>;
   /** Get execution data for validation (including ingestToken) */
   getExecution: (executionId: string) => Promise<ExecutionData | null>;
   /** Transition execution status to 'running' when wrapper connects */
@@ -124,8 +129,11 @@ export type IngestDOContext = {
   updateExecutionStatus: (
     executionId: string,
     status: 'completed' | 'failed' | 'interrupted',
-    error?: string
+    error?: string,
+    gateResult?: 'pass' | 'fail'
   ) => Promise<void>;
+  /** Cancel the disconnect grace period when wrapper reconnects */
+  cancelDisconnectGrace?: () => Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -154,11 +162,6 @@ export function createIngestHandler(
   broadcastFn: (event: StoredEvent) => void,
   doContext: IngestDOContext
 ) {
-  // Track active ingest connections per execution
-  // Note: This map is reset on hibernation, but we can reconstruct
-  // from state.getWebSockets() using tags if needed
-  const activeConnections = new Map<ExecutionId, WebSocket>();
-
   return {
     /**
      * Handle incoming /ingest WebSocket upgrade request.
@@ -167,7 +170,7 @@ export function createIngestHandler(
      * 1. Validate WebSocket upgrade header
      * 2. Extract and validate executionId and token from query params
      * 3. Validate execution exists and token matches
-     * 4. Close any existing connection for this execution
+     * 4. Close any existing sockets for this execution (including hibernated ones)
      * 5. Transition execution status to 'running'
      * 6. Accept WebSocket with hibernation support and ingest tag
      * 7. Store execution ID in attachment for hibernation-safe access
@@ -204,15 +207,16 @@ export function createIngestHandler(
         return new Response('Execution not active', { status: 409 });
       }
 
-      // Check for existing connection - close old one if exists
-      const existingWs = activeConnections.get(executionId);
-      if (existingWs) {
+      // Close any existing ingest sockets for this execution (including
+      // hibernated ones that wouldn't appear in an in-memory map).
+      // state.getWebSockets() is the authoritative source — it survives
+      // hibernation and excludes already-disconnected sockets.
+      for (const existingWs of state.getWebSockets(`ingest:${executionId}`)) {
         try {
           existingWs.close(1000, 'Replaced by new connection');
         } catch {
           // Ignore close errors on already-closed connections
         }
-        activeConnections.delete(executionId);
       }
 
       // Transition execution status to 'running' if not already
@@ -240,8 +244,8 @@ export function createIngestHandler(
       state.acceptWebSocket(server, [`ingest:${executionId}`]);
       server.serializeAttachment(attachment);
 
-      // Track the connection
-      activeConnections.set(executionId, server);
+      // Cancel any pending disconnect grace period — wrapper reconnected
+      await doContext.cancelDisconnectGrace?.();
 
       // Set initial heartbeat
       void doContext.updateHeartbeat(executionId, now);
@@ -367,7 +371,9 @@ export function createIngestHandler(
           await handleExecutionComplete(
             executionId,
             'completed',
-            createExecutionLifecycleContext(doContext)
+            createExecutionLifecycleContext(doContext),
+            undefined,
+            parsedComplete.data.gateResult
           );
         }
 
@@ -426,52 +432,40 @@ export function createIngestHandler(
     /**
      * Handle ingest WebSocket close.
      *
-     * Removes the connection from tracking if it's the current
-     * connection for this execution (avoids removing a replacement
-     * connection that was already established).
+     * Returns the executionId only when no other ingest sockets remain
+     * for that execution — i.e. the wrapper is truly disconnected, not
+     * just being replaced by a reconnection.
+     *
+     * Uses state.getWebSockets() which is authoritative across hibernation
+     * and excludes already-disconnected sockets.
      *
      * @param ws - The WebSocket that closed
      */
     handleIngestClose(ws: WebSocket): ExecutionId | null {
       const attachment = ws.deserializeAttachment() as IngestAttachment | null;
-      if (attachment) {
-        const { executionId } = attachment;
-        // Only remove from tracking if this is the current connection for this execution
-        if (activeConnections.get(executionId) === ws) {
-          activeConnections.delete(executionId);
-          return executionId;
-        }
-      }
-      return null;
+      if (!attachment) return null;
+
+      const { executionId } = attachment;
+
+      // If another ingest socket still exists for this execution (e.g. a
+      // replacement connection), the wrapper isn't truly gone.
+      const remaining = state.getWebSockets(`ingest:${executionId}`);
+      if (remaining.length > 0) return null;
+
+      return executionId;
     },
 
     /**
      * Check if an execution has an active ingest connection.
      *
+     * Uses state.getWebSockets() which is authoritative across hibernation
+     * and excludes already-disconnected sockets.
+     *
      * @param executionId - Execution ID to check
      * @returns True if there's an active connection for this execution
      */
     hasActiveConnection(executionId: ExecutionId): boolean {
-      return activeConnections.has(executionId);
-    },
-
-    /**
-     * Get count of active ingest connections.
-     *
-     * @returns Number of active ingest WebSocket connections
-     */
-    getActiveConnectionCount(): number {
-      return activeConnections.size;
-    },
-
-    /**
-     * Get WebSocket for a specific execution (for testing/debugging).
-     *
-     * @param executionId - Execution ID to get connection for
-     * @returns WebSocket if found, undefined otherwise
-     */
-    getConnection(executionId: ExecutionId): WebSocket | undefined {
-      return activeConnections.get(executionId);
+      return state.getWebSockets(`ingest:${executionId}`).length > 0;
     },
   };
 }

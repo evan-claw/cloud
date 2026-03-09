@@ -100,12 +100,6 @@ export function useOpenRouterProviders() {
   });
 }
 
-async function parseModelsByProviderBackupData() {
-  return NormalizedOpenRouterResponse.parse(
-    (await import('@/data/openrouter-models-by-provider-backup.json')).default
-  );
-}
-
 export function useModelSelectorList(organizationId: string | undefined) {
   const query = useQuery({
     queryKey: ['openrouter-models', organizationId],
@@ -134,16 +128,14 @@ export function useModelSelectorList(organizationId: string | undefined) {
 export function useOpenRouterModelsAndProviders() {
   const query = useQuery({
     queryKey: ['openrouter-models-and-providers'],
-    queryFn: async (): Promise<OpenRouterData> => {
+    queryFn: async (): Promise<Pick<OpenRouterData, 'providers'>> => {
       const response = await fetch('/api/openrouter/models-by-provider');
       if (!response.ok) {
-        console.error(`Failed to fetch: ${response.status} ${response.statusText}`);
-        return await parseModelsByProviderBackupData();
+        throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
       }
       const parsedResponse = NormalizedOpenRouterResponse.safeParse(await response.json());
       if (!parsedResponse.success) {
-        console.error('Failed to parse response', z.prettifyError(parsedResponse.error));
-        return await parseModelsByProviderBackupData();
+        throw new Error('Failed to parse response:\n' + z.prettifyError(parsedResponse.error));
       }
       return parsedResponse.data;
     },

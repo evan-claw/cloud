@@ -292,4 +292,37 @@ describe('buildEnvVars', () => {
       })
     ).rejects.toThrow('valid shell identifier');
   });
+
+  // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────
+  // Verifies that switching from hardcoded SENSITIVE_KEYS to catalog-derived
+  // ALL_SECRET_ENV_VARS produces identical classification behavior.
+  // The catalog contains the exact same 4 env var names that were hardcoded.
+
+  it('classifies all catalog channel env vars as sensitive (catalog-derived SENSITIVE_KEYS)', async () => {
+    const env = createMockEnv({ AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey });
+
+    // Provide all 4 channel env var names as plaintext user env vars.
+    // They should all land in the sensitive bucket because SENSITIVE_KEYS
+    // is now derived from the catalog (which includes all 4).
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: {
+        TELEGRAM_BOT_TOKEN: 'tg-plain',
+        DISCORD_BOT_TOKEN: 'discord-plain',
+        SLACK_BOT_TOKEN: 'slack-bot-plain',
+        SLACK_APP_TOKEN: 'slack-app-plain',
+      },
+    });
+
+    // All 4 must be in sensitive — same behavior as the old hardcoded set
+    expect(result.sensitive.TELEGRAM_BOT_TOKEN).toBe('tg-plain');
+    expect(result.sensitive.DISCORD_BOT_TOKEN).toBe('discord-plain');
+    expect(result.sensitive.SLACK_BOT_TOKEN).toBe('slack-bot-plain');
+    expect(result.sensitive.SLACK_APP_TOKEN).toBe('slack-app-plain');
+
+    // None should leak into the plaintext env bucket
+    expect(result.env.TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(result.env.DISCORD_BOT_TOKEN).toBeUndefined();
+    expect(result.env.SLACK_BOT_TOKEN).toBeUndefined();
+    expect(result.env.SLACK_APP_TOKEN).toBeUndefined();
+  });
 });

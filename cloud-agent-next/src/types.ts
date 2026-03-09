@@ -83,6 +83,8 @@ export type Env = {
   CLOUD_AGENT_SESSION: DurableObjectNamespace<CloudAgentSession>;
   /** Service binding for the session ingest worker */
   SESSION_INGEST: SessionIngestBinding;
+  /** Shared secret for internal service-to-service authentication */
+  INTERNAL_API_SECRET_PROD: SecretsStoreSecret;
   /** R2 bucket for storing session logs */
   R2_BUCKET: R2Bucket;
   /** Queue for callback messages (optional - supports incremental rollout) */

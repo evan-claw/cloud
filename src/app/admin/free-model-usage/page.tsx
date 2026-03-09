@@ -43,6 +43,23 @@ export default function FreeModelUsagePage() {
           </a>
         </div>
 
+        <div className="bg-background rounded-lg border p-6">
+          <h3 className="mb-2 text-lg font-semibold">Free Tier Sign-Up Conversion Dashboard</h3>
+          <p className="text-muted-foreground mb-4">
+            Tracks how many anonymous users hit the free model rate limit (600 requests/day) each
+            hour, and what percentage sign up within 3 hours. Includes helper queries for
+            investigating individual IPs and their usage patterns.
+          </p>
+          <a
+            href="https://novel-topmast.metabaseapp.com/dashboard/69-free-tier-sign-up-conversion"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block rounded-md bg-[#2B6AD2] px-4 py-2 text-sm font-bold text-white hover:bg-[#225eb9] focus:ring-2 focus:ring-[#3b7de8] focus:ring-offset-2 focus:outline-hidden"
+          >
+            View sign-up conversion dashboard on Metabase →
+          </a>
+        </div>
+
         <Suspense fallback={<div>Loading free model usage statistics...</div>}>
           <FreeModelUsageStats />
         </Suspense>

@@ -31,6 +31,14 @@ const NOT_FOUND_PATTERNS = [
   /\bno such\b.*\brepository\b/i,
 ];
 
+const SANDBOX_PATTERNS = [
+  /\bConfigInvalidError\b/i,
+  /\bFailed to create.*workspace\b/i,
+  /\bFailed to create kilo CLI session\b/i,
+  /\bprepareSession\b.*\bfailed\b/i,
+  /\bFileSystemError\b/i,
+];
+
 /**
  * Classify a raw error into a structured code and user-friendly message.
  *
@@ -60,6 +68,13 @@ export function classifyAnalysisError(error: unknown): ClassifiedError {
     return {
       code: 'REPO_NOT_FOUND',
       userMessage: 'Repository not found. It may have been deleted, renamed, or made private.',
+    };
+  }
+
+  if (SANDBOX_PATTERNS.some(p => p.test(raw))) {
+    return {
+      code: 'SANDBOX_FAILED',
+      userMessage: 'Sandbox analysis failed to start. Please try again later.',
     };
   }
 
