@@ -595,6 +595,46 @@
       }
     },
     {
+      "id": "morph-warp-grep-v2",
+      "canonical_slug": "morph-warp-grep-v2",
+      "hugging_face_id": "",
+      "name": "Morph: WarpGrep V2 (free)",
+      "created": 1756238927,
+      "description": "A code search subagent that finds relevant code in a separate context window — no embeddings, no indexing.",
+      "context_length": 256000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      },
+      "pricing": {
+        "prompt": "0.0000000",
+        "completion": "0.0000000",
+        "request": "0",
+        "image": "0",
+        "web_search": "0",
+        "internal_reasoning": "0"
+      },
+      "top_provider": {
+        "context_length": 256000,
+        "max_completion_tokens": 32000,
+        "is_moderated": false
+      },
+      "per_request_limits": null,
+      "supported_parameters": [
+        "max_tokens",
+        "temperature",
+        "tools"
+      ],
+      "default_parameters": {}
+    },
+    {
       "id": "kilo-auto/small",
       "name": "Kilo Auto Small",
       "created": 0,
