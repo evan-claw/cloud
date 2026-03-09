@@ -220,20 +220,23 @@ export const organizationsSettingsRouter = createTRPCRouter({
         settingsUpdate.provider_deny_list = [...new Set(provider_deny_list)]; // Deduplicate slugs
       }
 
-      // Check if default_model needs to be cleared
+      // Check if default_model needs to be cleared when deny lists change
       if (
-        settingsUpdate.model_deny_list !== undefined &&
-        currentSettings.default_model &&
-        settingsUpdate.model_deny_list.length > 0
+        (model_deny_list !== undefined || provider_deny_list !== undefined) &&
+        currentSettings.default_model
       ) {
-        const isAllowed = createAllowPredicateFromDenyList(
-          settingsUpdate.model_deny_list,
-          settingsUpdate.provider_deny_list
-        );
+        const effectiveModelDenyList = settingsUpdate.model_deny_list ?? [];
+        const effectiveProviderDenyList = settingsUpdate.provider_deny_list ?? [];
+        if (effectiveModelDenyList.length > 0 || effectiveProviderDenyList.length > 0) {
+          const isAllowed = createAllowPredicateFromDenyList(
+            effectiveModelDenyList,
+            effectiveProviderDenyList
+          );
 
-        if (!(await isAllowed(currentSettings.default_model))) {
-          // Clear default_model if it's no longer allowed
-          settingsUpdate.default_model = undefined;
+          if (!(await isAllowed(currentSettings.default_model))) {
+            // Clear default_model if it's no longer allowed
+            settingsUpdate.default_model = undefined;
+          }
         }
       }
 
