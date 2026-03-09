@@ -213,6 +213,29 @@ platform.patch('/channels', async c => {
   }
 });
 
+// GET /api/platform/public-key
+// Returns the RSA public key used to encrypt secrets for this worker.
+// The google-setup container uses this to encrypt Google OAuth credentials.
+platform.get('/public-key', async c => {
+  const privateKeyPem = c.env.AGENT_ENV_VARS_PRIVATE_KEY;
+  if (!privateKeyPem) {
+    return c.json({ error: 'Encryption not configured' }, 503);
+  }
+
+  try {
+    const { createPublicKey } = await import('crypto');
+    const publicKey = createPublicKey({
+      key: privateKeyPem,
+      format: 'pem',
+    });
+    const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+    return c.json({ publicKey: publicKeyPem });
+  } catch (err) {
+    console.error('[platform] Failed to derive public key:', err);
+    return c.json({ error: 'Failed to derive public key' }, 500);
+  }
+});
+
 // POST /api/platform/google-credentials
 const GoogleCredentialsPatchSchema = z.object({
   userId: z.string().min(1),
