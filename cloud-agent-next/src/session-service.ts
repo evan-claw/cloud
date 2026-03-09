@@ -1454,24 +1454,23 @@ export class SessionService {
         `Session ${sessionId} has no kiloSessionId in metadata. Cannot restore snapshot.`
       );
     }
-    // Clone first so .git exists when `kilo import` runs — the CLI derives the
-    // project ID from the repo's root commit hash; without a repo the FK on
-    // session.project_id fails.
-    await restoreWorkspace(session, context.workspacePath, context.branchName, {
-      githubRepo: metadata.githubRepo,
-      githubToken: freshGithubToken ?? metadata.githubToken,
-      gitUrl: metadata.gitUrl,
-      gitToken: freshGitToken ?? metadata.gitToken,
-      gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
-      lastSeenBranch: metadata.upstreamBranch,
-      platform: context.platform,
-    });
-
-    // Wrap post-clone steps so that any failure removes the workspace
-    // directory. Without this, `.git` survives and the next retry sees
-    // `isColdStart = false`, skipping the full restore flow — leaving the
-    // session in a broken half-initialized state.
+    // Wrap clone and all post-clone steps so that any failure removes the
+    // workspace directory. Without this, `.git` survives and the next retry
+    // sees `isColdStart = false`, skipping the full restore flow — leaving
+    // the session in a broken half-initialized state.
     try {
+      // Clone first so .git exists when `kilo import` runs — the CLI derives
+      // the project ID from the repo's root commit hash; without a repo the
+      // FK on session.project_id fails.
+      await restoreWorkspace(session, context.workspacePath, context.branchName, {
+        githubRepo: metadata.githubRepo,
+        githubToken: freshGithubToken ?? metadata.githubToken,
+        gitUrl: metadata.gitUrl,
+        gitToken: freshGitToken ?? metadata.gitToken,
+        gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
+        lastSeenBranch: metadata.upstreamBranch,
+        platform: context.platform,
+      });
       // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
       await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
       await writeGlobalRules(sandbox, context.sessionHome, sessionId);
@@ -1522,7 +1521,7 @@ export class SessionService {
           sessionId,
           error: error instanceof Error ? error.message : String(error),
         })
-        .warn('Post-clone cold-start step failed; removing workspace for clean retry');
+        .warn('Cold-start resume step failed; removing workspace for clean retry');
       await cleanupWorkspace(session, context.workspacePath, context.sessionHome);
 
       throw error;

@@ -1074,6 +1074,69 @@ describe('SessionService', () => {
       const sessionHome = `/home/${sessionId}`;
       expect(mockCleanupWorkspace).toHaveBeenCalledWith(fakeSession, workspacePath, sessionHome);
     });
+
+    it('removes workspace when restoreWorkspace (clone/branch) fails during cold start', async () => {
+      mockedRestoreWorkspace.mockRejectedValueOnce(new Error('branch checkout failed'));
+
+      const mockDOGetMetadata = vi.fn();
+      const envWithIngest: PersistenceEnv = {
+        ...mockEnv,
+        CLOUD_AGENT_SESSION: {
+          idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
+          get: vi.fn(() => ({
+            getMetadata: mockDOGetMetadata,
+            updateMetadata: vi.fn().mockResolvedValue(undefined),
+            deleteSession: vi.fn().mockResolvedValue(undefined),
+          })),
+        } as unknown as PersistenceEnv['CLOUD_AGENT_SESSION'],
+      };
+      const fakeSession = {
+        exec: vi
+          .fn()
+          .mockResolvedValueOnce({ success: true, exitCode: 1, stdout: '', stderr: '' })
+          .mockResolvedValue({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+        gitCheckout: vi.fn().mockResolvedValue({ success: true, exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+      };
+      const sandbox = {
+        createSession: vi.fn().mockResolvedValue(fakeSession),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        exec: vi.fn().mockResolvedValue({ exitCode: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SandboxInstance;
+
+      const kiloSessionId = 'ses_test_kilo_session_id_0001';
+      const metadata = {
+        version: 123456789,
+        sessionId,
+        orgId,
+        userId,
+        timestamp: 123456789,
+        githubRepo: 'facebook/react',
+        githubToken: 'test-token',
+        kiloSessionId,
+      };
+      mockDOGetMetadata.mockResolvedValue(metadata);
+
+      const service = new SessionService();
+      await expect(
+        service.resume({
+          sandbox,
+          sandboxId: `${orgId}__${userId}`,
+          orgId,
+          userId,
+          sessionId,
+          kilocodeToken: 'test-token',
+          kilocodeModel: 'test-model',
+          env: envWithIngest,
+        })
+      ).rejects.toThrow('branch checkout failed');
+
+      const workspacePath = `/workspace/${orgId}/${userId}/sessions/${sessionId}`;
+      const sessionHome = `/home/${sessionId}`;
+      expect(mockCleanupWorkspace).toHaveBeenCalledWith(fakeSession, workspacePath, sessionHome);
+    });
   });
 
   describe('Environment Variable Injection', () => {
