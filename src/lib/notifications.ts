@@ -66,7 +66,6 @@ export async function generateUserNotifications(user: User): Promise<KiloNotific
     generateLowCreditNotification,
     generateAutoTopUpNotification,
     generateByokProvidersNotification,
-    generateFirstDayWelcomeNotification,
     generateKiloPassNotification,
   ];
 
@@ -217,12 +216,6 @@ async function generateByokProvidersNotification(user: User): Promise<KiloNotifi
     console.error('[generateByokProvidersNotification]', e);
     return [];
   }
-}
-
-async function generateFirstDayWelcomeNotification(_user: User): Promise<KiloNotification[]> {
-  // Disabled: new users no longer receive free $5 signup credits,
-  // so the welcome notification referencing the bonus no longer applies.
-  return [];
 }
 
 async function generateKiloPassNotification(user: User): Promise<KiloNotification[]> {

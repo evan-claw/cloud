@@ -171,14 +171,3 @@ export async function saveFingerprints(
 
   return { kilo_free_tier_allowed };
 }
-
-/**
- * Previously granted $5 welcome credits for users who pass Turnstile and Stytch validation.
- * Disabled: new users no longer receive free signup credits.
- */
-export async function handleSignupPromotion(
-  _user: User,
-  _passedValidations: boolean
-): Promise<void> {
-  // No-op: free signup credits have been removed.
-}

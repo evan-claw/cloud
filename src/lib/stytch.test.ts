@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from '@jest/globals';
 import { insertTestUser } from '../tests/helpers/user.helper';
 import { db } from './drizzle';
-import { stytch_fingerprints, credit_transactions } from '@kilocode/db/schema';
+import { stytch_fingerprints } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 import type { FraudFingerprintLookupResponse } from 'stytch';
 
@@ -9,7 +9,6 @@ import {
   saveFingerprints,
   isKnownFingerprintOfOtherUser,
   getStoredFingerprint,
-  handleSignupPromotion,
 } from '@/lib/stytch';
 
 beforeEach(async () => {
@@ -181,24 +180,6 @@ describe('Stytch Fingerprint Functions', () => {
       });
 
       expect(savedFingerprint?.kilo_free_tier_allowed).toBe(false);
-    });
-
-    test('should no longer grant welcome credits (signup credits disabled)', async () => {
-      const user = await insertTestUser();
-      const fingerprintData = createMockFingerprintData();
-      const headers = createMockHeaders();
-
-      const { kilo_free_tier_allowed } = await saveFingerprints(user, fingerprintData, headers);
-      expect(kilo_free_tier_allowed).toBe(true);
-
-      await handleSignupPromotion(user, kilo_free_tier_allowed);
-
-      // Verify no credit was granted (signup credits are disabled)
-      const creditTransaction = await db.query.credit_transactions.findFirst({
-        where: eq(credit_transactions.kilo_user_id, user.id),
-      });
-
-      expect(creditTransaction).toBeUndefined();
     });
   });
 
