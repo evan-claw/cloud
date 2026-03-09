@@ -21,7 +21,7 @@ type AutoModel = {
 
 export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
   id: 'kilo-auto/frontier',
-  name: 'Kilo Auto: Frontier',
+  name: 'Kilo Auto Frontier',
   description: 'Automatically routes your request to the best model for the task.',
   context_length: 1_000_000,
   max_completion_tokens: 128_000,
@@ -37,7 +37,7 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
 
 export const KILO_AUTO_FREE_MODEL: AutoModel = {
   id: 'kilo-auto/free',
-  name: 'Kilo Auto: Free',
+  name: 'Kilo Auto Free',
   description: 'Automatically routes your request to a free model.',
   context_length: minimax_m25_free_model.context_length,
   max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
@@ -53,7 +53,7 @@ export const KILO_AUTO_FREE_MODEL: AutoModel = {
 
 export const KILO_AUTO_SMALL_MODEL: AutoModel = {
   id: 'kilo-auto/small',
-  name: 'Kilo Auto: Small',
+  name: 'Kilo Auto Small',
   description: 'Automatically routes your request to a small model.',
   context_length: 400_000,
   max_completion_tokens: 128_000,
