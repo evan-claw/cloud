@@ -12,6 +12,7 @@ import { generateApiToken } from '@/lib/tokens';
 import {
   fetchSessionMessages,
   deleteSession as deleteSessionIngest,
+  shareSession as shareSessionIngest,
 } from '@/lib/session-ingest-client';
 import { baseGetSessionNextOutputSchema } from './cloud-agent-next-schemas';
 import { sanitizeGitUrl } from '@/routers/cli-sessions-router';
@@ -93,6 +94,10 @@ const GetByCloudAgentSessionIdInputSchema = z.object({
 });
 
 const DeleteSessionInputSchema = z.object({
+  session_id: sessionIdField,
+});
+
+const ShareSessionInputSchema = z.object({
   session_id: sessionIdField,
 });
 
@@ -367,5 +372,31 @@ export const cliSessionsV2Router = createTRPCRouter({
     await deleteSessionIngest(session_id, ctx.user.id);
 
     return { success: true, session_id };
+  }),
+
+  /**
+   * Share a V2 session by generating a public_id.
+   *
+   * Delegates to the session-ingest worker which is idempotent — if the session
+   * already has a public_id, the existing one is returned.
+   */
+  share: baseProcedure.input(ShareSessionInputSchema).mutation(async ({ ctx, input }) => {
+    const { session_id } = input;
+    await getSessionWithOwnerCheck(session_id, ctx.user.id);
+
+    try {
+      const result = await shareSessionIngest(session_id, ctx.user.id);
+      return { public_id: result.public_id };
+    } catch (error) {
+      captureException(error, {
+        tags: { source: 'cli-sessions-v2-router', endpoint: 'share' },
+        extra: { session_id },
+      });
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to share session',
+        cause: error,
+      });
+    }
   }),
 });

@@ -12,15 +12,12 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Copy, Check, Share2, GitFork } from 'lucide-react';
 import { useRawTRPCClient } from '@/lib/trpc/utils';
 import { toast } from 'sonner';
-import { CliSessionSharedState } from '@/types/cli-session-shared-state';
-import { OpenInEditorButton } from '@/app/share/[shareId]/open-in-editor-button';
-import { OpenInCliButton } from '@/app/share/[shareId]/open-in-cli-button';
 import { CopyableCommand } from '@/components/CopyableCommand';
 
 type SessionActionsDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The Kilo session ID (UUID from cliSessions.session_id) */
+  /** The Kilo session ID (UUID from cli_sessions_v2.session_id) */
   kiloSessionId?: string;
   sessionTitle?: string;
   repository?: string;
@@ -47,12 +44,11 @@ export function SessionActionsDialog({
     setIsSharing(true);
 
     try {
-      const result = await trpc.cliSessions.share.mutate({
+      const result = await trpc.cliSessionsV2.share.mutate({
         session_id: kiloSessionId,
-        shared_state: CliSessionSharedState.Public,
       });
 
-      const url = new URL(`/share/${result.share_id}`, window.location.origin).toString();
+      const url = new URL(`/s/${result.public_id}`, window.location.origin).toString();
       setShareUrl(url);
       toast.success('Session shared successfully');
     } catch (error) {
@@ -186,33 +182,15 @@ export function SessionActionsDialog({
               <h3 className="text-sm font-medium">Fork Session</h3>
             </div>
             <p className="text-muted-foreground text-xs">
-              Fork this session to continue working on it in your editor or CLI
+              Fork this session to continue working on it in your CLI
             </p>
 
-            {kiloSessionId && (
-              <div className="space-y-3">
-                {/* Open in Editor */}
-                <div className="flex justify-center">
-                  <OpenInEditorButton sessionId={kiloSessionId} />
-                </div>
-
-                {/* Open in CLI */}
-                <div className="flex justify-center">
-                  <OpenInCliButton command={`kilocode --fork ${kiloSessionId}`} />
-                </div>
-
-                {/* Manual fork command */}
-                <div className="space-y-2">
-                  <p className="text-muted-foreground text-xs">Or use the fork command manually:</p>
-                  <CopyableCommand
-                    command={`/session fork ${kiloSessionId}`}
-                    className="bg-muted rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-            )}
-
-            {!kiloSessionId && (
+            {kiloSessionId ? (
+              <CopyableCommand
+                command={`kilo --session ${kiloSessionId} --fork`}
+                className="bg-muted rounded-md px-3 py-2 text-sm"
+              />
+            ) : (
               <p className="text-muted-foreground text-center text-sm">
                 Session ID not available yet
               </p>
