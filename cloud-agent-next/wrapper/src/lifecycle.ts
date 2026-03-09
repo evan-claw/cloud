@@ -144,6 +144,10 @@ export function createLifecycleManager(
     // Only check when has job context
     if (!state.hasJob) return;
 
+    // Skip SSE health checks while the ingest WS is reconnecting — the SSE stream
+    // is still alive, we just can't relay events until the WS reconnects.
+    if (connectionManager.isReconnecting()) return;
+
     const now = Date.now();
 
     // Check SSE inactivity while active (inflight > 0)

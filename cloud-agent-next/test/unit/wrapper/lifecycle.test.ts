@@ -34,12 +34,14 @@ const createMockKiloClient = (): KiloClient => ({
   answerPermission: vi.fn().mockResolvedValue(true),
   answerQuestion: vi.fn().mockResolvedValue(true),
   rejectQuestion: vi.fn().mockResolvedValue(true),
+  generateCommitMessage: vi.fn().mockResolvedValue({ message: 'test commit' }),
 });
 
 const createMockConnectionManager = (): ConnectionManager => ({
   open: vi.fn().mockResolvedValue(undefined),
   close: vi.fn().mockResolvedValue(undefined),
   isConnected: vi.fn().mockReturnValue(false),
+  isReconnecting: vi.fn().mockReturnValue(false),
 });
 
 const createDefaultConfig = (overrides: Partial<LifecycleConfig> = {}): LifecycleConfig => ({
@@ -564,6 +566,25 @@ describe('createLifecycleManager', () => {
       );
       expect(errorCalls).toHaveLength(1);
       expect(errorCalls[0][0].data.messageId).toBe('msg_short');
+    });
+
+    it('skips SSE health checks while reconnecting', async () => {
+      const mgr = createManager();
+      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (connectionManager.isReconnecting as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+      state.startJob(createJobContext());
+      state.addInflight('msg_1', Date.now() + 600_000);
+      // Record initial SSE activity so the inactivity check has a baseline
+      state.recordSseEvent();
+
+      mgr.start();
+
+      // Advance past SSE inactivity timeout (120s) + check interval
+      await vi.advanceTimersByTimeAsync(130_000);
+
+      // abortSession should NOT have been called because we're reconnecting
+      expect(kiloClient.abortSession).not.toHaveBeenCalled();
     });
   });
 });
