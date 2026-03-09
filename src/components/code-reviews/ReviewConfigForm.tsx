@@ -597,7 +597,7 @@ export function ReviewConfigForm({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="off">Off — system errors only</SelectItem>
+                    <SelectItem value="off">Off</SelectItem>
                     <SelectItem value="all">All findings</SelectItem>
                     <SelectItem value="warning">Warnings and above</SelectItem>
                     <SelectItem value="critical">Critical issues only</SelectItem>
