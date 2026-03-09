@@ -303,14 +303,19 @@ async function fetchAllDependabotAlerts(
     if (!response.ok) {
       const body = await response.text();
 
-      if (response.status === 403 && body.includes('repository access blocked')) {
+      if (
+        (response.status === 403 || response.status === 422) &&
+        body.includes('repository access blocked')
+      ) {
         return { status: 'access_blocked' };
       }
 
       if (
-        response.status === 403 &&
+        (response.status === 403 || response.status === 422) &&
         (body.includes('Dependabot alerts are disabled') ||
-          body.includes('Dependabot alerts are not available'))
+          body.includes('Dependabot alerts are not available') ||
+          body.includes('archived repositories') ||
+          body.includes('archived repository'))
       ) {
         return { status: 'alerts_disabled' };
       }
