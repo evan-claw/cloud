@@ -264,20 +264,32 @@ export async function cleanupStaleWorkspaces(
       // Skip directories younger than STALE_DIR_MIN_AGE_SECONDS to avoid deleting
       // sessions that are mid-setup (cloning, running setup commands, etc.) and
       // haven't started their wrapper process yet.
+      // If we can't determine age (stat fails or unparseable), also skip — unknown
+      // age is treated as potentially recent to avoid destroying active work.
       const workspacePath = `${baseWorkspacePath}/sessions/${candidateSessionId}`;
       const statResult = await sandbox.exec(`stat -c %Y '${workspacePath}'`);
-      if (statResult.exitCode === 0 && statResult.stdout) {
-        const mtimeSeconds = Number.parseInt(statResult.stdout.trim(), 10);
-        if (Number.isFinite(mtimeSeconds)) {
-          const ageSeconds = nowSeconds - mtimeSeconds;
-          if (ageSeconds < STALE_DIR_MIN_AGE_SECONDS) {
-            logger
-              .withFields({ candidateSessionId, ageSeconds })
-              .info('Skipping session: directory too recent');
-            skipped++;
-            continue;
-          }
-        }
+      if (statResult.exitCode !== 0 || !statResult.stdout) {
+        logger
+          .withFields({ candidateSessionId })
+          .info('Skipping session: could not determine directory age');
+        skipped++;
+        continue;
+      }
+      const mtimeSeconds = Number.parseInt(statResult.stdout.trim(), 10);
+      if (!Number.isFinite(mtimeSeconds)) {
+        logger
+          .withFields({ candidateSessionId })
+          .info('Skipping session: could not parse directory mtime');
+        skipped++;
+        continue;
+      }
+      const ageSeconds = nowSeconds - mtimeSeconds;
+      if (ageSeconds < STALE_DIR_MIN_AGE_SECONDS) {
+        logger
+          .withFields({ candidateSessionId, ageSeconds })
+          .info('Skipping session: directory too recent');
+        skipped++;
+        continue;
       }
 
       const wrapperInfo = findWrapperForSessionInProcesses(processes, candidateSessionId);

@@ -797,29 +797,38 @@ describe('disk space checking', () => {
       ).toBe(true);
     });
 
-    it('proceeds with cleanup when stat fails', async () => {
+    it('skips cleanup when stat fails (unknown age treated as recent)', async () => {
       mockSandboxExec
         .mockResolvedValueOnce({
           exitCode: 0,
           stdout: 'agent_stale-1111\n',
           stderr: '',
         }) // ls
-        .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'stat: cannot stat' }) // stat fails
-        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }) // rm workspace
-        .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' }); // rm home
+        .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'stat: cannot stat' }); // stat fails
 
       mockListProcesses.mockResolvedValue([]);
 
       await cleanupStaleWorkspaces(fakeSandbox, '/workspace/org/user', 'agent_current-aaaa');
 
-      // ls + stat + rm workspace + rm home
-      expect(mockSandboxExec).toHaveBeenCalledTimes(4);
-      const execCalls = mockSandboxExec.mock.calls.map((c: string[]) => c[0]);
-      expect(
-        execCalls.some((c: string) =>
-          c.includes("rm -rf '/workspace/org/user/sessions/agent_stale-1111'")
-        )
-      ).toBe(true);
+      // ls + stat only — no rm calls (directory was skipped)
+      expect(mockSandboxExec).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips cleanup when stat returns unparseable output', async () => {
+      mockSandboxExec
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'agent_stale-1111\n',
+          stderr: '',
+        }) // ls
+        .mockResolvedValueOnce({ exitCode: 0, stdout: 'not-a-number\n', stderr: '' }); // stat returns garbage
+
+      mockListProcesses.mockResolvedValue([]);
+
+      await cleanupStaleWorkspaces(fakeSandbox, '/workspace/org/user', 'agent_current-aaaa');
+
+      // ls + stat only — no rm calls (directory was skipped)
+      expect(mockSandboxExec).toHaveBeenCalledTimes(2);
     });
   });
 
