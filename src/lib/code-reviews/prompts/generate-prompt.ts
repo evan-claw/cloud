@@ -172,25 +172,42 @@ export type GitLabDiffContext = {
 };
 
 /**
+ * Optional parameters for prompt generation
+ */
+export type GenerateReviewPromptOptions = {
+  /** Code review ID for generating fix link */
+  reviewId?: string;
+  /** Complete review state for intelligent decisions */
+  existingReviewState?: ExistingReviewState | null;
+  /** Platform type (defaults to 'github') */
+  platform?: CodeReviewPlatform;
+  /** GitLab-specific diff context for inline comments */
+  gitlabContext?: GitLabDiffContext;
+  /** HEAD SHA from a previous completed review (enables incremental mode) */
+  previousHeadSha?: string | null;
+};
+
+/**
  * Generates a code review prompt based on configuration
  * @param config Agent configuration with review settings
  * @param repository Repository in format "owner/repo" (GitHub) or "namespace/project" (GitLab)
  * @param prNumber Pull request number (GitHub) or merge request IID (GitLab)
- * @param reviewId Code review ID for generating fix link (optional)
- * @param existingReviewState Complete review state for intelligent decisions (optional)
- * @param platform Platform type (defaults to 'github' for backward compatibility)
- * @param gitlabContext GitLab-specific diff context for inline comments (optional)
+ * @param options Optional parameters for review context, platform, and incremental mode
  * @returns Generated prompt with version and source info
  */
 export async function generateReviewPrompt(
   config: CodeReviewAgentConfig,
   repository: string,
   prNumber?: number,
-  reviewId?: string,
-  existingReviewState?: ExistingReviewState | null,
-  platform: CodeReviewPlatform = 'github',
-  gitlabContext?: GitLabDiffContext
+  options: GenerateReviewPromptOptions = {}
 ): Promise<{ prompt: string; version: string; source: 'posthog' | 'local' }> {
+  const {
+    reviewId,
+    existingReviewState,
+    platform = 'github',
+    gitlabContext,
+    previousHeadSha,
+  } = options;
   // Load template from PostHog (remote) or local fallback
   const { template, source } = await loadPromptTemplate(platform);
   const platformConfig = getPlatformConfig(platform);
