@@ -233,5 +233,25 @@ describe('encryption utilities', () => {
       const channels: EncryptedChannelTokens = {};
       expect(decryptChannelTokens(channels, privateKey)).toEqual({});
     });
+
+    it('skips unknown channel keys not in the secret catalog (warn + continue)', () => {
+      // Simulate a channels object with a key that is not registered in the secret
+      // catalog (e.g. stale DO state from a rolled-back schema change, or a key
+      // added to EncryptedChannelTokens before the catalog was updated).
+      // The function should skip the unknown key gracefully rather than throwing,
+      // so a single unrecognised key does not prevent the machine from starting.
+      const channels = {
+        unknownFutureToken: encryptForTest('some-token', publicKey),
+        telegramBotToken: encryptForTest('tg-token', publicKey),
+      } as unknown as EncryptedChannelTokens;
+
+      const result = decryptChannelTokens(channels, privateKey);
+
+      // Known key is still decrypted correctly
+      expect(result.TELEGRAM_BOT_TOKEN).toBe('tg-token');
+      // Unknown key is silently skipped — no entry in result
+      expect(Object.keys(result)).not.toContain('unknownFutureToken');
+      expect(Object.keys(result)).toHaveLength(1);
+    });
   });
 });

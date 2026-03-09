@@ -119,6 +119,11 @@ export const FIELD_KEY_TO_ENTRY: ReadonlyMap<string, SecretCatalogEntry> = new M
   SECRET_CATALOG.flatMap(entry => entry.fields.map(field => [field.key, entry]))
 );
 
+/** Set of all env var names from catalog entries (for SENSITIVE_KEYS classification) */
+export const ALL_SECRET_ENV_VARS: ReadonlySet<string> = new Set(
+  SECRET_CATALOG.flatMap(entry => entry.fields.map(field => field.envVar))
+);
+
 /**
  * Get all entries for a given category, sorted by order (undefined sorts last).
  */

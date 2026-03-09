@@ -25,6 +25,7 @@ export {
   ALL_SECRET_FIELD_KEYS,
   FIELD_KEY_TO_ENV_VAR,
   FIELD_KEY_TO_ENTRY,
+  ALL_SECRET_ENV_VARS,
   getEntriesByCategory,
 } from './catalog.js';
 
