@@ -1075,6 +1075,46 @@ export class SessionService {
   }
 
   /**
+   * Extract last-write-wins file diffs from streamed snapshot messages.
+   * The snapshot format is `{ info, messages: [{ info: { summary: { diffs } }, parts }] }`.
+   * Returns null when no diffs exist.
+   */
+  private static extractDiffsFromMessages(
+    payload: string
+  ): Array<{ file: string; after: string; status?: 'added' | 'deleted' | 'modified' }> | null {
+    const fileDiffSchema = z.object({
+      file: z.string(),
+      after: z.string().default(''),
+      status: z.enum(['added', 'deleted', 'modified']).default('modified'),
+    });
+
+    try {
+      const parsed = JSON.parse(payload) as {
+        messages?: Array<{ info?: { summary?: { diffs?: unknown[] } } }>;
+      };
+      if (!parsed.messages) return null;
+
+      const byFile = new Map<string, z.infer<typeof fileDiffSchema>>();
+
+      for (const msg of parsed.messages) {
+        const diffs = msg.info?.summary?.diffs;
+        if (!Array.isArray(diffs)) continue;
+
+        for (const d of diffs) {
+          const result = fileDiffSchema.safeParse(d);
+          if (!result.success) continue;
+          byFile.set(result.data.file, result.data);
+        }
+      }
+
+      if (byFile.size === 0) return null;
+      return [...byFile.values()];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Initialize a cloud-agent session by resuming an existing kilo session.
    *
    * Client provides both kiloSessionId and githubRepo (parsed from git_url).
@@ -1433,50 +1473,38 @@ export class SessionService {
     await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
     await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
-    // Single combined RPC: fetch snapshot (with diffs stripped) + aggregated diff.
-    const combinedPayload = await env.SESSION_INGEST.exportSessionWithDiff({
-      sessionId: metadata.kiloSessionId,
-      kiloUserId: userId,
-    });
+    // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
+    const internalSecret = await env.INTERNAL_SERVICE_SECRET.get();
+    const response = await env.SESSION_INGEST.fetch(
+      new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
+        headers: {
+          'X-Internal-Secret': internalSecret,
+          'X-Kilo-User-Id': userId,
+        },
+      })
+    );
 
-    if (combinedPayload === null) {
+    if (response.status === 404) {
       throw new SessionSnapshotRestoreError(
         `Session snapshot restore failed: session not found`,
         404
       );
     }
-
-    const combinedExportSchema = z.object({
-      snapshot: z.unknown(),
-      diff: z
-        .array(
-          z.object({
-            file: z.string(),
-            after: z.string(),
-            status: z.enum(['added', 'deleted', 'modified']).optional(),
-          })
-        )
-        .nullable(),
-    });
-
-    let snapshotJson: string;
-    let diff: z.infer<typeof combinedExportSchema>['diff'];
-    try {
-      const parsed = combinedExportSchema.parse(JSON.parse(combinedPayload));
-      snapshotJson = JSON.stringify(parsed.snapshot);
-      diff = parsed.diff;
-    } catch (error) {
-      throw new Error(
-        `Failed to parse combined export payload: ${error instanceof Error ? error.message : String(error)}`
-      );
+    if (!response.ok) {
+      throw new Error(`Session export failed: ${response.status}`);
     }
 
-    await this.restoreSessionSnapshot(session, sessionId, userId, snapshotJson);
+    const snapshotPayload = await response.text();
+
+    // Extract diffs client-side from the streamed snapshot messages.
+    const diffs = SessionService.extractDiffsFromMessages(snapshotPayload);
+
+    await this.restoreSessionSnapshot(session, sessionId, userId, snapshotPayload);
 
     // Apply file-level changes from the previous session on top of the fresh clone.
     // This runs after kilo import (conversation restore) since the CLI doesn't need
     // the file state during import — it only restores its internal session DB.
-    await this.applySessionDiff(session, sessionId, userId, context.workspacePath, diff);
+    await this.applySessionDiff(session, sessionId, userId, context.workspacePath, diffs);
 
     // Re-run setup commands (fresh clone, need to reinstall)
     if (metadata.setupCommands && metadata.setupCommands.length > 0) {

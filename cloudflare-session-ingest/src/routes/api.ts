@@ -8,9 +8,8 @@ import type { Env } from '../env';
 import { zodJsonValidator, withDORetry } from '@kilocode/worker-utils';
 import { getSessionIngestDO } from '../dos/SessionIngestDO';
 import { getSessionAccessCacheDO } from '../dos/SessionAccessCacheDO';
-import { SessionSyncInputSchema } from '../types/session-sync';
-import { splitIngestBatchForDO } from '../util/ingest-batching';
 import { getSessionExport } from '../services/session-export';
+import type { IngestQueueMessage } from '../queue-consumer';
 
 export type ApiContext = {
   Bindings: Env;
@@ -24,8 +23,6 @@ export const api = new Hono<ApiContext>();
 const createSessionSchema = z.object({
   sessionId: z.string().startsWith('ses_').length(30),
 });
-
-const ingestSessionSchema = SessionSyncInputSchema;
 
 const sessionIdSchema = z.string().startsWith('ses_').length(30);
 
@@ -135,7 +132,7 @@ api.delete('/session/:sessionId', async c => {
   return c.json({ success: true }, 200);
 });
 
-api.post('/session/:sessionId/ingest', zodJsonValidator(ingestSessionSchema), async c => {
+api.post('/session/:sessionId/ingest', async c => {
   const rawSessionId = c.req.param('sessionId');
   const sessionIdParseResult = sessionIdSchema.safeParse(rawSessionId);
   if (!sessionIdParseResult.success) {
@@ -146,9 +143,6 @@ api.post('/session/:sessionId/ingest', zodJsonValidator(ingestSessionSchema), as
   }
 
   const sessionId = sessionIdParseResult.data;
-
-  const ingestBody = c.req.valid('json');
-
   const kiloUserId = c.get('user_id');
   const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
 
@@ -183,95 +177,24 @@ api.post('/session/:sessionId/ingest', zodJsonValidator(ingestSessionSchema), as
 
   const ingestVersion = ingestVersionSchema.parse(c.req.query('v') ?? 0);
 
-  const split = splitIngestBatchForDO(ingestBody.data);
-  if (split.droppedOversizeItems > 0) {
-    console.warn('Dropping oversize ingest items', {
-      incoming_items: ingestBody.data.length,
-      dropped_oversize_items: split.droppedOversizeItems,
-      chunk_count: split.chunks.length,
-    });
-  }
+  // Stream request body directly to R2 (zero memory)
+  const r2Key = `ingest/${kiloUserId}/${sessionId}/${crypto.randomUUID()}`;
+  await c.env.SESSION_INGEST_R2.put(r2Key, c.req.raw.body);
 
-  const mergedChanges = new Map<string, string | null>();
-  for (const chunk of split.chunks) {
-    const ingestResult = await withDORetry(
-      () => getSessionIngestDO(c.env, { kiloUserId, sessionId: sessionId }),
-      stub => stub.ingest(chunk, kiloUserId, sessionId, ingestVersion),
-      'SessionIngestDO.ingest'
-    );
-
-    for (const change of ingestResult.changes) {
-      mergedChanges.set(change.name, change.value);
-    }
-  }
-
-  const title = mergedChanges.has('title') ? (mergedChanges.get('title') ?? null) : undefined;
-  const platform = mergedChanges.has('platform')
-    ? (mergedChanges.get('platform') ?? null)
-    : undefined;
-  const orgId = mergedChanges.has('orgId') ? (mergedChanges.get('orgId') ?? null) : undefined;
-  const gitUrl = mergedChanges.has('gitUrl') ? (mergedChanges.get('gitUrl') ?? null) : undefined;
-  const gitBranch = mergedChanges.has('gitBranch')
-    ? (mergedChanges.get('gitBranch') ?? null)
-    : undefined;
-
-  const updates: Partial<
-    Pick<
-      typeof cli_sessions_v2.$inferInsert,
-      'title' | 'created_on_platform' | 'organization_id' | 'git_url' | 'git_branch'
-    >
-  > = {};
-  if (title !== undefined) updates.title = title;
-  // created_on_platform is NOT NULL in the schema, so skip if null to avoid a DB error.
-  if (platform !== undefined && platform !== null) updates.created_on_platform = platform;
-  if (orgId !== undefined) updates.organization_id = orgId;
-  if (gitUrl !== undefined) updates.git_url = gitUrl;
-  if (gitBranch !== undefined) updates.git_branch = gitBranch;
-
-  if (Object.keys(updates).length > 0) {
-    await db
-      .update(cli_sessions_v2)
-      .set(updates)
-      .where(
-        and(eq(cli_sessions_v2.session_id, sessionId), eq(cli_sessions_v2.kilo_user_id, kiloUserId))
-      );
-  }
-
-  const parentSessionId = mergedChanges.has('parentId')
-    ? (mergedChanges.get('parentId') ?? null)
-    : undefined;
-  if (parentSessionId !== undefined) {
-    if (parentSessionId === sessionId) {
-      return c.json({ success: false, error: 'parent_session_id_cannot_be_self' }, 400);
-    }
-
-    if (parentSessionId) {
-      const parentRows = await db
-        .select({ session_id: cli_sessions_v2.session_id })
-        .from(cli_sessions_v2)
-        .where(
-          and(
-            eq(cli_sessions_v2.session_id, parentSessionId),
-            eq(cli_sessions_v2.kilo_user_id, kiloUserId)
-          )
-        )
-        .limit(1);
-
-      if (!parentRows[0]) {
-        return c.json({ success: false, error: 'parent_session_not_found' }, 404);
-      }
-    }
-
-    await db
-      .update(cli_sessions_v2)
-      .set({ parent_session_id: parentSessionId })
-      .where(
-        and(
-          eq(cli_sessions_v2.session_id, sessionId),
-          eq(cli_sessions_v2.kilo_user_id, kiloUserId),
-          sql`${cli_sessions_v2.parent_session_id} IS DISTINCT FROM ${parentSessionId}`
-        )
-      );
+  // Enqueue for async processing
+  const queueMessage: IngestQueueMessage = {
+    r2Key,
+    kiloUserId,
+    sessionId,
+    ingestVersion,
+    ingestedAt: Date.now(),
+  };
+  try {
+    await c.env.INGEST_QUEUE.send(queueMessage);
+  } catch (err) {
+    // Clean up staging R2 object to prevent orphaned blobs
+    await c.env.SESSION_INGEST_R2.delete(r2Key).catch(() => {});
+    throw err;
   }
 
   return c.json({ success: true }, 200);
@@ -285,13 +208,13 @@ api.get('/session/:sessionId/export', async c => {
   }
 
   const kiloUserId = c.get('user_id');
-  const json = await getSessionExport(c.env, parsed.data, kiloUserId);
+  const stream = await getSessionExport(c.env, parsed.data, kiloUserId);
 
-  if (json === null) {
+  if (stream === null) {
     return c.json({ success: false, error: 'session_not_found' }, 404);
   }
 
-  return c.body(json, 200, {
+  return c.body(stream, 200, {
     'content-type': 'application/json; charset=utf-8',
   });
 });

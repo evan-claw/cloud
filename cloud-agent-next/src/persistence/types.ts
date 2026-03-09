@@ -180,6 +180,9 @@ export type PersistenceEnv = {
   /** URL for session ingest service, injected into sandbox session env vars */
   KILO_SESSION_INGEST_URL?: string;
 
+  /** Shared secret for internal service-to-service authentication */
+  INTERNAL_SERVICE_SECRET: SecretsStoreSecret;
+
   R2_ENDPOINT?: string;
   R2_ATTACHMENTS_READONLY_ACCESS_KEY_ID?: string;
   R2_ATTACHMENTS_READONLY_SECRET_ACCESS_KEY?: string;

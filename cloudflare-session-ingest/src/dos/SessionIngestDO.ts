@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { eq, ne, inArray } from 'drizzle-orm';
+import { eq, ne, gt, and, sql, inArray, isNotNull } from 'drizzle-orm';
 import { drizzle, type DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
 
@@ -8,7 +8,6 @@ import type { Env } from '../env';
 import type { IngestBatch } from '../types/session-sync';
 import type { SessionDataItem } from '../types/session-sync';
 import { getItemIdentity } from '../util/compaction';
-import { buildSharedSessionSnapshot } from '../util/share-output';
 import {
   extractNormalizedGitBranchFromItem,
   extractNormalizedGitUrlFromItem,
@@ -23,16 +22,7 @@ import {
   POST_CLOSE_DRAIN_MS,
   type TerminationReason,
 } from './session-metrics';
-import { z } from 'zod';
 import migrations from '../../drizzle/migrations';
-
-const fileDiffSchema = z.object({
-  file: z.string(),
-  after: z.string().default(''),
-  status: z.string().default('modified'),
-});
-
-type FileDiff = z.infer<typeof fileDiffSchema>;
 
 type IngestMetaKey =
   | ExtractableMetaKey
@@ -40,7 +30,8 @@ type IngestMetaKey =
   | 'sessionId'
   | 'ingestVersion'
   | 'closeReason'
-  | 'metricsEmitted';
+  | 'metricsEmitted'
+  | 'deleted';
 
 type ExtractableMetaKey = 'title' | 'parentId' | 'platform' | 'orgId' | 'gitUrl' | 'gitBranch';
 
@@ -97,10 +88,28 @@ export class SessionIngestDO extends DurableObject<Env> {
     payload: IngestBatch,
     kiloUserId: string,
     sessionId: string,
-    ingestVersion = 0
+    ingestVersion = 0,
+    ingestedAt?: number,
+    r2References?: Record<string, string>
   ): Promise<{
     changes: Changes;
   }> {
+    const deletedRow = this.db
+      .select({ value: ingestMeta.value })
+      .from(ingestMeta)
+      .where(eq(ingestMeta.key, 'deleted'))
+      .get();
+    if (deletedRow?.value === 'true') {
+      // Clean up any R2 blobs the caller uploaded for this now-deleted session
+      if (r2References) {
+        const keys = Object.values(r2References);
+        if (keys.length > 0) {
+          await this.env.SESSION_INGEST_R2.delete(keys);
+        }
+      }
+      return { changes: [] };
+    }
+
     writeIngestMetaIfChanged(this.db, { key: 'kiloUserId', incomingValue: kiloUserId });
     writeIngestMetaIfChanged(this.db, { key: 'sessionId', incomingValue: sessionId });
     writeIngestMetaIfChanged(this.db, {
@@ -119,18 +128,61 @@ export class SessionIngestDO extends DurableObject<Env> {
 
     let hasSessionOpen = false;
     let closeReason: string | undefined;
+    const orphanedR2Keys: string[] = [];
 
     for (const item of payload) {
       const { item_id, item_type } = getItemIdentity(item);
 
-      const itemDataJson = JSON.stringify(item.data);
+      // Check timestamp guard: skip if existing row has a newer ingested_at.
+      // Also read the existing R2 key so we can clean up orphaned blobs.
+      if (ingestedAt !== undefined) {
+        const existing = this.db
+          .select({
+            ingested_at: ingestItems.ingested_at,
+            item_data_r2_key: ingestItems.item_data_r2_key,
+          })
+          .from(ingestItems)
+          .where(eq(ingestItems.item_id, item_id))
+          .get();
+        if (
+          existing?.ingested_at !== null &&
+          existing?.ingested_at !== undefined &&
+          existing.ingested_at > ingestedAt
+        ) {
+          // Item is stale — if the caller wrote an R2 blob for it, that blob is orphaned
+          const newR2Key = r2References?.[item_id];
+          if (newR2Key) orphanedR2Keys.push(newR2Key);
+          continue;
+        }
+
+        // If the existing row pointed to a different R2 blob, it will be orphaned after upsert
+        const newR2Key = r2References?.[item_id] ?? null;
+        if (existing?.item_data_r2_key && existing.item_data_r2_key !== newR2Key) {
+          orphanedR2Keys.push(existing.item_data_r2_key);
+        }
+      }
+
+      const r2Key = r2References?.[item_id];
+      const itemDataJson = r2Key ? '{}' : JSON.stringify(item.data);
+      const itemDataR2Key = r2Key ?? null;
 
       this.db
         .insert(ingestItems)
-        .values({ item_id, item_type, item_data: itemDataJson })
+        .values({
+          item_id,
+          item_type,
+          item_data: itemDataJson,
+          item_data_r2_key: itemDataR2Key,
+          ingested_at: ingestedAt ?? null,
+        })
         .onConflictDoUpdate({
           target: ingestItems.item_id,
-          set: { item_type, item_data: itemDataJson },
+          set: {
+            item_type,
+            item_data: itemDataJson,
+            item_data_r2_key: itemDataR2Key,
+            ingested_at: ingestedAt ?? null,
+          },
         })
         .run();
 
@@ -162,6 +214,11 @@ export class SessionIngestDO extends DurableObject<Env> {
       }
     }
 
+    // Clean up orphaned R2 blobs (e.g. replaced or stale oversized items)
+    if (orphanedR2Keys.length > 0) {
+      await this.env.SESSION_INGEST_R2.delete(orphanedR2Keys);
+    }
+
     if (ingestVersion >= 1) {
       // v1 clients send explicit open/close pairs. Only those events drive alarms.
       if (hasSessionOpen) {
@@ -187,79 +244,111 @@ export class SessionIngestDO extends DurableObject<Env> {
     };
   }
 
-  /** Read and parse all non-session_diff items from the DB. */
-  private readItems(): IngestBatch {
-    const rows = this.db
-      .select({
-        item_id: ingestItems.item_id,
-        item_type: ingestItems.item_type,
-        item_data: ingestItems.item_data,
-      })
-      .from(ingestItems)
-      .where(ne(ingestItems.item_type, 'session_diff'))
-      .orderBy(ingestItems.id)
-      .all();
+  async getAllStream(): Promise<ReadableStream<Uint8Array>> {
+    const db = this.db;
+    const r2 = this.env.SESSION_INGEST_R2;
+    const encoder = new TextEncoder();
 
-    const items: IngestBatch = [];
-    for (const row of rows) {
-      try {
-        const parsedData: unknown = JSON.parse(row.item_data);
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          // --- session info ---
+          controller.enqueue(encoder.encode('{"info":'));
+          const sessionRow = db
+            .select({
+              item_data: ingestItems.item_data,
+              item_data_r2_key: ingestItems.item_data_r2_key,
+            })
+            .from(ingestItems)
+            .where(eq(ingestItems.item_type, 'session'))
+            .limit(1)
+            .get();
+          if (sessionRow) {
+            await enqueueItemData(controller, sessionRow, r2, encoder);
+          } else {
+            controller.enqueue(encoder.encode('{}'));
+          }
 
-        // DB values are untyped; trust stored shape.
-        items.push({
-          type: row.item_type as SessionDataItem['type'],
-          data: parsedData as SessionDataItem['data'],
-        } as IngestBatch[number]);
-      } catch {
-        // Ignore corrupted rows; best-effort read.
-      }
-    }
+          // --- messages ---
+          const CURSOR_BATCH = 10;
+          controller.enqueue(encoder.encode(',"messages":['));
+          let msgCursor = 0;
+          let firstMsg = true;
 
-    return items;
-  }
+          while (true) {
+            const msgBatch = db
+              .select({
+                id: ingestItems.id,
+                item_id: ingestItems.item_id,
+                item_data: ingestItems.item_data,
+                item_data_r2_key: ingestItems.item_data_r2_key,
+              })
+              .from(ingestItems)
+              .where(and(eq(ingestItems.item_type, 'message'), gt(ingestItems.id, msgCursor)))
+              .orderBy(ingestItems.id)
+              .limit(CURSOR_BATCH)
+              .all();
 
-  async getAll(): Promise<string> {
-    const snapshot = buildSharedSessionSnapshot(this.readItems());
-    return JSON.stringify(snapshot);
-  }
+            if (msgBatch.length === 0) break;
+            msgCursor = msgBatch[msgBatch.length - 1].id;
 
-  /**
-   * Aggregate last-write-wins file diffs from the given items' `summary.diffs`.
-   * Returns null when no diffs exist.
-   */
-  private static collectDiffs(items: IngestBatch): FileDiff[] | null {
-    const messageDiffsSchema = z.object({
-      summary: z.object({ diffs: z.array(z.unknown()) }).optional(),
+            for (const msgRow of msgBatch) {
+              if (!firstMsg) controller.enqueue(encoder.encode(','));
+              firstMsg = false;
+
+              // message info
+              controller.enqueue(encoder.encode('{"info":'));
+              await enqueueItemData(controller, msgRow, r2, encoder);
+
+              // parts for this message: item_id = '{msgId}/{partId}'
+              const msgId = msgRow.item_id.slice('message/'.length);
+              // Escape LIKE wildcards (% and _) so they match literally, with ESCAPE clause
+              const likePattern = msgId.replace(/[%_\\]/g, '\\$&') + '/%';
+              controller.enqueue(encoder.encode(',"parts":['));
+              let partCursor = 0;
+              let firstPart = true;
+
+              while (true) {
+                const partBatch = db
+                  .select({
+                    id: ingestItems.id,
+                    item_data: ingestItems.item_data,
+                    item_data_r2_key: ingestItems.item_data_r2_key,
+                  })
+                  .from(ingestItems)
+                  .where(
+                    and(
+                      eq(ingestItems.item_type, 'part'),
+                      sql`${ingestItems.item_id} LIKE ${likePattern} ESCAPE '\\'`,
+                      gt(ingestItems.id, partCursor)
+                    )
+                  )
+                  .orderBy(ingestItems.id)
+                  .limit(CURSOR_BATCH)
+                  .all();
+
+                if (partBatch.length === 0) break;
+                partCursor = partBatch[partBatch.length - 1].id;
+
+                for (const partRow of partBatch) {
+                  if (!firstPart) controller.enqueue(encoder.encode(','));
+                  firstPart = false;
+
+                  await enqueueItemData(controller, partRow, r2, encoder);
+                }
+              }
+
+              controller.enqueue(encoder.encode(']}'));
+            }
+          }
+
+          controller.enqueue(encoder.encode(']}'));
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
     });
-
-    const byFile = new Map<string, FileDiff>();
-
-    for (const item of items) {
-      if (item.type !== 'message') continue;
-      const parsed = messageDiffsSchema.safeParse(item.data);
-      const diffs = parsed.data?.summary?.diffs;
-      if (!diffs) continue;
-
-      for (const d of diffs) {
-        const result = fileDiffSchema.safeParse(d);
-        if (!result.success) continue;
-        byFile.set(result.data.file, result.data);
-      }
-    }
-
-    if (byFile.size === 0) return null;
-    return [...byFile.values()];
-  }
-
-  /**
-   * Combined export: returns the session snapshot and aggregated file-level
-   * diff in a single call, reading items from the DB only once.
-   */
-  async getSessionExportWithDiff(): Promise<string> {
-    const items = this.readItems();
-    const snapshot = buildSharedSessionSnapshot(items);
-    const diff = SessionIngestDO.collectDiffs(items);
-    return JSON.stringify({ snapshot, diff });
   }
 
   /**
@@ -281,6 +370,10 @@ export class SessionIngestDO extends DurableObject<Env> {
       return false;
     }
 
+    // Note: items that exceeded the DO SQLite row limit (~1.94MB) are stored in R2
+    // with item_data='{}'. Metrics reads only item_data from SQLite, so those items
+    // contribute empty data. This is acceptable — oversized items are rare edge cases
+    // (giant tool results) and metrics only needs small fields (timestamps, types).
     const rows = this.db
       .select({
         item_type: ingestItems.item_type,
@@ -346,10 +439,21 @@ export class SessionIngestDO extends DurableObject<Env> {
     const metaRows = this.db
       .select()
       .from(ingestMeta)
-      .where(inArray(ingestMeta.key, ['kiloUserId', 'sessionId', 'closeReason', 'ingestVersion']))
+      .where(
+        inArray(ingestMeta.key, [
+          'kiloUserId',
+          'sessionId',
+          'closeReason',
+          'ingestVersion',
+          'deleted',
+        ])
+      )
       .all();
 
     const meta = Object.fromEntries(metaRows.map(r => [r.key, r.value]));
+
+    if (meta['deleted'] === 'true') return;
+
     const kiloUserId = meta['kiloUserId'];
     const sessionId = meta['sessionId'];
 
@@ -377,9 +481,53 @@ export class SessionIngestDO extends DurableObject<Env> {
   }
 
   async clear(): Promise<void> {
+    // Delete any R2-backed item blobs before wiping SQLite
+    const r2Rows = this.db
+      .select({ item_data_r2_key: ingestItems.item_data_r2_key })
+      .from(ingestItems)
+      .where(isNotNull(ingestItems.item_data_r2_key))
+      .all();
+    const r2Keys = r2Rows.map(r => r.item_data_r2_key).filter((k): k is string => k !== null);
+    if (r2Keys.length > 0) {
+      await this.env.SESSION_INGEST_R2.delete(r2Keys);
+    }
+
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     await migrate(this.db, migrations);
+    this.db
+      .insert(ingestMeta)
+      .values({ key: 'deleted', value: 'true' })
+      .onConflictDoUpdate({ target: ingestMeta.key, set: { value: 'true' } })
+      .run();
+  }
+}
+
+type ItemDataRef = Pick<typeof ingestItems.$inferSelect, 'item_data' | 'item_data_r2_key'>;
+
+async function enqueueItemData(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  ref: ItemDataRef,
+  r2: R2Bucket,
+  encoder: TextEncoder
+): Promise<void> {
+  if (ref.item_data_r2_key) {
+    const obj = await r2.get(ref.item_data_r2_key);
+    if (obj) {
+      const reader = obj.body.getReader();
+      while (true) {
+        const result: ReadableStreamReadResult<Uint8Array> = await reader.read();
+        if (result.done) break;
+        controller.enqueue(result.value);
+      }
+    } else {
+      console.error('R2 blob missing during export, falling back to empty object', {
+        r2Key: ref.item_data_r2_key,
+      });
+      controller.enqueue(encoder.encode('{}'));
+    }
+  } else {
+    controller.enqueue(encoder.encode(ref.item_data));
   }
 }
 

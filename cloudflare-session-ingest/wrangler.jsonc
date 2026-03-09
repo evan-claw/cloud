@@ -61,6 +61,27 @@
       "new_sqlite_classes": ["SessionIngestDO", "SessionAccessCacheDO"],
     },
   ],
+  "r2_buckets": [
+    {
+      "binding": "SESSION_INGEST_R2",
+      "bucket_name": "session-ingest-staging",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "INGEST_QUEUE",
+        "queue": "session-ingest-processing",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "session-ingest-processing",
+        "max_retries": 3,
+        "dead_letter_queue": "session-ingest-dlq",
+      },
+    ],
+  },
   "services": [
     {
       "binding": "O11Y",
@@ -74,6 +95,11 @@
       "secret_name": "NEXTAUTH_SECRET_PROD",
       // To set: wrangler secrets-store secret create 342a86d9e3a94da698e82d0c6e2a36f0 --name NEXTAUTH_SECRET_PROD --scopes workers
       // docs https://developers.cloudflare.com/workers/wrangler/commands/#secrets-store-secret
+    },
+    {
+      "binding": "INTERNAL_SERVICE_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "INTERNAL_SERVICE_SECRET",
     },
   ],
 }

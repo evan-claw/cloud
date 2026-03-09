@@ -41,9 +41,9 @@ import type { PersistenceEnv, CloudAgentSessionState } from './persistence/types
 describe('SessionService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.SESSION_INGEST.exportSessionWithDiff = vi
+    (mockEnv.SESSION_INGEST as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch = vi
       .fn()
-      .mockResolvedValue(JSON.stringify({ snapshot: { info: {}, messages: [] }, diff: null }));
+      .mockResolvedValue(new Response(JSON.stringify({ info: {}, messages: [] })));
   });
 
   const mockedSetupWorkspace = vi.mocked(mockSetupWorkspace);
@@ -68,8 +68,11 @@ describe('SessionService', () => {
     } as unknown as PersistenceEnv['CLOUD_AGENT_SESSION'],
     NEXTAUTH_SECRET: 'mock-secret',
     SESSION_INGEST: {
-      exportSessionWithDiff: vi.fn(),
+      fetch: vi.fn(),
     } as unknown as PersistenceEnv['SESSION_INGEST'],
+    INTERNAL_SERVICE_SECRET: {
+      get: vi.fn().mockResolvedValue('test-secret'),
+    } as unknown as PersistenceEnv['INTERNAL_SERVICE_SECRET'],
   };
 
   const createMetadataEnv = (
@@ -166,14 +169,14 @@ describe('SessionService', () => {
       expect(result.context.sessionId).toBe(sessionId);
     });
 
-    it('does not restore session snapshot during initiate (no exportSessionWithDiff call)', async () => {
-      const exportSessionWithDiffMock = vi
+    it('does not restore session snapshot during initiate (no fetch call)', async () => {
+      const fetchMock = vi
         .fn()
-        .mockResolvedValue(JSON.stringify({ snapshot: { info: {}, messages: [] }, diff: null }));
+        .mockResolvedValue(new Response(JSON.stringify({ info: {}, messages: [] })));
       const envWithIngest: PersistenceEnv = {
         ...mockEnv,
         SESSION_INGEST: {
-          exportSessionWithDiff: exportSessionWithDiffMock,
+          fetch: fetchMock,
         } as unknown as PersistenceEnv['SESSION_INGEST'],
       };
 
@@ -209,7 +212,7 @@ describe('SessionService', () => {
         env: envWithIngest,
       });
 
-      expect(exportSessionWithDiffMock).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(fakeSession.writeFile).not.toHaveBeenCalled();
       expect(fakeSession.exec).not.toHaveBeenCalledWith(
         `kilo import "/tmp/kilo-session-export-${sessionId}.json"`
@@ -574,13 +577,12 @@ describe('SessionService', () => {
 
     it('restores workspace then session snapshot when workspace is missing', async () => {
       const mockDOGetMetadata = vi.fn();
-      const snapshot = { info: {}, messages: [] };
-      const combinedPayload = JSON.stringify({ snapshot, diff: null });
-      const exportSessionWithDiffMock = vi.fn().mockResolvedValue(combinedPayload);
+      const payload = JSON.stringify({ info: {}, messages: [] });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(payload));
       const envWithIngest: PersistenceEnv = {
         ...mockEnv,
         SESSION_INGEST: {
-          exportSessionWithDiff: exportSessionWithDiffMock,
+          fetch: fetchMock,
         } as unknown as PersistenceEnv['SESSION_INGEST'],
         CLOUD_AGENT_SESSION: {
           idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
@@ -633,14 +635,14 @@ describe('SessionService', () => {
         env: envWithIngest,
       });
 
-      expect(exportSessionWithDiffMock).toHaveBeenCalledWith({
-        sessionId: kiloSessionId,
-        kiloUserId: userId,
-      });
-      // Snapshot is re-serialized from the parsed combined payload
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `https://session-ingest/internal/session/${kiloSessionId}/export`,
+        })
+      );
       expect(fakeSession.writeFile).toHaveBeenCalledWith(
         `/tmp/kilo-session-export-${sessionId}.json`,
-        JSON.stringify(snapshot)
+        payload
       );
       expect(fakeSession.exec).toHaveBeenCalledWith(
         `kilo import "/tmp/kilo-session-export-${sessionId}.json"`
@@ -671,32 +673,29 @@ describe('SessionService', () => {
 
     it('applies session diff after restoring snapshot during cold start', async () => {
       const mockDOGetMetadata = vi.fn();
-      const diffEntries = [
-        {
-          file: 'src/index.ts',
-          after: 'new content',
-          status: 'modified',
-        },
-        {
-          file: 'src/new-file.ts',
-          after: 'brand new file',
-          status: 'added',
-        },
-        {
-          file: 'src/removed.ts',
-          after: '',
-          status: 'deleted',
-        },
-      ];
-      const combinedPayload = JSON.stringify({
-        snapshot: { info: {}, messages: [] },
-        diff: diffEntries,
-      });
-      const exportSessionWithDiffMock = vi.fn().mockResolvedValue(combinedPayload);
+      const snapshotWithDiffs = {
+        info: {},
+        messages: [
+          {
+            info: {
+              summary: {
+                diffs: [
+                  { file: 'src/index.ts', after: 'new content', status: 'modified' },
+                  { file: 'src/new-file.ts', after: 'brand new file', status: 'added' },
+                  { file: 'src/removed.ts', after: '', status: 'deleted' },
+                ],
+              },
+            },
+            parts: [],
+          },
+        ],
+      };
+      const snapshotPayload = JSON.stringify(snapshotWithDiffs);
+      const fetchMock = vi.fn().mockResolvedValue(new Response(snapshotPayload));
       const envWithIngest: PersistenceEnv = {
         ...mockEnv,
         SESSION_INGEST: {
-          exportSessionWithDiff: exportSessionWithDiffMock,
+          fetch: fetchMock,
         } as unknown as PersistenceEnv['SESSION_INGEST'],
         CLOUD_AGENT_SESSION: {
           idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
@@ -748,11 +747,12 @@ describe('SessionService', () => {
         env: envWithIngest,
       });
 
-      // Verify exportSessionWithDiff was called (single combined RPC)
-      expect(exportSessionWithDiffMock).toHaveBeenCalledWith({
-        sessionId: kiloSessionId,
-        kiloUserId: userId,
-      });
+      // Verify fetch was called with the streaming export endpoint
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `https://session-ingest/internal/session/${kiloSessionId}/export`,
+        })
+      );
 
       // Verify modified file was written
       expect(fakeSession.writeFile).toHaveBeenCalledWith(
@@ -792,17 +792,14 @@ describe('SessionService', () => {
       expect(mkdirOrder).toBeGreaterThan(kiloImportOrder);
     });
 
-    it('skips session diff gracefully when diff is null in combined response', async () => {
+    it('skips session diff gracefully when no diffs in messages', async () => {
       const mockDOGetMetadata = vi.fn();
-      const combinedPayload = JSON.stringify({
-        snapshot: { info: {}, messages: [] },
-        diff: null,
-      });
-      const exportSessionWithDiffMock = vi.fn().mockResolvedValue(combinedPayload);
+      const payload = JSON.stringify({ info: {}, messages: [{ info: {}, parts: [] }] });
+      const fetchMock = vi.fn().mockResolvedValue(new Response(payload));
       const envWithIngest: PersistenceEnv = {
         ...mockEnv,
         SESSION_INGEST: {
-          exportSessionWithDiff: exportSessionWithDiffMock,
+          fetch: fetchMock,
         } as unknown as PersistenceEnv['SESSION_INGEST'],
         CLOUD_AGENT_SESSION: {
           idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
@@ -855,10 +852,11 @@ describe('SessionService', () => {
         env: envWithIngest,
       });
 
-      expect(exportSessionWithDiffMock).toHaveBeenCalledWith({
-        sessionId: kiloSessionId,
-        kiloUserId: userId,
-      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: `https://session-ingest/internal/session/${kiloSessionId}/export`,
+        })
+      );
 
       // No file writes for diff (only the kilo import tmp file)
       const diffWriteCalls = fakeSession.writeFile.mock.calls.filter(
@@ -867,13 +865,13 @@ describe('SessionService', () => {
       expect(diffWriteCalls).toHaveLength(0);
     });
 
-    it('throws when exportSessionWithDiff returns null (session not found)', async () => {
+    it('throws when session export returns 404 (session not found)', async () => {
       const mockDOGetMetadata = vi.fn();
-      const exportSessionWithDiffMock = vi.fn().mockResolvedValue(null);
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
       const envWithIngest: PersistenceEnv = {
         ...mockEnv,
         SESSION_INGEST: {
-          exportSessionWithDiff: exportSessionWithDiffMock,
+          fetch: fetchMock,
         } as unknown as PersistenceEnv['SESSION_INGEST'],
         CLOUD_AGENT_SESSION: {
           idFromName: vi.fn(() => 'mock-do-id' as unknown as DurableObjectId),
@@ -927,7 +925,7 @@ describe('SessionService', () => {
         })
       ).rejects.toThrow('session not found');
 
-      expect(exportSessionWithDiffMock).toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalled();
     });
   });
 

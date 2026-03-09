@@ -7,23 +7,27 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.workers.config.ts",
+    "test:integration:watch": "vitest --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "dependencies": {
     "@kilocode/db": "workspace:*",
     "@kilocode/worker-utils": "workspace:*",
+    "@streamparser/json": "^0.0.22",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260305.0",
+    "@cloudflare/vitest-pool-workers": "^0.12.8",
+    "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
     "@types/node": "^22",
-    "jose": "catalog:",
     "drizzle-kit": "catalog:",
     "eslint": "catalog:",
+    "jose": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"

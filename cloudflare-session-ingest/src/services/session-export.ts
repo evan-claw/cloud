@@ -29,19 +29,19 @@ async function verifySessionOwnership(
 }
 
 /**
- * Fetch the full session export payload from the SessionIngestDO.
+ * Fetch the full session export as a streaming ReadableStream.
  *
  * Verifies that the session exists in `cli_sessions_v2` and belongs to the
  * given user before reading the DO.
  *
- * @returns The raw JSON string from `SessionIngestDO.getAll()`, or `null`
- *          if the session does not exist or does not belong to the user.
+ * @returns A ReadableStream of the JSON payload, or `null` if the session
+ *          does not exist or does not belong to the user.
  */
 export async function getSessionExport(
   env: Env,
   sessionId: string,
   kiloUserId: string
-): Promise<string | null> {
+): Promise<ReadableStream<Uint8Array> | null> {
   const owned = await verifySessionOwnership(env, sessionId, kiloUserId);
   if (!owned) {
     return null;
@@ -49,33 +49,7 @@ export async function getSessionExport(
 
   return withDORetry(
     () => getSessionIngestDO(env, { kiloUserId, sessionId }),
-    stub => stub.getAll(),
-    'SessionIngestDO.getAll'
-  );
-}
-
-/**
- * Fetch the combined session snapshot and aggregated
- * file-level diff from the SessionIngestDO in a single RPC call.
- *
- * Verifies session ownership before reading the DO.
- *
- * @returns The raw JSON string of `{ snapshot, diff }`, or `null`
- *          if the session does not exist or does not belong to the user.
- */
-export async function getSessionWithDiffExport(
-  env: Env,
-  sessionId: string,
-  kiloUserId: string
-): Promise<string | null> {
-  const owned = await verifySessionOwnership(env, sessionId, kiloUserId);
-  if (!owned) {
-    return null;
-  }
-
-  return withDORetry(
-    () => getSessionIngestDO(env, { kiloUserId, sessionId }),
-    stub => stub.getSessionExportWithDiff(),
-    'SessionIngestDO.getSessionExportWithDiff'
+    stub => stub.getAllStream(),
+    'SessionIngestDO.getAllStream'
   );
 }
