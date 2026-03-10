@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import path from 'node:path';
-import { writeGwsCredentials, type GwsCredentialsDeps } from './gws-credentials';
+import { writeGwsCredentials, installGwsSkills, type GwsCredentialsDeps } from './gws-credentials';
+
+vi.mock('node:child_process', () => ({
+  exec: vi.fn((_cmd: string, cb: (err: Error | null) => void) => cb(null)),
+}));
 
 function mockDeps() {
   return {
@@ -88,5 +92,49 @@ describe('writeGwsCredentials', () => {
     // Should not throw
     const result = writeGwsCredentials({}, dir, deps);
     expect(result).toBe(false);
+  });
+
+  it('calls installGwsSkills when credentials are written', async () => {
+    const { exec } = await import('node:child_process');
+    const deps = mockDeps();
+    (exec as ReturnType<typeof vi.fn>).mockClear();
+
+    writeGwsCredentials(
+      {
+        GOOGLE_CLIENT_SECRET_JSON: '{"client_id":"test"}',
+        GOOGLE_CREDENTIALS_JSON: '{"refresh_token":"rt"}',
+      },
+      '/tmp/gws-test',
+      deps
+    );
+
+    expect(exec).toHaveBeenCalledWith(
+      'npx -y skills add https://github.com/googleworkspace/cli --yes --global',
+      expect.any(Function)
+    );
+  });
+
+  it('does not call installGwsSkills when credentials are absent', async () => {
+    const { exec } = await import('node:child_process');
+    const deps = mockDeps();
+    (exec as ReturnType<typeof vi.fn>).mockClear();
+
+    writeGwsCredentials({}, '/tmp/gws-test', deps);
+
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('installGwsSkills', () => {
+  it('runs npx skills add command', async () => {
+    const { exec } = await import('node:child_process');
+    (exec as ReturnType<typeof vi.fn>).mockClear();
+
+    installGwsSkills();
+
+    expect(exec).toHaveBeenCalledWith(
+      'npx -y skills add https://github.com/googleworkspace/cli --yes --global',
+      expect.any(Function)
+    );
   });
 });

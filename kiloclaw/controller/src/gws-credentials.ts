@@ -1,10 +1,12 @@
 /**
- * Writes Google Workspace CLI (gws) credential files to disk.
+ * Writes Google Workspace CLI (gws) credential files to disk and
+ * installs gws agent skills for OpenClaw.
  *
  * When the container starts with GOOGLE_CLIENT_SECRET_JSON and
  * GOOGLE_CREDENTIALS_JSON env vars, this module writes them to
  * ~/.config/gws/ so the gws CLI picks them up automatically.
  */
+import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -55,5 +57,25 @@ export function writeGwsCredentials(
   deps.writeFileSync(path.join(configDir, CREDENTIALS_FILE), credentials, { mode: 0o600 });
 
   console.log(`[gws] Wrote credentials to ${configDir}`);
+
+  // Install gws agent skills in the background (non-blocking, best-effort)
+  installGwsSkills();
+
   return true;
+}
+
+/**
+ * Install gws agent skills for OpenClaw via the `skills` CLI.
+ * Runs in the background — logs outcome but never blocks startup.
+ */
+export function installGwsSkills(): void {
+  const cmd = 'npx -y skills add https://github.com/googleworkspace/cli --yes --global';
+  console.log('[gws] Installing agent skills in background...');
+  exec(cmd, (error, _stdout, stderr) => {
+    if (error) {
+      console.error('[gws] Failed to install agent skills:', stderr || error.message);
+    } else {
+      console.log('[gws] Agent skills installed successfully');
+    }
+  });
 }
