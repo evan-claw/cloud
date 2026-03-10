@@ -638,7 +638,10 @@ export const microdollar_usage_metadata = pgTable(
     auto_model_id: integer(),
     market_cost: bigint({ mode: 'number' }),
   },
-  table => [index('idx_microdollar_usage_metadata_created_at').on(table.created_at)]
+  table => [
+    index('idx_microdollar_usage_metadata_created_at').on(table.created_at),
+    index('idx_microdollar_usage_metadata_session_id').on(table.session_id),
+  ]
 );
 
 export const api_request_log = pgTable(

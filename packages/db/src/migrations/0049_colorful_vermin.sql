@@ -1,0 +1,1 @@
+CREATE INDEX "idx_microdollar_usage_metadata_session_id" ON "microdollar_usage_metadata" USING btree ("session_id");
