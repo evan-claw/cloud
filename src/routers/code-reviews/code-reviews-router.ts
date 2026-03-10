@@ -88,7 +88,8 @@ async function recreatePRGateCheck(review: CloudAgentCodeReview) {
           repoOwner,
           repoName,
           checkRunId,
-          { status: 'completed', conclusion: 'cancelled' }
+          { status: 'completed', conclusion: 'cancelled' },
+          appType
         );
         logExceptInTest(
           `[retrigger] Cancelled orphaned check run ${checkRunId} for ${review.repo_full_name}#${review.pr_number}`

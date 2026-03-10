@@ -299,7 +299,8 @@ async function updatePRGateCheck(
         conclusion: checkRunMapping.conclusion,
         detailsUrl,
         output: { title: checkRunMapping.title, summary: checkRunMapping.summary },
-      }
+      },
+      integration.github_app_type ?? 'standard'
     );
 
     logExceptInTest(
