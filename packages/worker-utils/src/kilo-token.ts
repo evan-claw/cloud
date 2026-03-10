@@ -1,6 +1,8 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { z } from 'zod';
 
+export const KILO_TOKEN_VERSION = 3;
+
 /**
  * All known fields that can appear in a Kilo user JWT, sourced from
  * generateApiToken() / generateOrganizationApiToken() in src/lib/tokens.ts.
@@ -8,7 +10,7 @@ import { z } from 'zod';
  */
 export const kiloTokenPayload = z.object({
   // Core — always present
-  version: z.literal(3),
+  version: z.literal(KILO_TOKEN_VERSION),
   kiloUserId: z.string().min(1),
   // Present in generateApiToken / generateOrganizationApiToken, absent in generateInternalServiceToken
   apiTokenPepper: z.string().nullable().optional(),
@@ -29,8 +31,7 @@ export const kiloTokenPayload = z.object({
 });
 
 export type KiloTokenPayload = z.infer<typeof kiloTokenPayload>;
-
-const KILO_TOKEN_VERSION = 3;
+const signKiloTokenPayload = kiloTokenPayload.omit({ iat: true, exp: true }).strict();
 
 /**
  * Optional claims beyond the core fields (userId, pepper, version, env).
@@ -71,7 +72,9 @@ export async function signKiloToken(params: {
     payload.env = params.env;
   }
 
-  const token = await new SignJWT(payload)
+  const validatedPayload = signKiloTokenPayload.parse(payload);
+
+  const token = await new SignJWT(validatedPayload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt(now)
     .setExpirationTime(exp)

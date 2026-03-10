@@ -844,7 +844,7 @@ describe('buildUserEnvVars API key refresh', () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stale-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
 
     const result = await callBuildUserEnvVars(instance);
@@ -876,7 +876,7 @@ describe('buildUserEnvVars API key refresh', () => {
     const { instance, storage } = createInstance(createFakeStorage(), env);
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stored-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
 
     await callBuildUserEnvVars(instance);
@@ -889,11 +889,30 @@ describe('buildUserEnvVars API key refresh', () => {
     expect(storage._store.get('kilocodeApiKey')).toBe('stored-key');
   });
 
+  it('rejects when Hyperdrive is unavailable and the stored key is expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'));
+
+    const env = createFakeEnv();
+    env.HYPERDRIVE = { connectionString: '' } as never;
+    const { instance, storage } = createInstance(createFakeStorage(), env);
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-03-10T11:59:59.000Z',
+    });
+
+    await expect(callBuildUserEnvVars(instance)).rejects.toThrow(
+      'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+    );
+    expect(db.findPepperByUserId).not.toHaveBeenCalled();
+    expect(gatewayEnv.buildEnvVars).not.toHaveBeenCalled();
+  });
+
   it('falls back to the stored key and logs when the user is missing', async () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stored-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
     (db.findPepperByUserId as Mock).mockResolvedValueOnce(null);
 
@@ -910,7 +929,7 @@ describe('buildUserEnvVars API key refresh', () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stored-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
     const err = new Error('db down');
     (db.findPepperByUserId as Mock).mockRejectedValueOnce(err);
@@ -927,13 +946,35 @@ describe('buildUserEnvVars API key refresh', () => {
     expect(options.kilocodeApiKey).toBe('stored-key');
   });
 
+  it('rejects when minting fails and the stored key is expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'));
+
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-03-10T11:59:59.000Z',
+    });
+    const err = new Error('db down');
+    (db.findPepperByUserId as Mock).mockRejectedValueOnce(err);
+
+    await expect(callBuildUserEnvVars(instance)).rejects.toThrow(
+      'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      '[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:',
+      err
+    );
+    expect(gatewayEnv.buildEnvVars).not.toHaveBeenCalled();
+  });
+
   it('falls back to the stored key and logs when minting times out', async () => {
     vi.useFakeTimers();
 
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stored-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
     (db.findPepperByUserId as Mock).mockImplementationOnce(() => new Promise(() => undefined));
 
@@ -963,7 +1004,7 @@ describe('buildUserEnvVars API key refresh', () => {
     const { instance, storage } = createInstance(createFakeStorage(), env);
     await seedProvisioned(storage, {
       kilocodeApiKey: 'stored-key',
-      kilocodeApiKeyExpiresAt: '2026-01-01T00:00:00.000Z',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
     });
 
     await expect(callBuildUserEnvVars(instance)).rejects.toThrow(

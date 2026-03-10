@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SignJWT } from 'jose';
-import { kiloTokenPayload, signKiloToken, verifyKiloToken } from './kilo-token.js';
+import {
+  kiloTokenPayload,
+  KILO_TOKEN_VERSION,
+  signKiloToken,
+  verifyKiloToken,
+  type SignKiloTokenExtra,
+} from './kilo-token.js';
 
 const SECRET = 'test-secret-at-least-32-characters-long';
 
@@ -40,12 +46,24 @@ describe('signKiloToken', () => {
     expect(payload).toMatchObject({
       kiloUserId: 'user-123',
       apiTokenPepper: 'pepper-123',
-      version: 3,
+      version: KILO_TOKEN_VERSION,
       env: 'development',
       botId: 'bot-1',
       internalApiUse: true,
       gastownAccess: true,
     });
+  });
+
+  it('rejects runtime extras outside the closed schema', async () => {
+    await expect(
+      signKiloToken({
+        userId: 'user-123',
+        pepper: null,
+        secret: SECRET,
+        expiresInSeconds: 60,
+        extra: { unknownClaim: true } as unknown as SignKiloTokenExtra,
+      })
+    ).rejects.toThrow();
   });
 
   it('returns an ISO expiresAt derived from expiresInSeconds', async () => {
@@ -108,7 +126,7 @@ describe('verifyKiloToken', () => {
     const token = await sign({ version: 3, kiloUserId: 'user-123' });
     const payload = await verifyKiloToken(token, SECRET);
     expect(payload.kiloUserId).toBe('user-123');
-    expect(payload.version).toBe(3);
+    expect(payload.version).toBe(KILO_TOKEN_VERSION);
   });
 
   it('passthrough preserves extra claims', async () => {

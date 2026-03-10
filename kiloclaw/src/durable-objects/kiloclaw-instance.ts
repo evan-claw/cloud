@@ -2796,6 +2796,19 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     });
   }
 
+  private hasExpiredStoredApiKey(): boolean {
+    if (!this.kilocodeApiKey || !this.kilocodeApiKeyExpiresAt) {
+      return false;
+    }
+
+    const expiresAtMs = Date.parse(this.kilocodeApiKeyExpiresAt);
+    if (Number.isNaN(expiresAtMs)) {
+      return false;
+    }
+
+    return expiresAtMs <= Date.now();
+  }
+
   private async buildUserEnvVars(): Promise<{
     envVars: Record<string, string>;
     minSecretsVersion: number;
@@ -2834,6 +2847,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       } catch (err) {
         console.warn('[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:', err);
       }
+    }
+
+    if (this.hasExpiredStoredApiKey()) {
+      throw new Error(
+        'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+      );
     }
 
     const { env: plainEnv, sensitive } = await buildEnvVars(
