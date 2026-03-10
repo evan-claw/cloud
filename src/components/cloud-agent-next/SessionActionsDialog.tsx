@@ -187,7 +187,7 @@ export function SessionActionsDialog({
 
             {kiloSessionId ? (
               <CopyableCommand
-                command={`kilo --session ${kiloSessionId} --fork`}
+                command={`kilo --session ${kiloSessionId} --cloud-fork`}
                 className="bg-muted rounded-md px-3 py-2 text-sm"
               />
             ) : (
