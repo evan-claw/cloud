@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-transport-https \
     ca-certificates \
     gnupg \
+    expect \
   && rm -rf /var/lib/apt/lists/*
 
 # Install gcloud CLI

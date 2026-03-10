@@ -15,7 +15,7 @@
  *   docker run -it --network host kilocode/google-setup --api-key=kilo_abc123
  */
 
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -99,11 +99,31 @@ const { publicKey: publicKeyPem } = await pubKeyRes.json();
 console.log('Setting up Google OAuth client...');
 console.log('Follow the prompts to create an OAuth client in your Google Cloud project.\n');
 
-try {
-  // Don't pass --login: we handle OAuth ourselves to avoid gws's encrypted credential store.
-  // When prompted "Run gws auth login now? [Y/n]", type 'n'.
-  execFileSync('gws', ['auth', 'setup'], { stdio: 'inherit' });
-} catch {
+// Use `expect` to wrap `gws auth setup` in a real PTY so all interactive prompts
+// work normally, while auto-answering "n" to the final "Run gws auth login now?" prompt.
+// Write expect script to a temp file to avoid JS→shell→Tcl escaping issues.
+const expectScriptPath = '/tmp/gws-setup.exp';
+fs.writeFileSync(expectScriptPath, [
+  '#!/usr/bin/expect -f',
+  'set timeout -1',
+  'spawn gws auth setup',
+  'interact -o "Y/n" {',
+  '  send "n\\r"',
+  '}',
+  'catch wait result',
+  'exit [lindex $result 3]',
+  '',
+].join('\n'));
+
+const setupExitCode = await new Promise((resolve) => {
+  const child = spawn('expect', [expectScriptPath], {
+    stdio: 'inherit',
+  });
+  child.on('close', (code) => resolve(code));
+  child.on('error', () => resolve(1));
+});
+
+if (setupExitCode !== 0) {
   console.error('\nFailed to set up OAuth client. Please try again.');
   process.exit(1);
 }
