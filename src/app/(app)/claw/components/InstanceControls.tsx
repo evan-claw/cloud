@@ -200,7 +200,8 @@ export function InstanceControls({
               <Label htmlFor="upgrade" className="block cursor-pointer leading-tight">
                 <span className="text-foreground text-sm font-medium">Upgrade to latest</span>
                 <span className="text-muted-foreground mt-0.5 block text-xs">
-                  Upgrade to the latest supported KiloClaw version, redeploy and apply pending config changes.
+                  Upgrade to the latest supported KiloClaw version, redeploy and apply pending
+                  config changes.
                 </span>
               </Label>
             </div>
