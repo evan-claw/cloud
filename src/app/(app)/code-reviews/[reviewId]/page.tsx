@@ -6,8 +6,8 @@ export default async function CodeReviewDetailPage({
 }: {
   params: Promise<{ reviewId: string }>;
 }) {
-  await getUserFromAuthOrRedirect('/users/sign_in?callbackPath=/code-reviews');
   const { reviewId } = await params;
+  await getUserFromAuthOrRedirect(`/users/sign_in?callbackPath=/code-reviews/${reviewId}`);
 
   return <CodeReviewDetailClient reviewId={reviewId} />;
 }
