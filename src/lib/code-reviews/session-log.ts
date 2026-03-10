@@ -33,7 +33,7 @@ export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEnt
     const info = msg.info as Record<string, unknown>;
     const role = info.role as string | undefined;
     const time = info.time as { created?: number } | undefined;
-    const baseTs = time?.created ? new Date(time.created * 1000).toISOString() : '';
+    const baseTs = time?.created ? new Date(time.created).toISOString() : '';
 
     // Show the initial user prompt as a single log line (truncated)
     if (role === 'user') {
