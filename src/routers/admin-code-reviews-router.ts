@@ -144,7 +144,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       !agentVersion || agentVersion === 'all'
         ? await db
             .select({
-              agent_version: sql<string>`COALESCE(${cloud_agent_code_reviews.agent_version}, 'unknown')`,
+              agent_version: sql<string>`COALESCE(${cloud_agent_code_reviews.agent_version}, 'v1')`,
               total: sql<number>`COUNT(*)`,
               completed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'completed')`,
               failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeInsufficientCreditsError})`,
@@ -408,7 +408,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     const result = await db
       .select({
         day: sql<string>`DATE_TRUNC('day', ${cloud_agent_code_reviews.created_at})::date::text`,
-        agent_version: sql<string>`COALESCE(${cloud_agent_code_reviews.agent_version}, 'unknown')`,
+        agent_version: sql<string>`COALESCE(${cloud_agent_code_reviews.agent_version}, 'v1')`,
         avg_seconds: sql<number>`AVG(${durationExpr})`,
         p50_seconds: sql<number>`percentile_cont(0.5) WITHIN GROUP (ORDER BY ${durationExpr})`,
         p90_seconds: sql<number>`percentile_cont(0.9) WITHIN GROUP (ORDER BY ${durationExpr})`,
