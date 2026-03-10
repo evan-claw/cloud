@@ -244,6 +244,43 @@ export class WrapperClient {
       logger.debug('WrapperClient: wrapper not running, starting...');
     }
 
+    // Pre-flight: verify bun runtime and wrapper binary are functional before
+    // committing to the full start+waitForPort loop.  A fast `bun --version`
+    // catches SIGILL (exit 132) on hosts whose CPU lacks required instructions,
+    // missing/corrupt binaries, etc.  We also verify the wrapper script exists.
+    try {
+      const [bunCheck, fileCheck] = await Promise.all([
+        this.session.exec('bun --version', { timeout: 5_000 }),
+        this.session.exec(`test -f ${wrapperPath} && echo ok`, { timeout: 5_000 }),
+      ]);
+
+      if (bunCheck.exitCode !== 0) {
+        const detail =
+          bunCheck.exitCode === 132
+            ? 'SIGILL â bun binary incompatible with host CPU'
+            : `exit code ${bunCheck.exitCode}`;
+        throw new WrapperNotReadyError(
+          `Wrapper pre-flight failed: bun runtime is broken (${detail}). stderr: ${bunCheck.stderr?.trim() ?? '(empty)'}`
+        );
+      }
+
+      if (!fileCheck.stdout?.includes('ok')) {
+        throw new WrapperNotReadyError(
+          `Wrapper pre-flight failed: ${wrapperPath} not found in container`
+        );
+      }
+
+      logger.debug('WrapperClient: pre-flight passed', {
+        bunVersion: bunCheck.stdout?.trim(),
+      });
+    } catch (error) {
+      if (error instanceof WrapperNotReadyError) throw error;
+      // exec itself failed (e.g. sandbox connectivity) â log but don't block
+      logger.warn('WrapperClient: pre-flight check failed to execute, proceeding anyway', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Start the wrapper process using startProcess so it's trackable via listProcesses()
     // The command includes a session marker so we can find this wrapper later
     const sessionMarker = getWrapperSessionMarker(sessionId);
