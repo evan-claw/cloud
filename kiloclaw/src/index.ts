@@ -82,6 +82,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
     const missing: string[] = [];
     if (!c.env.INTERNAL_API_SECRET) missing.push('INTERNAL_API_SECRET');
     if (!c.env.HYPERDRIVE?.connectionString) missing.push('HYPERDRIVE');
+    if (!c.env.NEXTAUTH_SECRET) missing.push('NEXTAUTH_SECRET');
     if (!c.env.GATEWAY_TOKEN_SECRET) missing.push('GATEWAY_TOKEN_SECRET');
     if (!c.env.FLY_API_TOKEN) missing.push('FLY_API_TOKEN');
     if (missing.length > 0) {

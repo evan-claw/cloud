@@ -12,7 +12,7 @@
  * - Alarm cadence varies by status
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 
 // -- Mock cloudflare:workers --
 // Must be before the DO import so vitest hoists it.
@@ -67,6 +67,10 @@ vi.mock('../lib/image-version', async () => {
 vi.mock('../db', () => ({
   getWorkerDb: vi.fn(() => ({})),
   getActiveInstance: vi.fn().mockResolvedValue(null),
+  findPepperByUserId: vi.fn().mockResolvedValue({
+    id: 'user-1',
+    api_token_pepper: 'pepper-1',
+  }),
   markInstanceDestroyed: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -88,7 +92,9 @@ import { KiloClawInstance } from './kiloclaw-instance';
 import * as flyClient from '../fly/client';
 import { FlyApiError } from '../fly/client';
 import * as db from '../db';
+import * as gatewayEnv from '../gateway/env';
 import { resolveLatestVersion } from '../lib/image-version';
+import { verifyKiloToken } from '@kilocode/worker-utils';
 import {
   ALARM_INTERVAL_RUNNING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
@@ -152,12 +158,14 @@ function createFakeEnv() {
     FLY_APP_NAME: 'test-app',
     FLY_REGION: 'us,eu',
     GATEWAY_TOKEN_SECRET: 'test-secret',
+    NEXTAUTH_SECRET: 'test-nextauth-secret-at-least-32-chars',
+    WORKER_ENV: 'development',
     KILOCLAW_INSTANCE: {} as unknown,
     KILOCLAW_APP: {
       idFromName: vi.fn().mockReturnValue('fake-do-id'),
       get: vi.fn().mockReturnValue(appStub),
     } as unknown,
-    HYPERDRIVE: { connectionString: '' } as unknown,
+    HYPERDRIVE: { connectionString: 'postgresql://fake' } as unknown,
     KV_CLAW_CACHE: {
       get: vi.fn().mockResolvedValue(null),
       put: vi.fn().mockResolvedValue(undefined),
@@ -247,6 +255,10 @@ beforeEach(() => {
       return Promise.resolve({ ok: true, status: 200 });
     })
   );
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('two-phase destroy', () => {
@@ -804,6 +816,202 @@ describe('status guards', () => {
     // Status unchanged
     expect(storage._store.get('status')).toBe('destroying');
     expect(flyClient.stopMachineAndWait).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildUserEnvVars API key refresh', () => {
+  async function callBuildUserEnvVars(instance: KiloClawInstance) {
+    await (instance as unknown as { loadState: () => Promise<void> }).loadState();
+    return await (
+      instance as unknown as {
+        buildUserEnvVars: () => Promise<{
+          envVars: Record<string, string>;
+          minSecretsVersion: number;
+        }>;
+      }
+    ).buildUserEnvVars();
+  }
+
+  beforeEach(() => {
+    (gatewayEnv.buildEnvVars as Mock).mockClear();
+    (db.findPepperByUserId as Mock).mockResolvedValue({
+      id: 'user-1',
+      api_token_pepper: 'pepper-1',
+    });
+  });
+
+  it('mints a fresh key, persists it, and passes it to buildEnvVars', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stale-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+
+    const result = await callBuildUserEnvVars(instance);
+
+    expect(result.minSecretsVersion).toBe(1);
+    expect(db.findPepperByUserId).toHaveBeenCalledTimes(1);
+    expect(gatewayEnv.buildEnvVars).toHaveBeenCalledTimes(1);
+
+    const options = (gatewayEnv.buildEnvVars as Mock).mock.calls[0][3] as {
+      kilocodeApiKey?: string;
+    };
+    expect(options.kilocodeApiKey).toBeTypeOf('string');
+    expect(options.kilocodeApiKey).not.toBe('stale-key');
+    expect(storage._store.get('kilocodeApiKey')).toBe(options.kilocodeApiKey);
+    expect(storage._store.get('kilocodeApiKeyExpiresAt')).toBeTypeOf('string');
+
+    const payload = await verifyKiloToken(
+      options.kilocodeApiKey!,
+      'test-nextauth-secret-at-least-32-chars'
+    );
+    expect(payload.kiloUserId).toBe('user-1');
+    expect(payload.apiTokenPepper).toBe('pepper-1');
+    expect(payload.env).toBe('development');
+  });
+
+  it('falls back to the stored key when Hyperdrive is unavailable', async () => {
+    const env = createFakeEnv();
+    env.HYPERDRIVE = { connectionString: '' } as never;
+    const { instance, storage } = createInstance(createFakeStorage(), env);
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+
+    await callBuildUserEnvVars(instance);
+
+    expect(db.findPepperByUserId).not.toHaveBeenCalled();
+    const options = (gatewayEnv.buildEnvVars as Mock).mock.calls[0][3] as {
+      kilocodeApiKey?: string;
+    };
+    expect(options.kilocodeApiKey).toBe('stored-key');
+    expect(storage._store.get('kilocodeApiKey')).toBe('stored-key');
+  });
+
+  it('rejects when Hyperdrive is unavailable and the stored key is expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'));
+
+    const env = createFakeEnv();
+    env.HYPERDRIVE = { connectionString: '' } as never;
+    const { instance, storage } = createInstance(createFakeStorage(), env);
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-03-10T11:59:59.000Z',
+    });
+
+    await expect(callBuildUserEnvVars(instance)).rejects.toThrow(
+      'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+    );
+    expect(db.findPepperByUserId).not.toHaveBeenCalled();
+    expect(gatewayEnv.buildEnvVars).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the stored key and logs when the user is missing', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+    (db.findPepperByUserId as Mock).mockResolvedValueOnce(null);
+
+    await callBuildUserEnvVars(instance);
+
+    expect(console.warn).toHaveBeenCalledWith('[DO] mintFreshApiKey: user not found in DB');
+    const options = (gatewayEnv.buildEnvVars as Mock).mock.calls[0][3] as {
+      kilocodeApiKey?: string;
+    };
+    expect(options.kilocodeApiKey).toBe('stored-key');
+  });
+
+  it('falls back to the stored key and logs when the DB lookup throws', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+    const err = new Error('db down');
+    (db.findPepperByUserId as Mock).mockRejectedValueOnce(err);
+
+    await callBuildUserEnvVars(instance);
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:',
+      err
+    );
+    const options = (gatewayEnv.buildEnvVars as Mock).mock.calls[0][3] as {
+      kilocodeApiKey?: string;
+    };
+    expect(options.kilocodeApiKey).toBe('stored-key');
+  });
+
+  it('rejects when minting fails and the stored key is expired', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T12:00:00.000Z'));
+
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-03-10T11:59:59.000Z',
+    });
+    const err = new Error('db down');
+    (db.findPepperByUserId as Mock).mockRejectedValueOnce(err);
+
+    await expect(callBuildUserEnvVars(instance)).rejects.toThrow(
+      'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      '[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:',
+      err
+    );
+    expect(gatewayEnv.buildEnvVars).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the stored key and logs when minting times out', async () => {
+    vi.useFakeTimers();
+
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+    (db.findPepperByUserId as Mock).mockImplementationOnce(() => new Promise(() => undefined));
+
+    const buildPromise = callBuildUserEnvVars(instance);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await buildPromise;
+
+    const warningCall = (console.warn as Mock).mock.calls.find(
+      (call: unknown[]) =>
+        call[0] === '[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:' &&
+        call[1] instanceof Error &&
+        call[1].message === 'API key mint timed out'
+    );
+    expect(warningCall).toBeDefined();
+
+    const options = (gatewayEnv.buildEnvVars as Mock).mock.calls[0][3] as {
+      kilocodeApiKey?: string;
+    };
+    expect(options.kilocodeApiKey).toBe('stored-key');
+  });
+
+  it('rejects env building when NEXTAUTH_SECRET is missing', async () => {
+    const env = {
+      ...createFakeEnv(),
+      NEXTAUTH_SECRET: undefined,
+    } as unknown as ReturnType<typeof createFakeEnv>;
+    const { instance, storage } = createInstance(createFakeStorage(), env);
+    await seedProvisioned(storage, {
+      kilocodeApiKey: 'stored-key',
+      kilocodeApiKeyExpiresAt: '2026-12-01T00:00:00.000Z',
+    });
+
+    await expect(callBuildUserEnvVars(instance)).rejects.toThrow(
+      'Cannot build env vars: NEXTAUTH_SECRET missing'
+    );
+    expect(db.findPepperByUserId).not.toHaveBeenCalled();
+    expect(gatewayEnv.buildEnvVars).not.toHaveBeenCalled();
   });
 });
 

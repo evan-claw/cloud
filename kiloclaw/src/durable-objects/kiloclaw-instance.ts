@@ -22,10 +22,11 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
+import { signKiloToken, withTimeout } from '@kilocode/worker-utils';
 import type { KiloClawEnv } from '../types';
 import { sandboxIdFromUserId } from '../auth/sandbox-id';
 import { deriveGatewayToken } from '../auth/gateway-token';
-import { getWorkerDb, getActiveInstance, markInstanceDestroyed } from '../db';
+import { findPepperByUserId, getWorkerDb, getActiveInstance, markInstanceDestroyed } from '../db';
 import { buildEnvVars } from '../gateway/env';
 import {
   PersistedStateSchema,
@@ -49,6 +50,7 @@ import {
   HEALTH_PROBE_INTERVAL_MS,
   STALE_PROVISION_THRESHOLD_MS,
   OPENCLAW_BUILTIN_DEFAULT_MODEL,
+  KILOCODE_API_KEY_EXPIRY_SECONDS,
 } from '../config';
 import type { FlyClientConfig } from '../fly/client';
 import type { FlyMachineConfig, FlyVolumeSnapshot } from '../fly/types';
@@ -114,6 +116,8 @@ const STORAGE_KEYS = Object.keys(PersistedStateSchema.shape);
 function storageUpdate(update: Partial<PersistedState>): Partial<PersistedState> {
   return update;
 }
+
+const MINT_TIMEOUT_MS = 5_000;
 
 // ============================================================================
 // Structured reconciliation logging
@@ -2783,6 +2787,43 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
   }
 
+  private async mintFreshApiKey(
+    secret: string
+  ): Promise<{ token: string; expiresAt: string } | null> {
+    const connectionString = this.env.HYPERDRIVE?.connectionString;
+    if (!this.userId || !connectionString) {
+      return null;
+    }
+
+    const db = getWorkerDb(connectionString);
+    const user = await findPepperByUserId(db, this.userId);
+    if (!user) {
+      console.warn('[DO] mintFreshApiKey: user not found in DB');
+      return null;
+    }
+
+    return signKiloToken({
+      userId: user.id,
+      pepper: user.api_token_pepper,
+      secret,
+      expiresInSeconds: KILOCODE_API_KEY_EXPIRY_SECONDS,
+      env: this.env.WORKER_ENV,
+    });
+  }
+
+  private hasExpiredStoredApiKey(): boolean {
+    if (!this.kilocodeApiKey || !this.kilocodeApiKeyExpiresAt) {
+      return false;
+    }
+
+    const expiresAtMs = Date.parse(this.kilocodeApiKeyExpiresAt);
+    if (Number.isNaN(expiresAtMs)) {
+      return false;
+    }
+
+    return expiresAtMs <= Date.now();
+  }
+
   private async buildUserEnvVars(): Promise<{
     envVars: Record<string, string>;
     minSecretsVersion: number;
@@ -2793,6 +2834,41 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (!this.userId) {
       throw new Error('Cannot build env vars: userId missing');
     }
+    if (!this.env.NEXTAUTH_SECRET) {
+      throw new Error('Cannot build env vars: NEXTAUTH_SECRET missing');
+    }
+    const nextAuthSecret = this.env.NEXTAUTH_SECRET;
+
+    let kilocodeApiKey = this.kilocodeApiKey ?? undefined;
+    if (this.userId && this.env.HYPERDRIVE?.connectionString) {
+      try {
+        const freshKey = await withTimeout(
+          this.mintFreshApiKey(nextAuthSecret),
+          MINT_TIMEOUT_MS,
+          'API key mint timed out'
+        );
+        if (freshKey) {
+          kilocodeApiKey = freshKey.token;
+          this.kilocodeApiKey = freshKey.token;
+          this.kilocodeApiKeyExpiresAt = freshKey.expiresAt;
+          await this.ctx.storage.put(
+            storageUpdate({
+              kilocodeApiKey: freshKey.token,
+              kilocodeApiKeyExpiresAt: freshKey.expiresAt,
+            })
+          );
+          console.log('[DO] buildUserEnvVars: minted fresh API key, expires:', freshKey.expiresAt);
+        }
+      } catch (err) {
+        console.warn('[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:', err);
+      }
+    }
+
+    if (this.hasExpiredStoredApiKey()) {
+      throw new Error(
+        'Cannot build env vars: stored KiloCode API key expired and fresh mint unavailable'
+      );
+    }
 
     const { env: plainEnv, sensitive } = await buildEnvVars(
       this.env,
@@ -2801,7 +2877,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       {
         envVars: this.envVars ?? undefined,
         encryptedSecrets: this.encryptedSecrets ?? undefined,
-        kilocodeApiKey: this.kilocodeApiKey ?? undefined,
+        kilocodeApiKey,
         kilocodeDefaultModel: this.kilocodeDefaultModel ?? undefined,
         channels: this.channels ?? undefined,
         instanceFeatures: this.instanceFeatures,
