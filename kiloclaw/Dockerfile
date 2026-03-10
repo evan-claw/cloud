@@ -54,6 +54,9 @@ RUN npm install -g mcporter@0.7.3
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.11.1
 
+# Install gws CLI (Google Workspace CLI)
+RUN npm install -g @googleworkspace/cli
+
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
 RUN ARCH="$(dpkg --print-architecture)" \
@@ -69,8 +72,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 #   so user-installed tools persist across restarts and are included in snapshots.
 # - npm/Node (installed to /usr/local) and apt packages (/usr/bin) are unaffected.
 ENV PATH="/usr/local/go/bin:/root/go/bin:$PATH"
-RUN GOBIN=/usr/local/bin go install github.com/steipete/gogcli/cmd/gog@v0.11.0 \
-    && GOBIN=/usr/local/bin go install github.com/steipete/goplaces/cmd/goplaces@v0.3.0 \
+RUN GOBIN=/usr/local/bin go install github.com/steipete/goplaces/cmd/goplaces@v0.3.0 \
     && GOBIN=/usr/local/bin go install github.com/Hyaxia/blogwatcher/cmd/blogwatcher@v0.0.2 \
     && GOBIN=/usr/local/bin go install github.com/xdevplatform/xurl@v1.0.3 \
     && GOBIN=/usr/local/bin go install github.com/steipete/gifgrep/cmd/gifgrep@v0.2.3 \
