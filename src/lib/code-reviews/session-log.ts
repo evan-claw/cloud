@@ -24,7 +24,7 @@ export type SessionLogEntry = {
  *
  * Walks each StoredMessage's parts array and extracts tool calls, text output,
  * and errors into timestamped log lines. Skips reasoning, compaction, and file
- * parts â those add noise without actionable context for end users.
+ * parts — those add noise without actionable context for end users.
  */
 export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEntry[] {
   const entries: SessionLogEntry[] = [];
@@ -43,7 +43,7 @@ export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEnt
         .join('')
         .trim();
       if (textContent) {
-        const truncated = textContent.length > 300 ? textContent.slice(0, 300) + 'â¦' : textContent;
+        const truncated = textContent.length > 300 ? textContent.slice(0, 300) + '…' : textContent;
         entries.push({ timestamp: baseTs, eventType: 'info', message: truncated });
       }
       continue;
@@ -72,7 +72,7 @@ export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEnt
           const query = input.query ?? input.pattern;
           if (typeof filePath === 'string') detail = filePath;
           else if (typeof command === 'string')
-            detail = command.length > 120 ? command.slice(0, 120) + 'â¦' : command;
+            detail = command.length > 120 ? command.slice(0, 120) + '…' : command;
           else if (typeof query === 'string') detail = query;
         }
 
@@ -81,7 +81,7 @@ export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEnt
           entries.push({
             timestamp: baseTs,
             eventType: 'error',
-            message: `Tool: ${toolName ?? 'unknown'} â error`,
+            message: `Tool: ${toolName ?? 'unknown'} — error`,
             content: errorStr ?? detail,
           });
         } else {
@@ -98,7 +98,7 @@ export function v2SnapshotToLogEntries(snapshot: SessionSnapshot): SessionLogEnt
       if (partType === 'text') {
         const text = (p.text as string | undefined)?.trim();
         if (!text) continue;
-        const truncated = text.length > 200 ? text.slice(0, 200) + 'â¦' : text;
+        const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text;
         entries.push({ timestamp: baseTs, eventType: 'text', message: truncated });
         continue;
       }
@@ -143,7 +143,7 @@ export function v1BlobToLogEntries(rawMessages: unknown): SessionLogEntry[] {
     if (msg.type === 'user') {
       const text = (msg.text || msg.content || '').trim();
       if (text) {
-        const truncated = text.length > 300 ? text.slice(0, 300) + 'â¦' : text;
+        const truncated = text.length > 300 ? text.slice(0, 300) + '…' : text;
         entries.push({ timestamp: ts, eventType: 'info', message: truncated });
       }
       continue;
@@ -169,7 +169,7 @@ function cloudMessageToLogEntry(msg: CloudMessage, ts: string): SessionLogEntry 
       const command = meta.command;
       if (typeof filePath === 'string') detail = filePath;
       else if (typeof command === 'string')
-        detail = command.length > 120 ? command.slice(0, 120) + 'â¦' : command;
+        detail = command.length > 120 ? command.slice(0, 120) + '…' : command;
     }
     return { timestamp: ts, eventType: 'tool', message: `Tool: ${toolName}`, content: detail };
   }
@@ -183,7 +183,7 @@ function cloudMessageToLogEntry(msg: CloudMessage, ts: string): SessionLogEntry 
   if (msg.say === 'completion_result') {
     const text = (msg.text || msg.content || '').trim();
     if (!text) return null;
-    const truncated = text.length > 200 ? text.slice(0, 200) + 'â¦' : text;
+    const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text;
     return { timestamp: ts, eventType: 'text', message: truncated };
   }
 
@@ -191,7 +191,7 @@ function cloudMessageToLogEntry(msg: CloudMessage, ts: string): SessionLogEntry 
   if (msg.say === 'text') {
     const text = (msg.text || msg.content || '').trim();
     if (!text) return null;
-    const truncated = text.length > 200 ? text.slice(0, 200) + 'â¦' : text;
+    const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text;
     return { timestamp: ts, eventType: 'text', message: truncated };
   }
 
@@ -201,7 +201,7 @@ function cloudMessageToLogEntry(msg: CloudMessage, ts: string): SessionLogEntry 
     return {
       timestamp: ts,
       eventType: 'error',
-      message: `Error: ${text.length > 200 ? text.slice(0, 200) + 'â¦' : text}`,
+      message: `Error: ${text.length > 200 ? text.slice(0, 200) + '…' : text}`,
     };
   }
 
