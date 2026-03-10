@@ -1,4 +1,4 @@
-import { isFreeModel, kiloFreeModels, preferredModels } from '@/lib/models';
+import { kiloFreeModels, preferredModels } from '@/lib/models';
 import { PROVIDERS } from '@/lib/providers';
 import type { OpenRouterModel } from '@/lib/organizations/organization-types';
 import {
@@ -69,16 +69,10 @@ function enhancedModelList(models: OpenRouterModel[]) {
       const preferredIndex = preferredModels.indexOf(model.id);
       const ageDays = (Date.now() / 1_000 - model.created) / (24 * 3600);
       const isNew = preferredIndex >= 0 && ageDays >= 0 && ageDays < 7;
-      const skipSuffix = model.name.endsWith(')') || /\bfree\b/i.test(model.name);
+      const skipSuffix = model.name.endsWith(')');
       return {
         ...model,
-        name: skipSuffix
-          ? model.name
-          : isFreeModel(model.id)
-            ? model.name + ' (free)'
-            : isNew
-              ? model.name + ' (new)'
-              : model.name,
+        name: skipSuffix ? model.name : isNew ? model.name + ' (new)' : model.name,
         preferredIndex: preferredIndex >= 0 ? preferredIndex : undefined,
         settings: model.settings ?? getModelSettings(model.id),
         versioned_settings: model.versioned_settings ?? getVersionedModelSettings(model.id),
