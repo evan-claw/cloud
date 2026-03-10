@@ -58,12 +58,10 @@ describe('validateUserEnvVarName', () => {
     expect(() => validateUserEnvVarName('var123')).not.toThrow();
   });
 
-  it('rejects KILOCLAW_ENC_ prefix', () => {
+  it('rejects KILOCLAW_ prefix', () => {
     expect(() => validateUserEnvVarName('KILOCLAW_ENC_FOO')).toThrow('reserved prefix');
-  });
-
-  it('rejects KILOCLAW_ENV_ prefix', () => {
     expect(() => validateUserEnvVarName('KILOCLAW_ENV_KEY')).toThrow('reserved prefix');
+    expect(() => validateUserEnvVarName('KILOCLAW_FOO')).toThrow('reserved prefix');
   });
 
   it('rejects names with hyphens', () => {

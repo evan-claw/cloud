@@ -29,6 +29,7 @@ import { getWorkerDb, getActiveInstance, markInstanceDestroyed } from '../db';
 import { buildEnvVars } from '../gateway/env';
 import {
   PersistedStateSchema,
+  DEFAULT_INSTANCE_FEATURES,
   type InstanceConfig,
   type PersistedState,
   type EncryptedEnvelope,
@@ -187,6 +188,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private lastDestroyErrorMessage: string | null = null;
   private lastDestroyErrorAt: number | null = null;
   private lastBoundMachineRecoveryAt: number | null = null;
+  private instanceFeatures: string[] = [];
 
   // In-memory only (not persisted to SQLite) — throttles live Fly checks in getStatus()
   private lastLiveCheckAt: number | null = null;
@@ -233,6 +235,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.lastDestroyErrorMessage = s.lastDestroyErrorMessage;
       this.lastDestroyErrorAt = s.lastDestroyErrorAt;
       this.lastBoundMachineRecoveryAt = s.lastBoundMachineRecoveryAt;
+      this.instanceFeatures = s.instanceFeatures;
     } else {
       const hasAnyData = entries.size > 0;
       if (hasAnyData) {
@@ -412,10 +415,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageDigest: this.trackedImageDigest,
     };
 
+    // Set default instance features on first provision; preserve existing on re-provision.
+    if (isNew) {
+      this.instanceFeatures = [...DEFAULT_INSTANCE_FEATURES];
+    }
+
     const update = isNew
       ? storageUpdate({
           ...configFields,
           ...versionFields,
+          instanceFeatures: this.instanceFeatures,
           provisionedAt: Date.now(),
           lastStartedAt: null,
           lastStoppedAt: null,
@@ -428,7 +437,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           pendingDestroyVolumeId: null,
           pendingPostgresMarkOnFinalize: false,
         })
-      : storageUpdate({ ...configFields, ...versionFields });
+      : storageUpdate({ ...configFields, ...versionFields, instanceFeatures: this.instanceFeatures });
 
     await this.ctx.storage.put(update);
 
@@ -2789,6 +2798,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         kilocodeApiKey: this.kilocodeApiKey ?? undefined,
         kilocodeDefaultModel: this.kilocodeDefaultModel ?? undefined,
         channels: this.channels ?? undefined,
+        instanceFeatures: this.instanceFeatures,
       }
     );
 

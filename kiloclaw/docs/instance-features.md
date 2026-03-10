@@ -1,0 +1,48 @@
+# Instance Feature Flags
+
+KiloClaw uses per-instance feature flags to gate behavior that should only apply to newly provisioned instances. This avoids breaking existing users whose agents may depend on default paths or conventions.
+
+## How it works
+
+Feature flags are owned by the Durable Object and stored in its SQLite state (`instanceFeatures` array). On first provision (`isNew = true`), the DO populates the current default set from `DEFAULT_INSTANCE_FEATURES`. On subsequent provisions and reboots, existing features are preserved.
+
+Features flow to the Fly machine as environment variables through the `buildEnvVars()` pipeline. Each feature maps to a `KILOCLAW_*` env var (defined in `FEATURE_TO_ENV_VAR` in `gateway/env.ts`). The startup script reads these env vars and conditionally enables behavior.
+
+```
+DO (source of truth) → buildEnvVars() → config.env → Fly machine → start-openclaw.sh
+```
+
+### Why the DO owns this
+
+- Single source of truth — no filesystem state to drift or audit
+- Uses the existing env var pipeline — same as every other config value
+- Observable — feature set is in DO SQLite, queryable via admin APIs
+- Legacy instances get an empty array by default (Zod schema `.default([])`)
+
+## Current flags
+
+| Feature name | Env var | Description |
+|---|---|---|
+| `npm-global-prefix` | `KILOCLAW_NPM_GLOBAL_PREFIX` | Redirects `npm install -g` to `/root/.npm-global` (persistent volume) instead of `/usr/local` (image layer, lost on restart). PATH is set in the Dockerfile; `NPM_CONFIG_PREFIX` is exported at runtime. |
+
+## Adding a new flag
+
+1. Add the feature name to `DEFAULT_INSTANCE_FEATURES` in `kiloclaw-instance.ts`
+2. Add the feature-to-env-var mapping in `FEATURE_TO_ENV_VAR` in `gateway/env.ts`
+3. Add a conditional block in `start-openclaw.sh` that reads the env var
+4. If PATH changes are needed, add them to the `Dockerfile` (harmless when the feature is absent)
+5. Update the table above
+
+## Existing instances
+
+Features are set once at first provision and preserved on re-provision. New features added to `DEFAULT_INSTANCE_FEATURES` only apply to newly provisioned instances — existing instances keep their original set. This is by design to avoid breaking existing users.
+
+To get the latest feature set, a user must destroy and re-provision their instance.
+
+## Key files
+
+- `src/durable-objects/kiloclaw-instance.ts` — `DEFAULT_INSTANCE_FEATURES`, provision logic
+- `src/schemas/instance-config.ts` — `instanceFeatures` in `PersistedStateSchema`
+- `src/gateway/env.ts` — `FEATURE_TO_ENV_VAR`, maps features to env vars
+- `start-openclaw.sh` — reads env vars, applies runtime configuration
+- `Dockerfile` — PATH entries for feature directories

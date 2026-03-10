@@ -15,6 +15,15 @@ export type UserConfig = {
   kilocodeApiKey?: string | null;
   kilocodeDefaultModel?: string | null;
   channels?: EncryptedChannelTokens;
+  instanceFeatures?: string[];
+};
+
+/**
+ * Maps instance feature flag names to container environment variables.
+ * Each feature becomes a KILOCLAW_* env var set to "true" when enabled.
+ */
+export const FEATURE_TO_ENV_VAR: Record<string, string> = {
+  'npm-global-prefix': 'KILOCLAW_NPM_GLOBAL_PREFIX',
 };
 
 /**
@@ -49,6 +58,7 @@ const SENSITIVE_KEYS = new Set([
  * 3. User-provided encrypted secrets (override env vars on conflict)
  * 4. Decrypted channel tokens (mapped to container env var names)
  * 5. Reserved system vars (cannot be overridden by any user config)
+ * 6. Instance feature flags (cannot be overridden by any user config)
  *
  * Returns a split result: non-sensitive vars in `env`, sensitive vars in `sensitive`.
  * User-provided plaintext env vars go to `env` unless they match SENSITIVE_KEYS.
@@ -133,6 +143,15 @@ export async function buildEnvVars(
   // Layer 5: Reserved system vars (cannot be overridden by any user config)
   sensitive.OPENCLAW_GATEWAY_TOKEN = await deriveGatewayToken(sandboxId, gatewayTokenSecret);
   plainEnv.AUTO_APPROVE_DEVICES = 'true';
+
+  // Instance feature flags → env vars (non-sensitive, not user-overridable).
+  // Applied after user env vars so users cannot suppress features via envVars config.
+  if (userConfig?.instanceFeatures) {
+    for (const feature of userConfig.instanceFeatures) {
+      const envVar = FEATURE_TO_ENV_VAR[feature];
+      if (envVar) plainEnv[envVar] = 'true';
+    }
+  }
 
   return { env: plainEnv, sensitive };
 }

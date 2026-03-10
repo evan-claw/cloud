@@ -16,8 +16,8 @@ export const ENCRYPTED_ENV_PREFIX = 'KILOCLAW_ENC_';
 /** Prefix on encrypted values (format version marker). */
 const ENCRYPTED_VALUE_PREFIX = 'enc:v1:';
 
-/** Prefixes reserved for the encryption system. User env vars must not use these. */
-export const RESERVED_PREFIXES = ['KILOCLAW_ENC_', 'KILOCLAW_ENV_'] as const;
+/** Prefixes reserved for internal use. User env vars must not use these. */
+export const RESERVED_PREFIXES = ['KILOCLAW_'] as const;
 
 /** Valid shell identifier: letters, digits, underscores. Must start with letter or underscore. */
 const SHELL_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
