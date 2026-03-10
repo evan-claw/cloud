@@ -454,11 +454,20 @@ export default function CodeReviewsPage() {
         )}
 
         {/* Error State */}
-        {(overviewQuery.error || dailyQuery.error) && (
+        {(overviewQuery.error ||
+          dailyQuery.error ||
+          performanceQuery.error ||
+          errorQuery.error ||
+          segmentationQuery.error) && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm text-red-800">
               Error loading data:{' '}
-              {overviewQuery.error?.message || dailyQuery.error?.message || 'Unknown error'}
+              {overviewQuery.error?.message ||
+                dailyQuery.error?.message ||
+                performanceQuery.error?.message ||
+                errorQuery.error?.message ||
+                segmentationQuery.error?.message ||
+                'Unknown error'}
             </p>
           </div>
         )}
