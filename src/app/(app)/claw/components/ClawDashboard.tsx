@@ -17,7 +17,10 @@ import { CreateInstanceCard } from './CreateInstanceCard';
 import { InstanceControls } from './InstanceControls';
 import { InstanceTab } from './InstanceTab';
 import { SettingsTab } from './SettingsTab';
+import { useTRPC } from '@/lib/trpc/utils';
+import { useQuery } from '@tanstack/react-query';
 import { ChangelogCard } from './ChangelogCard';
+import { EarlybirdBanner } from './EarlybirdBanner';
 import { PairingCard } from './PairingCard';
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
@@ -31,6 +34,7 @@ function hasPopulatedStatus(
 }
 
 export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | undefined }) {
+  const trpc = useTRPC();
   const mutations = useKiloClawMutations();
   const gatewayUrl = useGatewayUrl(status);
   const instanceStatus = hasPopulatedStatus(status) ? status : null;
@@ -42,6 +46,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
   } = useKiloClawGatewayStatus(isRunning);
 
   const { data: isServiceDegraded } = useKiloClawServiceDegraded();
+  const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
 
   const [dirtyChannels, setDirtyChannels] = useState<Set<string>>(new Set());
 
@@ -141,6 +146,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
 
       {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
 
+      {earlybirdStatus?.purchased && <EarlybirdBanner />}
       <ChangelogCard />
     </div>
   );
