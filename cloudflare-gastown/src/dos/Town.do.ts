@@ -1045,7 +1045,24 @@ export class TownDO extends DurableObject<Env> {
     let sessionStatus: 'idle' | 'active' | 'starting';
 
     if (isAlive) {
-      const sent = await dispatch.sendMessageToAgent(this.env, townId, mayor.id, message);
+      // Mint a fresh JWT so the running agent has a valid token for any
+      // tool calls triggered by this message. This is the primary fix for
+      // #923 — without this, persistent agents (Mayor) get 401s after 8h.
+      const townConfig = await this.getTownConfig();
+      const freshToken = await dispatch.mintAgentToken(this.env, {
+        agentId: mayor.id,
+        rigId: `mayor-${townId}`,
+        townId,
+        userId: townConfig.owner_user_id ?? townId,
+      });
+
+      const sent = await dispatch.sendMessageToAgent(
+        this.env,
+        townId,
+        mayor.id,
+        message,
+        freshToken ?? undefined
+      );
       sessionStatus = sent ? 'active' : 'idle';
     } else {
       const townConfig = await this.getTownConfig();
@@ -1121,6 +1138,19 @@ export class TownDO extends DurableObject<Env> {
     const isAlive = containerStatus.status === 'running' || containerStatus.status === 'starting';
 
     if (isAlive) {
+      // Proactively refresh the agent's JWT so it doesn't go stale while
+      // the user keeps the page open (which keeps the container alive).
+      const townConfig = await this.getTownConfig();
+      const freshToken = await dispatch.mintAgentToken(this.env, {
+        agentId: mayor.id,
+        rigId: `mayor-${townId}`,
+        townId,
+        userId: townConfig.owner_user_id ?? townId,
+      });
+      if (freshToken) {
+        void dispatch.refreshAgentToken(this.env, townId, mayor.id, freshToken);
+      }
+
       const status = mayor.status === 'working' || mayor.status === 'stalled' ? 'active' : 'idle';
       return { agentId: mayor.id, sessionStatus: status };
     }
@@ -1964,6 +1994,14 @@ export class TownDO extends DurableObject<Env> {
       }
     }
 
+    // Refresh agent JWTs before any work that might trigger API calls.
+    // Throttled internally to once per hour (tokens have 8h expiry).
+    try {
+      await this.refreshRunningAgentTokens();
+    } catch (err) {
+      console.warn(`${TOWN_LOG} alarm: refreshRunningAgentTokens failed`, err);
+    }
+
     // Process reviews FIRST so the refinery gets assigned before the
     // scheduler dispatches new polecats. This prevents downstream beads
     // from starting before upstream reviews are merged.
@@ -2019,6 +2057,50 @@ export class TownDO extends DurableObject<Env> {
       this.broadcastAlarmStatus(snapshot);
     } catch (err) {
       console.warn(`${TOWN_LOG} alarm: status broadcast failed`, err);
+    }
+  }
+
+  /**
+   * Proactively refresh JWTs for all running agents. Called from the alarm
+   * handler but throttled to once per hour (tokens have 8h expiry, so
+   * hourly refresh provides ample safety margin). This is the safety net
+   * for agents that stay alive without receiving user messages — e.g. the
+   * refinery during a long review, or a mayor in a town with automated
+   * sling triggers.
+   */
+  private lastTokenRefreshAt = 0;
+  private async refreshRunningAgentTokens(): Promise<void> {
+    const TOKEN_REFRESH_INTERVAL_MS = 60 * 60_000; // 1 hour
+    const now = Date.now();
+    if (now - this.lastTokenRefreshAt < TOKEN_REFRESH_INTERVAL_MS) return;
+    this.lastTokenRefreshAt = now;
+
+    const townId = this.townId;
+    const activeAgents = agents.listAgents(this.sql, { status: 'working' });
+    const stalledAgents = agents.listAgents(this.sql, { status: 'stalled' });
+    const allActive = [...activeAgents, ...stalledAgents];
+
+    if (allActive.length === 0) return;
+
+    const townConfig = await this.getTownConfig();
+    const userId = townConfig.owner_user_id ?? townId;
+
+    for (const agent of allActive) {
+      const rigId = agent.rig_id ?? `mayor-${townId}`;
+      const token = await dispatch.mintAgentToken(this.env, {
+        agentId: agent.id,
+        rigId,
+        townId,
+        userId,
+      });
+      if (token) {
+        const ok = await dispatch.refreshAgentToken(this.env, townId, agent.id, token);
+        if (ok) {
+          console.log(
+            `${TOWN_LOG} refreshRunningAgentTokens: refreshed token for ${agent.identity}`
+          );
+        }
+      }
     }
   }
 

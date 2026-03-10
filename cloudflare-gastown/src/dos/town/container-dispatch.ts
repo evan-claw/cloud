@@ -413,16 +413,55 @@ export async function stopAgentInContainer(
 }
 
 /**
+ * Push a fresh JWT to an already-running agent in the container.
+ * Updates the agent's ManagedAgent record, heartbeat module, and plugin
+ * client tokens so all subsequent API calls use the new JWT.
+ */
+export async function refreshAgentToken(
+  env: Env,
+  townId: string,
+  agentId: string,
+  token: string
+): Promise<boolean> {
+  try {
+    const container = getTownContainerStub(env, townId);
+    const response = await container.fetch(`http://container/agents/${agentId}/refresh-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Send a follow-up message to an existing agent in the container.
+ * Optionally refreshes the agent's JWT before sending the message.
  */
 export async function sendMessageToAgent(
   env: Env,
   townId: string,
   agentId: string,
-  message: string
+  message: string,
+  /** Fresh JWT to push to the agent before sending the message. */
+  token?: string
 ): Promise<boolean> {
   try {
     const container = getTownContainerStub(env, townId);
+
+    // Refresh the token first so the agent has a valid JWT for any tool
+    // calls triggered by processing this message.
+    if (token) {
+      const refreshed = await refreshAgentToken(env, townId, agentId, token);
+      if (!refreshed) {
+        console.warn(
+          `${TOWN_LOG} sendMessageToAgent: token refresh failed for agent ${agentId}, sending message anyway`
+        );
+      }
+    }
+
     const response = await container.fetch(`http://container/agents/${agentId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

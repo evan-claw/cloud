@@ -38,6 +38,11 @@ export class GastownClient {
     this.townId = env.townId;
   }
 
+  /** Hot-swap the session token for subsequent API calls. */
+  setToken(token: string): void {
+    this.token = token;
+  }
+
   private rigPath(path: string): string {
     return `${this.baseUrl}/api/towns/${this.townId}/rigs/${this.rigId}${path}`;
   }
@@ -46,11 +51,16 @@ export class GastownClient {
     return this.rigPath(`/agents/${this.agentId}${path}`);
   }
 
+  /** Returns the most up-to-date token: explicit setToken() value first, then this.token. */
+  private currentToken(): string {
+    return this.token;
+  }
+
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
     // Normalize headers so callers can pass plain objects, Headers instances, or tuples
     const headers = new Headers(init?.headers);
     headers.set('Content-Type', 'application/json');
-    headers.set('Authorization', `Bearer ${this.token}`);
+    headers.set('Authorization', `Bearer ${this.currentToken()}`);
 
     let response: Response;
     try {
@@ -208,14 +218,24 @@ export class MayorGastownClient {
     this.townId = env.townId;
   }
 
+  /** Hot-swap the session token for subsequent API calls. */
+  setToken(token: string): void {
+    this.token = token;
+  }
+
   private mayorPath(path: string): string {
     return `${this.baseUrl}/api/mayor/${this.townId}/tools${path}`;
+  }
+
+  /** Returns the most up-to-date token. */
+  private currentToken(): string {
+    return this.token;
   }
 
   private async request<T>(url: string, init?: RequestInit): Promise<T> {
     const headers = new Headers(init?.headers);
     headers.set('Content-Type', 'application/json');
-    headers.set('Authorization', `Bearer ${this.token}`);
+    headers.set('Authorization', `Bearer ${this.currentToken()}`);
 
     let response: Response;
     try {
@@ -319,6 +339,40 @@ export class MayorGastownClient {
 
   async getConvoyStatus(convoyId: string): Promise<ConvoyDetail> {
     return this.request<ConvoyDetail>(this.mayorPath(`/convoys/${convoyId}`));
+  }
+}
+
+// ── Plugin client token registry ─────────────────────────────────────────
+// The plugin client runs inside the kilo SDK plugin (loaded by createKilo()),
+// while the control server runs in the container's main module. They share
+// the same Bun process but different TypeScript project roots, so they can't
+// cross-import. We use a globalThis registry keyed by a well-known symbol so
+// the control server can push fresh tokens into plugin client instances.
+
+type TokenRefreshable = { setToken(token: string): void };
+
+const REGISTRY_KEY = Symbol.for('gastown.pluginClientRegistry');
+
+function getRegistry(): TokenRefreshable[] {
+  const g = globalThis as Record<symbol, unknown>;
+  if (!Array.isArray(g[REGISTRY_KEY])) {
+    g[REGISTRY_KEY] = [];
+  }
+  return g[REGISTRY_KEY] as TokenRefreshable[];
+}
+
+/** Register a plugin client so its token can be refreshed externally. */
+export function registerPluginClient(client: TokenRefreshable): void {
+  getRegistry().push(client);
+}
+
+/**
+ * Update the session token on all registered plugin clients.
+ * Accessible from any module in the same process via the global symbol.
+ */
+export function refreshPluginClientTokens(token: string): void {
+  for (const client of getRegistry()) {
+    client.setToken(token);
   }
 }
 

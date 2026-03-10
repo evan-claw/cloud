@@ -451,6 +451,40 @@ export async function sendMessage(agentId: string, prompt: string): Promise<void
   agent.lastActivityAt = new Date().toISOString();
 }
 
+// ── Plugin client token bridge ──────────────────────────────────────────
+// The plugin registers its GastownClient/MayorGastownClient instances in a
+// globalThis registry (keyed by Symbol.for('gastown.pluginClientRegistry')).
+// When the TownDO pushes a fresh JWT, we update both the ManagedAgent record
+// (for control-plane calls like broadcastEvent) and the plugin clients
+// (for tool-call API requests).
+
+const PLUGIN_REGISTRY_KEY = Symbol.for('gastown.pluginClientRegistry');
+
+function refreshPluginClientTokens(token: string): void {
+  const g = globalThis as Record<symbol, unknown>;
+  const registry = g[PLUGIN_REGISTRY_KEY];
+  if (!Array.isArray(registry)) return;
+  for (const client of registry) {
+    if (client && typeof client === 'object' && 'setToken' in client) {
+      (client as { setToken(t: string): void }).setToken(token);
+    }
+  }
+}
+
+/**
+ * Hot-swap the session token on a running agent.
+ * Updates the ManagedAgent record (for broadcastEvent, completion reporting)
+ * AND all registered plugin clients (for tool-call API requests).
+ */
+export function updateAgentToken(agentId: string, token: string): boolean {
+  const agent = agents.get(agentId);
+  if (!agent) return false;
+  agent.gastownSessionToken = token;
+  // Also push the fresh token to plugin client instances in this process
+  refreshPluginClientTokens(token);
+  return true;
+}
+
 export function getAgentStatus(agentId: string): ManagedAgent | null {
   return agents.get(agentId) ?? null;
 }

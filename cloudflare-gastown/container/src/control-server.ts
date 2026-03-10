@@ -11,10 +11,17 @@ import {
   stopAll,
   getAgentEvents,
   registerEventSink,
+  updateAgentToken,
 } from './process-manager';
-import { startHeartbeat, stopHeartbeat } from './heartbeat';
+import { startHeartbeat, stopHeartbeat, updateHeartbeatToken } from './heartbeat';
 import { mergeBranch, setupRigBrowseWorktree } from './git-manager';
-import { StartAgentRequest, SendMessageRequest, MergeRequest, SetupRepoRequest } from './types';
+import {
+  StartAgentRequest,
+  SendMessageRequest,
+  MergeRequest,
+  SetupRepoRequest,
+  RefreshTokenRequest,
+} from './types';
 import type {
   AgentStatusResponse,
   HealthResponse,
@@ -151,6 +158,34 @@ app.post('/agents/:agentId/message', async c => {
 
   await sendMessage(agentId, parsed.data.prompt);
   return c.json({ sent: true });
+});
+
+// POST /agents/:agentId/refresh-token
+// Hot-swap the session JWT on a running agent. Called by the TownDO
+// to push a fresh token before the current one expires.
+app.post('/agents/:agentId/refresh-token', async c => {
+  const { agentId } = c.req.param();
+  if (!getAgentStatus(agentId)) {
+    return c.json({ error: `Agent ${agentId} not found` }, 404);
+  }
+  const body: unknown = await c.req.json().catch(() => null);
+  const parsed = RefreshTokenRequest.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid request body', issues: parsed.error.issues }, 400);
+  }
+
+  const updated = updateAgentToken(agentId, parsed.data.token);
+  if (!updated) {
+    return c.json({ error: `Agent ${agentId} not found` }, 404);
+  }
+
+  // Also update the heartbeat module's token so heartbeat POSTs use the
+  // fresh JWT. The heartbeat uses a single module-level token shared
+  // across all agents, so any refresh keeps heartbeats alive.
+  updateHeartbeatToken(parsed.data.token);
+
+  console.log(`[control-server] Refreshed token for agent ${agentId}`);
+  return c.json({ refreshed: true });
 });
 
 // GET /agents/:agentId/status

@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GastownClient, MayorGastownClient, GastownApiError, createClientFromEnv } from './client';
+import {
+  GastownClient,
+  MayorGastownClient,
+  GastownApiError,
+  createClientFromEnv,
+  registerPluginClient,
+  refreshPluginClientTokens,
+} from './client';
 import type { GastownEnv, MayorGastownEnv } from './types';
 
 const TEST_ENV: GastownEnv = {
@@ -7,6 +14,7 @@ const TEST_ENV: GastownEnv = {
   sessionToken: 'test-jwt-token',
   agentId: 'agent-111',
   rigId: 'rig-222',
+  townId: 'town-333',
 };
 
 function mockFetch(data: unknown, status = 200) {
@@ -48,7 +56,9 @@ describe('GastownClient', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/agents/agent-111/prime');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/agents/agent-111/prime'
+    );
     const headers = new Headers(init.headers);
     expect(headers.get('Authorization')).toBe('Bearer test-jwt-token');
     expect(headers.get('Content-Type')).toBe('application/json');
@@ -81,7 +91,7 @@ describe('GastownClient', () => {
     expect(result).toEqual(bead);
 
     const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/beads/bead-1');
+    expect(url).toBe('https://gastown.example.com/api/towns/town-333/rigs/rig-222/beads/bead-1');
   });
 
   it('closeBead() sends agent_id in body', async () => {
@@ -94,7 +104,9 @@ describe('GastownClient', () => {
       string,
       RequestInit,
     ];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/beads/bead-1/close');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/beads/bead-1/close'
+    );
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({ agent_id: 'agent-111' });
   });
@@ -112,7 +124,9 @@ describe('GastownClient', () => {
       string,
       RequestInit,
     ];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/agents/agent-111/done');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/agents/agent-111/done'
+    );
     expect(JSON.parse(init.body as string)).toEqual({
       branch: 'feat/test',
       pr_url: 'https://github.com/pr/1',
@@ -145,7 +159,9 @@ describe('GastownClient', () => {
     expect(result).toEqual(mail);
 
     const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/agents/agent-111/mail');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/agents/agent-111/mail'
+    );
   });
 
   it('writeCheckpoint() posts data to checkpoint endpoint', async () => {
@@ -157,7 +173,9 @@ describe('GastownClient', () => {
       string,
       RequestInit,
     ];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/agents/agent-111/checkpoint');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/agents/agent-111/checkpoint'
+    );
     expect(JSON.parse(init.body as string)).toEqual({ data: { step: 3, files: ['a.ts'] } });
   });
 
@@ -172,7 +190,7 @@ describe('GastownClient', () => {
       string,
       RequestInit,
     ];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/escalations');
+    expect(url).toBe('https://gastown.example.com/api/towns/town-333/rigs/rig-222/escalations');
     expect(JSON.parse(init.body as string)).toEqual({ title: 'blocked', priority: 'high' });
   });
 
@@ -246,7 +264,9 @@ describe('GastownClient', () => {
     // Verify no double slashes in the URL by calling prime
     void c.prime();
     const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
-    expect(url).toBe('https://gastown.example.com/api/rigs/rig-222/agents/agent-111/prime');
+    expect(url).toBe(
+      'https://gastown.example.com/api/towns/town-333/rigs/rig-222/agents/agent-111/prime'
+    );
   });
 });
 
@@ -262,6 +282,7 @@ describe('createClientFromEnv', () => {
     process.env.GASTOWN_SESSION_TOKEN = 'tok';
     process.env.GASTOWN_AGENT_ID = 'agent-1';
     process.env.GASTOWN_RIG_ID = 'rig-1';
+    process.env.GASTOWN_TOWN_ID = 'town-1';
 
     const client = createClientFromEnv();
     expect(client).toBeInstanceOf(GastownClient);
@@ -356,5 +377,117 @@ describe('MayorGastownClient', () => {
 
     const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string];
     expect(url).toBe('https://gastown.example.com/api/mayor/town-1/tools/convoys/convoy-1');
+  });
+});
+
+// ── Token refresh tests ─────────────────────────────────────────────────
+
+describe('GastownClient.setToken', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('uses the new token after setToken()', async () => {
+    const env: GastownEnv = {
+      apiUrl: 'https://gastown.example.com',
+      sessionToken: 'old-token',
+      agentId: 'agent-1',
+      rigId: 'rig-1',
+      townId: 'town-1',
+    };
+    const client = new GastownClient(env);
+
+    // Replace token
+    client.setToken('new-token');
+
+    const fetchMock = mockFetch({
+      agent: {},
+      hooked_bead: null,
+      undelivered_mail: [],
+      open_beads: [],
+    });
+    globalThis.fetch = fetchMock;
+
+    await client.prime();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('Authorization')).toBe('Bearer new-token');
+  });
+});
+
+describe('MayorGastownClient.setToken', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('uses the new token after setToken()', async () => {
+    const env: MayorGastownEnv = {
+      apiUrl: 'https://gastown.example.com',
+      sessionToken: 'old-mayor-token',
+      agentId: 'mayor-1',
+      townId: 'town-1',
+    };
+    const client = new MayorGastownClient(env);
+
+    client.setToken('fresh-mayor-token');
+
+    const fetchMock = mockFetch([]);
+    globalThis.fetch = fetchMock;
+
+    await client.listRigs();
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('Authorization')).toBe('Bearer fresh-mayor-token');
+  });
+});
+
+describe('plugin client registry', () => {
+  const REGISTRY_KEY = Symbol.for('gastown.pluginClientRegistry');
+
+  beforeEach(() => {
+    // Clear the global registry before each test
+    (globalThis as Record<symbol, unknown>)[REGISTRY_KEY] = [];
+  });
+
+  it('registerPluginClient + refreshPluginClientTokens updates all clients', () => {
+    const client1 = new GastownClient({
+      apiUrl: 'https://example.com',
+      sessionToken: 'old-1',
+      agentId: 'a1',
+      rigId: 'r1',
+      townId: 't1',
+    });
+    const client2 = new MayorGastownClient({
+      apiUrl: 'https://example.com',
+      sessionToken: 'old-2',
+      agentId: 'a2',
+      townId: 't2',
+    });
+
+    registerPluginClient(client1);
+    registerPluginClient(client2);
+
+    refreshPluginClientTokens('refreshed-token');
+
+    // Verify by making a request and checking the auth header
+    const fetchMock = mockFetch([]);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock;
+
+    void client1.checkMail();
+    const [, init1] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init1.headers).get('Authorization')).toBe('Bearer refreshed-token');
+
+    void client2.listRigs();
+    const [, init2] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(new Headers(init2.headers).get('Authorization')).toBe('Bearer refreshed-token');
+
+    globalThis.fetch = originalFetch;
   });
 });

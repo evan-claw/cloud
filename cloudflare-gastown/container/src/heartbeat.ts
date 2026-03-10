@@ -28,6 +28,14 @@ export function startHeartbeat(apiUrl: string, token: string): void {
 }
 
 /**
+ * Update the session token used for heartbeat requests.
+ * Called when the TownDO pushes a fresh JWT to the container.
+ */
+export function updateHeartbeatToken(token: string): void {
+  sessionToken = token;
+}
+
+/**
  * Stop the heartbeat reporter.
  */
 export function stopHeartbeat(): void {

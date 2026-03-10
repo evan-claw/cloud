@@ -1,5 +1,10 @@
 import type { Plugin } from '@kilocode/plugin';
-import { createClientFromEnv, createMayorClientFromEnv, GastownApiError } from './client';
+import {
+  createClientFromEnv,
+  createMayorClientFromEnv,
+  GastownApiError,
+  registerPluginClient,
+} from './client';
 import { createTools } from './tools';
 import { createMayorTools } from './mayor-tools';
 
@@ -29,6 +34,7 @@ export const GastownPlugin: Plugin = async ({ client }) => {
   if (isMayor) {
     try {
       mayorClient = createMayorClientFromEnv();
+      registerPluginClient(mayorClient);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(
@@ -41,6 +47,7 @@ export const GastownPlugin: Plugin = async ({ client }) => {
   } else {
     try {
       gastownClient = createClientFromEnv();
+      registerPluginClient(gastownClient);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(
