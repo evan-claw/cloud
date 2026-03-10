@@ -31,7 +31,6 @@ import {
   captureProxyError,
   checkOrganizationModelRestrictions,
   dataCollectionRequiredResponse,
-  estimateChatTokens_ignoringToolDefinitions,
   extractFraudAndProjectHeaders,
   invalidPathResponse,
   invalidRequestResponse,
@@ -322,10 +321,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   }
 
   // Extract properties for usage context
-  const tokenEstimates =
-    parsedRequest.kind === 'chat_completions'
-      ? estimateChatTokens_ignoringToolDefinitions(parsedRequest.body)
-      : { estimatedInputTokens: 0, estimatedOutputTokens: 0 };
   const promptInfo: PromptInfo =
     parsedRequest.kind === 'chat_completions'
       ? extractPromptInfo(parsedRequest.body)
@@ -344,8 +339,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       parsedRequest.kind === 'chat_completions'
         ? (parsedRequest.body.transforms?.includes('middle-out') ?? false)
         : false,
-    estimatedInputTokens: tokenEstimates.estimatedInputTokens,
-    estimatedOutputTokens: tokenEstimates.estimatedOutputTokens,
     fraudHeaders,
     isStreaming: parsedRequest.body.stream === true,
     organizationId,

@@ -81,6 +81,12 @@ export const PROVIDERS = {
     apiKey: getEnvVariable('MISTRAL_API_KEY'),
     hasGenerationEndpoint: false,
   },
+  MORPH: {
+    id: 'morph',
+    apiUrl: 'https://api.morphllm.com/v1',
+    apiKey: getEnvVariable('MORPH_API_KEY'),
+    hasGenerationEndpoint: false,
+  },
   VERCEL_AI_GATEWAY: {
     id: 'vercel',
     apiUrl: 'https://ai-gateway.vercel.sh/v1',
@@ -155,6 +161,7 @@ export async function getProvider(
         force_reasoning: true,
         opencode_settings: null,
         extra_body: null,
+        interleaved_format: null,
       },
     };
   }
@@ -260,7 +267,7 @@ export function applyProviderSpecificLogic(
   applyPreferredProvider(requestedModel, requestToMutate);
 
   if (isXaiModel(requestedModel)) {
-    applyXaiModelSettings(requestToMutate, extraHeaders);
+    applyXaiModelSettings(requestedModel, requestToMutate, extraHeaders);
   }
 
   if (isGeminiModel(requestedModel)) {

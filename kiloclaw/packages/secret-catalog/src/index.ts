@@ -5,7 +5,7 @@ export {
   InjectionMethodSchema,
   SecretFieldDefinitionSchema,
   SecretCatalogEntrySchema,
-} from './types.js';
+} from './types';
 
 // Types
 export type {
@@ -14,9 +14,9 @@ export type {
   InjectionMethod,
   SecretFieldDefinition,
   SecretCatalogEntry,
-} from './types.js';
+} from './types';
 
-export { DEFAULT_INJECTION_METHOD, getInjectionMethod } from './types.js';
+export { DEFAULT_INJECTION_METHOD, getInjectionMethod } from './types';
 
 // Catalog and lookup helpers
 export {
@@ -24,9 +24,13 @@ export {
   SECRET_CATALOG_MAP,
   ALL_SECRET_FIELD_KEYS,
   FIELD_KEY_TO_ENV_VAR,
+  ENV_VAR_TO_FIELD_KEY,
   FIELD_KEY_TO_ENTRY,
+  ALL_SECRET_ENV_VARS,
   getEntriesByCategory,
-} from './catalog.js';
+} from './catalog';
+
+export type { SecretFieldKey } from './catalog';
 
 // Validation
-export { validateFieldValue } from './validation.js';
+export { validateFieldValue } from './validation';

@@ -4,6 +4,7 @@ export type ProviderId =
   | 'corethink'
   | 'martian'
   | 'mistral'
+  | 'morph'
   | 'vercel'
   | 'custom'
   | 'dev-tools';

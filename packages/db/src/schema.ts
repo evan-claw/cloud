@@ -62,6 +62,7 @@ import type {
   StoredModel,
   CustomLlmExtraBody,
   CustomLlmProvider,
+  InterleavedFormat,
 } from './schema-types';
 import type { AnyPgColumn as DrizzleAnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -897,6 +898,7 @@ export const custom_llm = pgTable('custom_llm', {
   force_reasoning: boolean(),
   opencode_settings: jsonb().$type<OpenCodeSettings>(),
   extra_body: jsonb().$type<CustomLlmExtraBody>(),
+  interleaved_format: text().$type<InterleavedFormat>(),
 });
 
 export type CustomLlm = typeof custom_llm.$inferSelect;
@@ -1710,6 +1712,9 @@ export const agent_configs = pgTable(
 
     // Status
     is_enabled: boolean().notNull().default(true),
+
+    // Generic runtime state (e.g. security_scan agents store { last_synced_at: string })
+    runtime_state: jsonb().$type<Record<string, unknown>>().default({}),
 
     // Metadata
     created_by: text().notNull(),

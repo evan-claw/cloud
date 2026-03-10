@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { SecretCatalogEntry, SecretCategory } from './types.js';
-import { SecretCatalogEntrySchema } from './types.js';
+import type { SecretCatalogEntry, SecretCategory } from './types';
+import { SecretCatalogEntrySchema } from './types';
 
 /**
  * Secret Catalog — declarative registry of all secret types.
@@ -104,6 +104,9 @@ export const SECRET_CATALOG_MAP: ReadonlyMap<string, SecretCatalogEntry> = new M
   SECRET_CATALOG.map(entry => [entry.id, entry])
 );
 
+/** Union type of all secret field keys in the catalog */
+export type SecretFieldKey = (typeof SECRET_CATALOG_RAW)[number]['fields'][number]['key'];
+
 /** Set of all field keys across all entries */
 export const ALL_SECRET_FIELD_KEYS: ReadonlySet<string> = new Set(
   SECRET_CATALOG.flatMap(entry => entry.fields.map(field => field.key))
@@ -114,9 +117,19 @@ export const FIELD_KEY_TO_ENV_VAR: ReadonlyMap<string, string> = new Map(
   SECRET_CATALOG.flatMap(entry => entry.fields.map(field => [field.key, field.envVar]))
 );
 
+/** Reverse map: env var name → field key (for reading encryptedSecrets back to working set) */
+export const ENV_VAR_TO_FIELD_KEY: ReadonlyMap<string, string> = new Map(
+  SECRET_CATALOG.flatMap(entry => entry.fields.map(field => [field.envVar, field.key]))
+);
+
 /** Map of field key → owning entry (used for allFieldsRequired checks) */
 export const FIELD_KEY_TO_ENTRY: ReadonlyMap<string, SecretCatalogEntry> = new Map(
   SECRET_CATALOG.flatMap(entry => entry.fields.map(field => [field.key, entry]))
+);
+
+/** Set of all env var names from catalog entries (for SENSITIVE_KEYS classification) */
+export const ALL_SECRET_ENV_VARS: ReadonlySet<string> = new Set(
+  SECRET_CATALOG.flatMap(entry => entry.fields.map(field => field.envVar))
 );
 
 /**

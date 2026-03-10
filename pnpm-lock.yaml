@@ -114,6 +114,9 @@ importers:
       '@kilocode/encryption':
         specifier: workspace:*
         version: link:packages/encryption
+      '@kilocode/kiloclaw-secret-catalog':
+        specifier: workspace:*
+        version: link:kiloclaw/packages/secret-catalog
       '@kilocode/worker-utils':
         specifier: workspace:*
         version: link:packages/worker-utils
@@ -1397,6 +1400,9 @@ importers:
       '@kilocode/encryption':
         specifier: workspace:*
         version: link:../packages/encryption
+      '@kilocode/kiloclaw-secret-catalog':
+        specifier: workspace:*
+        version: link:packages/secret-catalog
       '@kilocode/worker-utils':
         specifier: workspace:*
         version: link:../packages/worker-utils

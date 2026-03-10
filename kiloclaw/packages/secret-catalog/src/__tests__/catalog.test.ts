@@ -4,6 +4,7 @@ import {
   SECRET_CATALOG_MAP,
   ALL_SECRET_FIELD_KEYS,
   FIELD_KEY_TO_ENV_VAR,
+  ENV_VAR_TO_FIELD_KEY,
   FIELD_KEY_TO_ENTRY,
   getEntriesByCategory,
 } from '../catalog.js';
@@ -118,6 +119,20 @@ describe('Secret Catalog', () => {
       expect(FIELD_KEY_TO_ENV_VAR.get('discordBotToken')).toBe('DISCORD_BOT_TOKEN');
       expect(FIELD_KEY_TO_ENV_VAR.get('slackBotToken')).toBe('SLACK_BOT_TOKEN');
       expect(FIELD_KEY_TO_ENV_VAR.get('slackAppToken')).toBe('SLACK_APP_TOKEN');
+    });
+
+    it('ENV_VAR_TO_FIELD_KEY is the exact reverse of FIELD_KEY_TO_ENV_VAR', () => {
+      expect(ENV_VAR_TO_FIELD_KEY.size).toBe(FIELD_KEY_TO_ENV_VAR.size);
+      for (const [fieldKey, envVar] of FIELD_KEY_TO_ENV_VAR) {
+        expect(ENV_VAR_TO_FIELD_KEY.get(envVar)).toBe(fieldKey);
+      }
+    });
+
+    it('ENV_VAR_TO_FIELD_KEY has correct reverse mappings', () => {
+      expect(ENV_VAR_TO_FIELD_KEY.get('TELEGRAM_BOT_TOKEN')).toBe('telegramBotToken');
+      expect(ENV_VAR_TO_FIELD_KEY.get('DISCORD_BOT_TOKEN')).toBe('discordBotToken');
+      expect(ENV_VAR_TO_FIELD_KEY.get('SLACK_BOT_TOKEN')).toBe('slackBotToken');
+      expect(ENV_VAR_TO_FIELD_KEY.get('SLACK_APP_TOKEN')).toBe('slackAppToken');
     });
   });
 
@@ -262,6 +277,59 @@ describe('Secret Catalog', () => {
       expect(() => validateFieldValue('test', invalidPattern)).toThrow(
         /Invalid validation pattern in catalog/
       );
+    });
+  });
+
+  describe('allFieldsRequired contract', () => {
+    it('slack entry has allFieldsRequired set', () => {
+      const slack = SECRET_CATALOG_MAP.get('slack');
+      expect(slack?.allFieldsRequired).toBe(true);
+    });
+
+    it('slack entry has exactly 2 fields', () => {
+      const slack = SECRET_CATALOG_MAP.get('slack');
+      expect(slack?.fields.length).toBe(2);
+      expect(slack?.fields.map(f => f.key)).toEqual(['slackBotToken', 'slackAppToken']);
+    });
+
+    it('telegram and discord do not have allFieldsRequired', () => {
+      expect(SECRET_CATALOG_MAP.get('telegram')?.allFieldsRequired).toBeFalsy();
+      expect(SECRET_CATALOG_MAP.get('discord')?.allFieldsRequired).toBeFalsy();
+    });
+
+    it('ALL_SECRET_FIELD_KEYS rejects unknown keys', () => {
+      expect(ALL_SECRET_FIELD_KEYS.has('telegramBotToken')).toBe(true);
+      expect(ALL_SECRET_FIELD_KEYS.has('unknownKey')).toBe(false);
+      expect(ALL_SECRET_FIELD_KEYS.has('')).toBe(false);
+    });
+
+    it('FIELD_KEY_TO_ENTRY maps both slack fields to the same entry', () => {
+      const botEntry = FIELD_KEY_TO_ENTRY.get('slackBotToken');
+      const appEntry = FIELD_KEY_TO_ENTRY.get('slackAppToken');
+      expect(botEntry).toBeDefined();
+      expect(botEntry).toBe(appEntry);
+      expect(botEntry?.allFieldsRequired).toBe(true);
+    });
+  });
+
+  describe('maxLength contract', () => {
+    it('all maxLength values are within the global 500 ceiling', () => {
+      for (const entry of SECRET_CATALOG) {
+        for (const field of entry.fields) {
+          expect(field.maxLength).toBeLessThanOrEqual(500);
+        }
+      }
+    });
+
+    it('field-specific maxLength values are set correctly', () => {
+      const telegram = FIELD_KEY_TO_ENTRY.get('telegramBotToken');
+      const discord = FIELD_KEY_TO_ENTRY.get('discordBotToken');
+      const slackBot = FIELD_KEY_TO_ENTRY.get('slackBotToken');
+
+      expect(telegram?.fields[0].maxLength).toBe(100);
+      expect(discord?.fields[0].maxLength).toBe(200);
+      expect(slackBot?.fields.find(f => f.key === 'slackBotToken')?.maxLength).toBe(300);
+      expect(slackBot?.fields.find(f => f.key === 'slackAppToken')?.maxLength).toBe(300);
     });
   });
 });

@@ -780,6 +780,10 @@ export const CustomLlmProviderSchema = z.enum(['anthropic', 'openai', 'openai-co
 
 export type CustomLlmProvider = z.infer<typeof CustomLlmProviderSchema>;
 
+export const InterleavedFormatSchema = z.enum(['reasoning_content', 'think']);
+
+export type InterleavedFormat = z.infer<typeof InterleavedFormatSchema>;
+
 export const CustomLlmExtraBodySchema = z.record(z.string(), z.any());
 
 export type CustomLlmExtraBody = z.infer<typeof CustomLlmExtraBodySchema>;

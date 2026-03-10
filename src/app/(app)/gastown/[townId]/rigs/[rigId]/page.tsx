@@ -1,6 +1,6 @@
 import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { notFound } from 'next/navigation';
-import { ENABLE_GASTOWN_FEATURE } from '@/lib/constants';
+import { isGastownEnabled } from '@/lib/gastown/feature-flags';
 import { RigDetailPageClient } from './RigDetailPageClient';
 
 export default async function RigDetailPage({
@@ -13,7 +13,7 @@ export default async function RigDetailPage({
     `/users/sign_in?callbackPath=/gastown/${townId}/rigs/${rigId}`
   );
 
-  if (!ENABLE_GASTOWN_FEATURE || !user.is_admin) {
+  if (!(await isGastownEnabled(user.id))) {
     return notFound();
   }
 

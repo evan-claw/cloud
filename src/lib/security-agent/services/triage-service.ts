@@ -285,25 +285,41 @@ export async function triageSecurityFinding(options: {
             correlationId,
             findingId: finding.id,
             status: result.status,
+            model,
           });
-          captureException(new Error(`Triage API error: ${result.status}`), {
-            tags: { operation: 'triageSecurityFinding' },
-            extra: {
-              findingId: finding.id,
-              status: result.status,
-              error: result.error,
-              correlationId,
-            },
-          });
+
+          // Provider-side errors we expect when users pick models that are
+          // delisted (404), rate-limited (408/429), or when the provider is
+          // down (5xx). These are not actionable on our side.
+          // All other statuses (e.g. 400/401/403) may indicate bugs in our
+          // request or auth path and should still reach Sentry.
+          const isProviderError =
+            result.status === 404 ||
+            result.status === 408 ||
+            result.status === 429 ||
+            result.status >= 500;
+
+          if (!isProviderError) {
+            captureException(new Error(`Triage API error: ${result.status}`), {
+              tags: { operation: 'triageSecurityFinding' },
+              extra: {
+                findingId: finding.id,
+                status: result.status,
+                error: result.error,
+                model,
+                correlationId,
+              },
+            });
+          }
 
           span.setAttribute('security_agent.status', 'error');
           span.setAttribute('security_agent.is_fallback', true);
 
           addBreadcrumb({
             category: 'security-agent.triage',
-            message: 'Triage fallback used',
+            message: `Triage fallback used (model=${model}, status=${result.status})`,
             level: 'warning',
-            data: { correlationId, findingId: finding.id, isFallback: true },
+            data: { correlationId, findingId: finding.id, model, isFallback: true },
           });
 
           return createFallbackTriage(`API error: ${result.status}`);

@@ -11,7 +11,6 @@ import { getUserFromAuth } from '@/lib/user.server';
 import {
   checkOrganizationModelRestrictions,
   countAndStoreFimUsage,
-  estimateFimTokens,
   extractFimPromptInfo,
   extractFraudAndProjectHeaders,
   invalidRequestResponse,
@@ -122,7 +121,6 @@ export async function POST(request: NextRequest) {
   const taskId = extractHeaderAndLimitLength(request, 'x-kilocode-taskid') ?? undefined;
 
   // Extract properties for usage context
-  const tokenEstimates = estimateFimTokens(requestBody);
   const promptInfo = extractFimPromptInfo(requestBody);
 
   const userByok = organizationId
@@ -136,8 +134,6 @@ export async function POST(request: NextRequest) {
     promptInfo,
     max_tokens: requestBody.max_tokens ?? null,
     has_middle_out_transform: null, // N/A for FIM
-    estimatedInputTokens: tokenEstimates.estimatedInputTokens,
-    estimatedOutputTokens: tokenEstimates.estimatedOutputTokens,
     fraudHeaders,
     isStreaming: requestBody.stream === true,
     organizationId,

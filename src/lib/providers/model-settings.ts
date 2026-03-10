@@ -64,6 +64,14 @@ export function getModelVariants(model: string): OpenCodeSettings['variants'] {
       thinking: { reasoning: { enabled: true } },
     };
   }
+  if (model.startsWith('inception/mercury-2')) {
+    return {
+      instant: { reasoning: { enabled: false } },
+      low: { reasoning: { enabled: true, effort: 'low' } },
+      medium: { reasoning: { enabled: true, effort: 'medium' } },
+      high: { reasoning: { enabled: true, effort: 'high' } },
+    };
+  }
   return undefined;
 }
 

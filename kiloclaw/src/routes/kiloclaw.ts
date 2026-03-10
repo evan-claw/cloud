@@ -1,5 +1,11 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
+import { SECRET_CATALOG } from '@kilocode/kiloclaw-secret-catalog';
+
+/** Channel env var names — excluded from secretCount (channels have their own counts). */
+const CHANNEL_ENV_VARS = new Set(
+  SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.envVar))
+);
 
 /**
  * User-facing KiloClaw routes (JWT auth via authMiddleware).
@@ -19,7 +25,9 @@ kiloclaw.get('/config', async c => {
 
   return c.json({
     envVarKeys: config.envVars ? Object.keys(config.envVars) : [],
-    secretCount: config.encryptedSecrets ? Object.keys(config.encryptedSecrets).length : 0,
+    secretCount: config.encryptedSecrets
+      ? Object.keys(config.encryptedSecrets).filter(k => !CHANNEL_ENV_VARS.has(k)).length
+      : 0,
     kilocodeDefaultModel: config.kilocodeDefaultModel ?? null,
     hasKiloCodeApiKey: !!config.kilocodeApiKey,
     kilocodeApiKeyExpiresAt: config.kilocodeApiKeyExpiresAt ?? null,

@@ -5,7 +5,7 @@ ENV NODE_VERSION=22.13.1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates curl gnupg git xz-utils unzip jq ripgrep rsync zstd \
-       build-essential python3 ffmpeg tmux \
+       build-essential python3 ffmpeg tmux chromium \
     && ARCH="$(dpkg --print-architecture)" \
     && case "${ARCH}" in \
          amd64) NODE_ARCH="x64" ;; \

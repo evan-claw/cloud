@@ -329,8 +329,6 @@ describe('logMicrodollarUsage', () => {
       },
       max_tokens: 200,
       has_middle_out_transform: true,
-      estimatedInputTokens: 100,
-      estimatedOutputTokens: 100,
       status_code: 200,
       editor_name: null,
       machine_id: null,

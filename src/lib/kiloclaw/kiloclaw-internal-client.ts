@@ -10,6 +10,8 @@ import type {
   KiloCodeConfigResponse,
   ChannelsPatchInput,
   ChannelsPatchResponse,
+  SecretsPatchInput,
+  SecretsPatchResponse,
   PairingListResponse,
   PairingApproveResponse,
   DevicePairingListResponse,
@@ -24,16 +26,18 @@ import type {
 
 /**
  * Error thrown when the KiloClaw API returns a non-OK response.
- * Preserves the HTTP status code for structured error handling
- * without leaking the raw response body.
+ * Preserves the HTTP status code and response body for structured
+ * error handling upstream.
  */
 export class KiloClawApiError extends Error {
   readonly statusCode: number;
+  readonly responseBody: string;
 
-  constructor(statusCode: number) {
+  constructor(statusCode: number, responseBody = '') {
     super(`KiloClaw API error (${statusCode})`);
     this.name = 'KiloClawApiError';
     this.statusCode = statusCode;
+    this.responseBody = responseBody;
   }
 }
 
@@ -72,7 +76,7 @@ export class KiloClawInternalClient {
         `KiloClaw API error (${res.status}) ${options?.method ?? 'GET'} ${path}:`,
         body
       );
-      throw new KiloClawApiError(res.status);
+      throw new KiloClawApiError(res.status, body);
     }
 
     return res.json() as Promise<T>;
@@ -147,6 +151,13 @@ export class KiloClawInternalClient {
 
   async patchChannels(userId: string, input: ChannelsPatchInput): Promise<ChannelsPatchResponse> {
     return this.request('/api/platform/channels', {
+      method: 'PATCH',
+      body: JSON.stringify({ userId, ...input }),
+    });
+  }
+
+  async patchSecrets(userId: string, input: SecretsPatchInput): Promise<SecretsPatchResponse> {
+    return this.request('/api/platform/secrets', {
       method: 'PATCH',
       body: JSON.stringify({ userId, ...input }),
     });

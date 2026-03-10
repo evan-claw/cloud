@@ -181,7 +181,14 @@ export const webhookTriggersRouter = createTRPCRouter({
         .where(whereClause)
         .orderBy(cloud_agent_webhook_triggers.created_at);
 
-      return triggers;
+      return triggers.map(trigger => ({
+        ...trigger,
+        inboundUrl: buildInboundUrl(
+          input.organizationId ? undefined : userId,
+          input.organizationId,
+          trigger.triggerId
+        ),
+      }));
     }),
 
   /**

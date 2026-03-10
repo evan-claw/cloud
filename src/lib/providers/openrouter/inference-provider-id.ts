@@ -11,6 +11,7 @@ export const OpenRouterInferenceProviderIdSchema = z.enum([
   'google-vertex',
   'inception',
   'moonshotai',
+  'morph',
   'xai',
   'minimax',
   'mistral',

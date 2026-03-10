@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { useSession } from 'next-auth/react';
 import { toast } from 'sonner';
 import { getWebhookRoutes } from '@/lib/webhook-routes';
 import {
@@ -18,20 +17,12 @@ import {
   type StatusFilterValue,
   type DeleteTarget,
 } from '@/components/webhook-triggers';
-import { encodeUserIdForPath } from '@/lib/webhook-agent/user-id-encoding';
-
-/** Build the inbound webhook URL for a trigger */
-function buildWebhookUrl(userId: string, triggerId: string): string {
-  return `https://hooks.kilosessions.ai/inbound/user/${encodeUserIdForPath(userId)}/${triggerId}`;
-}
 
 type WebhookTriggersListContentProps = {
   organizationId?: string;
 };
 
 export function WebhookTriggersListContent({ organizationId }: WebhookTriggersListContentProps) {
-  const { data: session } = useSession();
-
   // State
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
   const [copiedTriggerId, setCopiedTriggerId] = useState<string | null>(null);
@@ -63,15 +54,14 @@ export function WebhookTriggersListContent({ organizationId }: WebhookTriggersLi
   // Copy webhook URL to clipboard
   const handleCopyUrl = useCallback(
     async (triggerId: string) => {
-      const userId = session?.user?.id;
-      if (!userId) {
-        toast.error('User ID not available');
+      const trigger = triggers.find(t => t.triggerId === triggerId);
+      if (!trigger) {
+        toast.error('Trigger not found');
         return;
       }
 
-      const url = buildWebhookUrl(userId, triggerId);
       try {
-        await navigator.clipboard.writeText(url);
+        await navigator.clipboard.writeText(trigger.inboundUrl);
         setCopiedTriggerId(triggerId);
         toast.success('Webhook URL copied to clipboard');
         setTimeout(() => setCopiedTriggerId(null), 2000);
@@ -79,7 +69,7 @@ export function WebhookTriggersListContent({ organizationId }: WebhookTriggersLi
         toast.error('Failed to copy URL');
       }
     },
-    [session?.user?.id]
+    [triggers]
   );
 
   // Open delete confirmation dialog

@@ -1,5 +1,3 @@
-import { resolve } from 'node:path';
-import { z } from 'zod';
 import type {
   ExecutionSession,
   SandboxInstance,
@@ -934,185 +932,6 @@ export class SessionService {
   }
 
   /**
-   * Write a snapshot payload to a temp file, run `kilo import`, then clean up.
-   *
-   * @param snapshotPayload - Pre-fetched JSON string of the session snapshot.
-   */
-  private async restoreSessionSnapshot(
-    session: ExecutionSession,
-    sessionId: string,
-    userId: string,
-    snapshotPayload: string
-  ): Promise<void> {
-    const tmpPath = `/tmp/kilo-session-export-${sessionId}.json`;
-    let wroteSnapshot = false;
-    try {
-      await session.writeFile(tmpPath, snapshotPayload);
-      wroteSnapshot = true;
-
-      const importResult = await session.exec(`kilo import "${tmpPath}"`);
-      if (importResult.exitCode !== 0) {
-        logger
-          .withFields({
-            sessionId,
-            userId,
-            exitCode: importResult.exitCode,
-            stderr: importResult.stderr,
-            stdout: importResult.stdout,
-          })
-          .error('Session snapshot import failed');
-        throw new Error(`Session snapshot import failed with exit code ${importResult.exitCode}`);
-      }
-    } catch (error) {
-      logger
-        .withFields({
-          sessionId,
-          userId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        .error('Session snapshot restore failed');
-      throw error instanceof Error ? error : new Error(String(error));
-    } finally {
-      if (wroteSnapshot) {
-        try {
-          await session.deleteFile(tmpPath);
-        } catch (error) {
-          logger
-            .withFields({
-              sessionId,
-              userId,
-              error: error instanceof Error ? error.message : String(error),
-            })
-            .debug('Failed to delete session snapshot temp file');
-        }
-      }
-    }
-  }
-
-  /**
-   * Apply file-level changes from a pre-parsed diff array on top of the freshly
-   * cloned repo.  Called during cold-start resume after `restoreSessionSnapshot`.
-   *
-   * Each diff entry contains the full `after` content, so we simply write (or
-   * delete) files to recreate the workspace state from the previous session.
-   *
-   * @param diffs - Pre-parsed `FileDiff[]` array (or `null` when no diff exists).
-   */
-  private async applySessionDiff(
-    session: ExecutionSession,
-    sessionId: string,
-    userId: string,
-    workspacePath: string,
-    diffs: Array<{
-      file: string;
-      after: string;
-      status?: 'added' | 'deleted' | 'modified';
-    }> | null
-  ): Promise<void> {
-    if (!Array.isArray(diffs) || diffs.length === 0) {
-      return;
-    }
-
-    let applied = 0;
-    let skipped = 0;
-
-    for (const diff of diffs) {
-      if (!diff.file) {
-        skipped++;
-        continue;
-      }
-
-      // Skip binary files — they have empty after content
-      if (diff.status !== 'deleted' && !diff.after) {
-        skipped++;
-        continue;
-      }
-
-      const filePath = resolve(workspacePath, diff.file);
-      if (!filePath.startsWith(workspacePath + '/')) {
-        logger
-          .withFields({ sessionId, userId, file: diff.file })
-          .warn('Skipping diff entry with path outside workspace');
-        skipped++;
-        continue;
-      }
-
-      try {
-        if (diff.status === 'deleted') {
-          await session.deleteFile(filePath);
-          applied++;
-        } else {
-          // Ensure parent directory exists.
-          // Use single-quoted path to prevent shell metacharacter injection.
-          const lastSlash = filePath.lastIndexOf('/');
-          if (lastSlash > 0) {
-            const parentDir = filePath.substring(0, lastSlash);
-            const escaped = parentDir.replaceAll("'", "'\\''");
-            await session.exec(`mkdir -p '${escaped}'`);
-          }
-          await session.writeFile(filePath, diff.after);
-          applied++;
-        }
-      } catch (error) {
-        logger
-          .withFields({
-            sessionId,
-            userId,
-            file: diff.file,
-            status: diff.status,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          .warn('Failed to apply file diff (non-fatal, continuing)');
-        skipped++;
-      }
-    }
-
-    logger
-      .withFields({ sessionId, userId, applied, skipped, total: diffs.length })
-      .info('Applied session diff');
-  }
-
-  /**
-   * Extract last-write-wins file diffs from streamed snapshot messages.
-   * The snapshot format is `{ info, messages: [{ info: { summary: { diffs } }, parts }] }`.
-   * Returns null when no diffs exist.
-   */
-  private static extractDiffsFromMessages(
-    payload: string
-  ): Array<{ file: string; after: string; status?: 'added' | 'deleted' | 'modified' }> | null {
-    const fileDiffSchema = z.object({
-      file: z.string(),
-      after: z.string().default(''),
-      status: z.enum(['added', 'deleted', 'modified']).default('modified'),
-    });
-
-    try {
-      const parsed = JSON.parse(payload) as {
-        messages?: Array<{ info?: { summary?: { diffs?: unknown[] } } }>;
-      };
-      if (!parsed.messages) return null;
-
-      const byFile = new Map<string, z.infer<typeof fileDiffSchema>>();
-
-      for (const msg of parsed.messages) {
-        const diffs = msg.info?.summary?.diffs;
-        if (!Array.isArray(diffs)) continue;
-
-        for (const d of diffs) {
-          const result = fileDiffSchema.safeParse(d);
-          if (!result.success) continue;
-          byFile.set(result.data.file, result.data);
-        }
-      }
-
-      if (byFile.size === 0) return null;
-      return [...byFile.values()];
-    } catch {
-      return null;
-    }
-  }
-
-  /**
    * Initialize a cloud-agent session by resuming an existing kilo session.
    *
    * Client provides both kiloSessionId and githubRepo (parsed from git_url).
@@ -1454,60 +1273,114 @@ export class SessionService {
         `Session ${sessionId} has no kiloSessionId in metadata. Cannot restore snapshot.`
       );
     }
-    // Clone first so .git exists when `kilo import` runs — the CLI derives the
-    // project ID from the repo's root commit hash; without a repo the FK on
-    // session.project_id fails.
-    await restoreWorkspace(session, context.workspacePath, context.branchName, {
-      githubRepo: metadata.githubRepo,
-      githubToken: freshGithubToken ?? metadata.githubToken,
-      gitUrl: metadata.gitUrl,
-      gitToken: freshGitToken ?? metadata.gitToken,
-      gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
-      lastSeenBranch: metadata.upstreamBranch,
-      platform: context.platform,
-    });
+    // Wrap clone and all post-clone steps so that any failure removes the
+    // workspace directory. Without this, `.git` survives and the next retry
+    // sees `isColdStart = false`, skipping the full restore flow — leaving
+    // the session in a broken half-initialized state.
+    try {
+      // Clone first so .git exists when `kilo import` runs — the CLI derives
+      // the project ID from the repo's root commit hash; without a repo the
+      // FK on session.project_id fails.
+      await restoreWorkspace(session, context.workspacePath, context.branchName, {
+        githubRepo: metadata.githubRepo,
+        githubToken: freshGithubToken ?? metadata.githubToken,
+        gitUrl: metadata.gitUrl,
+        gitToken: freshGitToken ?? metadata.gitToken,
+        gitAuthorEnv: getGitAuthorEnv(env, metadata.githubAppType),
+        lastSeenBranch: metadata.upstreamBranch,
+        platform: context.platform,
+      });
+      // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
+      await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
+      await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
-    // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
-    await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
-    await writeGlobalRules(sandbox, context.sessionHome, sessionId);
+      // Single restore script handles download, import, and diff application inside
+      // the sandbox — the snapshot never enters worker memory.
+      logger.info('Starting cold-start session restore');
 
-    // Fetch snapshot from session-ingest DO and buffer it for sandbox writeFile (string-only API).
-    const internalSecret = await env.INTERNAL_API_SECRET_PROD.get();
-    const response = await env.SESSION_INGEST.fetch(
-      new Request(`https://session-ingest/internal/session/${metadata.kiloSessionId}/export`, {
-        headers: {
-          'X-Internal-Secret': internalSecret,
-          'X-Kilo-User-Id': userId,
-        },
-      })
-    );
-
-    if (response.status === 404) {
-      throw new SessionSnapshotRestoreError(
-        `Session snapshot restore failed: session not found`,
-        404
+      const escapedId = metadata.kiloSessionId.replaceAll("'", "'\\''");
+      const escapedWorkspace = context.workspacePath.replaceAll("'", "'\\''");
+      const restoreResult = await session.exec(
+        `bun /usr/local/bin/kilo-restore-session.js '${escapedId}' '${escapedWorkspace}'`
       );
-    }
-    if (!response.ok) {
-      throw new Error(`Session export failed: ${response.status}`);
-    }
 
-    const snapshotPayload = await response.text();
+      if (restoreResult.exitCode !== 0) {
+        logger
+          .withFields({
+            sessionId,
+            userId,
+            exitCode: restoreResult.exitCode,
+            stderr: restoreResult.stderr,
+            stdout: restoreResult.stdout,
+          })
+          .error('Cold-start session restore failed');
 
-    // Extract diffs client-side from the streamed snapshot messages.
-    const diffs = SessionService.extractDiffsFromMessages(snapshotPayload);
+        // Parse stdout JSON for structured error info
+        let code: number | undefined;
+        let step: string | undefined;
+        let restoreError: string | undefined;
+        try {
+          const parsed = JSON.parse(restoreResult.stdout?.trim() ?? '{}') as Record<
+            string,
+            unknown
+          >;
+          if (typeof parsed.code === 'number') {
+            code = parsed.code;
+          }
+          if (typeof parsed.step === 'string') {
+            step = parsed.step;
+          }
+          if (typeof parsed.error === 'string') {
+            restoreError = parsed.error;
+          }
+        } catch {
+          // non-JSON stdout, ignore
+        }
 
-    await this.restoreSessionSnapshot(session, sessionId, userId, snapshotPayload);
+        if (code === 404) {
+          throw new SessionSnapshotRestoreError(
+            'Session snapshot restore failed: session not found',
+            404
+          );
+        }
 
-    // Apply file-level changes from the previous session on top of the fresh clone.
-    // This runs after kilo import (conversation restore) since the CLI doesn't need
-    // the file state during import — it only restores its internal session DB.
-    await this.applySessionDiff(session, sessionId, userId, context.workspacePath, diffs);
+        const detail = [
+          `exit ${restoreResult.exitCode}`,
+          step && `step=${step}`,
+          restoreError && `error=${restoreError}`,
+        ]
+          .filter(Boolean)
+          .join(', ');
+        throw new SessionSnapshotRestoreError(`Cold-start session restore failed: ${detail}`, code);
+      }
 
-    // Re-run setup commands (fresh clone, need to reinstall)
-    if (metadata.setupCommands && metadata.setupCommands.length > 0) {
-      logger.info('Re-running setup commands after fresh clone');
-      await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
+      // Log structured summary from restore script
+      try {
+        const summary = JSON.parse(restoreResult.stdout?.trim() ?? '{}') as Record<string, unknown>;
+        logger
+          .withFields({ sessionId, userId, ...summary })
+          .info('Cold-start session restore completed');
+      } catch {
+        // non-JSON stdout, non-fatal
+      }
+
+      // Re-run setup commands (fresh clone, need to reinstall)
+      if (metadata.setupCommands && metadata.setupCommands.length > 0) {
+        logger.info('Re-running setup commands after fresh clone');
+        await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
+      }
+    } catch (error) {
+      // Remove the workspace and sessionHome so the next retry sees a true
+      // cold start and re-runs the full restore from scratch.
+      logger
+        .withFields({
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .warn('Cold-start resume step failed; removing workspace for clean retry');
+      await cleanupWorkspace(session, context.workspacePath, context.sessionHome);
+
+      throw error;
     }
   }
 

@@ -92,6 +92,11 @@ describe('generateBaseConfig', () => {
     expect(config.tools.exec.host).toBe('gateway');
     expect(config.tools.exec.security).toBe('allowlist');
     expect(config.tools.exec.ask).toBe('on-miss');
+
+    // Browser
+    expect(config.browser.enabled).toBe(true);
+    expect(config.browser.headless).toBe(true);
+    expect(config.browser.noSandbox).toBe(true);
   });
 
   it('always sets tool profile to full on restore', () => {

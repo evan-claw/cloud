@@ -1,12 +1,12 @@
 import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { notFound } from 'next/navigation';
-import { ENABLE_GASTOWN_FEATURE } from '@/lib/constants';
+import { isGastownEnabled } from '@/lib/gastown/feature-flags';
 import { TownListPageClient } from './TownListPageClient';
 
 export default async function GastownPage() {
   const user = await getUserFromAuthOrRedirect('/users/sign_in?callbackPath=/gastown');
 
-  if (!ENABLE_GASTOWN_FEATURE || !user.is_admin) {
+  if (!(await isGastownEnabled(user.id))) {
     return notFound();
   }
 

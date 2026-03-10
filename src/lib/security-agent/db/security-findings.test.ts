@@ -1,9 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 import { db } from '@/lib/drizzle';
-import { security_findings } from '@kilocode/db/schema';
+import { security_findings, agent_configs } from '@kilocode/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { insertTestUser } from '@/tests/helpers/user.helper';
-import { upsertSecurityFinding, supersedeDuplicateFindings } from './security-findings';
+import {
+  upsertSecurityFinding,
+  supersedeDuplicateFindings,
+  getLastSyncTime,
+} from './security-findings';
 import type { DependabotAlertRaw, ParsedSecurityFinding, SecurityReviewOwner } from '../core/types';
 
 const rawDependabotAlertFixture: DependabotAlertRaw = {
@@ -399,5 +403,118 @@ describe('supersedeDuplicateFindings', () => {
       .from(security_findings)
       .where(eq(security_findings.id, group2Newer.findingId));
     expect(g2NewerRow.status).toBe('open');
+  });
+});
+
+describe('getLastSyncTime', () => {
+  it('returns runtime_state.last_synced_at when present on agent_configs', async () => {
+    const user = await insertTestUser();
+    const expectedTime = '2026-03-01T12:00:00.000Z';
+
+    await db.insert(agent_configs).values({
+      owned_by_user_id: user.id,
+      agent_type: 'security_scan',
+      platform: 'github',
+      config: {},
+      is_enabled: true,
+      runtime_state: { last_synced_at: expectedTime },
+      created_by: 'test',
+    });
+
+    const result = await getLastSyncTime({ owner: { userId: user.id } });
+    expect(result).toBe(expectedTime);
+  });
+
+  it('returns null for owner-level query when runtime_state has no last_synced_at', async () => {
+    const user = await insertTestUser();
+    const owner: SecurityReviewOwner = { userId: user.id };
+
+    await db.insert(agent_configs).values({
+      owned_by_user_id: user.id,
+      agent_type: 'security_scan',
+      platform: 'github',
+      config: {},
+      is_enabled: true,
+      runtime_state: {},
+      created_by: 'test',
+    });
+
+    await upsertSecurityFinding({
+      ...makeFinding({ source_id: '100' }),
+      owner,
+      repoFullName: 'test-org/fallback-repo',
+    });
+
+    // Owner-level should NOT fall back to MAX(findings) — that overstates freshness after partial failures
+    const result = await getLastSyncTime({ owner });
+    expect(result).toBeNull();
+  });
+
+  it('returns null for owner-level query when no agent_config exists', async () => {
+    const user = await insertTestUser();
+    const owner: SecurityReviewOwner = { userId: user.id };
+
+    await upsertSecurityFinding({
+      ...makeFinding({ source_id: '200' }),
+      owner,
+      repoFullName: 'test-org/no-config-repo',
+    });
+
+    // Owner-level should return null, not fall back to MAX(findings)
+    const result = await getLastSyncTime({ owner });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no config and no findings exist', async () => {
+    const user = await insertTestUser();
+
+    const result = await getLastSyncTime({ owner: { userId: user.id } });
+    expect(result).toBeNull();
+  });
+
+  it('skips runtime_state and uses findings when repoFullName is provided', async () => {
+    const user = await insertTestUser();
+    const owner: SecurityReviewOwner = { userId: user.id };
+
+    await db.insert(agent_configs).values({
+      owned_by_user_id: user.id,
+      agent_type: 'security_scan',
+      platform: 'github',
+      config: {},
+      is_enabled: true,
+      runtime_state: { last_synced_at: '2026-06-01T00:00:00.000Z' },
+      created_by: 'test',
+    });
+
+    await upsertSecurityFinding({
+      ...makeFinding({ source_id: '300' }),
+      owner,
+      repoFullName: 'test-org/specific-repo',
+    });
+
+    const result = await getLastSyncTime({ owner, repoFullName: 'test-org/specific-repo' });
+    // Should return the finding's last_synced_at, not the owner-level runtime_state
+    expect(result).not.toBeNull();
+    expect(result).not.toBe('2026-06-01T00:00:00.000Z');
+  });
+
+  it('returns null for repo with zero findings (no per-repo sync metadata)', async () => {
+    const user = await insertTestUser();
+    const owner: SecurityReviewOwner = { userId: user.id };
+
+    await db.insert(agent_configs).values({
+      owned_by_user_id: user.id,
+      agent_type: 'security_scan',
+      platform: 'github',
+      config: {},
+      is_enabled: true,
+      runtime_state: { last_synced_at: '2026-03-01T12:00:00.000Z' },
+      created_by: 'test',
+    });
+
+    // No findings for this repo — could be a clean repo or one added after the last sync.
+    // Without per-repo sync metadata, returning null is safer than overstating freshness.
+    const result = await getLastSyncTime({ owner, repoFullName: 'test-org/clean-repo' });
+    expect(result).toBeNull();
   });
 });

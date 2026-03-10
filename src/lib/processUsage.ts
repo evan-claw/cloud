@@ -175,8 +175,6 @@ export type MicrodollarUsageContext = {
   promptInfo: PromptInfo;
   max_tokens: number | null;
   has_middle_out_transform: boolean | null;
-  estimatedInputTokens: number;
-  estimatedOutputTokens: number;
   isStreaming: boolean;
   prior_microdollar_usage: number;
   /** User email for authenticated users - used as PostHog distinctId. Undefined for anonymous users. */
@@ -958,6 +956,10 @@ async function processTokenData(
         [genStats.cost_mUsd, usageStats.cost_mUsd],
         [genStats.cacheDiscount_mUsd, usageStats.cacheDiscount_mUsd]
       );
+    }
+    if (usageStats.inputTokens) {
+      // retain because of vercel bug: https://kilo-code.slack.com/archives/C08UR25T02V/p1773140435733259
+      genStats.inputTokens = usageStats.inputTokens;
     }
     usageStats = genStats;
   }

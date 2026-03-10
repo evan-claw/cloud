@@ -79,8 +79,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
       max_tokens: null,
       has_middle_out_transform: null,
-      estimatedInputTokens: 0,
-      estimatedOutputTokens: 0,
       isStreaming: false,
       prior_microdollar_usage: user.microdollars_used,
       posthog_distinct_id: user.google_user_email,

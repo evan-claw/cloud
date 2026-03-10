@@ -11,6 +11,13 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-03-09',
+    description:
+      'Added headless Chromium browser support. OpenClaw\'s built-in browser tool now works out of the box for web browsing, screenshots, and CDP automation. Requires the "full" tool profile.',
+    category: 'feature',
+    deployHint: 'redeploy_required',
+  },
+  {
     date: '2026-03-05',
     description:
       'New deploys now default to the "full" tool profile, giving agents access to all tools including exec, filesystem, web search, and messaging. Existing instances can change their profile in the Control UI under Settings > Config > Tools > Tool Profile.',

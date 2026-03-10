@@ -37,10 +37,12 @@ import { debugSaveLog, inStreamDebugMode } from '@/lib/debugUtils';
 import { ReasoningFormat } from '@/lib/custom-llm/format';
 import {
   CustomLlmExtraBodySchema,
+  InterleavedFormatSchema,
   ReasoningEffortSchema,
   VerbositySchema,
 } from '@kilocode/db/schema-types';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type OpenAI from 'openai';
 
 function convertMessages(messages: OpenRouterChatCompletionsInput): ModelMessage[] {
   const toolNameByCallId = new Map<string, string>();
@@ -680,13 +682,42 @@ function createModel(customLlm: CustomLlm) {
     return openai(customLlm.internal_id);
   }
   if (customLlm.provider === 'openai-compatible') {
+    const interleavedFormat =
+      InterleavedFormatSchema.safeParse(customLlm.interleaved_format).data ??
+      InterleavedFormatSchema.enum.reasoning_content;
     const openaiCompatible = createOpenAICompatible({
       name: 'openaiCompatible',
       apiKey: customLlm.api_key,
       baseURL: customLlm.base_url,
       transformRequestBody: body => {
+        let messages = (body as OpenAI.ChatCompletionCreateParams).messages ?? [];
+        if (interleavedFormat === InterleavedFormatSchema.enum.think) {
+          messages = messages.map(msg => {
+            if (
+              msg.role !== 'assistant' ||
+              !('reasoning_content' in msg) ||
+              typeof msg.reasoning_content !== 'string'
+            ) {
+              return msg;
+            }
+            const think = '<think>' + msg.reasoning_content + '</think>';
+            if (Array.isArray(msg.content)) {
+              return {
+                ...msg,
+                content: [{ type: 'text', text: think }, ...msg.content],
+                reasoning_content: undefined,
+              };
+            } else {
+              return {
+                ...msg,
+                content: think + (msg.content ?? ''),
+                reasoning_content: undefined,
+              };
+            }
+          });
+        }
         const extraBody = CustomLlmExtraBodySchema.safeParse(customLlm.extra_body).data;
-        return { ...body, ...extraBody };
+        return { ...body, messages, ...extraBody };
       },
     });
     return openaiCompatible(customLlm.internal_id);

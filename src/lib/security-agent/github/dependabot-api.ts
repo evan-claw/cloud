@@ -108,31 +108,30 @@ function toInternalAlert(alert: GitHubDependabotAlert): DependabotAlertRaw {
 export type FetchAlertsResult =
   | { status: 'success'; alerts: DependabotAlertRaw[] }
   | { status: 'repo_not_found' }
-  | { status: 'alerts_unavailable' };
+  | { status: 'alerts_disabled' }
+  | { status: 'access_blocked' };
 
-type FetchAlertsSkipStatus = 'repo_not_found' | 'alerts_unavailable';
+type FetchAlertsSkipStatus = 'repo_not_found' | 'alerts_disabled' | 'access_blocked';
 
-const DEPENDABOT_NOT_ACTIONABLE_MESSAGE_HINTS = [
+// Permanent repo-level settings — safe to skip without blocking freshness.
+const DEPENDABOT_DISABLED_HINTS = [
   'dependabot alerts are disabled',
   'dependabot alerts are not available',
-  'repository access blocked',
   'archived repositories',
   'archived repository',
 ] as const;
+
+// The repo exists but our app can't read it — should block freshness
+// advancement so the owner doesn't look fully synced.
+const ACCESS_BLOCKED_HINTS = ['repository access blocked'] as const;
 
 function normalizeErrorMessage(message?: string): string {
   return (message ?? '').toLowerCase();
 }
 
-function isDependabotNotActionableMessage(message?: string): boolean {
+function matchesAnyHint(message: string | undefined, hints: readonly string[]): boolean {
   const normalized = normalizeErrorMessage(message);
-  return DEPENDABOT_NOT_ACTIONABLE_MESSAGE_HINTS.some(hint => normalized.includes(hint));
-}
-
-function isDependabotUnavailableStatus(httpStatus?: number): boolean {
-  return (
-    httpStatus === 451 || (typeof httpStatus === 'number' && httpStatus >= 500 && httpStatus < 600)
-  );
+  return hints.some(hint => normalized.includes(hint));
 }
 
 function classifyFetchAlertsError(
@@ -143,12 +142,20 @@ function classifyFetchAlertsError(
     return 'repo_not_found';
   }
 
-  if (isDependabotUnavailableStatus(httpStatus)) {
-    return 'alerts_unavailable';
+  // 451 "Unavailable for Legal Reasons" — repo is blocked and won't recover
+  // on its own.  Treat the same as access_blocked so freshness doesn't advance
+  // while the repo's data is unreadable.
+  if (httpStatus === 451) {
+    return 'access_blocked';
   }
 
-  if ((httpStatus === 403 || httpStatus === 422) && isDependabotNotActionableMessage(message)) {
-    return 'alerts_unavailable';
+  if (httpStatus === 403 || httpStatus === 422) {
+    if (matchesAnyHint(message, ACCESS_BLOCKED_HINTS)) {
+      return 'access_blocked';
+    }
+    if (matchesAnyHint(message, DEPENDABOT_DISABLED_HINTS)) {
+      return 'alerts_disabled';
+    }
   }
 
   return null;
@@ -210,12 +217,20 @@ export async function fetchAllDependabotAlerts(
     const message = (error as { message?: string }).message;
     const skipStatus = classifyFetchAlertsError(httpStatus, message);
 
-    if (skipStatus === 'alerts_unavailable') {
-      warn(`Dependabot alerts are unavailable for ${owner}/${repo}, skipping`, {
+    if (skipStatus === 'alerts_disabled') {
+      warn(`Dependabot alerts are disabled for ${owner}/${repo}, skipping`, {
         status: httpStatus,
         message,
       });
-      return { status: 'alerts_unavailable' };
+      return { status: 'alerts_disabled' };
+    }
+
+    if (skipStatus === 'access_blocked') {
+      warn(`Repository ${owner}/${repo} access blocked, cannot sync`, {
+        status: httpStatus,
+        message,
+      });
+      return { status: 'access_blocked' };
     }
 
     if (skipStatus === 'repo_not_found') {

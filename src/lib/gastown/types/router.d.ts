@@ -103,10 +103,10 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         agents: {
           id: string;
           rig_id: string | null;
-          role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+          role: string;
           name: string;
           identity: string;
-          status: 'dead' | 'idle' | 'stalled' | 'working';
+          status: string;
           current_hook_bead_id: string | null;
           dispatch_attempts: number;
           last_activity_at: string | null;
@@ -193,10 +193,10 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       output: {
         id: string;
         rig_id: string | null;
-        role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+        role: string;
         name: string;
         identity: string;
-        status: 'dead' | 'idle' | 'stalled' | 'working';
+        status: string;
         current_hook_bead_id: string | null;
         dispatch_attempts: number;
         last_activity_at: string | null;
@@ -248,10 +248,10 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         agent: {
           id: string;
           rig_id: string | null;
-          role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+          role: string;
           name: string;
           identity: string;
-          status: 'dead' | 'idle' | 'stalled' | 'working';
+          status: string;
           current_hook_bead_id: string | null;
           dispatch_attempts: number;
           last_activity_at: string | null;
@@ -287,6 +287,43 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
           status: 'active' | 'idle' | 'starting';
           lastActivityAt: string;
         } | null;
+      };
+      meta: object;
+    }>;
+    getAlarmStatus: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+      };
+      output: {
+        alarm: {
+          nextFireAt: string | null;
+          intervalMs: number;
+          intervalLabel: string;
+        };
+        agents: {
+          working: number;
+          idle: number;
+          stalled: number;
+          dead: number;
+          total: number;
+        };
+        beads: {
+          open: number;
+          inProgress: number;
+          failed: number;
+          triageRequests: number;
+        };
+        patrol: {
+          guppWarnings: number;
+          guppEscalations: number;
+          stalledAgents: number;
+          orphanedHooks: number;
+        };
+        recentEvents: {
+          time: string;
+          type: string;
+          message: string;
+        }[];
       };
       meta: object;
     }>;
@@ -658,10 +695,10 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             agents: {
               id: string;
               rig_id: string | null;
-              role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+              role: string;
               name: string;
               identity: string;
-              status: 'dead' | 'idle' | 'stalled' | 'working';
+              status: string;
               current_hook_bead_id: string | null;
               dispatch_attempts: number;
               last_activity_at: string | null;
@@ -748,10 +785,10 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           output: {
             id: string;
             rig_id: string | null;
-            role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+            role: string;
             name: string;
             identity: string;
-            status: 'dead' | 'idle' | 'stalled' | 'working';
+            status: string;
             current_hook_bead_id: string | null;
             dispatch_attempts: number;
             last_activity_at: string | null;
@@ -803,10 +840,10 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             agent: {
               id: string;
               rig_id: string | null;
-              role: 'mayor' | 'polecat' | 'refinery' | 'witness';
+              role: string;
               name: string;
               identity: string;
-              status: 'dead' | 'idle' | 'stalled' | 'working';
+              status: string;
               current_hook_bead_id: string | null;
               dispatch_attempts: number;
               last_activity_at: string | null;
@@ -842,6 +879,43 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
               status: 'active' | 'idle' | 'starting';
               lastActivityAt: string;
             } | null;
+          };
+          meta: object;
+        }>;
+        getAlarmStatus: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+          };
+          output: {
+            alarm: {
+              nextFireAt: string | null;
+              intervalMs: number;
+              intervalLabel: string;
+            };
+            agents: {
+              working: number;
+              idle: number;
+              stalled: number;
+              dead: number;
+              total: number;
+            };
+            beads: {
+              open: number;
+              inProgress: number;
+              failed: number;
+              triageRequests: number;
+            };
+            patrol: {
+              guppWarnings: number;
+              guppEscalations: number;
+              stalledAgents: number;
+              orphanedHooks: number;
+            };
+            recentEvents: {
+              time: string;
+              type: string;
+              message: string;
+            }[];
           };
           meta: object;
         }>;

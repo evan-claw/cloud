@@ -1,6 +1,6 @@
 import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { notFound } from 'next/navigation';
-import { ENABLE_GASTOWN_FEATURE } from '@/lib/constants';
+import { isGastownEnabled } from '@/lib/gastown/feature-flags';
 import { MailPageClient } from './MailPageClient';
 
 export default async function MailPage({ params }: { params: Promise<{ townId: string }> }) {
@@ -8,6 +8,6 @@ export default async function MailPage({ params }: { params: Promise<{ townId: s
   const user = await getUserFromAuthOrRedirect(
     `/users/sign_in?callbackPath=/gastown/${townId}/mail`
   );
-  if (!ENABLE_GASTOWN_FEATURE || !user.is_admin) return notFound();
+  if (!(await isGastownEnabled(user.id))) return notFound();
   return <MailPageClient townId={townId} />;
 }

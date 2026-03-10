@@ -268,6 +268,14 @@ config.tools.exec.host = 'gateway';
 config.tools.exec.security = 'allowlist';
 config.tools.exec.ask = 'on-miss';
 
+// Browser: headless Chromium for the browser tool in Docker.
+// OpenClaw auto-detects /usr/bin/chromium and adds --disable-dev-shm-usage on Linux.
+// noSandbox is required in containers (Chromium's setuid sandbox needs kernel namespacing).
+config.browser = config.browser || {};
+config.browser.enabled = true;
+config.browser.headless = true;
+config.browser.noSandbox = true;
+
 // Telegram configuration
 // Overwrite entire channel object to drop stale keys that would fail
 // OpenClaw's strict config validation (matches moltworker behavior)

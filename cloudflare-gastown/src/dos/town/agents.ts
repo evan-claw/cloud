@@ -335,7 +335,7 @@ export function allocatePolecatName(sql: SqlStorage): string {
 
 /**
  * Find an idle agent of the given role, or create one.
- * For singleton roles (witness, refinery, mayor), reuse existing.
+ * For singleton roles (mayor), reuse existing.
  * For polecats, create a new one.
  */
 export function getOrCreateAgent(
@@ -345,13 +345,32 @@ export function getOrCreateAgent(
   townId: string
 ): Agent {
   // Town-wide singletons: one per town, not tied to a rig.
-  const townSingletonRoles = ['witness', 'mayor'];
+  const townSingletonRoles = ['mayor'];
+  // Per-rig singletons: one per rig (the refinery processes reviews
+  // sequentially, so there should never be two for the same rig).
+  const rigSingletonRoles = ['refinery'];
 
   if (townSingletonRoles.includes(role)) {
     const existing = listAgents(sql, { role });
     if (existing.length > 0) return existing[0];
+  } else if (rigSingletonRoles.includes(role)) {
+    // Return the existing agent regardless of status. The caller is
+    // responsible for checking whether it's idle before dispatching.
+    const existing = [
+      ...query(
+        sql,
+        /* sql */ `
+          ${AGENT_JOIN}
+          WHERE ${agent_metadata.role} = ?
+            AND ${beads.rig_id} = ?
+          LIMIT 1
+        `,
+        [role, rigId]
+      ),
+    ];
+    if (existing.length > 0) return toAgent(AgentBeadRecord.parse(existing[0]));
   } else {
-    // Per-rig agents (polecat, refinery): reuse an idle one in the SAME rig.
+    // Per-rig agents (polecat): reuse an idle one in the SAME rig.
     // Agents are tied to a rig's worktree/repo — reusing one from a different
     // rig would dispatch it into the wrong repository.
     const idle = [

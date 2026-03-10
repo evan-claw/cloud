@@ -1,0 +1,1 @@
+ALTER TABLE "custom_llm" ADD COLUMN "interleaved_format" text;

@@ -99,8 +99,6 @@ export function systemPromptForRole(params: {
       switch (params.role) {
         case 'refinery':
           return `${base} You review code quality and merge PRs. Check for correctness, style, and test coverage.`;
-        case 'witness':
-          return `${base} You monitor agent health and report anomalies.`;
         default:
           return base;
       }
@@ -172,6 +170,13 @@ export async function startAgentInContainer(
     platformIntegrationId?: string;
     /** For convoy beads: the convoy's feature branch to branch from instead of defaultBranch. */
     convoyFeatureBranch?: string;
+    /** All rigs in the town (mayor only) — used to set up browse worktrees on fresh containers. */
+    rigs?: Array<{
+      rigId: string;
+      gitUrl: string;
+      defaultBranch: string;
+      platformIntegrationId?: string;
+    }>;
   }
 ): Promise<boolean> {
   console.log(
@@ -259,6 +264,10 @@ export async function startAgentInContainer(
         defaultBranch: params.defaultBranch,
         envVars,
         platformIntegrationId: params.platformIntegrationId,
+        // For convoy agents, start from the convoy's feature branch so the
+        // worktree includes all previously merged convoy work.
+        startPoint: params.convoyFeatureBranch ? `origin/${params.convoyFeatureBranch}` : undefined,
+        rigs: params.rigs,
       }),
     });
 
@@ -361,6 +370,11 @@ export async function checkAgentContainerStatus(
     const container = getTownContainerStub(env, townId);
     // TODO: Generally you should use containerFetch which waits for ports to be available
     const response = await container.fetch(`http://container/agents/${agentId}/status`);
+    // 404 means the container is running but has no record of this agent
+    // (e.g. after container eviction). Report as 'not_found' so
+    // witnessPatrol can immediately reset and redispatch the agent
+    // instead of waiting for the 2-hour GUPP timeout.
+    if (response.status === 404) return { status: 'not_found' };
     if (!response.ok) return { status: 'unknown' };
     const data: unknown = await response.json();
     if (typeof data === 'object' && data !== null && 'status' in data) {

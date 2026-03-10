@@ -66,6 +66,18 @@ import {
   ControllerVersionResponseSchema,
   GatewayControllerError,
 } from './gateway-controller-types';
+import {
+  SECRET_CATALOG,
+  FIELD_KEY_TO_ENV_VAR,
+  ENV_VAR_TO_FIELD_KEY,
+  ALL_SECRET_FIELD_KEYS,
+  type SecretFieldKey,
+} from '@kilocode/kiloclaw-secret-catalog';
+
+/** Channel env var names — used to exclude channel secrets from secretCount (they have their own channelCount). */
+const CHANNEL_ENV_VARS = new Set(
+  SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.envVar))
+);
 import { parseRegions, shuffleRegions, deprioritizeRegion } from './regions';
 import {
   METADATA_RECOVERY_COOLDOWN_MS,
@@ -518,49 +530,128 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     slackBot: boolean;
     slackApp: boolean;
   }> {
-    await this.loadState();
-
-    const merged = this.channels ? { ...this.channels } : {};
-
-    if (patch.telegramBotToken !== undefined) {
-      if (patch.telegramBotToken === null) {
-        delete merged.telegramBotToken;
-      } else {
-        merged.telegramBotToken = patch.telegramBotToken;
-      }
-    }
-    if (patch.discordBotToken !== undefined) {
-      if (patch.discordBotToken === null) {
-        delete merged.discordBotToken;
-      } else {
-        merged.discordBotToken = patch.discordBotToken;
-      }
-    }
-    if (patch.slackBotToken !== undefined) {
-      if (patch.slackBotToken === null) {
-        delete merged.slackBotToken;
-      } else {
-        merged.slackBotToken = patch.slackBotToken;
-      }
-    }
-    if (patch.slackAppToken !== undefined) {
-      if (patch.slackAppToken === null) {
-        delete merged.slackAppToken;
-      } else {
-        merged.slackAppToken = patch.slackAppToken;
+    // Delegate to updateSecrets so both storage fields stay in sync.
+    // Only forward keys that were explicitly provided in the patch.
+    const secretsPatch: Record<string, EncryptedEnvelope | null> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value !== undefined) {
+        secretsPatch[key] = value;
       }
     }
 
-    const hasAny = Object.values(merged).some(Boolean);
-    this.channels = hasAny ? merged : null;
-    await this.ctx.storage.put({ channels: this.channels });
+    const { configured } = await this.updateSecrets(secretsPatch);
 
     return {
-      telegram: !!this.channels?.telegramBotToken,
-      discord: !!this.channels?.discordBotToken,
-      slackBot: !!this.channels?.slackBotToken,
-      slackApp: !!this.channels?.slackAppToken,
+      telegram: configured.includes('telegramBotToken'),
+      discord: configured.includes('discordBotToken'),
+      slackBot: configured.includes('slackBotToken'),
+      slackApp: configured.includes('slackAppToken'),
     };
+  }
+
+  /**
+   * Generic secret update — catalog-driven replacement for updateChannels.
+   * Reads from both legacy `channels` + new `encryptedSecrets`, merges,
+   * applies the patch, then dual-writes to both fields for backward compat.
+   *
+   * Does NOT restart the machine; the caller should prompt the user to restart.
+   */
+  async updateSecrets(
+    patch: Partial<Record<SecretFieldKey, EncryptedEnvelope | null>>
+  ): Promise<{ configured: SecretFieldKey[] }> {
+    await this.loadState();
+
+    // 1. Read from both legacy channels + new encryptedSecrets into field-keyed working set.
+    //    encryptedSecrets stores env var names; reverse-map back to field keys.
+    //    Non-catalog keys (generic secrets) are tracked separately to preserve them on write.
+    const currentSecrets: Record<string, EncryptedEnvelope | null> = {
+      ...(this.channels ?? {}),
+    };
+    const nonCatalogSecrets: Record<string, EncryptedEnvelope> = {};
+    if (this.encryptedSecrets) {
+      for (const [key, value] of Object.entries(this.encryptedSecrets)) {
+        const fieldKey = ENV_VAR_TO_FIELD_KEY.get(key);
+        if (fieldKey) {
+          currentSecrets[fieldKey] = value;
+        } else {
+          // Non-catalog secret (e.g. OPENAI_API_KEY) — preserve as-is in storage
+          nonCatalogSecrets[key] = value;
+        }
+      }
+    }
+
+    // 2. Apply patch (log operation + field key, NEVER log secret values)
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) {
+        console.log('[DO] Secret removed', { fieldKey: key, operation: 'remove' });
+        delete currentSecrets[key];
+      } else {
+        console.log('[DO] Secret updated', { fieldKey: key, operation: 'set' });
+        currentSecrets[key] = value;
+      }
+    }
+
+    // 3. Enforce allFieldsRequired on post-merge state.
+    //    Rejects partial clears (e.g. removing slackBotToken while slackAppToken remains).
+    for (const entry of SECRET_CATALOG) {
+      if (!entry.allFieldsRequired) continue;
+      const fieldValues = entry.fields.map(f => currentSecrets[f.key]);
+      const hasAny = fieldValues.some(v => v != null);
+      const hasAll = fieldValues.every(v => v != null);
+      if (hasAny && !hasAll) {
+        const err = new Error(
+          `Invalid secret patch: ${entry.label} requires all fields to be set together`
+        );
+        (err as Error & { status: number }).status = 400;
+        throw err;
+      }
+    }
+
+    // 4. Dual-write: update both fields for backward compat
+    //    Legacy callers (patchChannels) still read from `channels`
+    const channelKeys = new Set(
+      SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.key))
+    );
+    const channelsSubset: Record<string, EncryptedEnvelope> = {};
+    for (const [key, value] of Object.entries(currentSecrets)) {
+      if (channelKeys.has(key) && value) {
+        channelsSubset[key] = value;
+      }
+    }
+
+    const hasChannels = Object.keys(channelsSubset).length > 0;
+    this.channels = hasChannels ? (channelsSubset as PersistedState['channels']) : null;
+
+    // Filter out null values for storage (only store non-null envelopes)
+    const cleanedSecrets: Record<string, EncryptedEnvelope> = {};
+    for (const [key, value] of Object.entries(currentSecrets)) {
+      if (value) {
+        cleanedSecrets[key] = value;
+      }
+    }
+
+    // Return only catalog field keys (exclude any non-catalog keys that may exist in storage)
+    const configured = Object.keys(cleanedSecrets).filter((k): k is SecretFieldKey =>
+      ALL_SECRET_FIELD_KEYS.has(k)
+    );
+
+    // 4. Remap field keys → env var names for encryptedSecrets storage.
+    //    buildEnvVars/mergeEnvVarsWithSecrets expects env var names as keys.
+    //    Non-catalog secrets are merged back unchanged.
+    const remappedSecrets: Record<string, EncryptedEnvelope> = { ...nonCatalogSecrets };
+    for (const [key, value] of Object.entries(cleanedSecrets)) {
+      const envName = FIELD_KEY_TO_ENV_VAR.get(key) ?? key;
+      remappedSecrets[envName] = value;
+    }
+    const hasSecrets = Object.keys(remappedSecrets).length > 0;
+    this.encryptedSecrets = hasSecrets ? remappedSecrets : null;
+
+    await this.ctx.storage.put({
+      channels: this.channels,
+      encryptedSecrets: this.encryptedSecrets,
+    });
+
+    return { configured };
   }
 
   /** KV cache key for pairing requests, scoped to the specific machine. */
@@ -1166,7 +1257,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastStartedAt: this.lastStartedAt,
       lastStoppedAt: this.lastStoppedAt,
       envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
-      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      secretCount: this.encryptedSecrets
+        ? Object.keys(this.encryptedSecrets).filter(k => !CHANNEL_ENV_VARS.has(k)).length
+        : 0,
       channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
       flyAppName: this.flyAppName,
       flyMachineId: this.flyMachineId,
@@ -1221,7 +1314,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastStartedAt: this.lastStartedAt,
       lastStoppedAt: this.lastStoppedAt,
       envVarCount: this.envVars ? Object.keys(this.envVars).length : 0,
-      secretCount: this.encryptedSecrets ? Object.keys(this.encryptedSecrets).length : 0,
+      secretCount: this.encryptedSecrets
+        ? Object.keys(this.encryptedSecrets).filter(k => !CHANNEL_ENV_VARS.has(k)).length
+        : 0,
       channelCount: this.channels ? Object.values(this.channels).filter(Boolean).length : 0,
       flyAppName: this.flyAppName,
       flyMachineId: this.flyMachineId,

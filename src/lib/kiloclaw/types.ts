@@ -1,4 +1,5 @@
 import type { EncryptedEnvelope } from '@/lib/encryption';
+import type { SecretFieldKey } from '@kilocode/kiloclaw-secret-catalog';
 
 /** Mirrors the worker's ImageVersionEntry schema (KV stored version metadata) */
 export type ImageVersionEntry = {
@@ -53,6 +54,17 @@ export type ChannelsPatchResponse = {
   discord: boolean;
   slackBot: boolean;
   slackApp: boolean;
+};
+
+/** Input to PATCH /api/platform/secrets */
+export type SecretsPatchInput = {
+  secrets: Partial<Record<SecretFieldKey, EncryptedEnvelope | null>>;
+};
+
+/** Response from PATCH /api/platform/secrets */
+export type SecretsPatchResponse = {
+  /** Field keys that have a value set after the patch */
+  configured: SecretFieldKey[];
 };
 
 /** A pending channel pairing request (e.g. from Telegram DM) */

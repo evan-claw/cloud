@@ -172,6 +172,14 @@ export function generateBaseConfig(
   config.tools.exec.security = 'allowlist';
   config.tools.exec.ask = 'on-miss';
 
+  // Browser: headless Chromium for the browser tool in Docker.
+  // OpenClaw auto-detects /usr/bin/chromium and adds --disable-dev-shm-usage on Linux.
+  // noSandbox is required in containers (Chromium's setuid sandbox needs kernel namespacing).
+  config.browser = config.browser ?? {};
+  config.browser.enabled = true;
+  config.browser.headless = true;
+  config.browser.noSandbox = true;
+
   // Telegram
   if (env.TELEGRAM_BOT_TOKEN) {
     const dmPolicy = env.TELEGRAM_DM_POLICY || 'pairing';
