@@ -314,7 +314,8 @@ export class WrapperClient {
         // Read the wrapper's own log file for richer diagnostics (logToFile output)
         let wrapperFileLog: string | undefined;
         try {
-          const logResult = await this.session.exec(`cat ${wrapperLogPath} 2>/dev/null`);
+          const quotedWrapperLogPath = `'${wrapperLogPath.replace(/'/g, "'\\''")}'`;
+          const logResult = await this.session.exec(`cat ${quotedWrapperLogPath} 2>/dev/null`);
           const content = logResult.stdout?.trim();
           if (content) {
             wrapperFileLog = content;
