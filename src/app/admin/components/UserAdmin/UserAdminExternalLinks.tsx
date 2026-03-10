@@ -41,6 +41,36 @@ export function UserAdminExternalLinks({
               <span className="flex items-center gap-2">Check on Have I Been Pwned</span>
               <SquareArrowOutUpRight size={16} />
             </a>
+
+            <a
+              href={`https://sentry.io/organizations/${process.env.SENTRY_ORG ?? 'kilo-code'}/issues/?query=user.email:${encodeURIComponent(google_user_email)}`}
+              target="_blank"
+              className="inline-flex items-center justify-between gap-2 rounded-md bg-red-950 px-4 py-3 text-sm font-medium text-red-200 transition-colors hover:bg-red-900"
+              title="View Sentry issues for this user"
+            >
+              View in Sentry
+              <SquareArrowOutUpRight size={16} />
+            </a>
+
+            <a
+              href={`https://us.posthog.com/project/${process.env.NEXT_PUBLIC_POSTHOG_PROJECT_ID ?? '141915'}/persons?search=${encodeURIComponent(google_user_email)}`}
+              target="_blank"
+              className="inline-flex items-center justify-between gap-2 rounded-md bg-blue-950 px-4 py-3 text-sm font-medium text-blue-200 transition-colors hover:bg-blue-900"
+              title="View PostHog person profile for this user"
+            >
+              View in PostHog
+              <SquareArrowOutUpRight size={16} />
+            </a>
+
+            <a
+              href={`https://app.usepylon.com/customers?search=${encodeURIComponent(google_user_email)}`}
+              target="_blank"
+              className="inline-flex items-center justify-between gap-2 rounded-md bg-emerald-950 px-4 py-3 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-900"
+              title="View Pylon customer profile for this user"
+            >
+              View in Pylon
+              <SquareArrowOutUpRight size={16} />
+            </a>
             <div className="bg-background flex items-center gap-3 rounded-md p-3">
               <div className="flex-1">
                 <p className="text-foreground text-sm font-medium">Gravatar</p>
