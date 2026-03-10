@@ -44,9 +44,14 @@ export function convertReasoningDetailsToReasoningContent(
 }
 
 export function applyXaiModelSettings(
+  requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest,
   extraHeaders: Record<string, string>
 ) {
+  if (requestedModel === grok_code_fast_1_optimized_free_model.public_id) {
+    delete requestToMutate.reasoning;
+  }
+
   // https://kilo-code.slack.com/archives/C09922UFQHF/p1767968746782459
   extraHeaders['x-grok-conv-id'] = requestToMutate.prompt_cache_key || crypto.randomUUID();
   extraHeaders['x-grok-req-id'] = crypto.randomUUID();
