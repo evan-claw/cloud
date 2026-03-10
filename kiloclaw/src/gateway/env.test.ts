@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { generateKeyPairSync, publicEncrypt, randomBytes, createCipheriv, constants } from 'crypto';
-import { buildEnvVars } from './env';
+import { buildEnvVars, FEATURE_TO_ENV_VAR } from './env';
+import { DEFAULT_INSTANCE_FEATURES } from '../schemas/instance-config';
 import { createMockEnv } from '../test-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
 import type { EncryptedEnvelope, EncryptedChannelTokens } from '../schemas/instance-config';
@@ -264,33 +265,36 @@ describe('buildEnvVars', () => {
 
   // ─── Reserved prefix validation ──────────────────────────────────────
 
-  it('rejects user envVars with KILOCLAW_ENC_ prefix', async () => {
+  it('drops user envVars with reserved KILOCLAW_ prefix instead of throwing', async () => {
     const env = createMockEnv();
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        envVars: { KILOCLAW_ENC_FOO: 'bad' },
-      })
-    ).rejects.toThrow('reserved prefix');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { KILOCLAW_ENC_FOO: 'bad', VALID_VAR: 'good' },
+    });
+
+    expect(result.env.KILOCLAW_ENC_FOO).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_ENC_FOO).toBeUndefined();
+    expect(result.env.VALID_VAR).toBe('good');
   });
 
-  it('rejects user encryptedSecrets with KILOCLAW_ENV_ prefix', async () => {
+  it('drops encrypted secrets with reserved KILOCLAW_ prefix instead of throwing', async () => {
     const env = createMockEnv({ AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey });
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        encryptedSecrets: {
-          KILOCLAW_ENV_BAD: encryptForTest('val', testPublicKey),
-        },
-      })
-    ).rejects.toThrow('reserved prefix');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      encryptedSecrets: {
+        KILOCLAW_ENV_BAD: encryptForTest('val', testPublicKey),
+      },
+    });
+
+    expect(result.sensitive.KILOCLAW_ENV_BAD).toBeUndefined();
   });
 
-  it('rejects user envVars with invalid shell identifier', async () => {
+  it('drops user envVars with invalid shell identifier instead of throwing', async () => {
     const env = createMockEnv();
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        envVars: { 'MY-VAR': 'bad' },
-      })
-    ).rejects.toThrow('valid shell identifier');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { 'MY-VAR': 'bad', GOOD_VAR: 'good' },
+    });
+
+    expect(result.env['MY-VAR']).toBeUndefined();
+    expect(result.env.GOOD_VAR).toBe('good');
   });
 
   // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────
@@ -324,5 +328,56 @@ describe('buildEnvVars', () => {
     expect(result.env.DISCORD_BOT_TOKEN).toBeUndefined();
     expect(result.env.SLACK_BOT_TOKEN).toBeUndefined();
     expect(result.env.SLACK_APP_TOKEN).toBeUndefined();
+  });
+
+  // ─── Instance feature flags (Layer 6) ───────────────────────────────
+
+  it('maps instanceFeatures to KILOCLAW_* env vars', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      instanceFeatures: ['npm-global-prefix'],
+    });
+
+    expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBe('true');
+  });
+
+  it('ignores unknown feature names without emitting env vars', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      instanceFeatures: ['nonexistent-feature'],
+    });
+
+    // No KILOCLAW_* feature vars should be set (only platform defaults)
+    const featureVars = Object.keys(result.env).filter(k => k.startsWith('KILOCLAW_'));
+    expect(featureVars).toEqual([]);
+  });
+
+  it('emits no feature env vars when instanceFeatures is empty', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      instanceFeatures: [],
+    });
+
+    expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBeUndefined();
+  });
+
+  it('drops user KILOCLAW_* env var and feature flag still applies (defense-in-depth)', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { KILOCLAW_NPM_GLOBAL_PREFIX: 'false' },
+      instanceFeatures: ['npm-global-prefix'],
+    });
+
+    // User's attempt to set it to 'false' was dropped; feature flag sets it to 'true'
+    expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBe('true');
+  });
+
+  it('every DEFAULT_INSTANCE_FEATURES entry has a FEATURE_TO_ENV_VAR mapping', () => {
+    for (const feature of DEFAULT_INSTANCE_FEATURES) {
+      expect(
+        FEATURE_TO_ENV_VAR[feature],
+        `Missing FEATURE_TO_ENV_VAR mapping for "${feature}"`
+      ).toBeDefined();
+    }
   });
 });

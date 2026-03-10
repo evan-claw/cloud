@@ -2419,6 +2419,37 @@ describe('provision: auto-start after fresh provision', () => {
   });
 });
 
+describe('provision: instance feature flags', () => {
+  it('sets DEFAULT_INSTANCE_FEATURES on first provision', async () => {
+    const { instance, storage } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+
+    const features = storage._store.get('instanceFeatures') as string[];
+    expect(features).toEqual(['npm-global-prefix']);
+  });
+
+  it('preserves existing features on re-provision (does not reset to defaults)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, {
+      instanceFeatures: ['some-old-feature'],
+    });
+
+    await instance.provision('user-1', { kilocodeApiKey: 'new-key' });
+
+    const features = storage._store.get('instanceFeatures') as string[];
+    expect(features).toEqual(['some-old-feature']);
+  });
+});
+
 describe('auto-destroy stale provisioned instances', () => {
   // Reset listMachines to return [] for each test in this block, since
   // earlier metadata-recovery tests may have set it to return machines

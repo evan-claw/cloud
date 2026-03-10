@@ -164,7 +164,11 @@ const SHELL_INJECTION_NAMES = [
 ];
 
 // Reserved prefix names (valid identifiers but blocked by prefix check)
-const RESERVED_PREFIX_NAMES = ['KILOCLAW_ENC_SECRET', 'KILOCLAW_ENV_KEY'];
+const RESERVED_PREFIX_NAMES = [
+  'KILOCLAW_ENC_SECRET',
+  'KILOCLAW_ENV_KEY',
+  'KILOCLAW_NPM_GLOBAL_PREFIX',
+];
 
 // =============================================================================
 // Tests: Adversarial env var VALUES
@@ -293,8 +297,8 @@ describe('shell escaping — reserved env var protection', () => {
     expect(() => validateUserEnvVarName('KILOCLAW_ENV_ANYTHING')).toThrow('reserved prefix');
   });
 
-  it('allows KILOCLAW_ without ENC_ or ENV_ suffix', () => {
-    expect(() => validateUserEnvVarName('KILOCLAW_FOO')).not.toThrow();
+  it('rejects all KILOCLAW_ prefixed names', () => {
+    expect(() => validateUserEnvVarName('KILOCLAW_FOO')).toThrow('reserved prefix');
   });
 
   it('Zod schema rejects reserved prefixes', () => {
@@ -302,6 +306,10 @@ describe('shell escaping — reserved env var protection', () => {
     expect(encResult.success).toBe(false);
     const envResult = InstanceConfigSchema.safeParse({ envVars: { KILOCLAW_ENV_KEY: 'v' } });
     expect(envResult.success).toBe(false);
+    const featureResult = InstanceConfigSchema.safeParse({
+      envVars: { KILOCLAW_NPM_GLOBAL_PREFIX: 'v' },
+    });
+    expect(featureResult.success).toBe(false);
   });
 });
 

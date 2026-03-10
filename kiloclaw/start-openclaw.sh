@@ -140,6 +140,27 @@ fi
 export KILOCLAW_FRESH_INSTALL
 
 # ============================================================
+# INSTANCE FEATURE FLAGS
+# ============================================================
+# Feature flags are owned by the DO and passed as env vars (KILOCLAW_* prefix).
+# See kiloclaw/docs/instance-features.md for details.
+
+# Feature: npm-global-prefix
+# Redirect runtime `npm install -g` to the persistent volume so packages
+# survive restarts. Uses /root/.npm-global instead of /usr/local.
+if [ "${KILOCLAW_NPM_GLOBAL_PREFIX:-}" = "true" ]; then
+    if mkdir -p /root/.npm-global/bin; then
+        export NPM_CONFIG_PREFIX="/root/.npm-global"
+        export PATH="$PATH:/root/.npm-global/bin"
+        echo "npm global prefix set to /root/.npm-global"
+    else
+        echo "WARNING: failed to create npm-global directory, using default prefix"
+    fi
+else
+    echo "npm global prefix: using default"
+fi
+
+# ============================================================
 # PATCH CONFIG (channels, gateway auth, exec policy)
 # ============================================================
 # openclaw onboard handles provider/model config natively (kilocode provider,

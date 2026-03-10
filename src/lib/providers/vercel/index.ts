@@ -32,19 +32,14 @@ function getRandomNumberLessThan100(randomSeed: string) {
 
 async function getVercelRoutingPercentage() {
   const errorRate = await getGatewayErrorRate();
-  const isOpenRouterErrorRateHigh = errorRate.openrouter > ERROR_RATE_THRESHOLD;
-  const isVercelErrorRateHigh = errorRate.vercel > ERROR_RATE_THRESHOLD;
-  if (isOpenRouterErrorRateHigh && !isVercelErrorRateHigh) {
+  const isOpenRouterErrorRateHigh =
+    errorRate.openrouter > ERROR_RATE_THRESHOLD && errorRate.vercel < ERROR_RATE_THRESHOLD;
+  if (isOpenRouterErrorRateHigh) {
     console.error(
       `[getVercelRoutingPercentage] OpenRouter error rate is high: ${errorRate.openrouter}`
     );
-    return 90;
   }
-  if (!isOpenRouterErrorRateHigh && isVercelErrorRateHigh) {
-    console.error(`[getVercelRoutingPercentage] Vercel error rate is high: ${errorRate.vercel}`);
-    return 10;
-  }
-  return 20;
+  return isOpenRouterErrorRateHigh ? 90 : 10;
 }
 
 function isLikelyAvailableOnAllGateways(requestedModel: string) {

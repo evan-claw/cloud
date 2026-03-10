@@ -54,6 +54,7 @@ RUN npm install -g mcporter@0.7.3
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.11.1
 
+
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
 RUN ARCH="$(dpkg --print-architecture)" \
@@ -101,8 +102,8 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-27-v57-openclaw-2026.2.26-1password-arch-fix
-RUN echo "7"
+# Build cache bust: 2026-03-10-v58-instance-feature-flags-npm-global-prefix
+RUN echo "8"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
 COPY openclaw-device-pairing-list.js /usr/local/bin/openclaw-device-pairing-list.js

@@ -41,6 +41,71 @@ const StatsSchema = z.object({
   days: z.number().min(1).max(365).default(30),
 });
 
+type KiloclawTrpcCode =
+  | 'BAD_REQUEST'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'TOO_MANY_REQUESTS'
+  | 'INTERNAL_SERVER_ERROR';
+
+function kiloclawStatusToTrpcCode(statusCode: number): KiloclawTrpcCode {
+  switch (statusCode) {
+    case 400:
+      return 'BAD_REQUEST';
+    case 404:
+      return 'NOT_FOUND';
+    case 409:
+      return 'CONFLICT';
+    case 429:
+      return 'TOO_MANY_REQUESTS';
+    default:
+      return 'INTERNAL_SERVER_ERROR';
+  }
+}
+
+function getKiloclawApiErrorMessage(err: KiloClawApiError, fallbackMessage: string): string {
+  if (!err.responseBody) return fallbackMessage;
+
+  try {
+    const parsed: unknown = JSON.parse(err.responseBody);
+    if (typeof parsed === 'object' && parsed !== null) {
+      const record = parsed as { error?: unknown; message?: unknown };
+      if (typeof record.error === 'string') return record.error;
+      if (typeof record.message === 'string') return record.message;
+    }
+  } catch {
+    // Fall back to the raw response body when the controller did not return JSON.
+  }
+
+  return err.responseBody.trim() || fallbackMessage;
+}
+
+function throwKiloclawAdminError(
+  err: unknown,
+  fallbackMessage: string,
+  options?: {
+    statusCodeOverrides?: Partial<Record<number, KiloclawTrpcCode>>;
+    messageOverrides?: Partial<Record<number, string>>;
+  }
+): never {
+  if (err instanceof KiloClawApiError) {
+    throw new TRPCError({
+      code:
+        options?.statusCodeOverrides?.[err.statusCode] ?? kiloclawStatusToTrpcCode(err.statusCode),
+      message:
+        options?.messageOverrides?.[err.statusCode] ??
+        getKiloclawApiErrorMessage(err, fallbackMessage),
+      cause: err,
+    });
+  }
+
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message: err instanceof Error ? `${fallbackMessage}: ${err.message}` : fallbackMessage,
+    cause: err instanceof Error ? err : undefined,
+  });
+}
+
 export type AdminKiloclawInstance = {
   id: string;
   user_id: string;
@@ -92,7 +157,12 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       workerStatus = await client.getDebugStatus(instance.user_id);
     } catch (err) {
-      workerStatusError = err instanceof Error ? err.message : 'Failed to fetch worker status';
+      workerStatusError =
+        err instanceof KiloClawApiError
+          ? getKiloclawApiErrorMessage(err, 'Failed to fetch worker status')
+          : err instanceof Error
+            ? err.message
+            : 'Failed to fetch worker status';
     }
 
     return {
@@ -285,73 +355,96 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
   volumeSnapshots: adminProcedure
     .input(VolumeSnapshotsSchema)
     .query(async ({ input }): Promise<{ snapshots: VolumeSnapshot[] }> => {
+      const fallbackMessage = 'Failed to fetch volume snapshots';
       try {
         const client = new KiloClawInternalClient();
         return await client.listVolumeSnapshots(input.userId);
       } catch (err) {
         console.error('Failed to fetch volume snapshots for user:', input.userId, err);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to fetch volume snapshots',
-        });
+        throwKiloclawAdminError(err, fallbackMessage);
       }
     }),
 
+  controllerVersion: adminProcedure.input(GatewayProcessSchema).query(async ({ input }) => {
+    const fallbackMessage = 'Failed to fetch controller version';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.getControllerVersion(input.userId);
+    } catch (err) {
+      console.error('Failed to fetch controller version for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
   gatewayStatus: adminProcedure.input(GatewayProcessSchema).query(async ({ input }) => {
+    const fallbackMessage = 'Failed to fetch gateway status';
     try {
       const client = new KiloClawInternalClient();
       return await client.getGatewayStatus(input.userId);
     } catch (err) {
       console.error('Failed to fetch gateway status for user:', input.userId, err);
-      if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Gateway control unavailable',
-        });
-      }
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to fetch gateway status',
+      throwKiloclawAdminError(err, fallbackMessage, {
+        statusCodeOverrides: { 409: 'NOT_FOUND' },
+        messageOverrides: {
+          404: 'Gateway control unavailable',
+          409: 'Gateway control unavailable',
+        },
       });
     }
   }),
 
   gatewayStart: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to start gateway';
     try {
       const client = new KiloClawInternalClient();
       return await client.startGateway(input.userId);
     } catch (err) {
       console.error('Failed to start gateway for user:', input.userId, err);
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to start gateway',
-      });
+      throwKiloclawAdminError(err, fallbackMessage);
     }
   }),
 
   gatewayStop: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to stop gateway';
     try {
       const client = new KiloClawInternalClient();
       return await client.stopGateway(input.userId);
     } catch (err) {
       console.error('Failed to stop gateway for user:', input.userId, err);
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to stop gateway',
-      });
+      throwKiloclawAdminError(err, fallbackMessage);
     }
   }),
 
   gatewayRestart: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to restart gateway';
     try {
       const client = new KiloClawInternalClient();
       return await client.restartGatewayProcess(input.userId);
     } catch (err) {
       console.error('Failed to restart gateway for user:', input.userId, err);
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to restart gateway',
-      });
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
+  runDoctor: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to run doctor';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.runDoctor(input.userId);
+    } catch (err) {
+      console.error('Failed to run doctor for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
+  restoreConfig: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to restore config';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.restoreConfig(input.userId);
+    } catch (err) {
+      console.error('Failed to restore config for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
     }
   }),
 
