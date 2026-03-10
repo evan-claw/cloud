@@ -2707,6 +2707,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           openclawVersion: null,
           imageVariant: null,
           trackedImageTag: null,
+          instanceFeatures: [...DEFAULT_INSTANCE_FEATURES],
         })
       );
 
@@ -2733,6 +2734,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.imageVariant = null;
       this.trackedImageTag = null;
       this.trackedImageDigest = null;
+      this.instanceFeatures = [...DEFAULT_INSTANCE_FEATURES];
       this.loaded = true;
 
       console.log('[DO] Restored from Postgres: sandboxId =', instance.sandboxId);

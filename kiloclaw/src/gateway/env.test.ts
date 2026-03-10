@@ -265,33 +265,36 @@ describe('buildEnvVars', () => {
 
   // ─── Reserved prefix validation ──────────────────────────────────────
 
-  it('rejects user envVars with KILOCLAW_ENC_ prefix', async () => {
+  it('drops user envVars with reserved KILOCLAW_ prefix instead of throwing', async () => {
     const env = createMockEnv();
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        envVars: { KILOCLAW_ENC_FOO: 'bad' },
-      })
-    ).rejects.toThrow('reserved prefix');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { KILOCLAW_ENC_FOO: 'bad', VALID_VAR: 'good' },
+    });
+
+    expect(result.env.KILOCLAW_ENC_FOO).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_ENC_FOO).toBeUndefined();
+    expect(result.env.VALID_VAR).toBe('good');
   });
 
-  it('rejects user encryptedSecrets with KILOCLAW_ENV_ prefix', async () => {
+  it('drops encrypted secrets with reserved KILOCLAW_ prefix instead of throwing', async () => {
     const env = createMockEnv({ AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey });
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        encryptedSecrets: {
-          KILOCLAW_ENV_BAD: encryptForTest('val', testPublicKey),
-        },
-      })
-    ).rejects.toThrow('reserved prefix');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      encryptedSecrets: {
+        KILOCLAW_ENV_BAD: encryptForTest('val', testPublicKey),
+      },
+    });
+
+    expect(result.sensitive.KILOCLAW_ENV_BAD).toBeUndefined();
   });
 
-  it('rejects user envVars with invalid shell identifier', async () => {
+  it('drops user envVars with invalid shell identifier instead of throwing', async () => {
     const env = createMockEnv();
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        envVars: { 'MY-VAR': 'bad' },
-      })
-    ).rejects.toThrow('valid shell identifier');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { 'MY-VAR': 'bad', GOOD_VAR: 'good' },
+    });
+
+    expect(result.env['MY-VAR']).toBeUndefined();
+    expect(result.env.GOOD_VAR).toBe('good');
   });
 
   // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────
@@ -358,13 +361,15 @@ describe('buildEnvVars', () => {
     expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBeUndefined();
   });
 
-  it('rejects user envVars with KILOCLAW_ prefix (defense-in-depth)', async () => {
+  it('drops user KILOCLAW_* env var and feature flag still applies (defense-in-depth)', async () => {
     const env = createMockEnv();
-    await expect(
-      buildEnvVars(env, SANDBOX_ID, SECRET, {
-        envVars: { KILOCLAW_NPM_GLOBAL_PREFIX: 'false' },
-      })
-    ).rejects.toThrow('reserved prefix');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: { KILOCLAW_NPM_GLOBAL_PREFIX: 'false' },
+      instanceFeatures: ['npm-global-prefix'],
+    });
+
+    // User's attempt to set it to 'false' was dropped; feature flag sets it to 'true'
+    expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBe('true');
   });
 
   it('every DEFAULT_INSTANCE_FEATURES entry has a FEATURE_TO_ENV_VAR mapping', () => {

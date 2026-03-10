@@ -87,21 +87,37 @@ export async function buildEnvVars(
 
   // Layer 2 + 3: User env vars merged with decrypted secrets.
   if (userConfig) {
-    // Validate user-provided env var names
-    if (userConfig.envVars) {
-      for (const name of Object.keys(userConfig.envVars)) {
-        validateUserEnvVarName(name);
+    // Validate user-provided env var names. Invalid names are dropped with a
+    // warning rather than throwing, so a stale reserved-prefix var stored before
+    // the prefix was blocked doesn't prevent the instance from starting.
+    const cleanedEnvVars = userConfig.envVars ? { ...userConfig.envVars } : undefined;
+    const cleanedSecrets = userConfig.encryptedSecrets
+      ? { ...userConfig.encryptedSecrets }
+      : undefined;
+    if (cleanedEnvVars) {
+      for (const name of Object.keys(cleanedEnvVars)) {
+        try {
+          validateUserEnvVarName(name);
+        } catch {
+          console.warn(`Dropping invalid env var "${name}": uses reserved prefix`);
+          delete cleanedEnvVars[name];
+        }
       }
     }
-    if (userConfig.encryptedSecrets) {
-      for (const name of Object.keys(userConfig.encryptedSecrets)) {
-        validateUserEnvVarName(name);
+    if (cleanedSecrets) {
+      for (const name of Object.keys(cleanedSecrets)) {
+        try {
+          validateUserEnvVarName(name);
+        } catch {
+          console.warn(`Dropping invalid encrypted secret "${name}": uses reserved prefix`);
+          delete cleanedSecrets[name];
+        }
       }
     }
 
     const userEnv = mergeEnvVarsWithSecrets(
-      userConfig.envVars,
-      userConfig.encryptedSecrets,
+      cleanedEnvVars,
+      cleanedSecrets,
       env.AGENT_ENV_VARS_PRIVATE_KEY
     );
 
