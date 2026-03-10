@@ -82,6 +82,7 @@ export async function generateUserNotifications(user: User): Promise<KiloNotific
     generateTeamsTrialNotification,
     generateLowCreditNotification,
     generateAutoTopUpNotification,
+    generateAutoTopUpOrgsNotification,
     generateByokProvidersNotification,
     generateFirstDayWelcomeNotification,
     generateKiloPassNotification,
@@ -147,6 +148,26 @@ async function generateAutoTopUpNotification(user: User): Promise<KiloNotificati
       action: {
         actionText: 'Enable Auto Top-Ups',
         actionURL: 'https://app.kilo.ai/credits',
+      },
+      showIn: ['cli', 'extension'],
+    },
+  ];
+}
+
+async function generateAutoTopUpOrgsNotification(user: User): Promise<KiloNotification[]> {
+  const orgs = await getUserOrganizationsWithSeats(user.id);
+  const isOwnerOrAdmin = orgs.some(org => org.role === 'owner');
+  if (!isOwnerOrAdmin) return [];
+
+  return [
+    {
+      id: 'auto-top-up-orgs-march-10',
+      title: 'New: Auto Top-Ups For Organizations',
+      message:
+        "Set your top-up amount once—we'll automatically add credits to your organization's balance when it drops below $50.",
+      action: {
+        actionText: 'Enable Auto Top-Ups',
+        actionURL: 'https://app.kilo.ai/',
       },
       showIn: ['cli', 'extension'],
     },
