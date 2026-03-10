@@ -946,6 +946,10 @@ async function processTokenData(
         [genStats.cacheDiscount_mUsd, usageStats.cacheDiscount_mUsd]
       );
     }
+    if (usageStats.inputTokens) {
+      // retain because of vercel bug: https://kilo-code.slack.com/archives/C08UR25T02V/p1773140435733259
+      genStats.inputTokens = usageStats.inputTokens;
+    }
     usageStats = genStats;
   }
 
