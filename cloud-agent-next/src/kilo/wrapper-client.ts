@@ -121,6 +121,11 @@ const ERROR_STATUS_CODES: Record<string, number> = {
 /** Max attempts for wrapper startup (1 retry on transient failures like Bun SIGILL) */
 const MAX_WRAPPER_START_ATTEMPTS = 2;
 
+/** Delay between wrapper startup retries to allow transient issues (e.g. kilo server briefly unreachable) to resolve */
+const WRAPPER_RETRY_DELAY_MS = 1_500;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
 // ---------------------------------------------------------------------------
 // WrapperClient Implementation
 // ---------------------------------------------------------------------------
@@ -247,10 +252,12 @@ export class WrapperClient {
     // Start the wrapper process using startProcess so it's trackable via listProcesses()
     // The command includes a session marker so we can find this wrapper later
     const sessionMarker = getWrapperSessionMarker(sessionId);
+    const wrapperLogPath = `/tmp/kilocode-wrapper-${sessionId}-${Date.now()}.log`;
     const envParts = [
       `WRAPPER_PORT=${this.port}`,
       `KILO_SERVER_PORT=${kiloServerPort}`,
       `WORKSPACE_PATH=${workspacePath}`,
+      `WRAPPER_LOG_PATH=${wrapperLogPath}`,
     ];
     if (autoCommit) envParts.push('AUTO_COMMIT=true');
     if (condenseOnComplete) envParts.push('CONDENSE_ON_COMPLETE=true');
@@ -287,7 +294,7 @@ export class WrapperClient {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        // Capture process logs for diagnostics
+        // Capture process stdout/stderr for diagnostics
         let stdout: string | undefined;
         let stderr: string | undefined;
         if (proc) {
@@ -304,39 +311,50 @@ export class WrapperClient {
           }
         }
 
+        // Read the wrapper's own log file for richer diagnostics (logToFile output)
+        let wrapperFileLog: string | undefined;
+        try {
+          const logResult = await this.session.exec(`cat ${wrapperLogPath} 2>/dev/null`);
+          const content = logResult.stdout?.trim();
+          if (content) {
+            wrapperFileLog = content;
+          }
+        } catch {
+          // Log file may not exist if the wrapper crashed before writing anything
+        }
+
+        const diagnostics = {
+          port: this.port,
+          attempt: attempt + 1,
+          error: lastError.message,
+          stdout,
+          stderr,
+          wrapperFileLog,
+        };
+
         if (attempt + 1 < MAX_WRAPPER_START_ATTEMPTS) {
           // Kill the failed process before retrying (proc.kill() is unreliable
           // in the sandbox SDK, so use pkill -f against the session marker).
           try {
             await this.session.exec(`pkill -f -- '${sessionMarker}'`);
           } catch {
-            // Process may already be dead — ignore
+            // Process may already be dead â ignore
           }
 
-          logger.warn('Wrapper startup failed, retrying', {
-            port: this.port,
-            attempt: attempt + 1,
-            error: lastError.message,
-            stdout,
-            stderr,
-          });
+          logger.warn('Wrapper startup failed, retrying', diagnostics);
+
+          // Delay before retrying to let transient issues resolve (e.g. kilo server briefly unreachable)
+          await sleep(WRAPPER_RETRY_DELAY_MS);
           continue;
         }
 
         // Final attempt failed
-        logger.error('Wrapper startup failed after all attempts', {
-          port: this.port,
-          attempt: attempt + 1,
-          error: lastError.message,
-          stdout,
-          stderr,
-        });
+        logger.error('Wrapper startup failed after all attempts', diagnostics);
       }
     }
 
-    const logsHint = ' (check logs above for process stdout/stderr)';
     throw new WrapperNotReadyError(
-      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'}${logsHint}`
+      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'} (check logs for process stdout/stderr and wrapperFileLog)`
     );
   }
 
