@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import AdminPage from '@/app/admin/components/AdminPage';
 import {
   BreadcrumbItem,
@@ -909,6 +909,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                       onClick={() => {
                         runDoctorMutation.reset();
                         setDoctorDialogOpen(true);
+                        runDoctorMutation.mutate({ userId: data.user_id });
                       }}
                     >
                       <Stethoscope className="mr-1 h-4 w-4" />
@@ -1078,60 +1079,57 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
         <RunDoctorDialog
           open={doctorDialogOpen}
           onOpenChange={setDoctorDialogOpen}
-          userId={data.user_id}
           mutation={runDoctorMutation}
         />
 
         {/* Restore Default Config Confirmation Dialog */}
-        {supportsConfigRestore && (
-          <Dialog
-            open={restoreConfigDialogOpen}
-            onOpenChange={restoreConfigMutation.isPending ? undefined : setRestoreConfigDialogOpen}
-          >
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle className="text-destructive flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5" />
-                  Restore Default Config
-                </DialogTitle>
-                <DialogDescription className="pt-3">
-                  This will rewrite openclaw.json to defaults based on the machine&apos;s current
-                  environment variables and restart the gateway process. Any manual config changes
-                  made via the Control UI will be lost.
-                  <span className="text-foreground mt-2 block font-medium">
-                    User: {data.user_email ?? data.user_id}
-                  </span>
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="gap-2 sm:gap-0">
-                <Button
-                  variant="secondary"
-                  onClick={() => setRestoreConfigDialogOpen(false)}
-                  disabled={gatewayActionPending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => void restoreConfigMutation.mutateAsync({ userId: data.user_id })}
-                  disabled={gatewayActionPending}
-                >
-                  {restoreConfigMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                      Restoring...
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw className="mr-1 h-4 w-4" />
-                      Restore &amp; Restart
-                    </>
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
+        <Dialog
+          open={restoreConfigDialogOpen && supportsConfigRestore}
+          onOpenChange={restoreConfigMutation.isPending ? () => {} : setRestoreConfigDialogOpen}
+        >
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="text-destructive flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Restore Default Config
+              </DialogTitle>
+              <DialogDescription className="pt-3">
+                This will rewrite openclaw.json to defaults based on the machine&apos;s current
+                environment variables and restart the gateway process. Any manual config changes
+                made via the Control UI will be lost.
+                <span className="text-foreground mt-2 block font-medium">
+                  User: {data.user_email ?? data.user_id}
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="secondary"
+                onClick={() => setRestoreConfigDialogOpen(false)}
+                disabled={gatewayActionPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => restoreConfigMutation.mutate({ userId: data.user_id })}
+                disabled={gatewayActionPending}
+              >
+                {restoreConfigMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    Restoring...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="mr-1 h-4 w-4" />
+                    Restore &amp; Restart
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DetailPageWrapper>
   );
@@ -1142,42 +1140,34 @@ type DoctorMutationLike = {
   isPending: boolean;
   isError: boolean;
   error: { message: string } | null;
-  mutate: (vars: { userId: string }) => void;
   reset: () => void;
 };
 
 function RunDoctorDialog({
   open,
   onOpenChange,
-  userId,
   mutation,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  userId: string;
   mutation: DoctorMutationLike;
 }) {
-  const hasFired = useRef(false);
-  const mutationRef = useRef(mutation);
-  mutationRef.current = mutation;
-  const userIdRef = useRef(userId);
-  userIdRef.current = userId;
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (mutation.isPending) {
+      return;
+    }
 
-  useEffect(() => {
-    if (open && !hasFired.current) {
-      hasFired.current = true;
-      mutationRef.current.mutate({ userId: userIdRef.current });
+    onOpenChange(nextOpen);
+    if (!nextOpen) {
+      mutation.reset();
     }
-    if (!open) {
-      hasFired.current = false;
-    }
-  }, [open]);
+  };
 
   const rawResult = mutation.data;
   const result = rawResult ? { ...rawResult, output: stripAnsi(rawResult.output) } : rawResult;
 
   return (
-    <Dialog open={open} onOpenChange={mutation.isPending ? undefined : onOpenChange}>
+    <Dialog open={open} onOpenChange={mutation.isPending ? () => {} : handleOpenChange}>
       <DialogContent className="sm:max-w-[750px]">
         <DialogHeader>
           <DialogTitle>OpenClaw Doctor</DialogTitle>
@@ -1227,7 +1217,7 @@ function RunDoctorDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => handleOpenChange(false)}
             disabled={mutation.isPending}
           >
             Close

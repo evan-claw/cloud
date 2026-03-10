@@ -95,12 +95,14 @@ function throwKiloclawAdminError(
       message:
         options?.messageOverrides?.[err.statusCode] ??
         getKiloclawApiErrorMessage(err, fallbackMessage),
+      cause: err,
     });
   }
 
   throw new TRPCError({
     code: 'INTERNAL_SERVER_ERROR',
-    message: fallbackMessage,
+    message: err instanceof Error ? `${fallbackMessage}: ${err.message}` : fallbackMessage,
+    cause: err instanceof Error ? err : undefined,
   });
 }
 
