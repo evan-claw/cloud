@@ -54,10 +54,6 @@ RUN npm install -g mcporter@0.7.3
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.11.1
 
-# Add npm-global bin to PATH for instances that opt in at runtime.
-# NPM_CONFIG_PREFIX is set conditionally in start-openclaw.sh based on the
-# KILOCLAW_NPM_GLOBAL_PREFIX env var (controlled by the DO's instance features).
-ENV PATH="/root/.npm-global/bin:$PATH"
 
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0

@@ -151,6 +151,7 @@ export KILOCLAW_FRESH_INSTALL
 if [ "${KILOCLAW_NPM_GLOBAL_PREFIX:-}" = "true" ]; then
     if mkdir -p /root/.npm-global/bin; then
         export NPM_CONFIG_PREFIX="/root/.npm-global"
+        export PATH="/root/.npm-global/bin:$PATH"
         echo "npm global prefix set to /root/.npm-global"
     else
         echo "WARNING: failed to create npm-global directory, using default prefix"

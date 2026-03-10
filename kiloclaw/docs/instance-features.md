@@ -21,16 +21,16 @@ DO (source of truth) → buildEnvVars() → config.env → Fly machine → start
 
 ## Current flags
 
-| Feature name        | Env var                      | Description                                                                                                                                                                                              |
-| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm-global-prefix` | `KILOCLAW_NPM_GLOBAL_PREFIX` | Redirects `npm install -g` to `/root/.npm-global` (persistent volume) instead of `/usr/local` (image layer, lost on restart). PATH is set in the Dockerfile; `NPM_CONFIG_PREFIX` is exported at runtime. |
+| Feature name        | Env var                      | Description                                                                                                                                                                                                          |
+| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm-global-prefix` | `KILOCLAW_NPM_GLOBAL_PREFIX` | Redirects `npm install -g` to `/root/.npm-global` (persistent volume) instead of `/usr/local` (image layer, lost on restart). Both `NPM_CONFIG_PREFIX` and `PATH` are exported conditionally in `start-openclaw.sh`. |
 
 ## Adding a new flag
 
 1. Add the feature name to `DEFAULT_INSTANCE_FEATURES` in `kiloclaw-instance.ts`
 2. Add the feature-to-env-var mapping in `FEATURE_TO_ENV_VAR` in `gateway/env.ts`
 3. Add a conditional block in `start-openclaw.sh` that reads the env var
-4. If PATH changes are needed, add them to the `Dockerfile` (harmless when the feature is absent)
+4. If PATH changes are needed, add them inside the conditional block in `start-openclaw.sh`
 5. Update the table above
 
 ## Existing instances
@@ -44,5 +44,4 @@ To get the latest feature set, a user must destroy and re-provision their instan
 - `src/durable-objects/kiloclaw-instance.ts` — `DEFAULT_INSTANCE_FEATURES`, provision logic
 - `src/schemas/instance-config.ts` — `instanceFeatures` in `PersistedStateSchema`
 - `src/gateway/env.ts` — `FEATURE_TO_ENV_VAR`, maps features to env vars
-- `start-openclaw.sh` — reads env vars, applies runtime configuration
-- `Dockerfile` — PATH entries for feature directories
+- `start-openclaw.sh` — reads env vars, applies runtime configuration (including PATH)
