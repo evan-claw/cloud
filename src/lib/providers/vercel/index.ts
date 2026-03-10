@@ -39,7 +39,7 @@ async function getVercelRoutingPercentage() {
       `[getVercelRoutingPercentage] OpenRouter error rate is high: ${errorRate.openrouter}`
     );
   }
-  return isOpenRouterErrorRateHigh ? 90 : 10;
+  return isOpenRouterErrorRateHigh ? 90 : 20;
 }
 
 function isLikelyAvailableOnAllGateways(requestedModel: string) {
