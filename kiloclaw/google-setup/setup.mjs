@@ -27,10 +27,12 @@ import http from 'node:http';
 
 const args = process.argv.slice(2);
 const apiKeyArg = args.find(a => a.startsWith('--api-key='));
-const apiKey = apiKeyArg?.split('=')[1];
+const apiKey = apiKeyArg?.substring(apiKeyArg.indexOf('=') + 1);
 
-const workerUrl =
-  args.find(a => a.startsWith('--worker-url='))?.split('=')[1] ?? 'https://claw.kilo.ai';
+const workerUrlArg = args.find(a => a.startsWith('--worker-url='));
+const workerUrl = workerUrlArg
+  ? workerUrlArg.substring(workerUrlArg.indexOf('=') + 1)
+  : 'https://claw.kilo.ai';
 
 if (!apiKey) {
   console.error(
@@ -67,7 +69,10 @@ if (!validateRes.ok) {
   process.exit(1);
 }
 
-const authCheckRes = await fetch(`${workerUrl}/api/admin/storage`, {
+// Validate auth by hitting an admin endpoint — the JWT middleware runs before any handler.
+// GET /api/admin/google-credentials is not defined, so it returns 404/405 after auth passes,
+// or 401/403 if the key is invalid.
+const authCheckRes = await fetch(`${workerUrl}/api/admin/google-credentials`, {
   headers: authHeaders,
 });
 
@@ -101,6 +106,9 @@ console.log('Follow the prompts to create an OAuth client in your Google Cloud p
 
 // Use `expect` to wrap `gws auth setup` in a real PTY so all interactive prompts
 // work normally, while auto-answering "n" to the final "Run gws auth login now?" prompt.
+// The "Y/n" pattern matches gws CLI's confirmation prompt. If gws changes this prompt
+// text in a future version, this interaction will need updating.
+// Tested with @googleworkspace/cli (gws) as of 2026-03.
 // Write expect script to a temp file to avoid JS→shell→Tcl escaping issues.
 const expectScriptPath = '/tmp/gws-setup.exp';
 fs.writeFileSync(expectScriptPath, [
@@ -171,7 +179,12 @@ const { code, redirectUri } = await new Promise((resolve, reject) => {
       res.end('<h1>Authorization successful!</h1><p>You can close this tab.</p>');
       server.close();
       resolve({ code, redirectUri: `http://localhost:${callbackPort}` });
+      return;
     }
+
+    // Ignore non-OAuth requests (e.g. browser favicon)
+    res.writeHead(404);
+    res.end();
   });
 
   server.listen(0, () => {

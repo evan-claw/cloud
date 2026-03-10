@@ -26,6 +26,4 @@ COPY package.json ./
 RUN npm install --production
 COPY setup.mjs ./
 
-EXPOSE 8080
-
 ENTRYPOINT ["node", "setup.mjs"]

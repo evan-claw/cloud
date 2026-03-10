@@ -260,9 +260,10 @@ if (dbConnected) {
 
   assertNotEmpty('JWT generated', JWT);
 
-  // Auth check (GET /api/admin/storage should return 410, not 401/403)
-  const { status: authCode } = await jwtGet('/api/admin/storage');
-  assertEq('Auth check returns 410 (not 401/403)', 410, authCode);
+  // Auth check — GET /api/admin/google-credentials isn't a defined route, so it returns
+  // 404 or 405 after auth passes. The key point: it's not 401/403.
+  const { status: authCode } = await jwtGet('/api/admin/google-credentials');
+  assertEq('Auth check returns non-401/403 (auth passed)', true, authCode !== 401 && authCode !== 403);
 
   // Store via user-facing route
   const { json: storeJwt } = await jwtPost('/api/admin/google-credentials', { googleCredentials: DUMMY_CREDS });

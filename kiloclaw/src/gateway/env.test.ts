@@ -312,6 +312,21 @@ describe('buildEnvVars', () => {
     expect(result.env.GOOGLE_CREDENTIALS_JSON).toBeUndefined();
   });
 
+  it('classifies Google credential env var names as sensitive even when provided as plaintext', async () => {
+    const env = createMockEnv({ AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey });
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      envVars: {
+        GOOGLE_CLIENT_SECRET_JSON: '{"client_id":"leak"}',
+        GOOGLE_CREDENTIALS_JSON: '{"refresh_token":"leak"}',
+      },
+    });
+
+    expect(result.sensitive.GOOGLE_CLIENT_SECRET_JSON).toBe('{"client_id":"leak"}');
+    expect(result.sensitive.GOOGLE_CREDENTIALS_JSON).toBe('{"refresh_token":"leak"}');
+    expect(result.env.GOOGLE_CLIENT_SECRET_JSON).toBeUndefined();
+    expect(result.env.GOOGLE_CREDENTIALS_JSON).toBeUndefined();
+  });
+
   it('skips Google credential decryption when no private key configured', async () => {
     const env = createMockEnv(); // no AGENT_ENV_VARS_PRIVATE_KEY
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {

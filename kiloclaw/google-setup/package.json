@@ -5,8 +5,5 @@
   "type": "module",
   "scripts": {
     "start": "node setup.mjs"
-  },
-  "dependencies": {
-    "open": "^10.0.0"
   }
 }
