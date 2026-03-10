@@ -672,7 +672,18 @@ export const codeReviewRouter = createTRPCRouter({
             return successResult({ entries: [] });
           }
 
-          const snapshot = await fetchSessionSnapshot(cliSessionId, session.kilo_user_id);
+          let snapshot;
+          try {
+            snapshot = await fetchSessionSnapshot(cliSessionId, session.kilo_user_id);
+          } catch (snapshotError) {
+            // Network errors (e.g. session-ingest worker unreachable) should not
+            // bubble up as a hard failure â return empty entries instead.
+            logExceptInTest(
+              `[getSessionMessages] Failed to fetch session snapshot for ${cliSessionId}:`,
+              snapshotError
+            );
+            return successResult({ entries: [] });
+          }
           if (!snapshot) {
             return successResult({ entries: [] });
           }
