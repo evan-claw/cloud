@@ -24,6 +24,8 @@ export type UserConfig = {
  */
 export const FEATURE_TO_ENV_VAR: Record<string, string> = {
   'npm-global-prefix': 'KILOCLAW_NPM_GLOBAL_PREFIX',
+  'pip-global-prefix': 'KILOCLAW_PIP_GLOBAL_PREFIX',
+  'uv-global-prefix': 'KILOCLAW_UV_GLOBAL_PREFIX',
 };
 
 /**

@@ -77,6 +77,11 @@ RUN GOBIN=/usr/local/bin go install github.com/steipete/gogcli/cmd/gog@v0.11.0 \
     && GOBIN=/usr/local/bin go install github.com/steipete/gifgrep/cmd/gifgrep@v0.2.3 \
     && go clean -cache -modcache
 
+# Install uv (Python package manager, available at runtime).
+# Install to /usr/local/bin so the binary survives the Fly Volume mount at /root.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
+    && uv --version
+
 # Install pinned Bun (build-time only) and compile the controller bundle.
 ARG BUN_VERSION=1.2.4
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
@@ -102,8 +107,8 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-03-10-v58-instance-feature-flags-npm-global-prefix
-RUN echo "8"
+# Build cache bust: 2026-03-10-v59-uv-pip-global-prefix
+RUN echo "9"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
 COPY openclaw-device-pairing-list.js /usr/local/bin/openclaw-device-pairing-list.js
