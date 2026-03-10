@@ -4,10 +4,7 @@ export function cleanVersion(version: string | null | undefined): string | null 
 }
 
 /** Returns true if calver `version` is >= `minVersion` (e.g. "2026.2.26"). Fails closed on malformed input. */
-export function calverAtLeast(
-  version: string | null | undefined,
-  minVersion: string
-): boolean {
+export function calverAtLeast(version: string | null | undefined, minVersion: string): boolean {
   if (!version) return false;
 
   const parts = version.split('.').map(Number);

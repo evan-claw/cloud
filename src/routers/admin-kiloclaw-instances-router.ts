@@ -63,10 +63,7 @@ function kiloclawStatusToTrpcCode(statusCode: number): KiloclawTrpcCode {
   }
 }
 
-function getKiloclawApiErrorMessage(
-  err: KiloClawApiError,
-  fallbackMessage: string
-): string {
+function getKiloclawApiErrorMessage(err: KiloClawApiError, fallbackMessage: string): string {
   if (!err.responseBody) return fallbackMessage;
 
   try {
@@ -93,7 +90,8 @@ function throwKiloclawAdminError(
 ): never {
   if (err instanceof KiloClawApiError) {
     throw new TRPCError({
-      code: options?.statusCodeOverrides?.[err.statusCode] ?? kiloclawStatusToTrpcCode(err.statusCode),
+      code:
+        options?.statusCodeOverrides?.[err.statusCode] ?? kiloclawStatusToTrpcCode(err.statusCode),
       message:
         options?.messageOverrides?.[err.statusCode] ??
         getKiloclawApiErrorMessage(err, fallbackMessage),
