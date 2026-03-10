@@ -255,7 +255,7 @@ export function CodeReviewJobsCard({
                             href={
                               review.platform === 'gitlab'
                                 ? review.pr_url.replace(/\/-\/merge_requests\/\d+$/, '')
-                                : `https://github.com/${review.repo_full_name}`
+                                : review.pr_url.replace(/\/pull\/\d+$/, '')
                             }
                             target="_blank"
                             rel="noopener noreferrer"
