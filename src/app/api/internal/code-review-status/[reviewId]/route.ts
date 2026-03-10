@@ -116,26 +116,29 @@ function normalizePayload(raw: StatusUpdatePayload): {
 }
 
 /**
- * Read a review's usage data, polling with exponential backoff if not yet available.
+ * Read a review's usage data.
  *
- * For v1 (SSE) reviews the orchestrator reports usage before the completion
- * callback fires, so a short poll handles the race.  For v2 (cloud-agent-next)
- * reviews the orchestrator never reports usage — we fall back to aggregating
- * from the billing tables (microdollar_usage) keyed by cli_session_id.
+ * For v1 (SSE) reviews the orchestrator writes usage to the record just
+ * before the completion callback, so a short poll handles the race.
+ * For v2 (cloud-agent-next) the orchestrator never writes usage — we
+ * skip the poll and go straight to the billing tables.
  *
- * When the billing fallback is used we also back-fill the code_reviews record
- * so subsequent reads (e.g. the admin panel) don't need the aggregation again.
+ * When the billing fallback is used we also back-fill the code_reviews
+ * record so later reads (e.g. admin panel) don't repeat the aggregation.
  */
 async function getReviewUsageData(reviewId: string) {
-  const MAX_RETRIES = 3;
-  const BASE_DELAY_MS = 200;
-
   let review = await getCodeReviewById(reviewId);
 
-  // Short poll: usage may arrive from the orchestrator just before the callback
-  for (let attempt = 0; attempt < MAX_RETRIES && review && !review.model; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, BASE_DELAY_MS * 2 ** attempt));
-    review = await getCodeReviewById(reviewId);
+  // v1 only: poll briefly — usage may arrive from the orchestrator
+  // right before the callback. v2 never writes usage to the record,
+  // so polling would just waste ~1.4s for nothing.
+  if (review && !review.model && review.agent_version !== 'v2') {
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 200;
+    for (let attempt = 0; attempt < MAX_RETRIES && review && !review.model; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, BASE_DELAY_MS * 2 ** attempt));
+      review = await getCodeReviewById(reviewId);
+    }
   }
 
   if (review?.model) {
