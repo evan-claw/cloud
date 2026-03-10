@@ -1317,6 +1317,8 @@ export class SessionService {
 
         // Parse stdout JSON for structured error info
         let code: number | undefined;
+        let step: string | undefined;
+        let restoreError: string | undefined;
         try {
           const parsed = JSON.parse(restoreResult.stdout?.trim() ?? '{}') as Record<
             string,
@@ -1324,6 +1326,12 @@ export class SessionService {
           >;
           if (typeof parsed.code === 'number') {
             code = parsed.code;
+          }
+          if (typeof parsed.step === 'string') {
+            step = parsed.step;
+          }
+          if (typeof parsed.error === 'string') {
+            restoreError = parsed.error;
           }
         } catch {
           // non-JSON stdout, ignore
@@ -1335,10 +1343,15 @@ export class SessionService {
             404
           );
         }
-        throw new SessionSnapshotRestoreError(
-          `Cold-start session restore failed: exit ${restoreResult.exitCode}`,
-          code
-        );
+
+        const detail = [
+          `exit ${restoreResult.exitCode}`,
+          step && `step=${step}`,
+          restoreError && `error=${restoreError}`,
+        ]
+          .filter(Boolean)
+          .join(', ');
+        throw new SessionSnapshotRestoreError(`Cold-start session restore failed: ${detail}`, code);
       }
 
       // Log structured summary from restore script
