@@ -130,11 +130,16 @@ export class WrapperClient {
   private readonly port: number;
   private readonly baseUrl: string;
 
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, "'\\''")}'`;
+  }
+
   private async runPreflightChecks(options: {
     wrapperPath: string;
     workspacePath: string;
   }): Promise<void> {
     const { wrapperPath, workspacePath } = options;
+    const quotedWrapperPath = this.shellQuote(wrapperPath);
 
     // Verify bun runtime and wrapper binary before the full start+waitForPort loop.
     // A fast `bun --version` catches SIGILL (exit 132) on hosts whose CPU lacks
@@ -143,7 +148,7 @@ export class WrapperClient {
     try {
       const [bunResult, fileResult] = await Promise.allSettled([
         this.session.exec('bun --version', { timeout: 5_000 }),
-        this.session.exec(`test -f ${wrapperPath} && echo ok`, {
+        this.session.exec(`test -f ${quotedWrapperPath}`, {
           timeout: 5_000,
           cwd: workspacePath,
         }),
@@ -159,7 +164,7 @@ export class WrapperClient {
         );
       }
 
-      if (fileResult.status === 'fulfilled' && !fileResult.value.stdout?.includes('ok')) {
+      if (fileResult.status === 'fulfilled' && fileResult.value.exitCode !== 0) {
         throw new WrapperNotReadyError(
           `Wrapper pre-flight failed: ${wrapperPath} not found in container`
         );
@@ -225,11 +230,11 @@ export class WrapperClient {
 
     if (body) {
       // Escape single quotes in JSON
-      const json = JSON.stringify(body).replace(/'/g, "'\\''");
-      command += ` -d '${json}'`;
+      const json = this.shellQuote(JSON.stringify(body));
+      command += ` -d ${json}`;
     }
 
-    command += ` '${url}'`;
+    command += ` ${this.shellQuote(url)}`;
 
     // Execute curl in the container
     const result = await this.session.exec(command);
