@@ -11,6 +11,12 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-03-10',
+    description: 'Updated OpenClaw to 2026.3.8.',
+    category: 'feature',
+    deployHint: 'redeploy_suggested',
+  },
+  {
     date: '2026-03-09',
     description:
       'Added headless Chromium browser support. OpenClaw\'s built-in browser tool now works out of the box for web browsing, screenshots, and CDP automation. Requires the "full" tool profile.',
