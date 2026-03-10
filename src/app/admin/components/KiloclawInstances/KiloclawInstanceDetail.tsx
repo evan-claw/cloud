@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AdminPage from '@/app/admin/components/AdminPage';
 import {
   BreadcrumbItem,
@@ -48,6 +48,9 @@ import {
   RotateCcw,
   RefreshCw,
   Pin,
+  Stethoscope,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
@@ -300,10 +303,18 @@ function VersionPinCard({ userId }: { userId: string }) {
   );
 }
 
+/** Strip ANSI escape codes so raw terminal output can render in a browser &lt;pre&gt;. */
+function stripAnsi(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
 export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
+  const [doctorDialogOpen, setDoctorDialogOpen] = useState(false);
+  const [restoreConfigDialogOpen, setRestoreConfigDialogOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery(
     trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId })
@@ -400,6 +411,33 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       },
       onError: err => {
         toast.error(`Failed to restart gateway: ${err.message}`);
+      },
+    })
+  );
+
+  const runDoctorMutation = useMutation(
+    trpc.admin.kiloclawInstances.runDoctor.mutationOptions({
+      onSuccess: () => {
+        invalidateGatewayQueries();
+      },
+    })
+  );
+
+  const restoreConfigMutation = useMutation(
+    trpc.admin.kiloclawInstances.restoreConfig.mutationOptions({
+      onSuccess: data => {
+        if (data.signaled) {
+          toast.success('Config restored and gateway restarting');
+        } else {
+          toast.success(
+            'Config restored, but the gateway was not running — restart the instance to apply'
+          );
+        }
+        invalidateGatewayQueries();
+        setRestoreConfigDialogOpen(false);
+      },
+      onError: err => {
+        toast.error(`Failed to restore config: ${err.message}`);
       },
     })
   );
@@ -841,6 +879,27 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                       )}
                       Restart
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={runDoctorMutation.isPending}
+                      onClick={() => {
+                        runDoctorMutation.reset();
+                        setDoctorDialogOpen(true);
+                      }}
+                    >
+                      <Stethoscope className="mr-1 h-4 w-4" />
+                      Run Doctor
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={restoreConfigMutation.isPending}
+                      onClick={() => setRestoreConfigDialogOpen(true)}
+                    >
+                      <RotateCcw className="mr-1 h-4 w-4" />
+                      Restore Default Config
+                    </Button>
                   </div>
                 </>
               )}
@@ -982,7 +1041,162 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Run Doctor Dialog */}
+        <RunDoctorDialog
+          open={doctorDialogOpen}
+          onOpenChange={setDoctorDialogOpen}
+          userId={data.user_id}
+          mutation={runDoctorMutation}
+        />
+
+        {/* Restore Default Config Confirmation Dialog */}
+        <Dialog
+          open={restoreConfigDialogOpen}
+          onOpenChange={restoreConfigMutation.isPending ? undefined : setRestoreConfigDialogOpen}
+        >
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="text-destructive flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Restore Default Config
+              </DialogTitle>
+              <DialogDescription className="pt-3">
+                This will rewrite openclaw.json to defaults based on the machine&apos;s current
+                environment variables and restart the gateway process. Any manual config changes
+                made via the Control UI will be lost.
+                <span className="text-foreground mt-2 block font-medium">
+                  User: {data.user_email ?? data.user_id}
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="secondary"
+                onClick={() => setRestoreConfigDialogOpen(false)}
+                disabled={restoreConfigMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void restoreConfigMutation.mutateAsync({ userId: data.user_id })}
+                disabled={restoreConfigMutation.isPending}
+              >
+                {restoreConfigMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    Restoring...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="mr-1 h-4 w-4" />
+                    Restore &amp; Restart
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DetailPageWrapper>
+  );
+}
+
+type DoctorMutationLike = {
+  data: { success: boolean; output: string } | undefined;
+  isPending: boolean;
+  isError: boolean;
+  error: { message: string } | null;
+  mutate: (vars: { userId: string }) => void;
+  reset: () => void;
+};
+
+function RunDoctorDialog({
+  open,
+  onOpenChange,
+  userId,
+  mutation,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  userId: string;
+  mutation: DoctorMutationLike;
+}) {
+  const hasFired = useRef(false);
+  const mutationRef = useRef(mutation);
+  mutationRef.current = mutation;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+
+  useEffect(() => {
+    if (open && !hasFired.current) {
+      hasFired.current = true;
+      mutationRef.current.mutate({ userId: userIdRef.current });
+    }
+    if (!open) {
+      hasFired.current = false;
+      mutationRef.current.reset();
+    }
+  }, [open]);
+
+  const rawResult = mutation.data;
+  const result = rawResult ? { ...rawResult, output: stripAnsi(rawResult.output) } : rawResult;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[750px]">
+        <DialogHeader>
+          <DialogTitle>OpenClaw Doctor</DialogTitle>
+          <DialogDescription>
+            Running diagnostics and applying fixes on this instance.
+          </DialogDescription>
+        </DialogHeader>
+
+        {mutation.isPending && (
+          <div className="flex flex-col items-center justify-center gap-3 py-12">
+            <Loader2 className="text-muted-foreground h-8 w-8 animate-spin" />
+            <p className="text-muted-foreground text-sm">Running diagnostics...</p>
+          </div>
+        )}
+
+        {mutation.isError && (
+          <div className="flex flex-col items-center justify-center gap-3 py-12">
+            <XCircle className="h-8 w-8 text-red-400" />
+            <p className="text-sm text-red-400">
+              {mutation.error?.message || 'Failed to run doctor'}
+            </p>
+          </div>
+        )}
+
+        {result && !mutation.isPending && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              {result.success ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-400" />
+              )}
+              <span className="text-sm font-medium">
+                {result.success ? 'Executed successfully' : 'Issues detected'}
+              </span>
+            </div>
+            <div className="border-border bg-background max-h-[400px] overflow-auto rounded-md border">
+              {/* prettier-ignore */}
+              <pre
+                className="p-3 text-xs leading-relaxed whitespace-pre"
+                style={{ fontFamily: "'Courier New', Courier, monospace", tabSize: 8 }}
+              >{result.output}</pre>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

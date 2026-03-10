@@ -355,6 +355,32 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
     }
   }),
 
+  runDoctor: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.runDoctor(input.userId);
+    } catch (err) {
+      console.error('Failed to run doctor for user:', input.userId, err);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to run doctor',
+      });
+    }
+  }),
+
+  restoreConfig: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.restoreConfig(input.userId);
+    } catch (err) {
+      console.error('Failed to restore config for user:', input.userId, err);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to restore config',
+      });
+    }
+  }),
+
   destroy: adminProcedure.input(DestroyInstanceSchema).mutation(async ({ input, ctx }) => {
     const [instance] = await db
       .select({
