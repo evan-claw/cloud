@@ -159,7 +159,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
             })
             .from(cloud_agent_code_reviews)
             .where(and(...baseConditions))
-            .groupBy(cloud_agent_code_reviews.agent_version)
+            .groupBy(sql`COALESCE(${cloud_agent_code_reviews.agent_version}, 'v1')`)
         : undefined;
 
     return {
@@ -425,7 +425,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       .where(and(...conditions))
       .groupBy(
         sql`DATE_TRUNC('day', ${cloud_agent_code_reviews.created_at})`,
-        cloud_agent_code_reviews.agent_version
+        sql`COALESCE(${cloud_agent_code_reviews.agent_version}, 'v1')`
       )
       .orderBy(sql`DATE_TRUNC('day', ${cloud_agent_code_reviews.created_at})`);
 
