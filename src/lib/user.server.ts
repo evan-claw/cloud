@@ -33,7 +33,7 @@ import type { AdapterUser } from 'next-auth/adapters';
 import assert from 'node:assert';
 import type { Organization, User } from '@kilocode/db/schema';
 import PostHogClient from '@/lib/posthog';
-import { captureException } from '@sentry/nextjs';
+import { captureException, setUser } from '@sentry/nextjs';
 import {
   doesOrgWithSSODomainExist,
   getSingleUserOrganization,
@@ -797,6 +797,8 @@ async function validateUserAuthorization(
       return authError(403, 'Access denied (not a member of the organization)', kiloUserId);
     }
   }
+
+  setUser({ id: user.id, email: user.google_user_email, ip_address: '{{auto}}' });
 
   return {
     user,
