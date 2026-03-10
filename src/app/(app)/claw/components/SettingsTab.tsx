@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
@@ -20,6 +21,7 @@ import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombob
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
 import { useControllerVersion, useKiloClawConfig, useKiloClawMyPin } from '@/hooks/useKiloClaw';
+import { useTRPC } from '@/lib/trpc/utils';
 import { useDefaultModelSelection } from '../hooks/useDefaultModelSelection';
 
 import { Badge } from '@/components/ui/badge';
@@ -218,9 +220,6 @@ function ChannelSection({
   );
 }
 
-const DOCKER_COMMAND = `docker run -it --network host kilocode/google-setup \\
-  --api-key="YOUR_API_KEY"`;
-
 function GoogleAccountSection({
   connected,
   mutations,
@@ -228,11 +227,17 @@ function GoogleAccountSection({
   connected: boolean;
   mutations: ClawMutations;
 }) {
+  const trpc = useTRPC();
+  const { data: setupData } = useQuery(
+    trpc.kiloclaw.getGoogleSetupCommand.queryOptions(undefined, { enabled: !connected })
+  );
   const [copied, setCopied] = useState(false);
   const isDisconnecting = mutations.disconnectGoogle.isPending;
+  const command = setupData?.command;
 
   function handleCopy() {
-    navigator.clipboard.writeText(DOCKER_COMMAND.replace(/\\\n\s+/g, ' '));
+    if (!command) return;
+    navigator.clipboard.writeText(command);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -251,19 +256,14 @@ function GoogleAccountSection({
           </Badge>
         </div>
 
-        {!connected && (
+        {!connected && command && (
           <div className="space-y-2">
             <p className="text-muted-foreground text-xs">
-              Run this command to connect your Google account. Replace{' '}
-              <code className="bg-muted rounded px-1">YOUR_API_KEY</code> with your API key from the{' '}
-              <a href="/profile" className="text-foreground underline">
-                Profile page
-              </a>
-              .
+              Run this command in your terminal to connect your Google account:
             </p>
             <div className="relative">
               <pre className="bg-muted overflow-x-auto rounded-md p-3 pr-10 text-xs">
-                <code>{DOCKER_COMMAND}</code>
+                <code>{command}</code>
               </pre>
               <Button
                 variant="ghost"

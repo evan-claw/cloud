@@ -462,6 +462,13 @@ export const kiloclawRouter = createTRPCRouter({
     return client.restoreConfig(ctx.user.id);
   }),
 
+  getGoogleSetupCommand: baseProcedure.query(({ ctx }) => {
+    const apiKey = generateApiToken(ctx.user);
+    return {
+      command: `docker run -it --network host kilocode/google-setup --api-key="${apiKey}"`,
+    };
+  }),
+
   connectGoogle: baseProcedure
     .input(
       z.object({
