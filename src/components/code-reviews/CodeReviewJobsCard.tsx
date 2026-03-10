@@ -263,7 +263,7 @@ export function CodeReviewJobsCard({
                           >
                             {review.repo_full_name}
                           </a>
-                          <span>â¢</span>
+                          <span>&middot;</span>
                           <a
                             href={review.pr_url}
                             target="_blank"
@@ -273,7 +273,7 @@ export function CodeReviewJobsCard({
                             #{review.pr_number}
                             <ExternalLink className="h-3 w-3" />
                           </a>
-                          <span>â¢</span>
+                          <span>&middot;</span>
                           <span>by @{review.pr_author}</span>
                         </div>
                       </div>
