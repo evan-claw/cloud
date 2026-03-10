@@ -139,7 +139,7 @@ export function CodeReviewDetailClient({ reviewId }: CodeReviewDetailClientProps
     label: review.status,
   };
   const StatusIcon = statusInfo.icon;
-  const canStream = ['running', 'queued'].includes(status);
+  const showStreamView = status !== 'pending';
   const canRetry = ['failed', 'cancelled', 'interrupted'].includes(status);
   const canCancel = ['pending', 'queued', 'running'].includes(status);
   const prLabel = review.platform === 'gitlab' ? 'MR' : 'PR';
@@ -308,7 +308,7 @@ export function CodeReviewDetailClient({ reviewId }: CodeReviewDetailClientProps
       </Card>
 
       {/* Session log / live stream */}
-      {canStream && (
+      {showStreamView && (
         <CodeReviewStreamView
           reviewId={reviewId}
           onComplete={() => {
