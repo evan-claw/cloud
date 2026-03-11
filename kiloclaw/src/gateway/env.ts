@@ -1,4 +1,7 @@
-import { ALL_SECRET_ENV_VARS } from '@kilocode/kiloclaw-secret-catalog';
+import {
+  ALL_SECRET_ENV_VARS,
+  INTERNAL_SENSITIVE_ENV_VARS,
+} from '@kilocode/kiloclaw-secret-catalog';
 import type { KiloClawEnv } from '../types';
 import type {
   EncryptedEnvelope,
@@ -57,9 +60,8 @@ export type EnvVarsBuild = {
 const SENSITIVE_KEYS = new Set([
   'KILOCODE_API_KEY',
   'OPENCLAW_GATEWAY_TOKEN',
-  'GOOGLE_CLIENT_SECRET_JSON',
-  'GOOGLE_CREDENTIALS_JSON',
   ...ALL_SECRET_ENV_VARS,
+  ...INTERNAL_SENSITIVE_ENV_VARS,
 ]);
 
 /**
