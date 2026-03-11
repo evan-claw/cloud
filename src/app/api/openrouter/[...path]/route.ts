@@ -442,8 +442,8 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   if (customLlm) {
     if (parsedRequest.kind === 'responses') {
       return NextResponse.json(
-        { error: 'Custom LLMs do not support the Responses API' },
-        { status: 400 }
+        { error: 'This model is not yet available on the Responses API' },
+        { status: 404 }
       );
     }
     response = await customLlmRequest(
@@ -546,13 +546,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     organization_id: organizationId || null,
     provider: provider.id,
     model: originalModelIdLowerCased,
-    request: parsedRequest.body,
+    request: parsedRequest,
   });
 
   {
     const errorResponse = await makeErrorReadable({
       requestedModel: originalModelIdLowerCased,
-      request: parsedRequest.body,
+      request: parsedRequest,
       response,
       isUserByok: !!userByok,
     });

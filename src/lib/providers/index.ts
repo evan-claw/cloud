@@ -264,14 +264,13 @@ export function applyProviderSpecificLogic(
   }
 
   if (requestToMutate.kind === 'chat_completions') {
-    // Roo Code only
     applyToolChoiceSetting(requestedModel, requestToMutate.body);
   }
 
   applyPreferredProvider(requestedModel, requestToMutate.body);
 
   if (isXaiModel(requestedModel)) {
-    applyXaiModelSettings(requestedModel, requestToMutate.body, extraHeaders);
+    applyXaiModelSettings(requestedModel, requestToMutate, extraHeaders);
   }
 
   if (isGeminiModel(requestedModel)) {

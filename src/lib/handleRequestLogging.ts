@@ -3,10 +3,7 @@ import { db } from '@/lib/drizzle';
 import { KILO_ORGANIZATION_ID } from '@/lib/organizations/constants';
 import { logExceptInTest } from '@/lib/utils.server';
 import { after } from 'next/server';
-import type {
-  GatewayResponsesRequest,
-  OpenRouterChatCompletionRequest,
-} from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 
 export function handleRequestLogging(params: {
   clonedResponse: Response;
@@ -14,7 +11,7 @@ export function handleRequestLogging(params: {
   organization_id: string | null;
   provider: string;
   model: string;
-  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest;
+  request: ParsedProxyRequest;
 }) {
   const { clonedResponse, user, organization_id, provider, model, request } = params;
   const isKiloEmployee =
@@ -34,7 +31,7 @@ export function handleRequestLogging(params: {
           status_code: clonedResponse.status,
           model,
           provider,
-          request,
+          request: request.body,
           response: await clonedResponse.text(),
         })
         .returning({ id: api_request_log.id });
