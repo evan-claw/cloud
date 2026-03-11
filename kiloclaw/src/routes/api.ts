@@ -89,7 +89,9 @@ adminApi.post('/gateway/restart', async c => {
   }
 });
 
-// Cache the derived public key PEM to avoid re-deriving on every request.
+// Isolate-level cache: shared across requests within the same CF Worker isolate
+// but evicted when the isolate is recycled. Not persistent — just avoids
+// re-deriving the public key on every request within a single isolate lifetime.
 let cachedPublicKeyPem: string | null = null;
 let cachedForPrivateKey: string | null = null;
 
