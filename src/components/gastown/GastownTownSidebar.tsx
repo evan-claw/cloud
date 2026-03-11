@@ -26,6 +26,7 @@ import {
   Activity,
   Settings,
   Crown,
+  Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -52,6 +53,7 @@ export function GastownTownSidebar({ townId, ...sidebarProps }: GastownTownSideb
 
   const navItems = [
     { title: 'Overview', icon: LayoutDashboard, url: basePath },
+    { title: '3D Town', icon: Globe, url: `${basePath}/viz` },
     { title: 'Beads', icon: Hexagon, url: `${basePath}/beads` },
     { title: 'Agents', icon: Bot, url: `${basePath}/agents` },
     { title: 'Merge Queue', icon: GitMerge, url: `${basePath}/merges` },
