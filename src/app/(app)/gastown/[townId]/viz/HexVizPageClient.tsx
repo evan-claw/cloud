@@ -59,7 +59,7 @@ export function HexVizPageClient({ townId }: HexVizPageClientProps) {
 
   if (loading) {
     return (
-      <div className="flex h-[calc(100vh-340px)] items-center justify-center">
+      <div className="-mb-[340px] flex h-[calc(100dvh-38px)] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
           <div className="text-sm text-white/60">Loading town data...</div>
@@ -79,7 +79,7 @@ export function HexVizPageClient({ townId }: HexVizPageClientProps) {
   };
 
   return (
-    <div className="relative h-[calc(100vh-340px)]">
+    <div className="relative -mb-[340px] h-[calc(100dvh-38px)]">
       {/* 3D Hex Scene */}
       <GastownHexScene
         snapshot={displaySnapshot}
