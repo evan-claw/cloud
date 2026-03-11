@@ -396,6 +396,15 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
+# GOG (Google Workspace CLI) KEYRING
+# ============================================================
+# gog uses 99designs/keyring with an empty password for the file backend.
+# Set GOG_KEYRING_PASSWORD here so it's inherited by the gateway and all
+# child processes (controller → gateway → gog). Without this, the keyring
+# library prompts for a password on a missing TTY and fails.
+export GOG_KEYRING_PASSWORD=""
+
+# ============================================================
 # START CONTROLLER
 # ============================================================
 # Tell the gateway it's running under a supervisor. On SIGUSR1 restart,
