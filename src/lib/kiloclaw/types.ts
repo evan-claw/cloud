@@ -188,8 +188,8 @@ export type DoctorResponse = {
   output: string;
 };
 
-/** Response from POST /api/admin/gateway/restart */
-export type RestartGatewayResponse = {
+/** Response from POST /api/admin/machine/restart */
+export type RestartMachineResponse = {
   success: boolean;
   message?: string;
   error?: string;

@@ -123,8 +123,8 @@ export function useKiloClawMutations() {
         },
       })
     ),
-    restartGateway: useMutation(
-      trpc.kiloclaw.restartGateway.mutationOptions({
+    restartMachine: useMutation(
+      trpc.kiloclaw.restartMachine.mutationOptions({
         onSuccess: async () => {
           await invalidateStatus();
           await queryClient.invalidateQueries({

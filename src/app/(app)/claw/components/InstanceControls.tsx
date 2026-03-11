@@ -113,7 +113,7 @@ export function InstanceControls({
           size="sm"
           variant="outline"
           className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-          disabled={!isRunning || mutations.restartGateway.isPending || isDestroying}
+          disabled={!isRunning || mutations.restartMachine.isPending || isDestroying}
           onClick={() => {
             posthog?.capture('claw_redeploy_prompted', { instance_status: status.status });
             setRedeployMode('redeploy');
@@ -166,7 +166,7 @@ export function InstanceControls({
       <Dialog
         open={confirmRedeploy}
         onOpenChange={open => {
-          if (mutations.restartGateway.isPending) return;
+          if (mutations.restartMachine.isPending) return;
           if (!open) posthog?.capture('claw_redeploy_cancelled');
           setConfirmRedeploy(open);
         }}
@@ -210,7 +210,7 @@ export function InstanceControls({
             <Button
               variant="outline"
               onClick={() => setConfirmRedeploy(false)}
-              disabled={mutations.restartGateway.isPending}
+              disabled={mutations.restartMachine.isPending}
             >
               Cancel
             </Button>
@@ -222,12 +222,10 @@ export function InstanceControls({
                   instance_status: status.status,
                   redeploy_mode: redeployMode,
                 });
-                mutations.restartGateway.mutate(imageTag ? { imageTag } : undefined, {
+                mutations.restartMachine.mutate(imageTag ? { imageTag } : undefined, {
                   onSuccess: () => {
                     toast.success(
-                      redeployMode === 'upgrade'
-                        ? 'Upgrading to latest image'
-                        : 'Gateway restarting'
+                      redeployMode === 'upgrade' ? 'Upgrading to latest image' : 'Redeploying'
                     );
                     setConfirmRedeploy(false);
                     onRedeploySuccess?.();
@@ -235,9 +233,9 @@ export function InstanceControls({
                   onError: err => toast.error(err.message),
                 });
               }}
-              disabled={mutations.restartGateway.isPending}
+              disabled={mutations.restartMachine.isPending}
             >
-              {mutations.restartGateway.isPending ? (
+              {mutations.restartMachine.isPending ? (
                 <>
                   {redeployMode === 'redeploy' ? 'Redeploying' : 'Upgrading'}
                   <AnimatedDots />

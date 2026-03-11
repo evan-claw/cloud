@@ -379,7 +379,7 @@ export const kiloclawRouter = createTRPCRouter({
     return client.getConfig();
   }),
 
-  restartGateway: baseProcedure
+  restartMachine: baseProcedure
     .input(
       z
         .object({
@@ -398,7 +398,7 @@ export const kiloclawRouter = createTRPCRouter({
       const client = new KiloClawUserClient(
         generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
       );
-      return client.restartGateway(input?.imageTag ? { imageTag: input.imageTag } : undefined);
+      return client.restartMachine(input?.imageTag ? { imageTag: input.imageTag } : undefined);
     }),
 
   listPairingRequests: baseProcedure

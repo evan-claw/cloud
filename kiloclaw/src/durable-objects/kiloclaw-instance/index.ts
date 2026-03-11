@@ -929,9 +929,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return gateway.patchConfigOnMachine(this.s, this.env, patch);
   }
 
-  // ── Restart gateway (user-facing) ──────────────────────────────────
+  // ── Restart machine (user-facing) ──────────────────────────────────
 
-  async restartGateway(options?: {
+  async restartMachine(options?: {
     imageTag?: string;
   }): Promise<{ success: boolean; error?: string }> {
     await this.loadState();
@@ -946,7 +946,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         : `pin-to-tag:${options.imageTag}`
       : 'redeploy-same-image';
     console.log(
-      '[DO] restartGateway:',
+      '[DO] restartMachine:',
       action,
       '| current trackedImageTag:',
       this.s.trackedImageTag
@@ -998,13 +998,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       } catch (stopErr) {
         const isTimeout = stopErr instanceof fly.FlyApiError && stopErr.status === 408;
         if (!isTimeout) throw stopErr;
-        console.warn('[DO] restartGateway: stop timed out, will update in-place:', stopErr.message);
+        console.warn('[DO] restartMachine: stop timed out, will update in-place:', stopErr.message);
       }
 
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);
       const imageTag = resolveImageTag(this.s, this.env);
-      console.log('[DO] restartGateway: deploying with imageTag:', imageTag);
+      console.log('[DO] restartMachine: deploying with imageTag:', imageTag);
       const identity = {
         userId: this.s.userId ?? '',
         sandboxId: this.s.sandboxId ?? '',
