@@ -192,6 +192,7 @@ export const kilocode_users = pgTable(
     linkedin_url: text(),
     github_url: text(),
     openrouter_upstream_safety_identifier: text(),
+    customer_source: text(),
   },
   table => [
     unique('UQ_b1afacbcf43f2c7c4cb9f7e7faa').on(table.google_user_email),

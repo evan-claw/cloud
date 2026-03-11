@@ -33,6 +33,8 @@ export async function GET(request: NextRequest) {
       } else {
         responsePath = '/account-verification';
       }
+    } else if (user.customer_source === null) {
+      responsePath = `/customer-source-survey?callbackPath=${encodeURIComponent(responsePath)}`;
     }
   }
 

@@ -288,6 +288,16 @@ export const userRouter = createTRPCRouter({
     return successResult();
   }),
 
+  submitCustomerSource: baseProcedure
+    .input(z.object({ source: z.string().min(1).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      await db
+        .update(kilocode_users)
+        .set({ customer_source: input.source })
+        .where(eq(kilocode_users.id, ctx.user.id));
+      return successResult();
+    }),
+
   updateProfile: baseProcedure
     .input(
       z.object({

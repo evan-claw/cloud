@@ -1,0 +1,1 @@
+ALTER TABLE "kilocode_users" ADD COLUMN "customer_source" text;
