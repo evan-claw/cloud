@@ -173,8 +173,9 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       // Success rate = completed / terminal states
       successRate: terminalCount > 0 ? (completedCount / terminalCount) * 100 : 0,
       // Failure rate = (failed + interrupted) / terminal states
-      // Note: cancelled and insufficient credits are neutral (not success, not failure)
       failureRate: terminalCount > 0 ? ((failedCount + interruptedCount) / terminalCount) * 100 : 0,
+      // Cancelled rate = cancelled / terminal states (the remainder to reach 100%)
+      cancelledRate: terminalCount > 0 ? (cancelledCount / terminalCount) * 100 : 0,
       avgDurationSeconds: Number(stats.avg_duration_seconds) || 0,
       versionBreakdown: versionBreakdown?.map(row => ({
         agentVersion: row.agent_version,
