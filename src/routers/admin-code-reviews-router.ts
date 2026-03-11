@@ -244,12 +244,12 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     ].filter(Boolean) as SQL[];
 
     const cancellationReasonExpr = sql<string>`CASE
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%superseded%' OR ${cloud_agent_code_reviews.error_message} LIKE '%Superseded%' THEN 'Superseded by new commit'
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%paid model%' OR ${cloud_agent_code_reviews.error_message} LIKE '%add credits%' OR ${cloud_agent_code_reviews.error_message} LIKE '%Add credits%' THEN 'No credits (billing)'
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%Stream timeout%' OR ${cloud_agent_code_reviews.error_message} LIKE '%stream timeout%' THEN 'Stream timeout'
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%cancelled%' OR ${cloud_agent_code_reviews.error_message} LIKE '%canceled%' THEN 'Explicitly cancelled'
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%Killed%' OR ${cloud_agent_code_reviews.error_message} LIKE '%SIGKILL%' OR ${cloud_agent_code_reviews.error_message} LIKE '%SIGTERM%' THEN 'Process killed'
-      WHEN ${cloud_agent_code_reviews.error_message} LIKE '%Interrupted%' THEN 'User interrupted'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%superseded%' THEN 'Superseded by new commit'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%paid model%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%add credits%' THEN 'No credits (billing)'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%stream timeout%' THEN 'Stream timeout'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%cancelled%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%canceled%' THEN 'Explicitly cancelled'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%killed%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigkill%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigterm%' THEN 'Process killed'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%interrupted%' THEN 'User interrupted'
       WHEN ${cloud_agent_code_reviews.error_message} IS NULL THEN 'No reason provided'
       ELSE 'Other'
     END`;
