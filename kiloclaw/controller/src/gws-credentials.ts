@@ -32,6 +32,10 @@ const defaultDeps: GwsCredentialsDeps = {
 /**
  * Write gws credential files if the corresponding env vars are set.
  * Returns true if credentials were written, false if skipped.
+ *
+ * Side effect: mutates the passed `env` record by setting
+ * GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE so gws finds the credentials
+ * when HOME points to the OpenClaw workspace dir.
  */
 export function writeGwsCredentials(
   env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
