@@ -114,13 +114,13 @@ async function handleHttpRequest(
 export async function startController(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const config = loadRuntimeConfig(env);
 
-  // writeGogCredentials is async but we don't await it —
-  // credential extraction is best-effort and should not block controller startup.
-  // This is safe: the gateway process doesn't use gog credentials at startup;
-  // gog is only invoked later by user/bot actions, well after this completes.
-  writeGogCredentials(env as Record<string, string | undefined>).catch(err => {
+  // Write gog credentials before starting the gateway so env vars are available
+  // to the child process on first spawn. Best-effort: log and continue on failure.
+  try {
+    await writeGogCredentials(env as Record<string, string | undefined>);
+  } catch (err) {
     console.error('[gog] Failed to write credentials:', err);
-  });
+  }
 
   const supervisor = createSupervisor({
     gatewayArgs: config.gatewayArgs,
