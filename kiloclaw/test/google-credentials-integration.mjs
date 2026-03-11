@@ -200,15 +200,21 @@ const provisionPromise = fetch(`${WORKER_URL}/api/platform/provision`, {
 green('Provision request fired (not waiting for completion)');
 
 // Poll status until the DO is reachable (google-credentials endpoint works once DO exists)
+let doReachable = false;
 for (let i = 0; i < 30; i++) {
   const { status } = await internalGet(`/api/platform/status?userId=${USER_ID}`);
   if (status !== 404) {
     green('Instance DO reachable');
+    doReachable = true;
     break;
   }
   await new Promise(r => setTimeout(r, 1000));
 }
 provisionController.abort();
+if (!doReachable) {
+  red('Instance DO never became reachable after 30s — provision may have failed');
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // 3. Platform API: store Google credentials
