@@ -19,6 +19,7 @@ type StatsData = {
   inProgressCount: number;
   successRate: number;
   failureRate: number;
+  cancelledRate: number;
   avgDurationSeconds: number;
   versionBreakdown?: VersionBreakdownRow[];
 };
@@ -40,7 +41,7 @@ export function CodeReviewStats({ data }: { data: StatsData }) {
   const showVersionBreakdown = byVersion.size > 0;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">Total Reviews</CardTitle>
@@ -109,6 +110,16 @@ export function CodeReviewStats({ data }: { data: StatsData }) {
               })}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Cancelled Rate</CardTitle>
+          <CardDescription>{data.cancelledCount.toLocaleString()} cancelled</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="text-3xl font-bold text-yellow-500">{data.cancelledRate.toFixed(1)}%</div>
         </CardContent>
       </Card>
 
