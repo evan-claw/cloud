@@ -15,7 +15,7 @@ export type GogCredentialsDeps = {
   writeFileSync: (path: string, data: Buffer) => void;
   unlinkSync: (path: string) => void;
   rmSync: (path: string, opts: { recursive: boolean; force: boolean }) => void;
-  execSync: (cmd: string) => void;
+  execFileSync: (file: string, args: string[]) => void;
 };
 
 /**
@@ -37,10 +37,10 @@ export async function writeGogCredentials(
     writeFileSync: deps?.writeFileSync ?? ((p, data) => fs.default.writeFileSync(p, data)),
     unlinkSync: deps?.unlinkSync ?? (p => fs.default.unlinkSync(p)),
     rmSync: deps?.rmSync ?? ((p, opts) => fs.default.rmSync(p, opts)),
-    execSync:
-      deps?.execSync ??
-      (cmd =>
-        cp.default.execSync(cmd, {
+    execFileSync:
+      deps?.execFileSync ??
+      ((file, args) =>
+        cp.default.execFileSync(file, args, {
           stdio: ['pipe', 'pipe', 'pipe'],
         })),
   };
@@ -61,7 +61,7 @@ export async function writeGogCredentials(
   d.writeFileSync(tmpTarball, Buffer.from(tarballBase64, 'base64'));
 
   try {
-    d.execSync(`tar xzf ${tmpTarball} -C ${parentDir}`);
+    d.execFileSync('tar', ['xzf', tmpTarball, '-C', parentDir]);
     console.log(`[gog] Extracted config tarball to ${configDir}`);
   } finally {
     try {

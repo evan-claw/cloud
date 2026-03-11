@@ -231,8 +231,8 @@ export type ControllerVersionResponse = {
 /** Input to POST /api/platform/google-credentials */
 export type GoogleCredentialsInput = {
   googleCredentials: {
-    clientSecret: EncryptedEnvelope;
-    credentials: EncryptedEnvelope;
+    gogConfigTarball: EncryptedEnvelope;
+    email?: string;
   };
 };
 

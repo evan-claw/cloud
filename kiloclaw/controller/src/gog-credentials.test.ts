@@ -6,7 +6,7 @@ function mockDeps() {
     writeFileSync: vi.fn(),
     unlinkSync: vi.fn(),
     rmSync: vi.fn(),
-    execSync: vi.fn(),
+    execFileSync: vi.fn(),
   };
 }
 
@@ -41,9 +41,12 @@ describe('writeGogCredentials', () => {
     );
 
     // Should run tar extraction
-    expect(deps.execSync).toHaveBeenCalledWith(
-      'tar xzf /root/.config/gogcli-config.tar.gz -C /root/.config'
-    );
+    expect(deps.execFileSync).toHaveBeenCalledWith('tar', [
+      'xzf',
+      '/root/.config/gogcli-config.tar.gz',
+      '-C',
+      '/root/.config',
+    ]);
 
     // Should clean up temp tarball
     expect(deps.unlinkSync).toHaveBeenCalledWith('/root/.config/gogcli-config.tar.gz');
@@ -79,7 +82,7 @@ describe('writeGogCredentials', () => {
 
   it('cleans up temp tarball even if extraction fails', async () => {
     const deps = mockDeps();
-    deps.execSync.mockImplementation(() => {
+    deps.execFileSync.mockImplementation(() => {
       throw new Error('tar failed');
     });
 
