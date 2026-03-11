@@ -88,7 +88,7 @@ console.log('API key verified.');
 
 console.log('Fetching encryption public key...');
 
-const pubKeyRes = await fetch(`${workerUrl}/public-key`);
+const pubKeyRes = await fetch(`${workerUrl}/api/admin/public-key`, { headers: authHeaders });
 if (!pubKeyRes.ok) {
   console.error('Failed to fetch public key from worker.');
   process.exit(1);
