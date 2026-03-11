@@ -6,7 +6,7 @@ import { sendViaMailgun } from '@/lib/email-mailgun';
 import {
   templates,
   subjects,
-  buildCreditsSection,
+  creditsVars,
   renderTemplate,
   RawHtml,
   type TemplateName,
@@ -56,10 +56,12 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
       return {
         organization_name: 'Acme Corp',
         inviter_name: 'Alice Smith',
-        accept_invite_url: `${NEXTAUTH_URL}/invite/fixture-code`,
+        // fixture URL — non-functional by design (no real token in DB)
+        accept_invite_url: `${NEXTAUTH_URL}/users/accept-invite/fixture-code`,
       };
     case 'magicLink':
       return {
+        // fixture URL — non-functional by design (no real token in DB)
         magic_link_url: `${NEXTAUTH_URL}/auth/magic?token=fixture-token`,
         email: 'user@example.com',
         expires_in: '24 hours',
@@ -73,13 +75,14 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
     case 'ossInviteNewUser':
       return {
         organization_name: 'Acme OSS',
-        accept_invite_url: `${NEXTAUTH_URL}/invite/fixture-oss-code`,
+        // fixture URL — non-functional by design (no real token in DB)
+        accept_invite_url: `${NEXTAUTH_URL}/users/accept-invite/fixture-oss-code`,
         integrations_url,
         code_reviews_url,
         tier_name: 'Premier',
         seats: '25',
         seat_value: '48,000',
-        credits_section: buildCreditsSection(500),
+        ...creditsVars(500),
       };
     case 'ossInviteExistingUser':
       return {
@@ -90,7 +93,7 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
         tier_name: 'Premier',
         seats: '25',
         seat_value: '48,000',
-        credits_section: buildCreditsSection(500),
+        ...creditsVars(500),
       };
     case 'ossExistingOrgProvisioned':
       return {
@@ -101,7 +104,7 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
         tier_name: 'Premier',
         seats: '25',
         seat_value: '48,000',
-        credits_section: buildCreditsSection(500),
+        ...creditsVars(500),
       };
     case 'deployFailed':
       return {

@@ -75,6 +75,18 @@ export function buildCreditsSection(monthlyCreditsUsd: number): RawHtml {
   );
 }
 
+// CIO templates still use Liquid {% if has_credits %}{{ monthly_credits_usd }}{% endif %}.
+// Mailgun templates use {{ credits_section }} instead. Pass both so each provider
+// gets the vars it needs; unrecognized keys are harmlessly ignored by both paths.
+export function creditsVars(monthlyCreditsUsd: number): TemplateVars {
+  return {
+    credits_section: buildCreditsSection(monthlyCreditsUsd),
+    ...(monthlyCreditsUsd > 0
+      ? { has_credits: 'true', monthly_credits_usd: String(monthlyCreditsUsd) }
+      : {}),
+  };
+}
+
 type SendParams = {
   to: string;
   templateName: TemplateName;
@@ -285,7 +297,7 @@ export async function sendOssInviteNewUserEmail(data: OssInviteEmailData) {
       tier_name: tierConfig.name,
       seats: String(tierConfig.seats),
       seat_value: tierConfig.seatValue.toLocaleString(),
-      credits_section: buildCreditsSection(data.monthlyCreditsUsd),
+      ...creditsVars(data.monthlyCreditsUsd),
     },
   });
 }
@@ -308,7 +320,7 @@ export async function sendOssInviteExistingUserEmail(
       tier_name: tierConfig.name,
       seats: String(tierConfig.seats),
       seat_value: tierConfig.seatValue.toLocaleString(),
-      credits_section: buildCreditsSection(data.monthlyCreditsUsd),
+      ...creditsVars(data.monthlyCreditsUsd),
     },
   });
 }
@@ -334,7 +346,7 @@ export async function sendOssExistingOrgProvisionedEmail(data: OssProvisionEmail
     tier_name: tierConfig.name,
     seats: String(tierConfig.seats),
     seat_value: tierConfig.seatValue.toLocaleString(),
-    credits_section: buildCreditsSection(data.monthlyCreditsUsd),
+    ...creditsVars(data.monthlyCreditsUsd),
   };
   await Promise.all(
     data.to.map(to => send({ to, templateName: 'ossExistingOrgProvisioned', templateVars }))
