@@ -102,6 +102,8 @@ export type StructurePlacement = {
   /** Optional link to a Gastown object for click interaction */
   linkedObjectId?: string;
   linkedObjectType?: 'agent' | 'bead' | 'rig' | 'convoy';
+  /** Rig ID for the linked object (needed for drawer queries) */
+  linkedRigId?: string;
   /** Visual state */
   glow?: [number, number, number]; // RGB glow color
   label?: string;

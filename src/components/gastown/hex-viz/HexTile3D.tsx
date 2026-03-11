@@ -4,7 +4,7 @@
  * A single hex tile rendered in 3D using a mesh from the loaded GLB.
  */
 
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { HexTilePlacement } from './types';
@@ -90,7 +90,9 @@ type InstancedTileGroupProps = {
 function InstancedTileGroup({ geometry, material, placements }: InstancedTileGroupProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
-  useMemo(() => {
+  // useEffect (not useMemo) so the ref is attached before we write matrices.
+  // useMemo runs during render before the DOM/Three.js objects exist.
+  useEffect(() => {
     if (!meshRef.current) return;
     const mesh = meshRef.current;
     const matrix = new THREE.Matrix4();

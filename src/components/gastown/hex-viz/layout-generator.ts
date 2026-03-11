@@ -276,6 +276,7 @@ function buildRigDistrict(
     elevation: 0,
     linkedObjectId: rig.id,
     linkedObjectType: 'rig',
+    linkedRigId: rig.id,
     label: rig.name,
   });
 
@@ -300,6 +301,7 @@ function buildRigDistrict(
       elevation: 0,
       linkedObjectId: agent.id,
       linkedObjectType: 'agent',
+      linkedRigId: rig.id,
       glow: agentStatusGlow(agent.status),
       label: agent.name,
       animate: agent.status === 'working',
@@ -320,6 +322,7 @@ function buildRigDistrict(
         elevation: 0,
         linkedObjectId: bead.id,
         linkedObjectType: 'bead',
+        linkedRigId: rig.id,
         glow: priorityColor(bead.priority),
         label: bead.title.slice(0, 20),
       });
@@ -370,6 +373,7 @@ function buildRigDistrict(
       elevation: 0,
       linkedObjectId: esc.id,
       linkedObjectType: 'bead',
+      linkedRigId: rig.id,
       glow: [1.0, 0.4, 0.0], // orange
       label: esc.title.slice(0, 20),
       animate: true,

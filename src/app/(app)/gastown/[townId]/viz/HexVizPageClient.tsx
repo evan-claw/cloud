@@ -36,14 +36,20 @@ export function HexVizPageClient({ townId }: HexVizPageClientProps) {
     (structure: StructurePlacement) => {
       setSelectedStructure(structure);
 
-      // Open the appropriate drawer based on the linked object type
-      if (structure.linkedObjectId && structure.linkedObjectType) {
+      // Open the appropriate drawer based on the linked object type.
+      // Both agent and bead panels require a real rigId for their
+      // rig-scoped tRPC queries.
+      if (structure.linkedObjectId && structure.linkedObjectType && structure.linkedRigId) {
         switch (structure.linkedObjectType) {
           case 'agent':
-            push({ type: 'agent', agentId: structure.linkedObjectId, rigId: '' });
+            push({
+              type: 'agent',
+              agentId: structure.linkedObjectId,
+              rigId: structure.linkedRigId,
+            });
             break;
           case 'bead':
-            push({ type: 'bead', beadId: structure.linkedObjectId, rigId: '' });
+            push({ type: 'bead', beadId: structure.linkedObjectId, rigId: structure.linkedRigId });
             break;
         }
       }

@@ -3,12 +3,12 @@
 /**
  * React hook that maintains a live TownSnapshot for the hex visualization.
  *
- * Fetches initial state via tRPC queries, then subscribes to the Town DO
- * status WebSocket for real-time updates.
+ * Fetches initial state via tRPC queries (agents + beads for ALL rigs),
+ * then subscribes to the Town DO status WebSocket for real-time updates.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { useGastownTRPC } from '@/lib/gastown/trpc';
 import { gastownWsUrl } from '@/lib/gastown/trpc';
 import type { GastownOutputs } from '@/lib/gastown/trpc';
@@ -40,24 +40,23 @@ export function useTownSnapshot(townId: string): {
   // ── tRPC queries for initial state ────────────────────────────────
 
   const rigsQuery = useQuery(trpc.gastown.listRigs.queryOptions({ townId }));
-  const rigIds = useMemo(() => (rigsQuery.data ?? []).map((r: TRPCRig) => r.id), [rigsQuery.data]);
+  const rigs = useMemo(() => (rigsQuery.data ?? []) as TRPCRig[], [rigsQuery.data]);
 
-  const firstRigId = rigIds[0] ?? '';
-
-  const agentsQuery = useQuery({
-    ...trpc.gastown.listAgents.queryOptions({ rigId: firstRigId }),
-    enabled: !!firstRigId,
+  // Query agents for ALL rigs (useQueries handles dynamic-length arrays)
+  const rigAgentQueries = useQueries({
+    queries: rigs.map(rig => trpc.gastown.listAgents.queryOptions({ rigId: rig.id })),
   });
 
-  const beadsQuery = useQuery({
-    ...trpc.gastown.listBeads.queryOptions({ rigId: firstRigId }),
-    enabled: !!firstRigId,
+  // Query beads for ALL rigs
+  const rigBeadQueries = useQueries({
+    queries: rigs.map(rig => trpc.gastown.listBeads.queryOptions({ rigId: rig.id })),
   });
 
   const convoysQuery = useQuery(trpc.gastown.listConvoys.queryOptions({ townId }));
 
-  const loading =
-    rigsQuery.isLoading || agentsQuery.isLoading || beadsQuery.isLoading || convoysQuery.isLoading;
+  const agentsLoading = rigAgentQueries.some(q => q.isLoading);
+  const beadsLoading = rigBeadQueries.some(q => q.isLoading);
+  const loading = rigsQuery.isLoading || agentsLoading || beadsLoading || convoysQuery.isLoading;
 
   // ── WebSocket for live updates ────────────────────────────────────
 
@@ -127,19 +126,25 @@ export function useTownSnapshot(townId: string): {
 
   // ── Assemble the snapshot ─────────────────────────────────────────
 
+  // Stabilize the query data arrays so useMemo deps work correctly
+  const rigAgentData = rigAgentQueries.map(q => q.data);
+  const rigBeadData = rigBeadQueries.map(q => q.data);
+
   const snapshot = useMemo<TownSnapshot | null>(() => {
     if (!rigsQuery.data) return null;
 
-    const rigs: RigSnapshot[] = (rigsQuery.data as TRPCRig[]).map((r: TRPCRig) => ({
+    const rigSnapshots: RigSnapshot[] = rigs.map((r: TRPCRig) => ({
       id: r.id,
       name: r.name,
       gitUrl: r.git_url,
       defaultBranch: r.default_branch,
     }));
 
-    const agents: AgentSnapshot[] =
-      wsAgents ??
-      ((agentsQuery.data ?? []) as TRPCAgent[]).map((a: TRPCAgent) => ({
+    // Merge agents from all rigs
+    const tRPCAgents: AgentSnapshot[] = rigAgentData.flatMap((data, i) => {
+      const rig = rigs[i];
+      if (!data || !rig) return [];
+      return (data as TRPCAgent[]).map((a: TRPCAgent) => ({
         id: a.id,
         rigId: a.rig_id ?? null,
         role: a.role as AgentSnapshot['role'],
@@ -150,17 +155,25 @@ export function useTownSnapshot(townId: string): {
         lastActivityAt: a.last_activity_at ?? null,
         statusMessage: a.agent_status_message ?? null,
       }));
+    });
 
-    const beadsList = (beadsQuery.data ?? []) as TRPCBead[];
-    const beads: BeadSnapshot[] = beadsList.map((b: TRPCBead) => ({
-      id: b.bead_id,
-      rigId: b.rig_id ?? null,
-      type: b.type as BeadSnapshot['type'],
-      status: b.status as BeadSnapshot['status'],
-      title: b.title,
-      priority: b.priority as BeadSnapshot['priority'],
-      assigneeAgentId: b.assignee_agent_bead_id ?? null,
-    }));
+    // Prefer WebSocket-updated agents when available (they span all rigs)
+    const agents = wsAgents ?? tRPCAgents;
+
+    // Merge beads from all rigs
+    const beads: BeadSnapshot[] = rigBeadData.flatMap((data, i) => {
+      const rig = rigs[i];
+      if (!data || !rig) return [];
+      return (data as TRPCBead[]).map((b: TRPCBead) => ({
+        id: b.bead_id,
+        rigId: b.rig_id ?? null,
+        type: b.type as BeadSnapshot['type'],
+        status: b.status as BeadSnapshot['status'],
+        title: b.title,
+        priority: b.priority as BeadSnapshot['priority'],
+        assigneeAgentId: b.assignee_agent_bead_id ?? null,
+      }));
+    });
 
     const convoysList = (convoysQuery.data ?? []) as TRPCConvoy[];
     const convoys: ConvoySnapshot[] = convoysList.map((c: TRPCConvoy) => ({
@@ -173,13 +186,14 @@ export function useTownSnapshot(townId: string): {
 
     return {
       townId,
-      rigs,
+      rigs: rigSnapshots,
       agents,
       beads,
       convoys,
       recentEvents: [],
     };
-  }, [townId, rigsQuery.data, agentsQuery.data, beadsQuery.data, convoysQuery.data, wsAgents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [townId, rigsQuery.data, rigs, rigAgentData, rigBeadData, convoysQuery.data, wsAgents]);
 
   return { snapshot, connected, loading };
 }
