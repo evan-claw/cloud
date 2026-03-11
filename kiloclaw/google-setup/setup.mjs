@@ -94,7 +94,6 @@ const SCOPES = [
   'https://www.googleapis.com/auth/classroom.rosters',
   'https://www.googleapis.com/auth/script.projects',
   'https://www.googleapis.com/auth/script.deployments',
-  'https://www.googleapis.com/auth/keep',
   'https://www.googleapis.com/auth/pubsub',
 ];
 
@@ -112,7 +111,6 @@ const GCP_APIS = [
   'chat.googleapis.com',
   'classroom.googleapis.com',
   'script.googleapis.com',
-  'keep.googleapis.com',
   'pubsub.googleapis.com',
 ];
 
