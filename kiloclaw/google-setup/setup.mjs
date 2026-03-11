@@ -245,11 +245,12 @@ if (!tokenRes.ok) {
 
 const tokens = await tokenRes.json();
 // Build a credentials object similar to what gws stores
+// Omit client_id/client_secret from the credentials envelope to avoid
+// duplicating the OAuth client secret across both envelopes.
+// The worker merges them from the clientSecret envelope at decryption time.
 const credentialsObj = {
   type: 'authorized_user',
   ...tokens,
-  client_id,
-  client_secret,
   scopes: SCOPES,
 };
 const credentialsJson = JSON.stringify(credentialsObj);

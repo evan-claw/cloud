@@ -299,21 +299,51 @@ describe('buildEnvVars', () => {
 
   // ─── Google credentials (Layer 4b) ───────────────────────────────────
 
-  it('decrypts Google credentials into sensitive bucket', async () => {
+  it('decrypts Google credentials into sensitive bucket and merges client_id/client_secret', async () => {
     const env = createMockEnv({
       AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey,
     });
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       googleCredentials: {
-        clientSecret: encryptForTest('{"client_id":"test"}', testPublicKey),
+        clientSecret: encryptForTest('{"client_id":"cid","client_secret":"csec"}', testPublicKey),
+        // credentials envelope omits client_id/client_secret (new setup flow)
         credentials: encryptForTest('{"refresh_token":"rt"}', testPublicKey),
       },
     });
 
-    expect(result.sensitive.GOOGLE_CLIENT_SECRET_JSON).toBe('{"client_id":"test"}');
-    expect(result.sensitive.GOOGLE_CREDENTIALS_JSON).toBe('{"refresh_token":"rt"}');
+    expect(result.sensitive.GOOGLE_CLIENT_SECRET_JSON).toBe(
+      '{"client_id":"cid","client_secret":"csec"}'
+    );
+    // Verify client_id and client_secret were merged from clientSecret envelope
+    const creds = JSON.parse(result.sensitive.GOOGLE_CREDENTIALS_JSON);
+    expect(creds.refresh_token).toBe('rt');
+    expect(creds.client_id).toBe('cid');
+    expect(creds.client_secret).toBe('csec');
     expect(result.env.GOOGLE_CLIENT_SECRET_JSON).toBeUndefined();
     expect(result.env.GOOGLE_CREDENTIALS_JSON).toBeUndefined();
+  });
+
+  it('does not overwrite existing client_id/client_secret in credentials envelope', async () => {
+    const env = createMockEnv({
+      AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey,
+    });
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      googleCredentials: {
+        clientSecret: encryptForTest(
+          '{"client_id":"old","client_secret":"old_sec"}',
+          testPublicKey
+        ),
+        // Legacy credentials envelope that already has client_id/client_secret
+        credentials: encryptForTest(
+          '{"refresh_token":"rt","client_id":"existing","client_secret":"existing_sec"}',
+          testPublicKey
+        ),
+      },
+    });
+
+    const creds = JSON.parse(result.sensitive.GOOGLE_CREDENTIALS_JSON);
+    expect(creds.client_id).toBe('existing');
+    expect(creds.client_secret).toBe('existing_sec');
   });
 
   it('classifies Google credential env var names as sensitive even when provided as plaintext', async () => {
