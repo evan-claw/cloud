@@ -341,7 +341,7 @@ export class WrapperClient {
     if (upstreamBranch) envParts.push(`UPSTREAM_BRANCH=${upstreamBranch}`);
     if (model) envParts.push(`MODEL=${model}`);
 
-    const command = `${envParts.join(' ')} bun run ${wrapperPath} ${sessionMarker}`;
+    const command = `${envParts.join(' ')} bun run ${this.shellQuote(wrapperPath)} ${sessionMarker}`;
 
     let lastError: Error | undefined;
 

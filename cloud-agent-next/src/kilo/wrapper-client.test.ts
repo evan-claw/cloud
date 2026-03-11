@@ -862,7 +862,7 @@ describe('WrapperClient', () => {
           return Promise.resolve({ exitCode: 0, stdout: '1.0.0' });
         }
         if (cmd.startsWith('test -f')) {
-          return Promise.resolve({ exitCode: 1, stdout: 'ok' });
+          return Promise.resolve({ exitCode: 1, stdout: '' });
         }
         return Promise.resolve(createCurlError(7, 'Connection refused'));
       });
@@ -934,7 +934,7 @@ describe('WrapperClient', () => {
           return Promise.reject(new Error('sandbox timeout'));
         }
         if (cmd.startsWith('test -f')) {
-          return Promise.resolve({ exitCode: 1, stdout: 'ok' });
+          return Promise.resolve({ exitCode: 1, stdout: '' });
         }
         return Promise.resolve(createCurlError(7, 'Connection refused'));
       });
@@ -979,6 +979,29 @@ describe('WrapperClient', () => {
       expect(session.exec).toHaveBeenCalledWith(
         "test -f './wrapper'\\''s folder/wrapper.js; touch /tmp/pwned'",
         expect.objectContaining({ cwd: '/workspace/test', timeout: 5_000 })
+      );
+    });
+
+    it('shell-quotes wrapperPath in the startup command', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        wrapperPath: "./wrapper's folder/wrapper.js; touch /tmp/pwned",
+      });
+
+      expect(session.startProcess).toHaveBeenCalledWith(
+        "WRAPPER_PORT=5000 KILO_SERVER_PORT=4600 WORKSPACE_PATH=/workspace/test bun run './wrapper'\\''s folder/wrapper.js; touch /tmp/pwned' --agent-session test-session",
+        expect.objectContaining({ cwd: '/workspace/test' })
       );
     });
   });
