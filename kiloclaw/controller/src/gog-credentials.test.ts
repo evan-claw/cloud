@@ -67,8 +67,8 @@ describe('writeGogCredentials', () => {
     });
 
     // Should write a keyring file with percent-encoded name
-    const keyringCall = deps.writeFileSync.mock.calls.find(
-      (c: unknown[]) => (c[0] as string).includes('keyring/')
+    const keyringCall = deps.writeFileSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes('keyring/')
     );
     expect(keyringCall).toBeDefined();
     const keyringPath = keyringCall![0] as string;
@@ -179,8 +179,8 @@ describe('writeGogCredentials', () => {
     };
     await writeGogCredentials(env, '/tmp/gogcli-test', deps);
 
-    const keyringCall = deps.writeFileSync.mock.calls.find(
-      (c: unknown[]) => (c[0] as string).includes('keyring/')
+    const keyringCall = deps.writeFileSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes('keyring/')
     );
     const keyringPath = keyringCall![0] as string;
     // + must be percent-encoded as %2B
@@ -212,8 +212,8 @@ describe('writeGogCredentials', () => {
     expect(credentialsCall).toBeDefined();
 
     // Keyring file should NOT be written (no email)
-    const keyringCall = deps.writeFileSync.mock.calls.find(
-      (c: unknown[]) => (c[0] as string).includes('keyring/')
+    const keyringCall = deps.writeFileSync.mock.calls.find((c: unknown[]) =>
+      (c[0] as string).includes('keyring/')
     );
     expect(keyringCall).toBeUndefined();
 

@@ -13,7 +13,7 @@ import { registerHealthRoute } from './routes/health';
 import { registerGatewayRoutes } from './routes/gateway';
 import { registerConfigRoutes } from './routes/config';
 import { CONTROLLER_COMMIT, CONTROLLER_VERSION } from './version';
-import { writeGwsCredentials } from './gws-credentials';
+import { writeGogCredentials } from './gog-credentials';
 
 export type RuntimeConfig = {
   port: number;
@@ -114,8 +114,13 @@ async function handleHttpRequest(
 export async function startController(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const config = loadRuntimeConfig(env);
 
-  // Write Google Workspace CLI credentials if available
-  writeGwsCredentials(env as Record<string, string | undefined>);
+  // writeGogCredentials is async (JWE encryption) but we don't await it —
+  // credential writing is best-effort and should not block controller startup.
+  // This is safe: the gateway process doesn't use gog credentials at startup;
+  // gog is only invoked later by user/bot actions, well after this completes.
+  writeGogCredentials(env as Record<string, string | undefined>).catch(err => {
+    console.error('[gog] Failed to write credentials:', err);
+  });
 
   const supervisor = createSupervisor({
     gatewayArgs: config.gatewayArgs,

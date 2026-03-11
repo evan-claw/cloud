@@ -131,7 +131,8 @@ export async function writeGogCredentials(
   const fs = await import('node:fs');
   const d: GogCredentialsDeps = {
     mkdirSync: deps?.mkdirSync ?? ((dir, opts) => fs.default.mkdirSync(dir, opts)),
-    writeFileSync: deps?.writeFileSync ?? ((p, data, opts) => fs.default.writeFileSync(p, data, opts)),
+    writeFileSync:
+      deps?.writeFileSync ?? ((p, data, opts) => fs.default.writeFileSync(p, data, opts)),
     unlinkSync: deps?.unlinkSync ?? (p => fs.default.unlinkSync(p)),
   };
 
@@ -195,8 +196,10 @@ export async function writeGogCredentials(
     env.GOG_KEYRING_PASSWORD = '';
     env.GOG_ACCOUNT = email;
   } else {
-    if (!email) console.warn('[gog] No email in credentials — keyring entry skipped, gog may not work');
-    if (!refreshToken) console.warn('[gog] No refresh_token in credentials — keyring entry skipped');
+    if (!email)
+      console.warn('[gog] No email in credentials — keyring entry skipped, gog may not work');
+    if (!refreshToken)
+      console.warn('[gog] No refresh_token in credentials — keyring entry skipped');
   }
 
   return true;
