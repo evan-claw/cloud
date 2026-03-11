@@ -13,12 +13,11 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { useRawTRPCClient } from '@/lib/trpc/utils';
 import { toast } from 'sonner';
-import { CliSessionSharedState } from '@/types/cli-session-shared-state';
 
 type ShareSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The Kilo session ID (UUID from cliSessions.session_id) */
+  /** The Kilo session ID (UUID from cli_sessions_v2.session_id) */
   kiloSessionId?: string;
 };
 
@@ -37,12 +36,11 @@ export function ShareSessionDialog({ open, onOpenChange, kiloSessionId }: ShareS
     setIsSharing(true);
 
     try {
-      const result = await trpc.cliSessions.share.mutate({
+      const result = await trpc.cliSessionsV2.share.mutate({
         session_id: kiloSessionId,
-        shared_state: CliSessionSharedState.Public,
       });
 
-      const url = `${window.location.origin}/share/${result.share_id}`;
+      const url = `${window.location.origin}/s/${result.public_id}`;
       setShareUrl(url);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to share session';
