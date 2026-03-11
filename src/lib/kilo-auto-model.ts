@@ -177,13 +177,16 @@ const legacyMapping: Record<string, string | undefined> = {
 };
 
 export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck() {
-  const mapping = Object.fromEntries(Object.entries(legacyMapping).map(([a, b]) => [b, a]));
-  return AUTO_MODELS.map(m => ({
-    ...m,
-    id: mapping[m.id],
-    name: 'Deprecated: ' + m.name,
-    description: `${mapping[m.id]} is deprecated, use ${m.id} instead`,
-  }));
+  return Object.entries(legacyMapping).flatMap(([legacyId, currentId]) => {
+    const model = AUTO_MODELS.find(m => m.id === currentId);
+    if (!model) return [];
+    return {
+      ...model,
+      id: legacyId,
+      name: 'Deprecated: ' + model.name,
+      description: `${legacyId} is deprecated, use ${model.id} instead`,
+    };
+  });
 }
 
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
