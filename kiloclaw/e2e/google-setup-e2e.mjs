@@ -21,14 +21,36 @@
 
 import { SignJWT } from 'jose';
 import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// ---------------------------------------------------------------------------
+// Load secrets from .dev.vars (same file wrangler uses)
+// ---------------------------------------------------------------------------
+
+function loadDevVars() {
+  const devVarsPath = path.resolve(__dirname, '../.dev.vars');
+  const vars = {};
+  try {
+    const content = fs.readFileSync(devVarsPath, 'utf8');
+    for (const line of content.split('\n')) {
+      const match = line.match(/^(\w+)="(.*)"/);
+      if (match) vars[match[1]] = match[2];
+    }
+  } catch {
+    console.warn('Could not read .dev.vars — using env overrides or defaults');
+  }
+  return vars;
+}
+
+const devVars = loadDevVars();
+
 const WORKER_URL = process.env.WORKER_URL ?? 'http://localhost:8795';
-const INTERNAL_SECRET = process.env.INTERNAL_SECRET ?? 'dev-internal-secret';
-const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? 'dev-secret-change-me';
+const INTERNAL_SECRET = process.env.INTERNAL_SECRET ?? devVars.INTERNAL_API_SECRET ?? 'dev-internal-secret';
+const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET ?? devVars.NEXTAUTH_SECRET ?? 'dev-secret-change-me';
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/postgres';
 const USER_ID = `test-google-setup-${Date.now()}`;
 const DOCKER_IMAGE = 'kilocode/google-setup';
@@ -50,9 +72,11 @@ function red(msg) { console.log(`\x1b[31m  ✗ ${msg}\x1b[0m`); }
 function bold(msg) { console.log(`\n\x1b[1m${msg}\x1b[0m`); }
 
 function sql(query) {
-  return execSync(`psql "${DATABASE_URL}" -tAc "${query.replace(/"/g, '\\"')}"`, {
+  return execSync('psql "$PGURL" -tAc "$PGQUERY"', {
     encoding: 'utf8',
     timeout: 5000,
+    env: { ...process.env, PGURL: DATABASE_URL, PGQUERY: query },
+    shell: '/bin/sh',
   }).trim();
 }
 
@@ -130,14 +154,36 @@ sql(`INSERT INTO kilocode_users (id, google_user_email, google_user_name, google
 cleanupFns.push(() => { try { sql(`DELETE FROM kilocode_users WHERE id = '${USER_ID}'`); } catch {} });
 green('Test user created (id=' + USER_ID + ')');
 
-const provisionRes = await internalPost('/api/platform/provision', { userId: USER_ID });
-if (provisionRes.status < 200 || provisionRes.status >= 300) {
-  red(`Provision failed with status ${provisionRes.status}: ${JSON.stringify(provisionRes.json)}`);
+// Fire off provision — Fly machine creation can be slow or flaky, but we only need
+// the DO to exist for credential storage. The machine start may time out on first try.
+cleanupFns.push(() => { internalPost('/api/platform/destroy', { userId: USER_ID }).catch(() => {}); });
+
+const provisionController = new AbortController();
+const provisionPromise = fetch(`${WORKER_URL}/api/platform/provision`, {
+  method: 'POST',
+  headers: { 'x-internal-api-key': INTERNAL_SECRET, 'content-type': 'application/json' },
+  body: JSON.stringify({ userId: USER_ID }),
+  signal: provisionController.signal,
+}).catch(() => {});
+green('Provision request fired');
+
+// Poll until DO is reachable (enough for credential tests)
+let doReachable = false;
+for (let i = 0; i < 60; i++) {
+  const { status } = await internalGet(`/api/platform/status?userId=${USER_ID}`);
+  if (status !== 404) {
+    doReachable = true;
+    break;
+  }
+  await new Promise(r => setTimeout(r, 1000));
+}
+provisionController.abort();
+if (!doReachable) {
+  red('Instance DO never became reachable after 60s');
   cleanup();
   process.exit(1);
 }
-cleanupFns.push(() => { internalPost('/api/platform/destroy', { userId: USER_ID }).catch(() => {}); });
-green('Instance provisioned');
+green('Instance DO reachable');
 
 // Verify googleConnected is false before we start
 const { json: statusBefore } = await internalGet(`/api/platform/status?userId=${USER_ID}`);
