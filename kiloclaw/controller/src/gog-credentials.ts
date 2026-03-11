@@ -42,6 +42,7 @@ function percentEncode(s: string): string {
  * Uses PBES2-HS256+A128KW for key wrapping and A256GCM for content encryption.
  */
 async function createKeyringEntry(
+  keyName: string,
   refreshToken: string,
   scopes: string[],
   password: string
@@ -49,7 +50,8 @@ async function createKeyringEntry(
   // Map OAuth scopes to gog service names for the Services field
   const services = mapScopesToServices(scopes);
 
-  const payload = JSON.stringify({
+  // The token data that gog reads from Item.Data
+  const tokenData = JSON.stringify({
     refresh_token: refreshToken,
     services: services,
     // gog stores only full OAuth scopes, not OIDC shorthand like 'openid'/'email'
@@ -57,8 +59,17 @@ async function createKeyringEntry(
     created_at: new Date().toISOString(),
   });
 
+  // 99designs/keyring file backend wraps data in an Item struct.
+  // Item.Data is []byte, which Go's json.Marshal encodes as base64.
+  const item = JSON.stringify({
+    Key: keyName,
+    Data: Buffer.from(tokenData).toString('base64'),
+    Label: '',
+    Description: '',
+  });
+
   const encoder = new TextEncoder();
-  const jwe = await new CompactEncrypt(encoder.encode(payload))
+  const jwe = await new CompactEncrypt(encoder.encode(item))
     .setProtectedHeader({ alg: 'PBES2-HS256+A128KW', enc: 'A256GCM' })
     .encrypt(encoder.encode(password));
 
@@ -186,7 +197,7 @@ export async function writeGogCredentials(
     const fileName = percentEncode(keyName);
     const password = ''; // Empty password is supported by gog
 
-    const jwe = await createKeyringEntry(refreshToken, scopes, password);
+    const jwe = await createKeyringEntry(keyName, refreshToken, scopes, password);
     d.writeFileSync(path.join(keyringDir, fileName), jwe, { mode: 0o600 });
 
     console.log(`[gog] Wrote keyring entry for ${email}`);
