@@ -29,13 +29,13 @@ type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 export function SettingsTab({
   status,
   mutations,
-  onChannelsChanged,
-  dirtyChannels,
+  onSecretsChanged,
+  dirtySecrets,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
-  onChannelsChanged?: (channelType: string) => void;
-  dirtyChannels: Set<string>;
+  onSecretsChanged?: (entryId: string) => void;
+  dirtySecrets: Set<string>;
 }) {
   const posthog = usePostHog();
   const { data: config } = useKiloClawConfig();
@@ -280,8 +280,8 @@ export function SettingsTab({
               entry={entry}
               configured={configuredSecrets[entry.id] ?? false}
               mutations={mutations}
-              onSecretsChanged={onChannelsChanged}
-              isDirty={dirtyChannels.has(entry.id)}
+              onSecretsChanged={onSecretsChanged}
+              isDirty={dirtySecrets.has(entry.id)}
             />
           ))}
         </div>

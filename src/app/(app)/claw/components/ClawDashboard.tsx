@@ -48,13 +48,13 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
   const { data: isServiceDegraded } = useKiloClawServiceDegraded();
   const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
 
-  const [dirtyChannels, setDirtyChannels] = useState<Set<string>>(new Set());
+  const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
-  const onChannelsChanged = useCallback((channelType: string) => {
-    setDirtyChannels(prev => new Set([...prev, channelType]));
+  const onSecretsChanged = useCallback((entryId: string) => {
+    setDirtySecrets(prev => new Set([...prev, entryId]));
   }, []);
   const onRedeploySuccess = useCallback(() => {
-    setDirtyChannels(new Set());
+    setDirtySecrets(new Set());
   }, []);
 
   return (
@@ -134,8 +134,8 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
                   <SettingsTab
                     status={instanceStatus}
                     mutations={mutations}
-                    onChannelsChanged={onChannelsChanged}
-                    dirtyChannels={dirtyChannels}
+                    onSecretsChanged={onSecretsChanged}
+                    dirtySecrets={dirtySecrets}
                   />
                 </TabsContent>
               </CardContent>
