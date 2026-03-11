@@ -23,6 +23,21 @@ export { createNotFoundHandler } from './not-found-handler.js';
 
 export type { Owner, MCPServerConfig } from './types.js';
 
+export { createCloudAgentNextFetchClient } from './cloud-agent-next-client.js';
+export type {
+  CloudAgentNextFetchClient,
+  CallbackTarget,
+  CloudAgentPrepareSessionInput,
+  CloudAgentPrepareSessionOutput,
+  CloudAgentInitiateInput,
+  CloudAgentInitiateOutput,
+  CloudAgentUpdateSessionInput,
+  CloudAgentSendMessageInput,
+  CloudAgentSendMessageOutput,
+  CloudAgentInterruptInput,
+  CloudAgentInterruptOutput,
+} from './cloud-agent-next-client.js';
+
 export {
   signKiloToken,
   verifyKiloToken,

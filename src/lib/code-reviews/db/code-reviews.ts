@@ -425,6 +425,48 @@ export async function findActiveReviewsForPR(
 }
 
 /**
+ * Finds the most recent completed review for the same PR with a different SHA.
+ * Used for incremental reviews: returns the previous HEAD SHA so the agent
+ * can diff against it instead of re-reviewing the entire PR.
+ * Also returns session_id (nullable) so the caller can derive both the
+ * incremental diff base and the session continuation target from a single row.
+ */
+export async function findPreviousCompletedReview(
+  repoFullName: string,
+  prNumber: number,
+  excludeSha: string,
+  platform: string = 'github'
+): Promise<{ head_sha: string; session_id: string | null } | null> {
+  try {
+    const [review] = await db
+      .select({
+        head_sha: cloud_agent_code_reviews.head_sha,
+        session_id: cloud_agent_code_reviews.session_id,
+      })
+      .from(cloud_agent_code_reviews)
+      .where(
+        and(
+          eq(cloud_agent_code_reviews.repo_full_name, repoFullName),
+          eq(cloud_agent_code_reviews.pr_number, prNumber),
+          eq(cloud_agent_code_reviews.platform, platform),
+          ne(cloud_agent_code_reviews.head_sha, excludeSha),
+          eq(cloud_agent_code_reviews.status, 'completed')
+        )
+      )
+      .orderBy(desc(cloud_agent_code_reviews.created_at))
+      .limit(1);
+
+    return review || null;
+  } catch (error) {
+    captureException(error, {
+      tags: { operation: 'findPreviousCompletedReview' },
+      extra: { repoFullName, prNumber, excludeSha, platform },
+    });
+    throw error;
+  }
+}
+
+/**
  * Stores the GitHub Check Run ID on a code review record.
  * Called after creating the initial check run so we can update it later.
  */
