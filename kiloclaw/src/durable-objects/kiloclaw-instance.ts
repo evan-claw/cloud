@@ -2304,6 +2304,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.kilocodeApiKeyExpiresAt = null;
     this.kilocodeDefaultModel = null;
     this.channels = null;
+    this.googleCredentials = null;
     this.provisionedAt = null;
     this.lastStartedAt = null;
     this.lastStoppedAt = null;

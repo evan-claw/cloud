@@ -96,6 +96,11 @@ if (!pubKeyRes.ok) {
 
 const { publicKey: publicKeyPem } = await pubKeyRes.json();
 
+if (!publicKeyPem || !publicKeyPem.includes('BEGIN PUBLIC KEY')) {
+  console.error('Invalid public key received from worker.');
+  process.exit(1);
+}
+
 // ---------------------------------------------------------------------------
 // Step 3: Run gws auth setup (project + OAuth client only, no login)
 // ---------------------------------------------------------------------------
@@ -189,6 +194,11 @@ const { code, redirectUri } = await new Promise((resolve, reject) => {
   });
 
   let timer;
+
+  server.on('error', (err) => {
+    clearTimeout(timer);
+    reject(new Error(`OAuth callback server failed: ${err.message}`));
+  });
 
   server.listen(0, () => {
     callbackPort = server.address().port;

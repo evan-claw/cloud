@@ -19,11 +19,9 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dea
 
 # Install gws CLI (Google Workspace CLI)
 # https://github.com/googleworkspace/cli
-RUN npm install -g @googleworkspace/cli
+RUN npm install -g @googleworkspace/cli@0.11.1
 
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
 COPY setup.mjs ./
 
 ENTRYPOINT ["node", "setup.mjs"]

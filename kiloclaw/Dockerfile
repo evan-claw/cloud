@@ -55,7 +55,7 @@ RUN npm install -g mcporter@0.7.3
 RUN npm install -g @steipete/summarize@0.11.1
 
 # Install gws CLI (Google Workspace CLI)
-RUN npm install -g @googleworkspace/cli
+RUN npm install -g @googleworkspace/cli@0.11.1
 
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
