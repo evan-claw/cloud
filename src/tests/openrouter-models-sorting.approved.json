@@ -130,7 +130,7 @@
         "include_reasoning"
       ],
       "default_parameters": {},
-      "preferredIndex": 2,
+      "preferredIndex": 3,
       "settings": {
         "included_tools": [
           "search_and_replace"
@@ -184,7 +184,7 @@
         "include_reasoning"
       ],
       "default_parameters": {},
-      "preferredIndex": 4,
+      "preferredIndex": 5,
       "versioned_settings": {
         "4.146.0": {
           "included_tools": [
