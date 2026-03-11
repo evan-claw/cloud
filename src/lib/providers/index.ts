@@ -6,6 +6,7 @@ import type {
   GatewayResponsesRequest,
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
+  ParsedProxyRequest,
 } from '@/lib/providers/openrouter/types';
 import {
   applyMistralModelSettings,
@@ -242,32 +243,35 @@ function applyPreferredProvider(
 export function applyProviderSpecificLogic(
   provider: Provider,
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
+  requestToMutate: ParsedProxyRequest,
   extraHeaders: Record<string, string>,
   userByok: BYOKResult[] | null
 ) {
   const kiloFreeModel = kiloFreeModels.find(m => m.public_id === requestedModel);
   if (kiloFreeModel) {
-    requestToMutate.model = kiloFreeModel.internal_id;
+    requestToMutate.body.model = kiloFreeModel.internal_id;
     if (kiloFreeModel.inference_provider) {
-      if (requestToMutate.provider) {
-        requestToMutate.provider.only = [kiloFreeModel.inference_provider];
+      if (requestToMutate.body.provider) {
+        requestToMutate.body.provider.only = [kiloFreeModel.inference_provider];
       } else {
-        requestToMutate.provider = { only: [kiloFreeModel.inference_provider] };
+        requestToMutate.body.provider = { only: [kiloFreeModel.inference_provider] };
       }
     }
   }
 
   if (isAnthropicModel(requestedModel)) {
-    applyAnthropicModelSettings(requestedModel, requestToMutate, extraHeaders);
+    applyAnthropicModelSettings(requestToMutate, extraHeaders);
   }
 
-  applyToolChoiceSetting(requestedModel, requestToMutate);
+  if (requestToMutate.kind === 'chat_completions') {
+    // Roo Code only
+    applyToolChoiceSetting(requestedModel, requestToMutate.body);
+  }
 
-  applyPreferredProvider(requestedModel, requestToMutate);
+  applyPreferredProvider(requestedModel, requestToMutate.body);
 
   if (isXaiModel(requestedModel)) {
-    applyXaiModelSettings(requestedModel, requestToMutate, extraHeaders);
+    applyXaiModelSettings(requestedModel, requestToMutate.body, extraHeaders);
   }
 
   if (isGeminiModel(requestedModel)) {
@@ -297,7 +301,7 @@ export function applyProviderSpecificLogic(
   }
 
   if (provider.id === 'vercel') {
-    applyVercelSettings(requestedModel, requestToMutate, extraHeaders, userByok);
+    applyVercelSettings(requestedModel, requestToMutate, userByok);
   }
 }
 

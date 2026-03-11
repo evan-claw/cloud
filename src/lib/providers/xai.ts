@@ -1,6 +1,7 @@
 import { ReasoningDetailType } from '@/lib/custom-llm/reasoning-details';
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import type {
+  GatewayResponsesRequest,
   MessageWithReasoning,
   OpenRouterChatCompletionRequest,
 } from '@/lib/providers/openrouter/types';
@@ -45,7 +46,7 @@ export function convertReasoningDetailsToReasoningContent(
 
 export function applyXaiModelSettings(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
+  requestToMutate: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
   extraHeaders: Record<string, string>
 ) {
   if (requestedModel === grok_code_fast_1_optimized_free_model.public_id) {

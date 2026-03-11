@@ -1,5 +1,5 @@
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 
 export const kimi_k25_free_model: KiloFreeModel = {
   public_id: 'moonshotai/kimi-k2.5:free',
@@ -19,9 +19,9 @@ export function isMoonshotModel(model: string) {
   return model.startsWith('moonshotai/');
 }
 
-export function applyMoonshotProviderSettings(requestToMutate: OpenRouterChatCompletionRequest) {
+export function applyMoonshotProviderSettings(requestToMutate: ParsedProxyRequest) {
   // Moonshot models don't support the temperature parameter
-  delete requestToMutate.temperature;
+  delete requestToMutate.body.temperature;
   // kimi-k2.5 only accepts top_p=0.95; any other value causes a 400 error
-  delete requestToMutate.top_p;
+  delete requestToMutate.body.top_p;
 }

@@ -1,4 +1,4 @@
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 import type { ProviderId } from '@/lib/providers/provider-id';
 
 export function isGeminiModel(model: string) {
@@ -27,13 +27,13 @@ type ReadFileParametersSchema = {
 
 export function applyGoogleModelSettings(
   provider: ProviderId,
-  requestToMutate: OpenRouterChatCompletionRequest
+  requestToMutate: ParsedProxyRequest
 ) {
-  if (provider !== 'vercel') {
+  if (provider !== 'vercel' || requestToMutate.kind !== 'chat_completions') {
     return;
   }
 
-  const readFileTool = requestToMutate.tools?.find(
+  const readFileTool = requestToMutate.body.tools?.find(
     tool => tool.type === 'function' && tool.function.name === 'read_file'
   );
   if (!readFileTool || readFileTool.type !== 'function') {

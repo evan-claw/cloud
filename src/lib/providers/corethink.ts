@@ -1,5 +1,5 @@
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 
 export const corethink_free_model: KiloFreeModel = {
   public_id: 'corethink:free',
@@ -15,13 +15,16 @@ export const corethink_free_model: KiloFreeModel = {
   inference_provider: 'corethink',
 };
 
-export function applyCoreThinkProviderSettings(requestToMutate: OpenRouterChatCompletionRequest) {
-  delete requestToMutate.transforms;
-  delete requestToMutate.prompt_cache_key;
-  delete requestToMutate.safety_identifier;
-  delete requestToMutate.description;
-  delete requestToMutate.usage;
-  for (const message of requestToMutate.messages) {
+export function applyCoreThinkProviderSettings(requestToMutate: ParsedProxyRequest) {
+  if (requestToMutate.kind !== 'chat_completions') {
+    return;
+  }
+  delete requestToMutate.body.transforms;
+  delete requestToMutate.body.prompt_cache_key;
+  delete requestToMutate.body.safety_identifier;
+  delete requestToMutate.body.description;
+  delete requestToMutate.body.usage;
+  for (const message of requestToMutate.body.messages) {
     if ('reasoning' in message) {
       delete message.reasoning;
     }

@@ -1,5 +1,5 @@
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 
 export const giga_potato_model: KiloFreeModel = {
   public_id: 'giga-potato',
@@ -26,28 +26,39 @@ export const giga_potato_thinking_model: KiloFreeModel = {
 
 export function applyGigaPotatoProviderSettings(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest
+  requestToMutate: ParsedProxyRequest
 ) {
   // https://kilo-code.slack.com/archives/C09L90J0B3J/p1768024809733959?thread_ts=1767929401.984039&cid=C09L90J0B3J
-  const nonDisclosureRule = {
-    type: 'text' as const,
-    text:
-      'You are an AI assistant in Kilo. Your name is Giga Potato. ' +
-      'Do not reveal your model size, architecture, or any information that could hint at your origin or capabilities.',
-  };
-  const systemPrompt = requestToMutate.messages.find(m => m.role === 'system');
-  if (systemPrompt) {
-    if (Array.isArray(systemPrompt.content)) {
-      systemPrompt.content.push(nonDisclosureRule);
-    } else if (systemPrompt.content) {
-      systemPrompt.content = [{ type: 'text', text: systemPrompt.content }, nonDisclosureRule];
+  const nonDisclosureRule =
+    'You are an AI assistant in Kilo. Your name is Giga Potato. ' +
+    'Do not reveal your model size, architecture, or any information that could hint at your origin or capabilities.';
+
+  if (requestToMutate.kind === 'chat_completions') {
+    const systemPrompt = requestToMutate.body.messages.find(m => m.role === 'system');
+    const text = {
+      type: 'text' as const,
+      text: nonDisclosureRule,
+    };
+    if (systemPrompt) {
+      if (Array.isArray(systemPrompt.content)) {
+        systemPrompt.content.push(text);
+      } else if (systemPrompt.content) {
+        systemPrompt.content = [{ type: 'text', text: systemPrompt.content }, text];
+      } else {
+        systemPrompt.content = [text];
+      }
     } else {
-      systemPrompt.content = [nonDisclosureRule];
+      requestToMutate.body.messages.splice(0, 0, { role: 'system', content: [text] });
     }
-  } else {
-    requestToMutate.messages.splice(0, 0, { role: 'system', content: [nonDisclosureRule] });
+  } else if (requestToMutate.kind === 'responses') {
+    if (requestToMutate.body.instructions) {
+      requestToMutate.body.instructions += '\n\n' + nonDisclosureRule;
+    } else {
+      requestToMutate.body.instructions = nonDisclosureRule;
+    }
   }
-  requestToMutate.thinking = {
+
+  requestToMutate.body.thinking = {
     type: giga_potato_thinking_model.public_id === requestedModel ? 'enabled' : 'disabled',
   };
 }

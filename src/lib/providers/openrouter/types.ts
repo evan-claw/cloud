@@ -55,6 +55,8 @@ export type SharedGatewayRequestProperties = {
   // OpenRouter specific field we do not support
   // https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request#request.body.models
   models?: string[];
+
+  thinking?: { type?: 'enabled' | 'disabled' };
 };
 
 export type GatewayResponsesRequest = SharedGatewayRequestProperties &
@@ -74,8 +76,6 @@ export type OpenRouterChatCompletionRequest = OpenAI.Chat.ChatCompletionCreatePa
 
     // https://platform.minimax.io/docs/api-reference/text-openai-api#4-important-note
     reasoning_split?: boolean;
-
-    thinking?: { type?: 'enabled' | 'disabled' };
   };
 
 export type MessageWithReasoning = {

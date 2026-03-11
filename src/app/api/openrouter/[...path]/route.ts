@@ -430,15 +430,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     parsedRequest.kind === 'chat_completions' ? getToolsUsed(parsedRequest.body.messages) : [];
 
   const extraHeaders: Record<string, string> = {};
-  if (parsedRequest.kind === 'chat_completions') {
-    applyProviderSpecificLogic(
-      provider,
-      originalModelIdLowerCased,
-      parsedRequest.body,
-      extraHeaders,
-      userByok
-    );
-  }
+  applyProviderSpecificLogic(
+    provider,
+    originalModelIdLowerCased,
+    parsedRequest,
+    extraHeaders,
+    userByok
+  );
 
   let response: Response;
   if (customLlm) {

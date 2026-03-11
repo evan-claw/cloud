@@ -1,15 +1,20 @@
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { ParsedProxyRequest } from '@/lib/providers/openrouter/types';
 
 export function isQwenModel(requestedModelId: string) {
   return requestedModelId.startsWith('qwen/');
 }
 
-export function applyQwenModelSettings(requestToMutate: OpenRouterChatCompletionRequest) {
+export function applyQwenModelSettings(requestToMutate: ParsedProxyRequest) {
   // Max Output listed on OpenRouter is wrong
-  if (requestToMutate.max_tokens) {
-    requestToMutate.max_tokens = Math.min(requestToMutate.max_tokens, 32768);
-  }
-  if (requestToMutate.max_completion_tokens) {
-    requestToMutate.max_completion_tokens = Math.min(requestToMutate.max_completion_tokens, 32768);
+  if (requestToMutate.kind === 'chat_completions') {
+    if (requestToMutate.body.max_tokens) {
+      requestToMutate.body.max_tokens = Math.min(requestToMutate.body.max_tokens, 32768);
+    }
+    if (requestToMutate.body.max_completion_tokens) {
+      requestToMutate.body.max_completion_tokens = Math.min(
+        requestToMutate.body.max_completion_tokens,
+        32768
+      );
+    }
   }
 }

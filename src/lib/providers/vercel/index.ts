@@ -11,8 +11,8 @@ import {
   VercelUserByokInferenceProviderIdSchema,
 } from '@/lib/providers/openrouter/inference-provider-id';
 import type {
-  OpenRouterChatCompletionRequest,
   OpenRouterProviderConfig,
+  ParsedProxyRequest,
   VercelInferenceProviderConfig,
   VercelProviderConfig,
 } from '@/lib/providers/openrouter/types';
@@ -151,11 +151,10 @@ export function getVercelInferenceProviderConfigForUserByok(
 
 export function applyVercelSettings(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
-  extraHeaders: Record<string, string>,
+  requestToMutate: ParsedProxyRequest,
   userByok: BYOKResult[] | null
 ) {
-  requestToMutate.model = mapModelIdToVercel(requestedModel);
+  requestToMutate.body.model = mapModelIdToVercel(requestedModel);
 
   if (userByok) {
     if (userByok.length === 0) {
@@ -169,21 +168,28 @@ export function applyVercelSettings(
 
     // this is vercel specific BYOK configuration to force vercel gateway to use the BYOK API key
     // for the user/org. If the key is invalid the request will faill - it will not fall back to bill our API key.
-    requestToMutate.providerOptions = {
+    requestToMutate.body.providerOptions = {
       gateway: {
         only: Object.keys(byokProviders),
         byok: byokProviders,
       },
     };
   } else {
-    requestToMutate.providerOptions = convertProviderOptions(requestToMutate.provider);
+    requestToMutate.body.providerOptions = convertProviderOptions(requestToMutate.body.provider);
   }
 
-  if (requestToMutate.providerOptions && requestToMutate.verbosity) {
-    requestToMutate.providerOptions.anthropic = {
-      effort: requestToMutate.verbosity,
-    };
+  if (requestToMutate.body.providerOptions) {
+    if (requestToMutate.kind === 'chat_completions' && requestToMutate.body.verbosity) {
+      requestToMutate.body.providerOptions.anthropic = {
+        effort: requestToMutate.body.verbosity,
+      };
+    }
+    if (requestToMutate.kind === 'responses' && requestToMutate.body.text?.verbosity) {
+      requestToMutate.body.providerOptions.anthropic = {
+        effort: requestToMutate.body.text.verbosity,
+      };
+    }
   }
 
-  delete requestToMutate.provider;
+  delete requestToMutate.body.provider;
 }
