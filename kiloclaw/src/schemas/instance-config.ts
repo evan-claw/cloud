@@ -166,4 +166,5 @@ export const DEFAULT_INSTANCE_FEATURES: readonly string[] = [
   'npm-global-prefix',
   'pip-global-prefix',
   'uv-global-prefix',
+  'kilo-cli',
 ];

@@ -13,6 +13,7 @@ import { registerHealthRoute } from './routes/health';
 import { registerGatewayRoutes } from './routes/gateway';
 import { registerConfigRoutes } from './routes/config';
 import { CONTROLLER_COMMIT, CONTROLLER_VERSION } from './version';
+import { writeKiloCliConfig } from './kilo-cli-config';
 
 export type RuntimeConfig = {
   port: number;
@@ -111,6 +112,8 @@ async function handleHttpRequest(
 }
 
 export async function startController(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  writeKiloCliConfig(env as Record<string, string | undefined>);
+
   const config = loadRuntimeConfig(env);
   const supervisor = createSupervisor({
     gatewayArgs: config.gatewayArgs,

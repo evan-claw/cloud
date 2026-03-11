@@ -54,6 +54,9 @@ RUN npm install -g mcporter@0.7.3
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.11.1
 
+# Install Kilo CLI (agentic coding assistant for the terminal)
+RUN npm install -g @kilocode/cli@7.0.46
+
 
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
@@ -107,7 +110,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-03-11-v60-tools-md
+# Build cache bust: 2026-03-11-v61-kilo-cli
 RUN echo "9"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js

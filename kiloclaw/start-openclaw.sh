@@ -198,6 +198,20 @@ else
     echo "uv global prefix: using default"
 fi
 
+# Feature: kilo-cli
+# Exports KILO_API_KEY so the CLI's built-in kilo provider auto-activates.
+# The controller also writes /root/.config/kilo/opencode.json on fresh install
+# (permissions) and patches base URL if KILOCODE_API_BASE_URL is set.
+# The kilo binary is always in the image; this flag controls auto-configuration only.
+if [ "${KILOCLAW_KILO_CLI:-}" = "true" ]; then
+    # The Kilo CLI's KiloAuthPlugin looks for KILO_API_KEY (not KILOCODE_API_KEY).
+    # Alias it so the built-in "kilo" provider auto-activates with full model access.
+    if [ -n "${KILOCODE_API_KEY:-}" ]; then
+        export KILO_API_KEY="$KILOCODE_API_KEY"
+    fi
+    echo "Kilo CLI auto-configuration enabled"
+fi
+
 # ============================================================
 # PATCH CONFIG (channels, gateway auth, exec policy)
 # ============================================================
