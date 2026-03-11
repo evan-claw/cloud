@@ -124,8 +124,12 @@ const authCheckRes = await fetch(`${workerUrl}/api/admin/google-credentials`, {
   headers: authHeaders,
 });
 
-if (authCheckRes.status === 401 || authCheckRes.status === 403) {
-  console.error('Invalid or expired session token. Log in to kilo.ai and copy a fresh token.');
+if (!authCheckRes.ok) {
+  if (authCheckRes.status === 401 || authCheckRes.status === 403) {
+    console.error('Invalid or expired session token. Log in to kilo.ai and copy a fresh token.');
+  } else {
+    console.error(`Worker returned unexpected status ${authCheckRes.status} during auth check.`);
+  }
   process.exit(1);
 }
 
