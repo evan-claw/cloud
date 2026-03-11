@@ -368,7 +368,7 @@ function Inner(props: InnerProps) {
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <BuyOrganizationCreditsDialog organizationId={id} />
               <Button variant="outline" className="whitespace-nowrap">
-                <Link href={`/organizations/${id}/payment-details`}>View Billing</Link>
+                <Link href={`/organizations/${id}/payment-details`}>View Payments</Link>
               </Button>
             </div>
             {expiringBlocks.length > 0 && earliestExpiry && (
