@@ -175,12 +175,8 @@ export type UserConfigResponse = {
   kilocodeDefaultModel: string | null;
   hasKiloCodeApiKey: boolean;
   kilocodeApiKeyExpiresAt?: string | null;
-  channels: {
-    telegram: boolean;
-    discord: boolean;
-    slackBot: boolean;
-    slackApp: boolean;
-  };
+  /** Per catalog entry ID → whether all fields for that entry are configured. */
+  configuredSecrets: Record<string, boolean>;
 };
 
 /** Response from POST /api/platform/doctor */

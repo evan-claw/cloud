@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { SECRET_CATALOG } from '@kilocode/kiloclaw-secret-catalog';
+import { SECRET_CATALOG, getFieldKeysByCategory } from '@kilocode/kiloclaw-secret-catalog';
 
 /** Channel env var names — excluded from secretCount (channels have their own counts). */
 const CHANNEL_ENV_VARS = new Set(
   SECRET_CATALOG.filter(e => e.category === 'channel').flatMap(e => e.fields.map(f => f.envVar))
 );
+
+/** Channel field keys — used to check legacy `channels` storage for backward compat. */
+const CHANNEL_FIELD_KEYS = getFieldKeysByCategory('channel');
 
 /**
  * User-facing KiloClaw routes (JWT auth via authMiddleware).
@@ -31,12 +34,7 @@ kiloclaw.get('/config', async c => {
     kilocodeDefaultModel: config.kilocodeDefaultModel ?? null,
     hasKiloCodeApiKey: !!config.kilocodeApiKey,
     kilocodeApiKeyExpiresAt: config.kilocodeApiKeyExpiresAt ?? null,
-    channels: {
-      telegram: !!config.channels?.telegramBotToken,
-      discord: !!config.channels?.discordBotToken,
-      slackBot: !!config.channels?.slackBotToken,
-      slackApp: !!config.channels?.slackAppToken,
-    },
+    configuredSecrets: buildConfiguredSecrets(config),
   });
 });
 
@@ -50,4 +48,30 @@ kiloclaw.get('/status', async c => {
   return c.json(status);
 });
 
-export { kiloclaw };
+/**
+ * Derive per-entry configured status from the catalog.
+ *
+ * Checks both `encryptedSecrets` (new path) and legacy `channels` storage
+ * so that instances provisioned before the catalog migration still report
+ * correct status. An entry is "configured" when ALL its fields have a value.
+ */
+function buildConfiguredSecrets(config: {
+  encryptedSecrets?: Record<string, unknown> | null;
+  channels?: Record<string, unknown> | null;
+}): Record<string, boolean> {
+  const result: Record<string, boolean> = {};
+
+  for (const entry of SECRET_CATALOG) {
+    result[entry.id] = entry.fields.every(field => {
+      // Check new encryptedSecrets storage (keyed by env var name)
+      if (config.encryptedSecrets?.[field.envVar] != null) return true;
+      // Fall back to legacy channels storage (keyed by field key)
+      if (CHANNEL_FIELD_KEYS.has(field.key) && config.channels?.[field.key] != null) return true;
+      return false;
+    });
+  }
+
+  return result;
+}
+
+export { kiloclaw, buildConfiguredSecrets };

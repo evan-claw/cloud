@@ -370,8 +370,9 @@ try {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: gogEnv,
   }).trim();
-  const accounts = JSON.parse(authList);
-  const found = Array.isArray(accounts) && accounts.some(a => a.email === userEmail || a.account === userEmail);
+  const parsed = JSON.parse(authList);
+  const accounts = Array.isArray(parsed) ? parsed : parsed.accounts ?? [];
+  const found = accounts.some(a => a.email === userEmail || a.account === userEmail);
   if (!found) {
     throw new Error(`Account ${userEmail} not found in gog auth list`);
   }

@@ -213,12 +213,7 @@ export function SettingsTab({
     '2026.2.26'
   );
 
-  const channelStatus = config?.channels ?? {
-    telegram: false,
-    discord: false,
-    slackBot: false,
-    slackApp: false,
-  };
+  const configuredSecrets = config?.configuredSecrets ?? {};
 
   function handleSave() {
     if (hasModelSelectionError) {
@@ -407,7 +402,7 @@ export function SettingsTab({
             <SecretEntrySection
               key={entry.id}
               entry={entry}
-              configured={isEntryConfigured(entry.id, channelStatus)}
+              configured={configuredSecrets[entry.id] ?? false}
               mutations={mutations}
               onSecretsChanged={onChannelsChanged}
               isDirty={dirtyChannels.has(entry.id)}
