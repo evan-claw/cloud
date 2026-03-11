@@ -1000,7 +1000,9 @@ describe('WrapperClient', () => {
       });
 
       expect(session.startProcess).toHaveBeenCalledWith(
-        "WRAPPER_PORT=5000 KILO_SERVER_PORT=4600 WORKSPACE_PATH=/workspace/test bun run './wrapper'\\''s folder/wrapper.js; touch /tmp/pwned' --agent-session test-session",
+        expect.stringMatching(
+          /^WRAPPER_PORT=5000 KILO_SERVER_PORT=4600 WORKSPACE_PATH=\/workspace\/test WRAPPER_LOG_PATH=\/tmp\/kilocode-wrapper-test-session-\d+\.log bun run '\.\/wrapper'\\''s folder\/wrapper\.js; touch \/tmp\/pwned' --agent-session test-session$/
+        ),
         expect.objectContaining({ cwd: '/workspace/test' })
       );
     });
