@@ -92,6 +92,12 @@ export async function shouldRouteToVercel(
     return false;
   }
 
+  if (requestedModel.startsWith('nvidia/')) {
+    // 2026-03-11: nemotron-3-super-120b-a12b was not available
+    console.debug(`[shouldRouteToVercel] NVIDIA models are not routed to Vercel`);
+    return false;
+  }
+
   if (!preferredModels.includes(requestedModel)) {
     console.debug(`[shouldRouteToVercel] only recommended models are tested for Vercel routing`);
     return false;
