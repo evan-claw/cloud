@@ -7,12 +7,11 @@ import {
   createCodeReview,
   updateCodeReviewStatus,
   findPreviousCompletedReview,
-  findPreviousCompletedReviewSession,
 } from './code-reviews';
 
 const REPO = `test-org/session-continuation-${Date.now()}`;
 
-describe('findPreviousCompletedReviewSession', () => {
+describe('findPreviousCompletedReview', () => {
   let testUser: User;
   const createdReviewIds: string[] = [];
 
@@ -21,7 +20,6 @@ describe('findPreviousCompletedReviewSession', () => {
   });
 
   afterAll(async () => {
-    // Clean up reviews then user
     for (const id of createdReviewIds) {
       await db.delete(cloud_agent_code_reviews).where(eq(cloud_agent_code_reviews.id, id));
     }
@@ -46,70 +44,73 @@ describe('findPreviousCompletedReviewSession', () => {
   }
 
   it('returns null when no previous completed review exists', async () => {
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'abc123');
+    const result = await findPreviousCompletedReview(REPO, 42, 'abc123');
     expect(result).toBeNull();
   });
 
-  it('returns null when previous review is completed but has no session_id', async () => {
+  it('returns head_sha and session_id: null for a completed review without session', async () => {
     const id = await createReview('sha-no-session');
     await updateCodeReviewStatus(id, 'completed');
 
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'other-sha');
-    expect(result).toBeNull();
+    const result = await findPreviousCompletedReview(REPO, 42, 'other-sha');
+    expect(result).not.toBeNull();
+    expect(result!.head_sha).toBe('sha-no-session');
+    expect(result!.session_id).toBeNull();
   });
 
-  it('returns session_id and head_sha for a completed review with session_id', async () => {
+  it('returns head_sha and session_id for a completed review with session', async () => {
     const id = await createReview('sha-with-session');
     await updateCodeReviewStatus(id, 'completed', {
       sessionId: 'agent_test123',
     });
 
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'other-sha');
+    const result = await findPreviousCompletedReview(REPO, 42, 'other-sha');
     expect(result).not.toBeNull();
-    expect(result!.session_id).toBe('agent_test123');
     expect(result!.head_sha).toBe('sha-with-session');
+    expect(result!.session_id).toBe('agent_test123');
   });
 
   it('excludes the current SHA', async () => {
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'sha-with-session');
-    // Should not find itself — only reviews with a different SHA
-    // The "sha-no-session" review has no session_id, so only "sha-with-session" would match
-    // but it's excluded by excludeSha
-    expect(result).toBeNull();
+    const result = await findPreviousCompletedReview(REPO, 42, 'sha-with-session');
+    // Should skip "sha-with-session" and fall back to "sha-no-session"
+    expect(result).not.toBeNull();
+    expect(result!.head_sha).toBe('sha-no-session');
   });
 
-  it('returns the most recent completed review with session_id', async () => {
+  it('returns the most recent completed review', async () => {
     const id = await createReview('sha-newer');
     await updateCodeReviewStatus(id, 'completed', {
       sessionId: 'agent_newer',
     });
 
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'other-sha');
+    const result = await findPreviousCompletedReview(REPO, 42, 'other-sha');
     expect(result).not.toBeNull();
-    expect(result!.session_id).toBe('agent_newer');
     expect(result!.head_sha).toBe('sha-newer');
+    expect(result!.session_id).toBe('agent_newer');
   });
 
-  it('ignores non-completed reviews with session_id', async () => {
+  it('ignores non-completed reviews', async () => {
     const id = await createReview('sha-running');
     await updateCodeReviewStatus(id, 'running', {
       sessionId: 'agent_running',
     });
 
     // Should still return the most recent *completed* one
-    const result = await findPreviousCompletedReviewSession(REPO, 42, 'other-sha');
+    const result = await findPreviousCompletedReview(REPO, 42, 'other-sha');
     expect(result).not.toBeNull();
+    expect(result!.head_sha).toBe('sha-newer');
     expect(result!.session_id).toBe('agent_newer');
   });
 
-  it('is consistent with findPreviousCompletedReview on head_sha', async () => {
-    const sessionResult = await findPreviousCompletedReviewSession(REPO, 42, 'other-sha');
-    const shaResult = await findPreviousCompletedReview(REPO, 42, 'other-sha');
+  it('ensures session_id and head_sha come from the same row', async () => {
+    // Create a completed review with no session (simulates v1 legacy)
+    const legacyId = await createReview('sha-legacy-newest');
+    await updateCodeReviewStatus(legacyId, 'completed');
 
-    // Both should find a completed review (sessionResult is more restrictive)
-    expect(shaResult).not.toBeNull();
-    expect(sessionResult).not.toBeNull();
-    // The head_sha from the session query should also appear in the sha-only query
-    expect(sessionResult!.head_sha).toBe(shaResult!.head_sha);
+    const result = await findPreviousCompletedReview(REPO, 42, 'other-sha');
+    expect(result).not.toBeNull();
+    // The newest completed review has no session — both fields from same row
+    expect(result!.head_sha).toBe('sha-legacy-newest');
+    expect(result!.session_id).toBeNull();
   });
 });

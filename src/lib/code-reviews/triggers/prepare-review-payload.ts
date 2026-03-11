@@ -36,11 +36,7 @@ import type {
   GitLabDiffContext,
 } from '../prompts/generate-prompt';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
-import {
-  getCodeReviewById,
-  findPreviousCompletedReview,
-  findPreviousCompletedReviewSession,
-} from '../db/code-reviews';
+import { getCodeReviewById, findPreviousCompletedReview } from '../db/code-reviews';
 import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 import {
   DEFAULT_CODE_REVIEW_MODEL,
@@ -322,7 +318,10 @@ export async function prepareReviewPayload(
     }
 
     // 4. Check for previous completed review (incremental review optimization)
+    // Both previousHeadSha (for diff base) and previousCloudAgentSessionId (for session
+    // continuation) are derived from the same review row to avoid mismatches.
     let previousHeadSha: string | null = null;
+    let previousCloudAgentSessionId: string | undefined;
     const incrementalEnabled = await isFeatureFlagEnabled(FEATURE_FLAG_INCREMENTAL_REVIEW);
 
     if (incrementalEnabled) {
@@ -334,6 +333,7 @@ export async function prepareReviewPayload(
           platform
         );
         previousHeadSha = previousReview?.head_sha ?? null;
+        previousCloudAgentSessionId = previousReview?.session_id ?? undefined;
 
         if (previousHeadSha) {
           logExceptInTest(
@@ -342,6 +342,7 @@ export async function prepareReviewPayload(
               reviewId,
               previousHeadSha: previousHeadSha.substring(0, 8),
               currentHeadSha: review.head_sha.substring(0, 8),
+              previousCloudAgentSessionId,
             }
           );
         }
@@ -349,37 +350,6 @@ export async function prepareReviewPayload(
         // Non-critical - fall back to full review
         logExceptInTest(
           '[prepareReviewPayload] Failed to fetch previous review, falling back to full review:',
-          {
-            reviewId,
-            error,
-          }
-        );
-      }
-    }
-
-    // 4b. Look up previous session ID for session continuation
-    let previousCloudAgentSessionId: string | undefined;
-    if (incrementalEnabled) {
-      try {
-        const previousSession = await findPreviousCompletedReviewSession(
-          review.repo_full_name,
-          review.pr_number,
-          existingReviewState?.headCommitSha ?? review.head_sha,
-          platform
-        );
-        previousCloudAgentSessionId = previousSession?.session_id;
-
-        if (previousCloudAgentSessionId) {
-          logExceptInTest('[prepareReviewPayload] Found previous session for continuation', {
-            reviewId,
-            previousCloudAgentSessionId,
-            previousHeadSha: previousSession?.head_sha.substring(0, 8),
-          });
-        }
-      } catch (error) {
-        // Non-critical - fall back to fresh session
-        logExceptInTest(
-          '[prepareReviewPayload] Failed to fetch previous session, falling back to fresh session:',
           {
             reviewId,
             error,
