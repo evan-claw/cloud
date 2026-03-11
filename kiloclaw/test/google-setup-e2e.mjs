@@ -130,7 +130,12 @@ sql(`INSERT INTO kilocode_users (id, google_user_email, google_user_name, google
 cleanupFns.push(() => { try { sql(`DELETE FROM kilocode_users WHERE id = '${USER_ID}'`); } catch {} });
 green('Test user created (id=' + USER_ID + ')');
 
-await internalPost('/api/platform/provision', { userId: USER_ID });
+const provisionRes = await internalPost('/api/platform/provision', { userId: USER_ID });
+if (provisionRes.status < 200 || provisionRes.status >= 300) {
+  red(`Provision failed with status ${provisionRes.status}: ${JSON.stringify(provisionRes.json)}`);
+  cleanup();
+  process.exit(1);
+}
 cleanupFns.push(() => { internalPost('/api/platform/destroy', { userId: USER_ID }).catch(() => {}); });
 green('Instance provisioned');
 
