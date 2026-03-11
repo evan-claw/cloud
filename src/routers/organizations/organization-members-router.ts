@@ -220,7 +220,6 @@ export const organizationsMembersRouter = createTRPCRouter({
 
     await sendOrganizationInviteEmail({
       to: email,
-      inviteCode: invitation.token,
       organizationName: organization.name,
       inviterName: user.google_user_name,
       acceptInviteUrl,
