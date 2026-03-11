@@ -42,6 +42,7 @@ export const ControllerVersionResponseSchema = z.object({
   commit: z.string(),
   // optional() for backward compat with older controllers that don't include this field
   openclawVersion: z.string().nullable().optional(),
+  openclawCommit: z.string().nullable().optional(),
 });
 
 export class GatewayControllerError extends Error {
