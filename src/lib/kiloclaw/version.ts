@@ -17,6 +17,21 @@ export function cleanVersion(version: string | null | undefined): string | null 
   return v || null;
 }
 
+/**
+ * Returns `'modified'` when the running OpenClaw version differs from the image version,
+ * indicating the user has self-updated OpenClaw on their machine.
+ * Returns `null` when the versions match or there is insufficient data to compare.
+ */
+export function getRunningVersionBadge(
+  runningVersion: string | null | undefined,
+  imageVersion: string | null | undefined
+): 'modified' | null {
+  const running = cleanVersion(runningVersion);
+  const image = cleanVersion(imageVersion);
+  if (!running || !image || running === image) return null;
+  return 'modified';
+}
+
 /** Returns true if calver `version` is >= `minVersion` (e.g. "2026.2.26"). Fails closed on malformed input. */
 export function calverAtLeast(version: string | null | undefined, minVersion: string): boolean {
   const parts = parseCalver(version);
