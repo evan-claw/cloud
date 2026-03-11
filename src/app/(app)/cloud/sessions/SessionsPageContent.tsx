@@ -276,15 +276,26 @@ export function SessionsPageContent() {
                 )}
 
                 {selectedSession.source === 'v2' && (
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground text-xs">
-                      Use the CLI to fork this session:
-                    </p>
-                    <CopyableCommand
-                      command={`kilo --session ${selectedSession.sessionId} --fork`}
-                      className="bg-muted rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
+                  <>
+                    {/* Open in Editor (v2) */}
+                    <div className="flex justify-center">
+                      <OpenInEditorButton
+                        sessionId={selectedSession.sessionId}
+                        pathOverride={`/s/${selectedSession.sessionId}`}
+                      />
+                    </div>
+
+                    {/* Fork in CLI (v2) */}
+                    <div className="space-y-2">
+                      <p className="text-muted-foreground text-xs">
+                        Or use the CLI to fork this session:
+                      </p>
+                      <CopyableCommand
+                        command={`kilo --session ${selectedSession.sessionId} --cloud-fork`}
+                        className="bg-muted rounded-md px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </>
                 )}
               </div>
             </div>

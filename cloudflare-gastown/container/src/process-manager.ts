@@ -97,16 +97,29 @@ function broadcastEvent(agentId: string, event: string, data: unknown): void {
 
   // Persist to AgentDO via the worker (fire-and-forget)
   const agent = agents.get(agentId);
-  if (agent?.gastownApiUrl && agent.gastownSessionToken) {
+  // Prefer live container token (refreshed via POST /refresh-token),
+  // then the per-agent cached token, then the legacy session token.
+  const authToken =
+    process.env.GASTOWN_CONTAINER_TOKEN ??
+    agent?.gastownContainerToken ??
+    agent?.gastownSessionToken;
+  if (agent?.gastownApiUrl && authToken) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    };
+    // When using a container JWT, send agent identity so the handler's
+    // getEnforcedAgentId() ownership check still works.
+    if (process.env.GASTOWN_CONTAINER_TOKEN || agent.gastownContainerToken) {
+      headers['X-Gastown-Agent-Id'] = agentId;
+      if (agent.rigId) headers['X-Gastown-Rig-Id'] = agent.rigId;
+    }
     // POST to the worker's agent-events endpoint for persistent storage
     fetch(
       `${agent.gastownApiUrl}/api/towns/${agent.townId ?? '_'}/rigs/${agent.rigId ?? '_'}/agent-events`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${agent.gastownSessionToken}`,
-        },
+        headers,
         body: JSON.stringify({
           agent_id: agentId,
           event_type: event,
@@ -315,6 +328,8 @@ export async function startAgent(
     messageCount: 0,
     exitReason: null,
     gastownApiUrl: request.envVars?.GASTOWN_API_URL ?? process.env.GASTOWN_API_URL ?? null,
+    gastownContainerToken:
+      request.envVars?.GASTOWN_CONTAINER_TOKEN ?? process.env.GASTOWN_CONTAINER_TOKEN ?? null,
     gastownSessionToken: request.envVars?.GASTOWN_SESSION_TOKEN ?? null,
     completionCallbackUrl: request.envVars?.GASTOWN_COMPLETION_CALLBACK_URL ?? null,
     model: request.model ?? null,

@@ -11,17 +11,47 @@ import {
 } from '@/components/ui/table';
 import { formatDate } from '@/lib/admin-utils';
 
-type ErrorData = {
-  errorType: string;
+type CategoryData = {
+  category: string;
   count: number;
   firstOccurrence: string;
   lastOccurrence: string;
 };
 
-export function CodeReviewErrorAnalysis({ data }: { data: ErrorData[] }) {
-  const totalErrors = data.reduce((sum, error) => sum + error.count, 0);
+type DetailData = {
+  errorType: string;
+  category: string;
+  count: number;
+  firstOccurrence: string;
+  lastOccurrence: string;
+};
 
-  if (data.length === 0) {
+type ErrorAnalysisData = {
+  categories: CategoryData[];
+  details: DetailData[];
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'Rate Limited': 'bg-amber-500',
+  Timeout: 'bg-orange-500',
+  'Context Window Exceeded': 'bg-purple-500',
+  'Auth / Permission Error': 'bg-red-500',
+  'Not Found': 'bg-slate-500',
+  'Upstream Server Error': 'bg-rose-600',
+  'Network Error': 'bg-sky-500',
+  'Parse Error': 'bg-indigo-500',
+  'Unknown Error': 'bg-gray-400',
+  Other: 'bg-gray-500',
+};
+
+export function CodeReviewErrorAnalysis({ data }: { data: ErrorAnalysisData }) {
+  const totalCategoryErrors = data.categories.reduce((sum, cat) => sum + cat.count, 0);
+  // Use category totals (uncapped) as the denominator so percentages are accurate
+  // even when the detail list is truncated to top 50.
+  const totalErrors = totalCategoryErrors;
+  const maxCategoryCount = Math.max(...data.categories.map(c => c.count), 1);
+
+  if (data.details.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -42,15 +72,43 @@ export function CodeReviewErrorAnalysis({ data }: { data: ErrorData[] }) {
       <CardHeader>
         <CardTitle>Error Analysis</CardTitle>
         <CardDescription>
-          {data.length} unique error types, {totalErrors.toLocaleString()} total failures
+          {data.categories.length} error categories, {totalCategoryErrors.toLocaleString()} total
+          failures
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
+        {/* Category horizontal bar chart */}
+        <div className="space-y-2">
+          {data.categories.map(cat => {
+            const pct = totalCategoryErrors > 0 ? (cat.count / totalCategoryErrors) * 100 : 0;
+            const barWidth = (cat.count / maxCategoryCount) * 100;
+            const colorClass = CATEGORY_COLORS[cat.category] ?? 'bg-gray-500';
+            return (
+              <div key={cat.category} className="flex items-center gap-3">
+                <span className="w-44 shrink-0 truncate text-right text-xs font-medium">
+                  {cat.category}
+                </span>
+                <div className="bg-muted relative h-5 flex-1 overflow-hidden rounded">
+                  <div
+                    className={`${colorClass} absolute inset-y-0 left-0 rounded transition-all`}
+                    style={{ width: `${barWidth}%` }}
+                  />
+                </div>
+                <span className="text-muted-foreground w-20 shrink-0 text-right text-xs">
+                  {cat.count.toLocaleString()} ({pct.toFixed(1)}%)
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Detail table */}
         <div className="max-h-[400px] overflow-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[50%]">Error Type</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead className="w-[40%]">Error Message</TableHead>
                 <TableHead className="text-right">Count</TableHead>
                 <TableHead className="text-right">% of Errors</TableHead>
                 <TableHead>First Seen</TableHead>
@@ -58,8 +116,9 @@ export function CodeReviewErrorAnalysis({ data }: { data: ErrorData[] }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((error, idx) => (
+              {data.details.map((error, idx) => (
                 <TableRow key={idx}>
+                  <TableCell className="text-xs">{error.category}</TableCell>
                   <TableCell
                     className="max-w-[400px] truncate font-mono text-xs"
                     title={error.errorType}

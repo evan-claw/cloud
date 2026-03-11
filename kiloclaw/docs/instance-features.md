@@ -24,6 +24,8 @@ DO (source of truth) → buildEnvVars() → config.env → Fly machine → start
 | Feature name        | Env var                      | Description                                                                                                                                                                                                          |
 | ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm-global-prefix` | `KILOCLAW_NPM_GLOBAL_PREFIX` | Redirects `npm install -g` to `/root/.npm-global` (persistent volume) instead of `/usr/local` (image layer, lost on restart). Both `NPM_CONFIG_PREFIX` and `PATH` are exported conditionally in `start-openclaw.sh`. |
+| `pip-global-prefix` | `KILOCLAW_PIP_GLOBAL_PREFIX` | Redirects `pip install --user` to `/root/.pip-global` (persistent volume) via `PYTHONUSERBASE`. PATH is appended conditionally in `start-openclaw.sh`.                                                               |
+| `uv-global-prefix`  | `KILOCLAW_UV_GLOBAL_PREFIX`  | Configures `uv` tool/cache directories on the persistent volume (`/root/.uv`). Sets `UV_TOOL_DIR`, `UV_TOOL_BIN_DIR`, and `UV_CACHE_DIR`. PATH is appended conditionally in `start-openclaw.sh`.                     |
 
 ## Adding a new flag
 

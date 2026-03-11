@@ -17,8 +17,10 @@ export async function reportAgentCompleted(
   reason?: string
 ): Promise<void> {
   const apiUrl = agent.gastownApiUrl;
-  const token = agent.gastownSessionToken;
-  if (!apiUrl || !token) {
+  // Prefer live container token (refreshed via POST /refresh-token)
+  const authToken =
+    process.env.GASTOWN_CONTAINER_TOKEN ?? agent.gastownContainerToken ?? agent.gastownSessionToken;
+  if (!apiUrl || !authToken) {
     console.warn(
       `Cannot report agent ${agent.agentId} completion: no API credentials on agent record`
     );
@@ -29,12 +31,14 @@ export async function reportAgentCompleted(
     agent.completionCallbackUrl ??
     `${apiUrl}/api/towns/${agent.townId}/rigs/${agent.rigId}/agents/${agent.agentId}/completed`;
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    };
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+      headers,
       body: JSON.stringify({ status, reason, agentId: agent.agentId }),
     });
 

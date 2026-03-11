@@ -31,13 +31,30 @@ type MockExecResult = {
   stderr?: string;
 };
 
+/** Pre-flight commands issued by ensureRunning before starting the wrapper */
+const isPreflightCommand = (cmd: string) =>
+  cmd.startsWith('bun --version') || cmd.startsWith('test -f ');
+
+const preflightResult = (cmd: string): MockExecResult =>
+  cmd.startsWith('bun --version')
+    ? { exitCode: 0, stdout: '1.0.0' }
+    : { exitCode: 0, stdout: 'ok' };
+
 const createMockSession = (
   execResult: MockExecResult | ((cmd: string) => MockExecResult)
 ): ExecutionSession => {
   const execFn =
     typeof execResult === 'function'
-      ? vi.fn().mockImplementation((cmd: string) => Promise.resolve(execResult(cmd)))
-      : vi.fn().mockResolvedValue(execResult);
+      ? vi
+          .fn()
+          .mockImplementation((cmd: string) =>
+            Promise.resolve(isPreflightCommand(cmd) ? preflightResult(cmd) : execResult(cmd))
+          )
+      : vi
+          .fn()
+          .mockImplementation((cmd: string) =>
+            Promise.resolve(isPreflightCommand(cmd) ? preflightResult(cmd) : execResult)
+          );
 
   // Mock startProcess that returns a process with waitForPort and getLogs
   const startProcessFn = vi.fn().mockImplementation(() =>
@@ -783,6 +800,209 @@ describe('WrapperClient', () => {
       expect(startProcessCall[0]).toContain('WRAPPER_PORT=5000');
       expect(startProcessCall[0]).toContain('KILO_SERVER_PORT=4600');
       expect(startProcessCall[0]).toContain('WORKSPACE_PATH=/workspace/test');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pre-flight checks
+  // -------------------------------------------------------------------------
+
+  describe('pre-flight checks', () => {
+    it('throws WrapperNotReadyError when bun exits with SIGILL (exit code 132)', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      // Override exec to simulate SIGILL on bun --version
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.resolve({ exitCode: 132, stderr: '' });
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.resolve({ exitCode: 0, stdout: 'ok' });
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(/SIGILL/);
+    });
+
+    it('throws WrapperNotReadyError when bun exits with non-zero code', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.resolve({ exitCode: 127, stderr: 'bun: not found' });
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.resolve({ exitCode: 0, stdout: 'ok' });
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(/bun runtime is broken.*exit code 127/);
+    });
+
+    it('throws WrapperNotReadyError when wrapper binary is missing', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.resolve({ exitCode: 0, stdout: '1.0.0' });
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.resolve({ exitCode: 1, stdout: '' });
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(/not found in container/);
+    });
+
+    it('proceeds when pre-flight exec itself fails (e.g. sandbox timeout)', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version') || cmd.startsWith('test -f')) {
+          return Promise.reject(new Error('sandbox timeout'));
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      // Should not throw; pre-flight failure is non-blocking
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+      });
+
+      expect(session.startProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it('surfaces fatal bun SIGILL even when the file check rejects', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.resolve({ exitCode: 132, stderr: '' });
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.reject(new Error('sandbox timeout'));
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(/SIGILL/);
+    });
+
+    it('surfaces missing wrapper even when the bun check rejects', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.reject(new Error('sandbox timeout'));
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.resolve({ exitCode: 1, stdout: '' });
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await expect(
+        client.ensureRunning({
+          sessionId: 'test-session',
+          kiloServerPort: 4600,
+          workspacePath: '/workspace/test',
+        })
+      ).rejects.toThrow(/not found in container/);
+    });
+
+    it('shell-quotes wrapperPath in the pre-flight file check', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.exec as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
+        if (cmd.startsWith('bun --version')) {
+          return Promise.resolve({ exitCode: 0, stdout: '1.0.0' });
+        }
+        if (cmd.startsWith('test -f')) {
+          return Promise.resolve({ exitCode: 0, stdout: '' });
+        }
+        return Promise.resolve(createCurlError(7, 'Connection refused'));
+      });
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        wrapperPath: "./wrapper's folder/wrapper.js; touch /tmp/pwned",
+      });
+
+      expect(session.exec).toHaveBeenCalledWith(
+        "test -f './wrapper'\\''s folder/wrapper.js; touch /tmp/pwned'",
+        expect.objectContaining({ cwd: '/workspace/test', timeout: 5_000 })
+      );
+    });
+
+    it('shell-quotes wrapperPath in the startup command', async () => {
+      const session = createMockSession(createCurlError(7, 'Connection refused'));
+      (session.startProcess as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'mock-process-id',
+        waitForPort: vi.fn().mockResolvedValue(undefined),
+        getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+      });
+
+      const client = new WrapperClient({ session, port: defaultPort });
+
+      await client.ensureRunning({
+        sessionId: 'test-session',
+        kiloServerPort: 4600,
+        workspacePath: '/workspace/test',
+        wrapperPath: "./wrapper's folder/wrapper.js; touch /tmp/pwned",
+      });
+
+      expect(session.startProcess).toHaveBeenCalledWith(
+        "WRAPPER_PORT=5000 KILO_SERVER_PORT=4600 WORKSPACE_PATH=/workspace/test bun run './wrapper'\\''s folder/wrapper.js; touch /tmp/pwned' --agent-session test-session",
+        expect.objectContaining({ cwd: '/workspace/test' })
+      );
     });
   });
 

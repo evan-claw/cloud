@@ -106,7 +106,7 @@ export function SubscriptionQuickActions({
           >
             <Link href={`/organizations/${organizationId}/payment-details`}>
               <Download className="mr-2 h-4 w-4" />
-              View Billing History
+              View Payment History
             </Link>
           </Button>
 

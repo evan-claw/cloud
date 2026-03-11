@@ -7,6 +7,7 @@ import { BreadcrumbItem, BreadcrumbPage } from '@/components/ui/breadcrumb';
 import { CodeReviewStats } from '@/app/admin/components/CodeReviewStats';
 import { CodeReviewDailyChart } from '@/app/admin/components/CodeReviewDailyChart';
 import { CodeReviewErrorAnalysis } from '@/app/admin/components/CodeReviewErrorAnalysis';
+import { CodeReviewPerformanceChart } from '@/app/admin/components/CodeReviewPerformanceChart';
 import { CodeReviewUserSegmentation } from '@/app/admin/components/CodeReviewUserSegmentation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import { RefreshCw, Download, X, Search, User, Building2 } from 'lucide-react';
 import {
   useCodeReviewOverviewStats,
   useCodeReviewDailyStats,
+  useCodeReviewPerformanceStats,
   useCodeReviewErrorAnalysis,
   useCodeReviewUserSegmentation,
   useSearchUsers,
@@ -31,6 +33,7 @@ const breadcrumbs = (
 
 type RangeType = '7d' | '30d' | '90d';
 type OwnershipType = 'all' | 'personal' | 'organization';
+type AgentVersionType = 'all' | 'v1' | 'v2';
 
 type SelectedUser = {
   id: string;
@@ -54,6 +57,7 @@ export default function CodeReviewsPage() {
 
   // Filter state
   const [ownershipType, setOwnershipType] = useState<OwnershipType>('all');
+  const [agentVersion, setAgentVersion] = useState<AgentVersionType>('all');
   const [selectedUser, setSelectedUser] = useState<SelectedUser | null>(null);
   const [selectedOrg, setSelectedOrg] = useState<SelectedOrg | null>(null);
 
@@ -92,22 +96,25 @@ export default function CodeReviewsPage() {
       userId: selectedUser?.id,
       organizationId: selectedOrg?.id,
       ownershipType: selectedUser || selectedOrg ? undefined : ownershipType,
+      agentVersion,
     }),
-    [startDate, endDate, selectedUser, selectedOrg, ownershipType]
+    [startDate, endDate, selectedUser, selectedOrg, ownershipType, agentVersion]
   );
 
   // Queries
   const overviewQuery = useCodeReviewOverviewStats(filterParams);
   const dailyQuery = useCodeReviewDailyStats(filterParams);
+  const performanceQuery = useCodeReviewPerformanceStats(filterParams);
   const errorQuery = useCodeReviewErrorAnalysis(filterParams);
   const segmentationQuery = useCodeReviewUserSegmentation(filterParams);
 
   const handleRefresh = useCallback(() => {
     void overviewQuery.refetch();
     void dailyQuery.refetch();
+    void performanceQuery.refetch();
     void errorQuery.refetch();
     void segmentationQuery.refetch();
-  }, [overviewQuery, dailyQuery, errorQuery, segmentationQuery]);
+  }, [overviewQuery, dailyQuery, performanceQuery, errorQuery, segmentationQuery]);
 
   // Handle selecting a user from search
   const handleSelectUser = (user: SelectedUser) => {
@@ -142,11 +149,13 @@ export default function CodeReviewsPage() {
     setSelectedUser(null);
     setSelectedOrg(null);
     setOwnershipType('all');
+    setAgentVersion('all');
     setUserSearchQuery('');
     setOrgSearchQuery('');
   };
 
-  const hasActiveFilter = selectedUser || selectedOrg || ownershipType !== 'all';
+  const hasActiveFilter =
+    selectedUser || selectedOrg || ownershipType !== 'all' || agentVersion !== 'all';
 
   // Handle CSV export
   const handleExport = useCallback(async () => {
@@ -165,10 +174,11 @@ export default function CodeReviewsPage() {
     }
   }, [trpcClient, filterParams, startDate, endDate, isExporting]);
 
-  const isLoading = overviewQuery.isLoading || dailyQuery.isLoading;
+  const isLoading = overviewQuery.isLoading || dailyQuery.isLoading || performanceQuery.isLoading;
   const isRefreshing =
     overviewQuery.isFetching ||
     dailyQuery.isFetching ||
+    performanceQuery.isFetching ||
     errorQuery.isFetching ||
     segmentationQuery.isFetching;
 
@@ -246,6 +256,24 @@ export default function CodeReviewsPage() {
                   className="h-4 w-4"
                 />
                 {type === 'all' ? 'All' : type === 'personal' ? 'Personal' : 'Organizations'}
+              </label>
+            ))}
+          </div>
+
+          {/* Agent Version Filter */}
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="text-sm font-medium">Agent Version:</span>
+            {(['all', 'v1', 'v2'] as AgentVersionType[]).map(version => (
+              <label key={version} className="flex cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="agentVersion"
+                  value={version}
+                  checked={agentVersion === version}
+                  onChange={() => setAgentVersion(version)}
+                  className="h-4 w-4"
+                />
+                {version === 'all' ? 'All Versions' : version.toUpperCase()}
               </label>
             ))}
           </div>
@@ -403,6 +431,14 @@ export default function CodeReviewsPage() {
             {/* Daily Chart */}
             {dailyQuery.data && <CodeReviewDailyChart data={dailyQuery.data} />}
 
+            {/* Performance Trend */}
+            {performanceQuery.data && (
+              <CodeReviewPerformanceChart
+                data={performanceQuery.data}
+                agentVersion={agentVersion}
+              />
+            )}
+
             {/* User Segmentation */}
             {segmentationQuery.data && (
               <CodeReviewUserSegmentation
@@ -418,11 +454,20 @@ export default function CodeReviewsPage() {
         )}
 
         {/* Error State */}
-        {(overviewQuery.error || dailyQuery.error) && (
+        {(overviewQuery.error ||
+          dailyQuery.error ||
+          performanceQuery.error ||
+          errorQuery.error ||
+          segmentationQuery.error) && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm text-red-800">
               Error loading data:{' '}
-              {overviewQuery.error?.message || dailyQuery.error?.message || 'Unknown error'}
+              {overviewQuery.error?.message ||
+                dailyQuery.error?.message ||
+                performanceQuery.error?.message ||
+                errorQuery.error?.message ||
+                segmentationQuery.error?.message ||
+                'Unknown error'}
             </p>
           </div>
         )}

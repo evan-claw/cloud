@@ -1,7 +1,12 @@
 import { captureException } from '@sentry/nextjs';
 import { generateInternalServiceToken } from '@/lib/tokens';
 import type { SessionSnapshot } from './session-ingest-client';
-import { fetchSessionSnapshot, fetchSessionMessages, deleteSession } from './session-ingest-client';
+import {
+  fetchSessionSnapshot,
+  fetchSessionMessages,
+  deleteSession,
+  shareSession,
+} from './session-ingest-client';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -256,6 +261,119 @@ describe('deleteSession', () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       'https://ingest.test.example.com/api/session/ses_with%20spaces%26special',
+      expect.any(Object)
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shareSession
+// ---------------------------------------------------------------------------
+
+describe('shareSession', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockCaptureException.mockReset();
+    mockGenerateInternalServiceToken.mockReset().mockReturnValue('mock-jwt-token');
+  });
+
+  it('returns public_id on success', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, public_id: 'pub_abc123' }),
+    });
+
+    const result = await shareSession('ses_abc123', 'user_123');
+
+    expect(result).toEqual({ public_id: 'pub_abc123' });
+  });
+
+  it('calls POST on the correct URL', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, public_id: 'pub_abc123' }),
+    });
+
+    await shareSession('ses_abc123', 'user_123');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://ingest.test.example.com/api/session/ses_abc123/share',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('sends correct Authorization header', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, public_id: 'pub_abc123' }),
+    });
+
+    await shareSession('ses_abc123', 'user_123');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: { Authorization: 'Bearer mock-jwt-token' } })
+    );
+  });
+
+  it('generates token for the given userId', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, public_id: 'pub_abc123' }),
+    });
+
+    await shareSession('ses_abc123', 'user_test_456');
+
+    expect(mockGenerateInternalServiceToken).toHaveBeenCalledWith('user_test_456');
+  });
+
+  it('throws on 404', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+    });
+
+    await expect(shareSession('ses_nonexistent', 'user_123')).rejects.toThrow('Session not found');
+    expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it('throws and calls captureException on 500', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('something broke'),
+    });
+
+    await expect(shareSession('ses_abc123', 'user_123')).rejects.toThrow(
+      'Session ingest share failed: 500 Internal Server Error - something broke'
+    );
+
+    expect(mockCaptureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        tags: { source: 'session-ingest-client', endpoint: 'share' },
+        extra: { sessionId: 'ses_abc123', status: 500 },
+      })
+    );
+  });
+
+  it('encodes session ID in URL', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ success: true, public_id: 'pub_abc123' }),
+    });
+
+    await shareSession('ses_with spaces&special', 'user_123');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://ingest.test.example.com/api/session/ses_with%20spaces%26special/share',
       expect.any(Object)
     );
   });

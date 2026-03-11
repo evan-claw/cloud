@@ -118,8 +118,13 @@ const ERROR_STATUS_CODES: Record<string, number> = {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Max attempts for wrapper startup (1 retry on transient failures like Bun SIGILL) */
+/** Max attempts for wrapper startup (1 retry on transient failures like Bun SIGILL or briefly unreachable kilo server) */
 const MAX_WRAPPER_START_ATTEMPTS = 2;
+
+/** Delay between wrapper startup retries to allow transient issues (e.g. kilo server briefly unreachable) to resolve */
+const WRAPPER_RETRY_DELAY_MS = 1_500;
+
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 // ---------------------------------------------------------------------------
 // WrapperClient Implementation
@@ -129,6 +134,88 @@ export class WrapperClient {
   private readonly session: ExecutionSession;
   private readonly port: number;
   private readonly baseUrl: string;
+
+  private shellQuote(value: string): string {
+    return `'${value.replace(/'/g, "'\\''")}'`;
+  }
+
+  private async runPreflightChecks(options: {
+    wrapperPath: string;
+    workspacePath: string;
+  }): Promise<void> {
+    const { wrapperPath, workspacePath } = options;
+    const quotedWrapperPath = this.shellQuote(wrapperPath);
+
+    // Verify bun runtime and wrapper binary before the full start+waitForPort loop.
+    // A fast `bun --version` catches SIGILL (exit 132) on hosts whose CPU lacks
+    // required instructions, missing/corrupt binaries, etc. We also verify the
+    // wrapper script exists.
+    try {
+      const [bunResult, fileResult] = await Promise.allSettled([
+        this.session.exec('bun --version', { timeout: 5_000 }),
+        this.session.exec(`test -f ${quotedWrapperPath}`, {
+          timeout: 5_000,
+          cwd: workspacePath,
+        }),
+      ]);
+
+      if (bunResult.status === 'fulfilled' && bunResult.value.exitCode !== 0) {
+        const detail =
+          bunResult.value.exitCode === 132
+            ? 'SIGILL -- bun binary incompatible with host CPU'
+            : `exit code ${bunResult.value.exitCode}`;
+        throw new WrapperNotReadyError(
+          `Wrapper pre-flight failed: bun runtime is broken (${detail}). stderr: ${bunResult.value.stderr?.trim() ?? '(empty)'}`
+        );
+      }
+
+      if (fileResult.status === 'fulfilled' && fileResult.value.exitCode !== 0) {
+        throw new WrapperNotReadyError(
+          `Wrapper pre-flight failed: ${wrapperPath} not found in container`
+        );
+      }
+
+      if (bunResult.status === 'rejected' && fileResult.status === 'rejected') {
+        logger.warn('WrapperClient: pre-flight check failed to execute, proceeding anyway', {
+          bunError:
+            bunResult.reason instanceof Error ? bunResult.reason.message : String(bunResult.reason),
+          fileError:
+            fileResult.reason instanceof Error
+              ? fileResult.reason.message
+              : String(fileResult.reason),
+        });
+        return;
+      }
+
+      if (bunResult.status === 'rejected') {
+        logger.warn('WrapperClient: bun pre-flight exec failed, proceeding anyway', {
+          error:
+            bunResult.reason instanceof Error ? bunResult.reason.message : String(bunResult.reason),
+        });
+      }
+
+      if (fileResult.status === 'rejected') {
+        logger.warn('WrapperClient: file pre-flight exec failed, proceeding anyway', {
+          error:
+            fileResult.reason instanceof Error
+              ? fileResult.reason.message
+              : String(fileResult.reason),
+        });
+      }
+
+      if (bunResult.status === 'fulfilled') {
+        logger.debug('WrapperClient: pre-flight passed', {
+          bunVersion: bunResult.value.stdout?.trim(),
+        });
+      }
+    } catch (error) {
+      if (error instanceof WrapperNotReadyError) throw error;
+
+      logger.warn('WrapperClient: pre-flight check failed unexpectedly, proceeding anyway', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   constructor(options: WrapperClientOptions) {
     this.session = options.session;
@@ -148,11 +235,11 @@ export class WrapperClient {
 
     if (body) {
       // Escape single quotes in JSON
-      const json = JSON.stringify(body).replace(/'/g, "'\\''");
-      command += ` -d '${json}'`;
+      const json = this.shellQuote(JSON.stringify(body));
+      command += ` -d ${json}`;
     }
 
-    command += ` '${url}'`;
+    command += ` ${this.shellQuote(url)}`;
 
     // Execute curl in the container
     const result = await this.session.exec(command);
@@ -244,20 +331,24 @@ export class WrapperClient {
       logger.debug('WrapperClient: wrapper not running, starting...');
     }
 
+    await this.runPreflightChecks({ wrapperPath, workspacePath });
+
     // Start the wrapper process using startProcess so it's trackable via listProcesses()
     // The command includes a session marker so we can find this wrapper later
     const sessionMarker = getWrapperSessionMarker(sessionId);
+    const wrapperLogPath = `/tmp/kilocode-wrapper-${sessionId}-${Date.now()}.log`;
     const envParts = [
       `WRAPPER_PORT=${this.port}`,
       `KILO_SERVER_PORT=${kiloServerPort}`,
       `WORKSPACE_PATH=${workspacePath}`,
+      `WRAPPER_LOG_PATH=${wrapperLogPath}`,
     ];
     if (autoCommit) envParts.push('AUTO_COMMIT=true');
     if (condenseOnComplete) envParts.push('CONDENSE_ON_COMPLETE=true');
     if (upstreamBranch) envParts.push(`UPSTREAM_BRANCH=${upstreamBranch}`);
     if (model) envParts.push(`MODEL=${model}`);
 
-    const command = `${envParts.join(' ')} bun run ${wrapperPath} ${sessionMarker}`;
+    const command = `${envParts.join(' ')} bun run ${this.shellQuote(wrapperPath)} ${sessionMarker}`;
 
     let lastError: Error | undefined;
 
@@ -287,7 +378,7 @@ export class WrapperClient {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
-        // Capture process logs for diagnostics
+        // Capture process stdout/stderr for diagnostics
         let stdout: string | undefined;
         let stderr: string | undefined;
         if (proc) {
@@ -304,39 +395,54 @@ export class WrapperClient {
           }
         }
 
+        // Read the wrapper's own log file for richer diagnostics (logToFile output)
+        let wrapperFileLog: string | undefined;
+        try {
+          const quotedWrapperLogPath = `'${wrapperLogPath.replace(/'/g, "'\\''")}'`;
+          const logResult = await this.session.exec(`cat ${quotedWrapperLogPath} 2>/dev/null`);
+          const content = logResult.stdout?.trim();
+          if (content) {
+            wrapperFileLog = content;
+          }
+        } catch (logFileError) {
+          logger.debug('Failed to read wrapper log file', {
+            wrapperLogPath,
+            error: logFileError instanceof Error ? logFileError.message : String(logFileError),
+          });
+        }
+
+        const diagnostics = {
+          port: this.port,
+          attempt: attempt + 1,
+          error: lastError.message,
+          stdout,
+          stderr,
+          wrapperFileLog,
+        };
+
         if (attempt + 1 < MAX_WRAPPER_START_ATTEMPTS) {
           // Kill the failed process before retrying (proc.kill() is unreliable
           // in the sandbox SDK, so use pkill -f against the session marker).
           try {
             await this.session.exec(`pkill -f -- '${sessionMarker}'`);
           } catch {
-            // Process may already be dead — ignore
+            // Process may already be dead - ignore
           }
 
-          logger.warn('Wrapper startup failed, retrying', {
-            port: this.port,
-            attempt: attempt + 1,
-            error: lastError.message,
-            stdout,
-            stderr,
-          });
+          logger.warn('Wrapper startup failed, retrying', diagnostics);
+
+          // Delay before retrying to let transient issues resolve (e.g. kilo server briefly unreachable)
+          await sleep(WRAPPER_RETRY_DELAY_MS);
           continue;
         }
 
         // Final attempt failed
-        logger.error('Wrapper startup failed after all attempts', {
-          port: this.port,
-          attempt: attempt + 1,
-          error: lastError.message,
-          stdout,
-          stderr,
-        });
+        logger.error('Wrapper startup failed after all attempts', diagnostics);
       }
     }
 
-    const logsHint = ' (check logs above for process stdout/stderr)';
     throw new WrapperNotReadyError(
-      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'}${logsHint}`
+      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'} (check logs for process stdout/stderr and wrapperFileLog)`
     );
   }
 

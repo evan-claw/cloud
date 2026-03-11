@@ -162,4 +162,8 @@ export type PersistedState = z.infer<typeof PersistedStateSchema>;
  * Existing instances keep their persisted (possibly empty) feature set.
  * See kiloclaw/docs/instance-features.md for details.
  */
-export const DEFAULT_INSTANCE_FEATURES: readonly string[] = ['npm-global-prefix'];
+export const DEFAULT_INSTANCE_FEATURES: readonly string[] = [
+  'npm-global-prefix',
+  'pip-global-prefix',
+  'uv-global-prefix',
+];

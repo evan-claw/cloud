@@ -1,16 +1,18 @@
 import { createMiddleware } from 'hono/factory';
-import { verifyAgentJWT } from '../util/jwt.util';
+import { verifyAgentJWT, verifyContainerJWT } from '../util/jwt.util';
 import { resError } from '../util/res.util';
 import type { GastownEnv } from '../gastown.worker';
 import { extractBearerToken } from '@kilocode/worker-utils';
 import { resolveSecret } from '../util/secret.util';
 
 /**
- * Auth middleware for mayor tool routes. Validates a Gastown agent JWT
- * and checks that the JWT's `townId` matches the `:townId` route param.
+ * Auth middleware for mayor tool routes. Accepts either:
+ * 1. A container secret (HMAC-based, no expiry) — preferred
+ * 2. A legacy agent JWT (HS256, 8h expiry) — backwards compatibility
  *
- * Unlike the rig-scoped `authMiddleware` (which checks `rigId` match),
- * this validates `townId` — the mayor operates cross-rig.
+ * Validates the token's `townId` matches the `:townId` route param.
+ * Unlike the rig-scoped `authMiddleware`, this does NOT check `rigId`
+ * because the mayor operates cross-rig.
  *
  * Sets `agentJWT` on the Hono context.
  */
@@ -26,6 +28,23 @@ export const mayorAuthMiddleware = createMiddleware<GastownEnv>(async (c, next) 
     return c.json(resError('Internal server error'), 500);
   }
 
+  // Try container-scoped JWT first (scope: 'container', carries townId + userId)
+  const containerResult = verifyContainerJWT(token, secret);
+  if (containerResult.success) {
+    const townId = c.req.param('townId');
+    if (townId && containerResult.payload.townId !== townId) {
+      return c.json(resError('Token townId does not match route'), 403);
+    }
+    c.set('agentJWT', {
+      agentId: '',
+      rigId: '',
+      townId: containerResult.payload.townId,
+      userId: containerResult.payload.userId,
+    });
+    return next();
+  }
+
+  // Fall back to legacy JWT verification
   const result = verifyAgentJWT(token, secret);
   if (!result.success) {
     return c.json(resError(result.error), 401);

@@ -1,3 +1,8 @@
+/**
+ * @deprecated Channel configuration data has moved to `@kilocode/kiloclaw-secret-catalog`.
+ * This file is kept only for backward compatibility with any remaining imports.
+ * Use `getEntriesByCategory('channel')` from the catalog package instead.
+ */
 import React from 'react';
 import { Send, Slack } from 'lucide-react';
 import { DiscordIcon } from './icons/DiscordIcon';

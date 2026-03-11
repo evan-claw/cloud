@@ -9,6 +9,7 @@ export type FilterParams = {
   userId?: string;
   organizationId?: string;
   ownershipType?: 'all' | 'personal' | 'organization';
+  agentVersion?: 'all' | 'v1' | 'v2';
 };
 
 export function useCodeReviewOverviewStats(params: FilterParams) {
@@ -23,6 +24,14 @@ export function useCodeReviewDailyStats(params: FilterParams) {
   const trpc = useTRPC();
   return useQuery({
     ...trpc.admin.codeReviews.getDailyStats.queryOptions(params),
+    enabled: Boolean(params.startDate && params.endDate),
+  });
+}
+
+export function useCodeReviewPerformanceStats(params: FilterParams) {
+  const trpc = useTRPC();
+  return useQuery({
+    ...trpc.admin.codeReviews.getPerformanceStats.queryOptions(params),
     enabled: Boolean(params.startDate && params.endDate),
   });
 }

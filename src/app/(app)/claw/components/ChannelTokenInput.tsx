@@ -11,6 +11,7 @@ export function ChannelTokenInput({
   onChange,
   disabled,
   className,
+  maxLength,
 }: {
   id: string;
   placeholder: string;
@@ -18,6 +19,7 @@ export function ChannelTokenInput({
   onChange: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  maxLength?: number;
 }) {
   const [show, setShow] = useState(false);
 
@@ -30,6 +32,7 @@ export function ChannelTokenInput({
         value={value}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
+        maxLength={maxLength}
         data-1p-ignore
         autoComplete="off"
         className="pr-9"

@@ -97,6 +97,63 @@ export async function fetchSessionMessages(
   return snapshot?.messages ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Share
+// ---------------------------------------------------------------------------
+
+const ShareResponseSchema = z.object({
+  success: z.literal(true),
+  public_id: z.string(),
+});
+
+/**
+ * Share a session via the session-ingest worker.
+ *
+ * Calls POST /session/:sessionId/share which is idempotent — if the session
+ * already has a public_id, the existing one is returned.
+ *
+ * @returns The public_id used to construct the /s/{public_id} share URL.
+ */
+export async function shareSession(
+  sessionId: string,
+  userId: string
+): Promise<{ public_id: string }> {
+  if (!SESSION_INGEST_WORKER_URL) {
+    throw new Error('SESSION_INGEST_WORKER_URL is not configured');
+  }
+
+  const token = generateInternalServiceToken(userId);
+  const url = `${SESSION_INGEST_WORKER_URL}/api/session/${encodeURIComponent(sessionId)}/share`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (response.status === 404) {
+    throw new Error('Session not found');
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    const error = new Error(
+      `Session ingest share failed: ${response.status} ${response.statusText}${errorText ? ` - ${errorText}` : ''}`
+    );
+    captureException(error, {
+      tags: { source: 'session-ingest-client', endpoint: 'share' },
+      extra: { sessionId, status: response.status },
+    });
+    throw error;
+  }
+
+  const body = ShareResponseSchema.parse(await response.json());
+  return { public_id: body.public_id };
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
 /**
  * Delete a session via the session-ingest worker.
  *

@@ -1,15 +1,6 @@
 'use client';
 
-import {
-  AlertCircle,
-  AlertTriangle,
-  Hash,
-  Package,
-  RotateCcw,
-  Save,
-  Square,
-  X,
-} from 'lucide-react';
+import { AlertTriangle, Hash, Package, RotateCcw, Save, Square } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
@@ -23,13 +14,12 @@ import { useDefaultModelSelection } from '../hooks/useDefaultModelSelection';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { DetailTile } from './DetailTile';
 
-import { ChannelTokenInput } from './ChannelTokenInput';
-import { CHANNELS, CHANNEL_TYPES, type ChannelDefinition } from './channel-config';
+import { getEntriesByCategory } from '@kilocode/kiloclaw-secret-catalog';
+import { SecretEntrySection } from './SecretEntrySection';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { VersionPinCard } from './VersionPinCard';
 
@@ -52,149 +42,31 @@ export const KILOCODE_CATALOG_IDS = new Set([
   'moonshotai/kimi-k2.5',
 ]);
 
-function ChannelSection({
-  channel,
-  configured,
-  mutations,
-  onChannelsChanged,
-  channelType,
-  dirtyChannels,
-}: {
-  channel: ChannelDefinition;
-  configured: boolean;
-  mutations: ClawMutations;
-  onChannelsChanged?: (channelType: string) => void;
-  channelType: string;
-  dirtyChannels: Set<string>;
-}) {
-  const [tokens, setTokens] = useState<Record<string, string>>({});
-  const [formatError, setFormatError] = useState<string | null>(null);
-  const isSaving = mutations.patchChannels.isPending;
-  const Icon = channel.icon;
-  const isChannelDirty = dirtyChannels.has(channelType);
-
-  function setToken(key: string, value: string) {
-    setTokens(prev => ({ ...prev, [key]: value }));
-    setFormatError(null);
+/**
+ * Maps a catalog entry ID to whether the entry is "configured" based on
+ * the channel status from the config endpoint. The config endpoint returns
+ * per-field booleans (telegram, discord, slackBot, slackApp) rather than
+ * per-entry booleans, so we need this bridge mapping.
+ *
+ * IMPORTANT: This switch must be updated when new channel entries are added
+ * to the secret catalog. Unknown entry IDs silently return false ("Not configured").
+ * The proper fix is to make the config endpoint return per-entry-id status
+ * derived from the catalog, eliminating this manual mapping.
+ */
+function isEntryConfigured(
+  entryId: string,
+  channelStatus: { telegram: boolean; discord: boolean; slackBot: boolean; slackApp: boolean }
+): boolean {
+  switch (entryId) {
+    case 'telegram':
+      return channelStatus.telegram;
+    case 'discord':
+      return channelStatus.discord;
+    case 'slack':
+      return channelStatus.slackBot && channelStatus.slackApp;
+    default:
+      return false;
   }
-
-  function hasAllTokensFilled() {
-    return channel.fields.every(f => tokens[f.key]?.trim());
-  }
-
-  function handleSave() {
-    if (!hasAllTokensFilled()) {
-      if (channel.fields.length > 1) {
-        toast.error(`All token fields are required for ${channel.label}.`);
-      } else {
-        toast.error('Enter a token or use Remove to clear it.');
-      }
-      return;
-    }
-
-    for (const field of channel.fields) {
-      const error = field.validate?.(tokens[field.key].trim());
-      if (error) {
-        setFormatError(error);
-        toast.error(error);
-        return;
-      }
-    }
-
-    const patch: Record<string, string> = {};
-    for (const field of channel.fields) {
-      patch[field.key] = tokens[field.key].trim();
-    }
-
-    mutations.patchChannels.mutate(patch, {
-      onSuccess: () => {
-        toast.success(
-          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} saved. Hit Redeploy to apply.`
-        );
-        setTokens({});
-        onChannelsChanged?.(channelType);
-      },
-      onError: err => toast.error(`Failed to save: ${err.message}`),
-    });
-  }
-
-  function handleRemove() {
-    const patch: Record<string, null> = {};
-    for (const field of channel.fields) {
-      patch[field.key] = null;
-    }
-
-    mutations.patchChannels.mutate(patch, {
-      onSuccess: () => {
-        toast.success(
-          `${channel.label} token${channel.fields.length > 1 ? 's' : ''} removed. Hit Redeploy to apply.`
-        );
-        setTokens({});
-        onChannelsChanged?.(channelType);
-      },
-      onError: err => toast.error(`Failed to remove: ${err.message}`),
-    });
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4" />
-        <Label className="shrink-0">{channel.label}</Label>
-        <span className="text-muted-foreground text-xs">
-          {configured ? 'Configured' : 'Not configured'}
-        </span>
-        {(formatError || isChannelDirty) && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <AlertCircle
-                className={`h-4 w-4 ${formatError ? 'text-red-500' : 'text-amber-500'}`}
-              />
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{formatError ? 'Improper token format' : 'Redeploy to apply changes'}</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      {channel.fields.map(field => (
-        <div key={field.key} className="flex items-center gap-2">
-          {channel.fields.length > 1 && (
-            <Label htmlFor={`settings-${field.key}`} className="w-20 shrink-0 text-xs">
-              {field.label}
-            </Label>
-          )}
-          <ChannelTokenInput
-            id={`settings-${field.key}`}
-            placeholder={configured ? field.placeholderConfigured : field.placeholder}
-            value={tokens[field.key] ?? ''}
-            onChange={v => setToken(field.key, v)}
-            disabled={isSaving}
-            className="flex-1"
-          />
-        </div>
-      ))}
-
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={handleSave} disabled={isSaving || !hasAllTokensFilled()}>
-          <Save className="h-4 w-4" />
-          {isSaving ? 'Saving...' : 'Save'}
-        </Button>
-        {configured && (
-          <Button variant="outline" size="sm" onClick={handleRemove} disabled={isSaving}>
-            <X className="h-4 w-4" />
-            Remove
-          </Button>
-        )}
-      </div>
-
-      <p className="text-muted-foreground text-xs">
-        {channel.help}
-        {dirtyChannels.size > 0 && ' Hit Redeploy to apply channel changes.'}
-      </p>
-    </div>
-  );
 }
 
 export function SettingsTab({
@@ -410,15 +282,14 @@ export function SettingsTab({
         </p>
 
         <div className="space-y-6">
-          {CHANNEL_TYPES.map(type => (
-            <ChannelSection
-              key={type}
-              channel={CHANNELS[type]}
-              configured={CHANNELS[type].configuredCheck(channelStatus)}
+          {getEntriesByCategory('channel').map(entry => (
+            <SecretEntrySection
+              key={entry.id}
+              entry={entry}
+              configured={isEntryConfigured(entry.id, channelStatus)}
               mutations={mutations}
-              onChannelsChanged={onChannelsChanged}
-              channelType={type}
-              dirtyChannels={dirtyChannels}
+              onSecretsChanged={onChannelsChanged}
+              isDirty={dirtyChannels.has(entry.id)}
             />
           ))}
         </div>

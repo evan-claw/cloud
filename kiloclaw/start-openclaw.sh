@@ -160,6 +160,38 @@ else
     echo "npm global prefix: using default"
 fi
 
+# Feature: pip-global-prefix
+# Redirect pip install --user to the persistent volume so packages
+# survive restarts. Uses /root/.pip-global instead of /root/.local.
+if [ "${KILOCLAW_PIP_GLOBAL_PREFIX:-}" = "true" ]; then
+    if mkdir -p /root/.pip-global/bin; then
+        export PYTHONUSERBASE="/root/.pip-global"
+        export PATH="$PATH:/root/.pip-global/bin"
+        echo "pip global prefix set to /root/.pip-global"
+    else
+        echo "WARNING: failed to create pip-global directory, using default prefix"
+    fi
+else
+    echo "pip global prefix: using default"
+fi
+
+# Feature: uv-global-prefix
+# Configure uv tool/cache directories on the persistent volume so
+# uv tool install packages survive restarts.
+if [ "${KILOCLAW_UV_GLOBAL_PREFIX:-}" = "true" ]; then
+    if mkdir -p /root/.uv/tools /root/.uv/bin /root/.uv/cache; then
+        export UV_TOOL_DIR="/root/.uv/tools"
+        export UV_TOOL_BIN_DIR="/root/.uv/bin"
+        export UV_CACHE_DIR="/root/.uv/cache"
+        export PATH="$PATH:/root/.uv/bin"
+        echo "uv global prefix set to /root/.uv"
+    else
+        echo "WARNING: failed to create uv directories, using defaults"
+    fi
+else
+    echo "uv global prefix: using default"
+fi
+
 # ============================================================
 # PATCH CONFIG (channels, gateway auth, exec policy)
 # ============================================================

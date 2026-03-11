@@ -1,5 +1,6 @@
 import type { BYOKResult } from '@/lib/byok';
 import { kiloFreeModels, preferredModels } from '@/lib/models';
+import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { getGatewayErrorRate } from '@/lib/providers/gateway-error-rate';
 import { isOpenAiModel } from '@/lib/providers/openai';
 import type { VercelUserByokInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
@@ -77,6 +78,12 @@ export async function shouldRouteToVercel(
   if (ENABLE_UNIVERSAL_VERCEL_ROUTING) {
     console.debug(`[shouldRouteToVercel] universal Vercel routing is enabled`);
     return true;
+  }
+
+  if (isAnthropicModel(requestedModel)) {
+    // cost calculated by Vercel seems to be wrong: https://kilo-code.slack.com/archives/C08UR25T02V/p1773219248747909
+    console.debug(`[shouldRouteToVercel] Anthropic models are not routed to Vercel`);
+    return false;
   }
 
   if (isOpenAiModel(requestedModel)) {
