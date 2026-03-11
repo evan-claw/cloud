@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { generateKeyPairSync, publicEncrypt, randomBytes, createCipheriv, constants } from 'crypto';
 import { buildEnvVars, FEATURE_TO_ENV_VAR } from './env';
 import { DEFAULT_INSTANCE_FEATURES } from '../schemas/instance-config';
@@ -369,8 +369,18 @@ describe('buildEnvVars', () => {
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       googleCredentials: {
         // Corrupted envelopes — not valid encrypted data
-        clientSecret: { encrypted: 'bad', key: 'bad', iv: 'bad', authTag: 'bad' },
-        credentials: { encrypted: 'bad', key: 'bad', iv: 'bad', authTag: 'bad' },
+        clientSecret: {
+          encryptedData: 'bad',
+          encryptedDEK: 'bad',
+          algorithm: 'rsa-aes-256-gcm' as const,
+          version: 1 as const,
+        },
+        credentials: {
+          encryptedData: 'bad',
+          encryptedDEK: 'bad',
+          algorithm: 'rsa-aes-256-gcm' as const,
+          version: 1 as const,
+        },
       },
     });
 
