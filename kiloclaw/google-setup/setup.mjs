@@ -6,20 +6,21 @@
  * Docker-based tool that:
  * 1. Validates the user's KiloCode API key against the kiloclaw worker
  * 2. Fetches the worker's RSA public key for credential encryption
- * 3. Runs `gws auth setup` to create an OAuth client in the user's Google Cloud project
- * 4. Runs our own OAuth flow (localhost callback) to get a refresh token
- * 5. Encrypts the client_secret + credentials with the worker's public key
- * 6. POSTs the encrypted bundle to the kiloclaw worker (user-facing JWT auth)
+ * 3. Signs into gcloud, creates/selects a GCP project, enables APIs
+ * 4. Prompts user to create a Desktop OAuth client in Cloud Console
+ * 5. Runs our own OAuth flow (localhost callback) to get a refresh token
+ * 6. Fetches the user's email address
+ * 7. Encrypts the client_secret + credentials with the worker's public key
+ * 8. POSTs the encrypted bundle to the kiloclaw worker
  *
  * Usage:
  *   docker run -it --network host kilocode/google-setup --api-key=kilo_abc123
  */
 
-import { spawn } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
+import { spawn, execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import readline from 'node:readline';
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -66,15 +67,80 @@ const authHeaders = {
 };
 
 // ---------------------------------------------------------------------------
-// Scopes
+// Scopes — all gog user services + pubsub
 // ---------------------------------------------------------------------------
 
 const SCOPES = [
+  'openid',
+  'email',
   'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.settings.basic',
+  'https://www.googleapis.com/auth/gmail.settings.sharing',
   'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/documents',
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/presentations',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/tasks',
+  'https://www.googleapis.com/auth/contacts',
+  'https://www.googleapis.com/auth/contacts.other.readonly',
+  'https://www.googleapis.com/auth/directory.readonly',
+  'https://www.googleapis.com/auth/forms.body',
+  'https://www.googleapis.com/auth/forms.responses.readonly',
+  'https://www.googleapis.com/auth/chat.spaces',
+  'https://www.googleapis.com/auth/chat.messages',
+  'https://www.googleapis.com/auth/chat.memberships',
+  'https://www.googleapis.com/auth/classroom.courses',
+  'https://www.googleapis.com/auth/classroom.rosters',
+  'https://www.googleapis.com/auth/script.projects',
+  'https://www.googleapis.com/auth/script.deployments',
+  'https://www.googleapis.com/auth/keep',
+  'https://www.googleapis.com/auth/pubsub',
 ];
+
+// APIs to enable in the GCP project
+const GCP_APIS = [
+  'gmail.googleapis.com',
+  'calendar-json.googleapis.com',
+  'drive.googleapis.com',
+  'docs.googleapis.com',
+  'slides.googleapis.com',
+  'sheets.googleapis.com',
+  'tasks.googleapis.com',
+  'people.googleapis.com',
+  'forms.googleapis.com',
+  'chat.googleapis.com',
+  'classroom.googleapis.com',
+  'script.googleapis.com',
+  'keep.googleapis.com',
+  'pubsub.googleapis.com',
+];
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise(resolve => {
+    rl.question(question, answer => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+function runCommand(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: 'inherit', ...opts });
+    child.on('close', code => (code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))));
+    child.on('error', reject);
+  });
+}
+
+function runCommandOutput(cmd, args) {
+  return execSync([cmd, ...args].join(' '), { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+}
 
 // ---------------------------------------------------------------------------
 // Step 1: Validate API key
@@ -88,8 +154,6 @@ if (!validateRes.ok) {
   process.exit(1);
 }
 
-// Validate auth by checking Google credentials status — returns 200 if auth passes,
-// or 401/403 if the key is invalid.
 const authCheckRes = await fetch(`${workerUrl}/api/admin/google-credentials`, {
   headers: authHeaders,
 });
@@ -99,7 +163,7 @@ if (authCheckRes.status === 401 || authCheckRes.status === 403) {
   process.exit(1);
 }
 
-console.log('API key verified.');
+console.log('API key verified.\n');
 
 // ---------------------------------------------------------------------------
 // Step 2: Fetch public key for encryption
@@ -121,66 +185,142 @@ if (!publicKeyPem || !publicKeyPem.includes('BEGIN PUBLIC KEY')) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: Run gws auth setup (project + OAuth client only, no login)
+// Step 3: Sign into gcloud and set up GCP project + APIs
 // ---------------------------------------------------------------------------
 
-console.log('Setting up Google OAuth client...');
-console.log('Follow the prompts to create an OAuth client in your Google Cloud project.\n');
+console.log('Signing into Google Cloud...');
+console.log('A browser window will open for you to sign in.\n');
 
-// Use `expect` to wrap `gws auth setup` in a real PTY so all interactive prompts
-// work normally, while auto-answering "n" to the final "Run gws auth login now?" prompt.
-// The "Y/n" pattern matches gws CLI's confirmation prompt. If gws changes this prompt
-// text in a future version, this interaction will need updating.
-// Tested with @googleworkspace/cli (gws) as of 2026-03.
-// Write expect script to a temp file to avoid JS→shell→Tcl escaping issues.
-const expectScriptPath = '/tmp/gws-setup.exp';
-fs.writeFileSync(expectScriptPath, [
-  '#!/usr/bin/expect -f',
-  'set timeout -1',
-  'spawn gws auth setup',
-  'interact -o "Y/n" {',
-  '  send "n\\r"',
-  '}',
-  'catch wait result',
-  'exit [lindex $result 3]',
-  '',
-].join('\n'));
+await runCommand('gcloud', ['auth', 'login', '--brief']);
 
-const setupExitCode = await new Promise((resolve) => {
-  const child = spawn('expect', [expectScriptPath], {
-    stdio: 'inherit',
-  });
-  child.on('close', (code) => resolve(code));
-  child.on('error', () => resolve(1));
-});
+const gcloudAccount = runCommandOutput('gcloud', ['config', 'get-value', 'account']);
+console.log(`\nSigned in as: ${gcloudAccount}\n`);
 
-if (setupExitCode !== 0) {
-  console.error('\nFailed to set up OAuth client. Please try again.');
-  process.exit(1);
+// Project selection: create new or use existing
+console.log('Google Cloud project setup:');
+console.log('  1. Create a new project (recommended)');
+console.log('  2. Use an existing project\n');
+
+const projectChoice = await ask('Choose (1 or 2): ');
+let projectId;
+
+if (projectChoice === '2') {
+  // List existing projects
+  console.log('\nFetching your projects...');
+  try {
+    await runCommand('gcloud', ['projects', 'list', '--format=table(projectId,name)']);
+  } catch {
+    console.warn('Could not list projects. You can still enter a project ID manually.');
+  }
+  projectId = await ask('\nEnter your project ID: ');
+} else {
+  // Generate a project ID based on date
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const defaultId = `kiloclaw-${dateStr}`;
+  const inputId = await ask(`Project ID [${defaultId}]: `);
+  projectId = inputId || defaultId;
+
+  console.log(`\nCreating project "${projectId}"...`);
+  try {
+    await runCommand('gcloud', ['projects', 'create', projectId, '--set-as-default']);
+    console.log('Project created.\n');
+  } catch {
+    console.error(`Failed to create project "${projectId}". It may already exist.`);
+    console.error('Try a different name, or choose option 2 to use an existing project.');
+    process.exit(1);
+  }
+}
+
+// Set as active project
+await runCommand('gcloud', ['config', 'set', 'project', projectId]);
+console.log(`\nUsing project: ${projectId}`);
+
+// Enable APIs
+console.log('\nEnabling Google APIs (this may take a minute)...');
+await runCommand('gcloud', ['services', 'enable', ...GCP_APIS, `--project=${projectId}`]);
+console.log('APIs enabled.\n');
+
+// Configure OAuth consent screen via REST API
+console.log('Configuring OAuth consent screen...');
+const accessToken = runCommandOutput('gcloud', ['auth', 'print-access-token']);
+
+// Check if brand already exists
+const brandsRes = await fetch(
+  `https://iap.googleapis.com/v1/projects/${projectId}/brands`,
+  { headers: { authorization: `Bearer ${accessToken}` } }
+);
+const brandsData = await brandsRes.json();
+
+if (!brandsData.brands?.length) {
+  const createBrandRes = await fetch(
+    `https://iap.googleapis.com/v1/projects/${projectId}/brands`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        applicationTitle: 'KiloClaw',
+        supportEmail: gcloudAccount,
+      }),
+    }
+  );
+  if (!createBrandRes.ok) {
+    console.warn('Could not auto-configure consent screen. You may need to set it up manually.');
+    console.warn(`Visit: https://console.cloud.google.com/apis/credentials/consent?project=${projectId}\n`);
+  } else {
+    console.log('OAuth consent screen configured.\n');
+  }
+} else {
+  console.log('OAuth consent screen already configured.\n');
 }
 
 // ---------------------------------------------------------------------------
-// Step 4: Read client_secret.json and run our own OAuth flow
+// Step 4: Manual OAuth client creation
 // ---------------------------------------------------------------------------
 
-const gwsDir = path.join(process.env.HOME ?? '/root', '.config', 'gws');
-const clientSecretPath = path.join(gwsDir, 'client_secret.json');
+const credentialsUrl = `https://console.cloud.google.com/apis/credentials?project=${projectId}`;
 
-if (!fs.existsSync(clientSecretPath)) {
-  console.error('client_secret.json not found. The setup step may not have completed.');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('  Create an OAuth client');
+console.log('');
+console.log(`  1. Open: ${credentialsUrl}`);
+console.log('  2. Click "Create Credentials" → "OAuth client ID"');
+console.log('  3. Application type: "Desktop app"');
+console.log('  4. Click "Create"');
+console.log('  5. Copy the Client ID and Client Secret below');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+const clientId = await ask('Client ID: ');
+const clientSecret = await ask('Client Secret: ');
+
+if (!clientId || !clientSecret) {
+  console.error('Client ID and Client Secret are required.');
   process.exit(1);
 }
 
-const clientSecretJson = fs.readFileSync(clientSecretPath, 'utf8');
-const clientConfig = JSON.parse(clientSecretJson);
-const { client_id, client_secret } = clientConfig.installed || clientConfig.web || {};
+// Build client_secret.json in the standard Google format
+const clientSecretObj = {
+  installed: {
+    client_id: clientId,
+    project_id: projectId,
+    auth_uri: 'https://accounts.google.com/o/oauth2/auth',
+    token_uri: 'https://oauth2.googleapis.com/token',
+    auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
+    client_secret: clientSecret,
+    redirect_uris: ['http://localhost'],
+  },
+};
+const clientSecretJson = JSON.stringify(clientSecretObj);
 
-if (!client_id || !client_secret) {
-  console.error('Invalid client_secret.json format.');
-  process.exit(1);
-}
+// ---------------------------------------------------------------------------
+// Step 5: Custom OAuth flow to get refresh token
+// ---------------------------------------------------------------------------
 
-// Start a local HTTP server for the OAuth callback
+console.log('\nStarting OAuth authorization...');
+
 const { code, redirectUri } = await new Promise((resolve, reject) => {
   let callbackPort;
 
@@ -222,7 +362,7 @@ const { code, redirectUri } = await new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => {
     callbackPort = server.address().port;
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authUrl.searchParams.set('client_id', client_id);
+    authUrl.searchParams.set('client_id', clientId);
     authUrl.searchParams.set('redirect_uri', `http://localhost:${callbackPort}`);
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('scope', SCOPES.join(' '));
@@ -249,8 +389,8 @@ const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
   headers: { 'content-type': 'application/x-www-form-urlencoded' },
   body: new URLSearchParams({
     code,
-    client_id,
-    client_secret,
+    client_id: clientId,
+    client_secret: clientSecret,
     redirect_uri: redirectUri,
     grant_type: 'authorization_code',
   }),
@@ -263,21 +403,38 @@ if (!tokenRes.ok) {
 }
 
 const tokens = await tokenRes.json();
-// Build a credentials object similar to what gws stores
-// Omit client_id/client_secret from the credentials envelope to avoid
-// duplicating the OAuth client secret across both envelopes.
-// The worker merges them from the clientSecret envelope at decryption time.
+console.log('OAuth tokens obtained.');
+
+// ---------------------------------------------------------------------------
+// Step 6: Fetch user email
+// ---------------------------------------------------------------------------
+
+console.log('Fetching account info...');
+
+const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+  headers: { authorization: `Bearer ${tokens.access_token}` },
+});
+
+let userEmail;
+if (userinfoRes.ok) {
+  const userinfo = await userinfoRes.json();
+  userEmail = userinfo.email;
+  console.log(`Account: ${userEmail}`);
+} else {
+  console.warn('Could not fetch user email. gog account auto-selection will not work.');
+}
+
+// Build credentials object — includes email for gog keyring key naming
 const credentialsObj = {
   type: 'authorized_user',
   ...tokens,
   scopes: SCOPES,
+  ...(userEmail && { email: userEmail }),
 };
 const credentialsJson = JSON.stringify(credentialsObj);
 
-console.log('OAuth tokens obtained.');
-
 // ---------------------------------------------------------------------------
-// Step 5: Encrypt credentials with worker's public key
+// Step 7: Encrypt credentials with worker's public key
 // ---------------------------------------------------------------------------
 
 function encryptEnvelope(plaintext, pemKey) {
@@ -308,7 +465,7 @@ const encryptedBundle = {
 };
 
 // ---------------------------------------------------------------------------
-// Step 6: POST to worker
+// Step 8: POST to worker
 // ---------------------------------------------------------------------------
 
 console.log('Sending credentials to your kiloclaw instance...');
@@ -327,5 +484,8 @@ if (!postRes.ok) {
 
 console.log('\nGoogle account connected!');
 console.log('Credentials sent to your kiloclaw instance.');
-console.log('\nYour bot can now use Gmail, Calendar, and Docs.');
+if (userEmail) {
+  console.log(`Connected account: ${userEmail}`);
+}
+console.log('\nYour bot can now use Gmail, Calendar, Drive, Docs, Sheets, and more.');
 console.log('Redeploy your kiloclaw instance to activate.');
