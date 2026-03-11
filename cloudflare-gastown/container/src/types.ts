@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // ── Agent roles (mirrors worker types) ──────────────────────────────────
 
-export const AgentRole = z.enum(['mayor', 'polecat', 'refinery']);
+export const AgentRole = z.enum(['mayor', 'polecat', 'refinery', 'triage']);
 export type AgentRole = z.infer<typeof AgentRole>;
 
 // ── Control server request/response schemas ─────────────────────────────
@@ -107,7 +107,9 @@ export type ManagedAgent = {
   exitReason: string | null;
   /** Gastown worker API URL for completion callbacks */
   gastownApiUrl: string | null;
-  /** Agent-scoped JWT for authenticating callbacks to the Gastown worker */
+  /** Container-scoped JWT (shared by all agents, refreshed by alarm). */
+  gastownContainerToken: string | null;
+  /** Legacy per-agent JWT for authenticating callbacks to the Gastown worker. */
   gastownSessionToken: string | null;
   /** Override the default completion callback URL (for agents not backed by a Rig DO) */
   completionCallbackUrl: string | null;

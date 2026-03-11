@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { extractBearerToken } from '@kilocode/worker-utils';
-import { verifyAgentJWT, type AgentJWTPayload } from '../util/jwt.util';
+import { verifyAgentJWT, verifyContainerJWT, type AgentJWTPayload } from '../util/jwt.util';
 import { resError } from '../util/res.util';
 import type { GastownEnv } from '../gastown.worker';
 
@@ -34,11 +34,41 @@ export const townIdMiddleware = createMiddleware<GastownEnv>(async (c, next) => 
 });
 
 /**
- * Auth middleware that requires a valid Gastown agent JWT via
- * `Authorization: Bearer <jwt>`.
+ * Try to authenticate with a container-scoped JWT (scope: 'container').
+ * Returns an AgentJWTPayload-shaped object if successful, null otherwise.
+ * Container JWTs carry { townId, userId } but not agentId/rigId — those
+ * come from the route params and are trusted because the JWT proves the
+ * request came from the right town's container.
+ */
+function tryContainerJWTAuth(
+  c: Context<GastownEnv>,
+  token: string,
+  jwtSecret: string
+): AgentJWTPayload | null {
+  const result = verifyContainerJWT(token, jwtSecret);
+  if (!result.success) return null;
+
+  // Populate agentId/rigId from route params, falling back to headers
+  // for routes that don't have :agentId/:rigId params (e.g. /triage/resolve,
+  // /mail). The container JWT proves the request came from this town's
+  // container, so we trust both the URL and the identity headers.
+  return {
+    agentId: c.req.param('agentId') ?? c.req.header('X-Gastown-Agent-Id') ?? '',
+    rigId: c.req.param('rigId') ?? c.req.header('X-Gastown-Rig-Id') ?? '',
+    townId: result.payload.townId,
+    userId: result.payload.userId,
+  };
+}
+
+/**
+ * Auth middleware that accepts either:
+ * 1. A container-scoped JWT (scope: 'container') — preferred for container→worker calls
+ * 2. A legacy per-agent JWT (HS256, 8h expiry) — retained for backwards compatibility
  *
- * Sets `agentJWT` on the Hono context. Also validates the JWT's townId
- * and rigId match the route params to prevent cross-town/cross-rig access.
+ * Sets `agentJWT` on the Hono context. Validates:
+ * - townId always (cross-town guard)
+ * - rigId only for legacy agent JWTs (container JWTs are town-scoped;
+ *   the container is trusted to call correct rig endpoints)
  */
 export const authMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
   const token = extractBearerToken(c.req.header('Authorization'));
@@ -52,31 +82,48 @@ export const authMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
     return c.json(resError('Internal server error'), 500);
   }
 
-  const result = verifyAgentJWT(token, secret);
-  if (!result.success) {
-    return c.json(resError(result.error), 401);
+  // Try container-scoped JWT first (scope: 'container', 8h expiry + alarm refresh)
+  let payload = tryContainerJWTAuth(c, token, secret);
+
+  // Fall back to legacy JWT verification
+  if (!payload) {
+    const result = verifyAgentJWT(token, secret);
+    if (!result.success) {
+      return c.json(resError(result.error), 401);
+    }
+    payload = result.payload;
   }
 
-  // Verify the rigId in the JWT matches the route param
+  // Cross-rig guard: only enforced for legacy agent JWTs where the rigId
+  // is cryptographically bound to the token. Container JWTs are town-scoped
+  // and don't carry a rigId — the container is trusted within its town.
   const rigId = c.req.param('rigId');
-  if (rigId && result.payload.rigId !== rigId) {
+  if (rigId && payload.rigId && payload.rigId !== rigId) {
     return c.json(resError('Token rigId does not match route'), 403);
   }
 
-  // Verify the townId in the JWT matches the route param (cross-town guard)
+  // Verify the townId matches the route param (cross-town guard)
   const townId = c.req.param('townId');
-  if (townId && townId !== result.payload.townId) {
+  if (townId && townId !== payload.townId) {
     return c.json(resError('Cross-town access denied'), 403);
   }
 
-  c.set('agentJWT', result.payload);
+  c.set('agentJWT', payload);
   return next();
 });
 
 /**
- * Restricts a route to the specific agent identified by the JWT.
- * Validates the agentId route param matches the JWT agentId.
+ * Restricts a route to the specific agent identified by the auth token.
+ * Validates the agentId route param matches the token's agentId.
  * Must be applied after `authMiddleware`.
+ *
+ * For container JWTs: agentId is populated from the route param by
+ * tryContainerJWTAuth, so this check is a no-op (route param == route
+ * param). This is intentional — the container JWT is town-scoped, and
+ * the container is trusted to call the correct agent endpoints.
+ * Cross-agent attacks require compromising the container itself, which
+ * is the same trust boundary the container already has (it runs all
+ * agents in the town).
  */
 export const agentOnlyMiddleware = createMiddleware<GastownEnv>(async (c, next) => {
   const jwt = c.get('agentJWT');
@@ -85,7 +132,7 @@ export const agentOnlyMiddleware = createMiddleware<GastownEnv>(async (c, next) 
   }
 
   const agentId = c.req.param('agentId');
-  if (agentId && jwt.agentId !== agentId) {
+  if (agentId && jwt.agentId && jwt.agentId !== agentId) {
     return c.json(resError('Token agentId does not match route'), 403);
   }
 
