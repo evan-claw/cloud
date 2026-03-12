@@ -584,7 +584,7 @@ function computeDirectEmbeddingMicrodollarCost(model: string, usage: EmbeddingUs
   return Math.round(usage.prompt_tokens * pricePerToken);
 }
 
-function parseEmbeddingUsageFromResponse(
+export function parseEmbeddingUsageFromResponse(
   responseText: string,
   isDirectProvider: boolean
 ): MicrodollarUsageStats {

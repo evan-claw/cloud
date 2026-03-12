@@ -1,5 +1,9 @@
 import { describe, it, expect } from '@jest/globals';
-import { checkOrganizationModelRestrictions } from './llm-proxy-helpers';
+import {
+  checkOrganizationModelRestrictions,
+  extractEmbeddingPromptInfo,
+  parseEmbeddingUsageFromResponse,
+} from './llm-proxy-helpers';
 
 describe('checkOrganizationModelRestrictions', () => {
   describe('enterprise plan - model deny list restrictions', () => {
@@ -203,5 +207,192 @@ describe('checkOrganizationModelRestrictions', () => {
       expect(result.error).toBeNull();
       expect(result.providerConfig).toBeUndefined();
     });
+  });
+});
+
+describe('extractEmbeddingPromptInfo', () => {
+  it('should extract prefix from a single string input', () => {
+    const result = extractEmbeddingPromptInfo({ input: 'Hello world' });
+
+    expect(result.user_prompt_prefix).toBe('Hello world');
+    expect(result.system_prompt_prefix).toBe('');
+    expect(result.system_prompt_length).toBe(0);
+  });
+
+  it('should extract the first element from a string array input', () => {
+    const result = extractEmbeddingPromptInfo({ input: ['First sentence', 'Second sentence'] });
+
+    expect(result.user_prompt_prefix).toBe('First sentence');
+  });
+
+  it('should fall back to JSON.stringify for an empty array', () => {
+    const result = extractEmbeddingPromptInfo({ input: [] });
+
+    expect(result.user_prompt_prefix).toBe('[]');
+  });
+
+  it('should fall back to JSON.stringify for a number array (token input)', () => {
+    const result = extractEmbeddingPromptInfo({ input: [1, 2, 3] });
+
+    expect(result.user_prompt_prefix).toBe('[1,2,3]');
+  });
+
+  it('should fall back to JSON.stringify for a nested number array (token batch)', () => {
+    const result = extractEmbeddingPromptInfo({
+      input: [
+        [1, 2],
+        [3, 4],
+      ],
+    });
+
+    expect(result.user_prompt_prefix).toBe('[[1,2],[3,4]]');
+  });
+
+  it('should truncate long string input to 100 characters', () => {
+    const longInput = 'x'.repeat(200);
+    const result = extractEmbeddingPromptInfo({ input: longInput });
+
+    expect(result.user_prompt_prefix).toHaveLength(100);
+    expect(result.user_prompt_prefix).toBe('x'.repeat(100));
+  });
+
+  it('should truncate long first element of string array to 100 characters', () => {
+    const longInput = 'y'.repeat(200);
+    const result = extractEmbeddingPromptInfo({ input: [longInput] });
+
+    expect(result.user_prompt_prefix).toHaveLength(100);
+  });
+
+  it('should always return empty system_prompt_prefix and zero system_prompt_length', () => {
+    const result = extractEmbeddingPromptInfo({ input: 'any input' });
+
+    expect(result.system_prompt_prefix).toBe('');
+    expect(result.system_prompt_length).toBe(0);
+  });
+});
+
+describe('parseEmbeddingUsageFromResponse', () => {
+  function makeResponse(overrides: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      id: 'embd-123',
+      object: 'list',
+      model: 'text-embedding-3-small',
+      usage: { prompt_tokens: 100, total_tokens: 100 },
+      data: [{ object: 'embedding', embedding: [0.1, 0.2], index: 0 }],
+      ...overrides,
+    });
+  }
+
+  it('should use OpenRouter cost field when available and not a direct provider', () => {
+    const response = makeResponse({
+      usage: { prompt_tokens: 100, total_tokens: 100, cost: 0.00005 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    // toMicrodollars(0.00005) = Math.round(0.00005 * 1_000_000) = 50
+    expect(result.cost_mUsd).toBe(50);
+  });
+
+  it('should compute cost from known pricing for direct Mistral models', () => {
+    const response = makeResponse({
+      model: 'mistral-embed',
+      usage: { prompt_tokens: 1000, total_tokens: 1000 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, true);
+
+    // mistral-embed: 0.1 microdollars/token * 1000 = 100
+    expect(result.cost_mUsd).toBe(100);
+  });
+
+  it('should compute cost from known pricing for direct OpenAI models', () => {
+    const response = makeResponse({
+      model: 'text-embedding-3-small',
+      usage: { prompt_tokens: 1000, total_tokens: 1000 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, true);
+
+    // text-embedding-3-small: 0.02 microdollars/token * 1000 = 20
+    expect(result.cost_mUsd).toBe(20);
+  });
+
+  it('should use default fallback pricing for unknown direct-provider models', () => {
+    const response = makeResponse({
+      model: 'some-unknown-model',
+      usage: { prompt_tokens: 1000, total_tokens: 1000 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, true);
+
+    // fallback: 0.2 microdollars/token * 1000 = 200
+    expect(result.cost_mUsd).toBe(200);
+  });
+
+  it('should ignore OpenRouter cost field for direct providers', () => {
+    const response = makeResponse({
+      model: 'text-embedding-3-small',
+      usage: { prompt_tokens: 1000, total_tokens: 1000, cost: 0.99 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, true);
+
+    // Direct provider → ignores cost field, uses known pricing
+    expect(result.cost_mUsd).toBe(20);
+  });
+
+  it('should extract id as messageId', () => {
+    const response = makeResponse({ id: 'embd-abc' });
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    expect(result.messageId).toBe('embd-abc');
+  });
+
+  it('should set messageId to null when id is absent', () => {
+    const response = makeResponse({});
+    const parsed = JSON.parse(response);
+    delete parsed.id;
+
+    const result = parseEmbeddingUsageFromResponse(JSON.stringify(parsed), false);
+
+    expect(result.messageId).toBeNull();
+  });
+
+  it('should set hasError to true when model is empty', () => {
+    const response = makeResponse({ model: '' });
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    expect(result.hasError).toBe(true);
+  });
+
+  it('should set hasError to false when model is present', () => {
+    const response = makeResponse({ model: 'text-embedding-3-small' });
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    expect(result.hasError).toBe(false);
+  });
+
+  it('should always set outputTokens to 0 and streamed/cancelled to false', () => {
+    const response = makeResponse();
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    expect(result.outputTokens).toBe(0);
+    expect(result.streamed).toBe(false);
+    expect(result.cancelled).toBe(false);
+  });
+
+  it('should extract prompt_tokens as inputTokens', () => {
+    const response = makeResponse({
+      usage: { prompt_tokens: 42, total_tokens: 42 },
+    });
+
+    const result = parseEmbeddingUsageFromResponse(response, false);
+
+    expect(result.inputTokens).toBe(42);
   });
 });
