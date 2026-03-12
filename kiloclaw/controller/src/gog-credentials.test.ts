@@ -42,13 +42,11 @@ describe('writeGogCredentials', () => {
       Buffer.from(FAKE_TARBALL_BASE64, 'base64')
     );
 
-    // Should run tar extraction with path traversal protection
     expect(deps.execFileSync).toHaveBeenCalledWith('tar', [
       'xzf',
       '/root/.config/gogcli-config.tar.gz',
       '-C',
       '/root/.config',
-      '--no-absolute-names',
     ]);
 
     // Should clean up temp tarball

@@ -64,11 +64,13 @@ export async function writeGogCredentials(
   const parentDir = path.dirname(configDir);
   d.mkdirSync(parentDir, { recursive: true });
 
+  const tarballBuffer = Buffer.from(tarballBase64, 'base64');
+
   const tmpTarball = path.join(parentDir, 'gogcli-config.tar.gz');
-  d.writeFileSync(tmpTarball, Buffer.from(tarballBase64, 'base64'));
+  d.writeFileSync(tmpTarball, tarballBuffer);
 
   try {
-    d.execFileSync('tar', ['xzf', tmpTarball, '-C', parentDir, '--no-absolute-names']);
+    d.execFileSync('tar', ['xzf', tmpTarball, '-C', parentDir]);
     console.log(`[gog] Extracted config tarball to ${configDir}`);
   } finally {
     try {
