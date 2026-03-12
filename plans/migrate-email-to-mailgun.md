@@ -181,12 +181,12 @@ Implementation:
 
 **QA** (no PR): Use the admin testing page to send each template via Mailgun to real inboxes. Compare rendered output against the Customer.io versions. Verify all variable substitution, styling, links.
 
-### PR 3: Flip to Mailgun
+**Flip to Mailgun**
 
 - Set `EMAIL_PROVIDER=mailgun` in production
 - Monitor delivery, bounce rates, rendering across email clients
 
-### PR 4: Cleanup
+### PR 3: Cleanup
 
 After the provider switch is confirmed stable:
 
