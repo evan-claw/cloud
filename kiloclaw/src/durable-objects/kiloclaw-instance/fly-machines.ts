@@ -8,7 +8,7 @@ import {
   DEFAULT_FLY_REGION,
   STALE_PROVISION_THRESHOLD_MS,
 } from '../../config';
-import { parseRegions, shuffleRegions, deprioritizeRegion } from '../regions';
+import { parseRegions, shuffleRegions } from '../regions';
 import { guestFromSize, volumeNameFromSandboxId } from '../machine-config';
 import type { InstanceMutableState } from './types';
 import { storageUpdate } from './state';
@@ -65,8 +65,7 @@ export async function replaceStrandedVolume(
   const oldVolumeId = state.flyVolumeId;
   const oldRegion = state.flyRegion;
   const hasUserData = state.lastStartedAt !== null;
-  const allRegions = shuffleRegions(parseRegions(env.FLY_REGION ?? DEFAULT_FLY_REGION));
-  const regions = deprioritizeRegion(allRegions, oldRegion);
+  const regions = parseRegions(env.FLY_REGION ?? DEFAULT_FLY_REGION).reverse();
   const compute = guestFromSize(state.machineSize);
 
   // Destroy existing machine if any — it's stuck on the constrained host.

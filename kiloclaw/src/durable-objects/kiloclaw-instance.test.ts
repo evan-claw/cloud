@@ -2128,7 +2128,7 @@ describe('start: volume region validation', () => {
 // ============================================================================
 
 describe('start: 412 insufficient resources recovery', () => {
-  it('fresh provision (never started): deletes volume and creates fresh with deprioritized regions', async () => {
+  it('fresh provision (never started): deletes volume and creates fresh with reversed regions', async () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, { flyMachineId: null, lastStartedAt: null });
 
@@ -2150,16 +2150,15 @@ describe('start: 412 insufficient resources recovery', () => {
 
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
-    // New volume created via fallback with deprioritized regions and compute hint
+    // New volume created via fallback with reversed regions and compute hint
     const regions412Call = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
     expect(regions412Call[1]).toEqual(
       expect.objectContaining({
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
-    // Regions are shuffled, so just check the set (deprioritize is a no-op here
-    // because 'iad' is not in FLY_REGION='us,eu')
-    expect((regions412Call[2] as string[]).sort()).toEqual(['eu', 'us']);
+    // Regions are reversed from FLY_REGION='us,eu' so EU is tried first on recovery
+    expect(regions412Call[2]).toEqual(['eu', 'us']);
     // source_volume_id should NOT be set for fresh provision
     const createVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
       .calls[0][1] as Record<string, unknown>;
@@ -2197,7 +2196,7 @@ describe('start: 412 insufficient resources recovery', () => {
 
     await instance.start('user-1');
 
-    // Volume was forked (source_volume_id set) with compute hint and deprioritized regions
+    // Volume was forked (source_volume_id set) with compute hint and reversed regions
     const regionsForkCall = (flyClient.createVolumeWithFallback as Mock).mock.calls[0];
     expect(regionsForkCall[1]).toEqual(
       expect.objectContaining({
@@ -2205,8 +2204,8 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
-    // Regions are shuffled — check the set
-    expect((regionsForkCall[2] as string[]).sort()).toEqual(['eu', 'us']);
+    // Regions are reversed from FLY_REGION='us,eu' so EU is tried first on recovery
+    expect(regionsForkCall[2]).toEqual(['eu', 'us']);
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
     // Machine was retried
@@ -2270,8 +2269,8 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
-    // Regions are shuffled then deprioritized — check the set
-    expect((regionsUpdateCall[2] as string[]).sort()).toEqual(['eu', 'us']);
+    // Regions are reversed from FLY_REGION='us,eu' so EU is tried first on recovery
+    expect(regionsUpdateCall[2]).toEqual(['eu', 'us']);
     // New machine was created
     expect(storage._store.get('flyMachineId')).toBe('machine-new');
     expect(storage._store.get('flyVolumeId')).toBe('vol-new');
