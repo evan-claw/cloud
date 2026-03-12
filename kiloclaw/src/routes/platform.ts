@@ -258,6 +258,44 @@ platform.delete('/google-credentials', async c => {
   }
 });
 
+// POST /api/platform/gmail-notifications
+platform.post('/gmail-notifications', async c => {
+  const result = await parseBody(c, UserIdRequestSchema);
+  if ('error' in result) return result.error;
+
+  const { userId } = result.data;
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailNotifications(true),
+      'enableGmailNotifications'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-notifications enable');
+    return jsonError(message, status);
+  }
+});
+
+// DELETE /api/platform/gmail-notifications?userId=...
+platform.delete('/gmail-notifications', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailNotifications(false),
+      'disableGmailNotifications'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-notifications disable');
+    return jsonError(message, status);
+  }
+});
+
 // PATCH /api/platform/secrets
 platform.patch('/secrets', async c => {
   const result = await parseBody(c, SecretsPatchSchema);

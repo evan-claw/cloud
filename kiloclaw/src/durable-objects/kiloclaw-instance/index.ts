@@ -476,14 +476,52 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   /**
    * Clear stored Google credentials.
    * Does NOT restart the machine; the caller should prompt the user to restart.
+   * Also disables Gmail notifications to prevent stale state.
    */
   async clearGoogleCredentials(): Promise<{ googleConnected: boolean }> {
     await this.loadState();
 
     this.s.googleCredentials = null;
-    await this.ctx.storage.put({ googleCredentials: null });
+    this.s.gmailNotificationsEnabled = false;
+    await this.ctx.storage.put({
+      googleCredentials: null,
+      gmailNotificationsEnabled: false,
+    });
 
     return { googleConnected: false };
+  }
+
+  /**
+   * Enable or disable Gmail push notifications.
+   * Persists the flag and restarts the machine so the controller picks it up.
+   */
+  async updateGmailNotifications(
+    enabled: boolean
+  ): Promise<{ gmailNotificationsEnabled: boolean }> {
+    await this.loadState();
+
+    if (!this.s.userId || !this.s.sandboxId) {
+      throw new Error('Instance is not provisioned');
+    }
+
+    // Cannot enable without Google credentials
+    if (enabled && !this.s.googleCredentials) {
+      throw new Error('Cannot enable Gmail notifications without a connected Google account');
+    }
+
+    this.s.gmailNotificationsEnabled = enabled;
+    await this.persist({ gmailNotificationsEnabled: enabled });
+
+    // Restart machine so controller picks up the new env var
+    if (this.s.status === 'running' && this.s.flyMachineId) {
+      try {
+        await this.restartMachine();
+      } catch (err) {
+        console.warn('[DO] Gmail notification toggle saved but restart failed:', err);
+      }
+    }
+
+    return { gmailNotificationsEnabled: enabled };
   }
 
   // ── Pairing ─────────────────────────────────────────────────────────
@@ -794,6 +832,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
     googleConnected: boolean;
+    gmailNotificationsEnabled: boolean;
   }> {
     await this.loadState();
 
@@ -829,6 +868,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
       googleConnected: this.s.googleCredentials !== null,
+      gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
     };
   }
 
@@ -852,6 +892,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
     googleConnected: boolean;
+    gmailNotificationsEnabled: boolean;
     pendingDestroyMachineId: string | null;
     pendingDestroyVolumeId: string | null;
     pendingPostgresMarkOnFinalize: boolean;
@@ -888,6 +929,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
       googleConnected: this.s.googleCredentials !== null,
+      gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
       pendingDestroyMachineId: this.s.pendingDestroyMachineId,
       pendingDestroyVolumeId: this.s.pendingDestroyVolumeId,
       pendingPostgresMarkOnFinalize: this.s.pendingPostgresMarkOnFinalize,

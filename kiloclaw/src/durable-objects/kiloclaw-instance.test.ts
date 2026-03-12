@@ -1847,6 +1847,38 @@ describe('updateSecrets', () => {
 });
 
 // ============================================================================
+// clearGoogleCredentials
+// ============================================================================
+
+describe('clearGoogleCredentials', () => {
+  it('sets googleCredentials to null and gmailNotificationsEnabled to false in storage', async () => {
+    const { instance, storage } = createInstance();
+    const fakeCredentials = {
+      clientSecretJson: 'secret',
+      oauthTokensJson: 'tokens',
+    };
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: true,
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.clearGoogleCredentials();
+
+    expect(result.googleConnected).toBe(false);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        googleCredentials: null,
+        gmailNotificationsEnabled: false,
+      })
+    );
+    expect(storage._store.get('googleCredentials')).toBeNull();
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(false);
+  });
+});
+
+// ============================================================================
 // parseRegions + deprioritizeRegion (pure functions)
 // ============================================================================
 
