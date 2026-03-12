@@ -116,7 +116,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       if (shuttingDown || manualStop) {
         return;
       }
-      void spawnGateway();
+      void spawnProcess();
     }, delay);
     backoffMs = Math.min(backoffMaxMs, Math.floor(backoffMs * backoffMultiplier));
   };
@@ -164,7 +164,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     // immediately without backoff.
     if (code === 0 && signal === null) {
       resetBackoff();
-      void spawnGateway();
+      void spawnProcess();
       return;
     }
 
@@ -172,7 +172,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     scheduleRestart();
   };
 
-  const spawnGateway = async (): Promise<void> => {
+  const spawnProcess = async (): Promise<void> => {
     if (child || shuttingDown || manualStop) {
       return;
     }
@@ -200,7 +200,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     });
 
     spawned.once('error', err => {
-      console.error('[controller] Failed to spawn openclaw gateway:', err);
+      console.error('[controller] Failed to spawn process:', err);
       handleChildExit(spawned, 1, null);
     });
 
@@ -247,7 +247,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     manualStop = false;
     clearRestartTimer();
     resetBackoff();
-    await spawnGateway();
+    await spawnProcess();
     return true;
   };
 
@@ -259,7 +259,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     clearRestartTimer();
     resetBackoff();
     await stopInternal(false);
-    await spawnGateway();
+    await spawnProcess();
     return true;
   };
 

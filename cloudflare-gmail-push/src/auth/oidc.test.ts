@@ -36,6 +36,7 @@ describe('validateOidcToken', () => {
     mockJwtVerify.mockResolvedValue({
       payload: {
         email: 'gmail-api-push@system.gserviceaccount.com',
+        email_verified: true,
         iss: 'https://accounts.google.com',
       },
       protectedHeader: { alg: 'RS256' },
@@ -45,6 +46,22 @@ describe('validateOidcToken', () => {
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.email).toBe('gmail-api-push@system.gserviceaccount.com');
+    }
+  });
+
+  it('rejects token with email_verified=false', async () => {
+    mockJwtVerify.mockResolvedValue({
+      payload: {
+        email: 'gmail-api-push@system.gserviceaccount.com',
+        email_verified: false,
+      },
+      protectedHeader: { alg: 'RS256' },
+    } as any);
+
+    const result = await validateOidcToken('Bearer valid-token', 'https://audience.example.com');
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error).toContain('not verified');
     }
   });
 
@@ -83,7 +100,7 @@ describe('validateOidcToken', () => {
 
   it('passes correct audience to jwtVerify', async () => {
     mockJwtVerify.mockResolvedValue({
-      payload: { email: 'gmail-api-push@system.gserviceaccount.com' },
+      payload: { email: 'gmail-api-push@system.gserviceaccount.com', email_verified: true },
       protectedHeader: { alg: 'RS256' },
     } as any);
 

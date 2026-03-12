@@ -81,6 +81,7 @@ const SAFE_ERROR_PREFIXES = [
   'User already has an ', // duplicate provision
   'Gateway controller ', // already sanitized at DO level
   'Invalid secret patch: ', // catalog validation (allFieldsRequired, etc.)
+  'Cannot enable Gmail ', // no Google account connected
 ];
 
 function sanitizeError(err: unknown, operation: string): { message: string; status: number } {

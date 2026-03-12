@@ -45,6 +45,10 @@ export async function validateOidcToken(
       return { valid: false, error: `Unexpected email: ${email}` };
     }
 
+    if (!payload.email_verified) {
+      return { valid: false, error: 'Email not verified' };
+    }
+
     return { valid: true, email };
   } catch (err) {
     return { valid: false, error: err instanceof Error ? err.message : 'JWT verification failed' };

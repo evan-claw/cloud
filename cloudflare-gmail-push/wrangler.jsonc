@@ -7,6 +7,7 @@
   "observability": { "enabled": true },
   "placement": { "mode": "smart" },
   "vars": {
+    // Must match --push-auth-token-audience in kiloclaw/google-setup/setup.mjs
     "OIDC_AUDIENCE": "https://gmail-push.kilocode.workers.dev"
   },
   "services": [
@@ -26,6 +27,7 @@
     "dev": {
       "name": "cloudflare-gmail-push-dev",
       "vars": {
+        // Must match --push-auth-token-audience in kiloclaw/google-setup/setup.mjs
         "OIDC_AUDIENCE": "https://gmail-push-dev.kilocode.workers.dev"
       },
       "services": [
