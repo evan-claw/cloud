@@ -45,7 +45,13 @@ export function createHttpProxy(options: ProxyOptions) {
   return async (c: Context): Promise<Response> => {
     const token = c.req.header('x-kiloclaw-proxy-token');
     if (!hasValidProxyToken(token, options.requireProxyToken, options.expectedToken)) {
-      return c.json({ error: 'Unauthorized' }, 401);
+      const isUnknownControllerRoute = c.req.path.startsWith('/_kilo/');
+      return c.json(
+        isUnknownControllerRoute
+          ? { code: 'controller_route_unavailable', error: 'Unauthorized' }
+          : { error: 'Unauthorized' },
+        401
+      );
     }
 
     if (options.supervisor && options.supervisor.getState() !== 'running') {

@@ -14,6 +14,31 @@ const DEFAULT_CONFIG_PATH = '/root/.openclaw/openclaw.json';
 
 export const MAX_CONFIG_BACKUPS = 5;
 
+// NOTE: writeBaseConfig does NOT use the shared atomicWrite utility because
+// the temp file is created earlier by `openclaw onboard` and shared across
+// multiple steps (onboard writes to it, generateBaseConfig reads from it,
+// then we write the patched content and rename into place). atomicWrite
+// manages its own temp file internally, so it cannot participate in this
+// lifecycle.
+
+function pruneOldConfigBackups(dir: string, base: string, deps: ConfigWriterDeps): void {
+  try {
+    const backupPrefix = `${base}.bak.`;
+    const backups = deps
+      .readdirSync(dir)
+      .filter(f => f.startsWith(backupPrefix))
+      .sort();
+    const toRemove = backups.slice(0, -MAX_CONFIG_BACKUPS);
+    for (const old of toRemove) {
+      deps.unlinkSync(path.join(dir, old));
+      console.log(`Pruned old config backup: ${old}`);
+    }
+  } catch (error) {
+    // Non-fatal — backup pruning failure shouldn't block config writes
+    console.warn('Failed to prune old config backups:', error);
+  }
+}
+
 /** Flags passed to `openclaw onboard`, matching start-openclaw.sh. */
 const ONBOARD_FLAGS = [
   'onboard',
@@ -238,6 +263,26 @@ export function generateBaseConfig(
 }
 
 /**
+ * Back up the existing config file and prune old backups.
+ */
+export function backupConfigFile(
+  configPath = DEFAULT_CONFIG_PATH,
+  deps: ConfigWriterDeps = defaultDeps
+): void {
+  const dir = path.dirname(configPath);
+  const base = path.basename(configPath);
+
+  if (deps.existsSync(configPath)) {
+    const timestamp = new Date().toISOString().replace(/:/g, '-');
+    const backupPath = path.join(dir, `${base}.bak.${timestamp}`);
+    deps.copyFileSync(configPath, backupPath);
+    console.log(`Backed up existing config to ${backupPath}`);
+  }
+
+  pruneOldConfigBackups(dir, base, deps);
+}
+
+/**
  * Generate a fresh config and write it to disk.
  *
  * Flow:
@@ -257,33 +302,10 @@ export function writeBaseConfig(
   configPath = DEFAULT_CONFIG_PATH,
   deps: ConfigWriterDeps = defaultDeps
 ): ConfigObject {
+  backupConfigFile(configPath, deps);
+
   const dir = path.dirname(configPath);
   const base = path.basename(configPath);
-
-  // 1. Back up existing config with timestamp
-  if (deps.existsSync(configPath)) {
-    const timestamp = new Date().toISOString().replace(/:/g, '-');
-    const backupPath = path.join(dir, `${base}.bak.${timestamp}`);
-    deps.copyFileSync(configPath, backupPath);
-    console.log(`Backed up existing config to ${backupPath}`);
-  }
-
-  // 2. Prune old backups, keep most recent MAX_CONFIG_BACKUPS
-  try {
-    const backupPrefix = `${base}.bak.`;
-    const backups = deps
-      .readdirSync(dir)
-      .filter(f => f.startsWith(backupPrefix))
-      .sort();
-    const toRemove = backups.slice(0, -MAX_CONFIG_BACKUPS);
-    for (const old of toRemove) {
-      deps.unlinkSync(path.join(dir, old));
-      console.log(`Pruned old config backup: ${old}`);
-    }
-  } catch (error) {
-    // Non-fatal — backup pruning failure shouldn't block config restore
-    console.warn('Failed to prune old config backups:', error);
-  }
 
   // 3. Run `openclaw onboard` targeting a temp file so the existing (possibly
   //    broken) config is untouched until we're ready to atomically swap in.

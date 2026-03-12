@@ -6,9 +6,11 @@
 # Usage: ./scripts/push-dev.sh [app-name]
 #   app-name defaults to FLY_APP_NAME from .dev.vars, or "kiloclaw-dev"
 #
-# Prerequisites: fly auth docker (for registry auth)
-
 set -e
+
+# Fly registry tokens expire after 5 minutes, so re-auth on every push.
+echo "Authenticating with Fly registry..."
+fly auth docker
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 KILOCLAW_DIR="$(dirname "$SCRIPT_DIR")"

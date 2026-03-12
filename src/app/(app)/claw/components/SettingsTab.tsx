@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   Copy,
+  FileCode,
   Hash,
   Package,
   RotateCcw,
@@ -11,7 +12,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
@@ -40,6 +41,7 @@ import { getEntriesByCategory } from '@kilocode/kiloclaw-secret-catalog';
 import { SecretEntrySection } from './SecretEntrySection';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { VersionPinCard } from './VersionPinCard';
+import { OpenclawConfigEditor } from './OpenclawConfigEditor';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -176,6 +178,7 @@ export function SettingsTab({
     ? 'Failed to load the running OpenClaw version. Retry before changing the default model.'
     : undefined;
   const isLoadingModelSelection = isLoadingModels || (isRunning && isLoadingControllerVersion);
+  const [editConfigOpen, setEditConfigOpen] = useState(false);
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
@@ -237,6 +240,10 @@ export function SettingsTab({
       }
     );
   }
+
+  useEffect(() => {
+    if (!isRunning) setEditConfigOpen(false);
+  }, [isRunning]);
 
   // Determine if running version differs from tracked version
   // Old image: the DO returns null when the controller lacks /_kilo/version,
@@ -500,6 +507,16 @@ export function SettingsTab({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={!isRunning || isDestroying}
+                onClick={() => setEditConfigOpen(prev => !prev)}
+              >
+                <FileCode className="h-4 w-4" />
+                Edit Config
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={!isRunning || mutations.stop.isPending || isDestroying}
                 onClick={() => {
                   posthog?.capture('claw_stop_instance_clicked', {
@@ -564,6 +581,16 @@ export function SettingsTab({
                 </>
               )}
             </div>
+
+            {editConfigOpen && (
+              <div className="mt-4">
+                <OpenclawConfigEditor
+                  enabled={isRunning}
+                  mutations={mutations}
+                  onOpenChange={setEditConfigOpen}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -584,6 +611,7 @@ export function SettingsTab({
             });
             mutations.restoreConfig.mutate(undefined, {
               onSuccess: data => {
+                setEditConfigOpen(false);
                 if (data.signaled) {
                   toast.success('Config restored and gateway restarting');
                 } else {

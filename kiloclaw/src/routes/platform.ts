@@ -64,8 +64,8 @@ function statusCodeFromError(err: unknown): number {
   return 500;
 }
 
-function jsonError(message: string, status: number): Response {
-  return new Response(JSON.stringify({ error: message }), {
+function jsonError(message: string, status: number, code?: string): Response {
+  return new Response(JSON.stringify({ error: message, ...(code ? { code } : {}) }), {
     status,
     headers: { 'content-type': 'application/json' },
   });
@@ -77,25 +77,64 @@ function jsonError(message: string, status: number): Response {
  * The raw error is always logged via console.error for Sentry/debugging.
  */
 const SAFE_ERROR_PREFIXES = [
-  'Instance is not ', // e.g. "Instance is not running", "Instance is not provisioned"
+  'Instance is not ', // e.g. "Instance is not running"
+  'Instance not ', // e.g. "Instance not provisioned" (DO uses both forms)
   'User already has an ', // duplicate provision
   'Gateway controller ', // already sanitized at DO level
+  'Config was modified ', // etag mismatch on config replace
   'Invalid secret patch: ', // catalog validation (allFieldsRequired, etc.)
+  'Config was modified ', // etag mismatch on config replace
 ];
 
 function sanitizeError(err: unknown, operation: string): { message: string; status: number } {
   const raw = err instanceof Error ? err.message : 'Unknown error';
   const status = statusCodeFromError(err);
+  const normalized = raw.replace(/^(?:[A-Za-z]+Error:\s*)+/, '');
 
   // Log the full error for Sentry/debugging — this never reaches the caller
   console.error(`[platform] ${operation} failed:`, raw);
 
   // Allow known-safe messages through
-  if (SAFE_ERROR_PREFIXES.some(prefix => raw.startsWith(prefix))) {
-    return { message: raw, status };
+  if (SAFE_ERROR_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+    return { message: normalized, status };
   }
 
   return { message: `${operation} failed`, status };
+}
+
+const OPENCLAW_CONFIG_ERROR_CODES = new Set([
+  'controller_route_unavailable',
+  'config_etag_conflict',
+  'invalid_json_body',
+  'invalid_request_body',
+]);
+
+function sanitizeOpenclawConfigError(
+  err: unknown,
+  operation: string
+): { message: string; status: number; code?: string } {
+  const raw = err instanceof Error ? err.message : 'Unknown error';
+  const status = statusCodeFromError(err);
+  const normalized = raw.replace(/^(?:[A-Za-z]+Error:\s*)+/, '');
+  const code =
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string'
+      ? (err as { code: string }).code
+      : undefined;
+
+  console.error(`[platform] ${operation} failed:`, raw);
+
+  if (code && OPENCLAW_CONFIG_ERROR_CODES.has(code)) {
+    return { message: normalized, status, code };
+  }
+
+  if (SAFE_ERROR_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
+    return { message: normalized, status, ...(code ? { code } : {}) };
+  }
+
+  return { message: `${operation} failed`, status, ...(code ? { code } : {}) };
 }
 
 /**
@@ -490,6 +529,60 @@ platform.post('/config/restore', async c => {
     const status = statusCodeFromError(err);
     console.error('[platform] config restore failed:', message);
     return jsonError(message, status);
+  }
+});
+
+// GET /api/platform/openclaw-config?userId=...
+// Returns the live openclaw.json from the running machine.
+platform.get('/openclaw-config', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+
+  try {
+    const config = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getOpenclawConfig(),
+      'getOpenclawConfig'
+    );
+    if (!config) {
+      return jsonError('Failed to get OpenClaw config', 404, 'controller_route_unavailable');
+    }
+    return c.json(config, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'openclaw-config read');
+    return jsonError(message, status, code);
+  }
+});
+
+// POST /api/platform/openclaw-config
+// Replace the entire openclaw.json on the running machine.
+const ReplaceOpenclawConfigSchema = z.object({
+  userId: z.string().min(1),
+  config: z.record(z.string(), z.unknown()),
+  etag: z.string().optional(),
+});
+
+platform.post('/openclaw-config', async c => {
+  const result = await parseBody(c, ReplaceOpenclawConfigSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, config, etag } = result.data;
+
+  try {
+    const response = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.replaceConfigOnMachine(config, etag),
+      'replaceConfigOnMachine'
+    );
+    if (!response) {
+      return jsonError('Failed to update OpenClaw config', 404, 'controller_route_unavailable');
+    }
+    return c.json(response, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'openclaw-config replace');
+    return jsonError(message, status, code);
   }
 });
 

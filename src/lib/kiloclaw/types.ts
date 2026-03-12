@@ -224,6 +224,12 @@ export type ControllerVersionResponse = {
   openclawCommit?: string | null;
 };
 
+/** Response from GET /api/platform/openclaw-config */
+export type OpenclawConfigResponse = {
+  config: Record<string, unknown>;
+  etag: string;
+};
+
 /** Input to POST /api/platform/google-credentials */
 export type GoogleCredentialsInput = {
   googleCredentials: {
