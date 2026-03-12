@@ -197,6 +197,9 @@ export function useKiloClawMutations() {
         },
       })
     ),
+    disconnectGoogle: useMutation(
+      trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus })
+    ),
   };
 }
 

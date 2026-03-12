@@ -4,8 +4,8 @@ import { IMAGE_TAG_RE, IMAGE_TAG_MAX_LENGTH } from '../lib/image-tag-validation'
 
 export const EncryptedEnvelopeSchema = z.object({
   // AES-256-GCM ciphertext: 16-byte IV + ciphertext + 16-byte tag, base64-encoded.
-  // 8 KiB is generous for token values (typical bot tokens are < 200 bytes).
-  encryptedData: z.string().max(8192),
+  // 64 KiB headroom for larger payloads like gog config tarballs.
+  encryptedData: z.string().max(65536),
   // RSA-2048 OAEP ciphertext of the 32-byte DEK, base64-encoded (~344 chars).
   encryptedDEK: z.string().max(1024),
   algorithm: z.literal('rsa-aes-256-gcm'),
@@ -30,6 +30,13 @@ const envVarNameSchema = z
   .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'Must be a valid shell identifier')
   .refine(s => !s.startsWith('KILOCLAW_'), 'Uses reserved prefix (KILOCLAW_*)');
 
+export const GoogleCredentialsSchema = z.object({
+  gogConfigTarball: EncryptedEnvelopeSchema, // base64 tar.gz of ~/.config/gogcli/
+  email: z.string().optional(), // for display ("Connected as user@...")
+});
+
+export type GoogleCredentials = z.infer<typeof GoogleCredentialsSchema>;
+
 export const InstanceConfigSchema = z.object({
   envVars: z.record(envVarNameSchema, z.string()).optional(),
   encryptedSecrets: z.record(envVarNameSchema, EncryptedEnvelopeSchema).optional(),
@@ -44,6 +51,7 @@ export const InstanceConfigSchema = z.object({
       slackAppToken: EncryptedEnvelopeSchema.optional(),
     })
     .optional(),
+  googleCredentials: GoogleCredentialsSchema.optional(),
   machineSize: MachineSizeSchema.optional(),
   // Region for Fly Volume/Machine. Comma-separated priority list of region codes or aliases.
   // Examples: "us,eu" (try US first, then Europe), "lhr" (London only).
@@ -78,7 +86,7 @@ export const SecretsPatchSchema = z.object({
 
 export const ProvisionRequestSchema = z.object({
   userId: z.string().min(1),
-  ...InstanceConfigSchema.shape,
+  ...InstanceConfigSchema.omit({ googleCredentials: true }).shape,
 });
 
 export type ProvisionRequest = z.infer<typeof ProvisionRequestSchema>;
@@ -117,6 +125,7 @@ export const PersistedStateSchema = z.object({
     })
     .nullable()
     .default(null),
+  googleCredentials: GoogleCredentialsSchema.nullable().default(null),
   provisionedAt: z.number().nullable().default(null),
   lastStartedAt: z.number().nullable().default(null),
   lastStoppedAt: z.number().nullable().default(null),

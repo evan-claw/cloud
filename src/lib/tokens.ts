@@ -21,11 +21,13 @@ export type JWTTokenExtraPayload = {
 
 const FIVE_YEARS_IN_SECONDS = 5 * 365 * 24 * 60 * 60;
 const THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60;
+const ONE_HOUR_IN_SECONDS = 60 * 60;
 const FIVE_MINUTES_IN_SECONDS = 5 * 60;
 
 export const TOKEN_EXPIRY = {
   default: FIVE_YEARS_IN_SECONDS,
   thirtyDays: THIRTY_DAYS_IN_SECONDS,
+  oneHour: ONE_HOUR_IN_SECONDS,
   fiveMinutes: FIVE_MINUTES_IN_SECONDS,
 } as const;
 

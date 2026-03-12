@@ -13,6 +13,7 @@ import { registerHealthRoute } from './routes/health';
 import { registerGatewayRoutes } from './routes/gateway';
 import { registerConfigRoutes } from './routes/config';
 import { CONTROLLER_COMMIT, CONTROLLER_VERSION } from './version';
+import { writeGogCredentials } from './gog-credentials';
 
 export type RuntimeConfig = {
   port: number;
@@ -112,6 +113,15 @@ async function handleHttpRequest(
 
 export async function startController(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const config = loadRuntimeConfig(env);
+
+  // Write gog credentials before starting the gateway so env vars are available
+  // to the child process on first spawn. Best-effort: log and continue on failure.
+  try {
+    await writeGogCredentials(env as Record<string, string | undefined>);
+  } catch (err) {
+    console.error('[gog] Failed to write credentials:', err);
+  }
+
   const supervisor = createSupervisor({
     gatewayArgs: config.gatewayArgs,
   });

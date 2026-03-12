@@ -13,6 +13,7 @@ import {
   UserIdRequestSchema,
   DestroyRequestSchema,
   ChannelsPatchSchema,
+  GoogleCredentialsSchema,
   SecretsPatchSchema,
 } from '../schemas/instance-config';
 import {
@@ -210,6 +211,49 @@ platform.patch('/channels', async c => {
     return c.json(updated, 200);
   } catch (err) {
     const { message, status } = sanitizeError(err, 'channels patch');
+    return jsonError(message, status);
+  }
+});
+
+// POST /api/platform/google-credentials
+const GoogleCredentialsPatchSchema = z.object({
+  userId: z.string().min(1),
+  googleCredentials: GoogleCredentialsSchema,
+});
+
+platform.post('/google-credentials', async c => {
+  const result = await parseBody(c, GoogleCredentialsPatchSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, googleCredentials } = result.data;
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGoogleCredentials(googleCredentials),
+      'updateGoogleCredentials'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'google-credentials');
+    return jsonError(message, status);
+  }
+});
+
+// DELETE /api/platform/google-credentials?userId=...
+platform.delete('/google-credentials', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.clearGoogleCredentials(),
+      'clearGoogleCredentials'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'google-credentials delete');
     return jsonError(message, status);
   }
 });

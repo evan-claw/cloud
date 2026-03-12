@@ -135,6 +135,7 @@ export type PlatformStatusResponse = {
   imageVariant: string | null;
   trackedImageTag: string | null;
   trackedImageDigest: string | null;
+  googleConnected: boolean;
 };
 
 /** Response from GET /api/platform/debug-status (internal/admin only). */
@@ -221,6 +222,19 @@ export type ControllerVersionResponse = {
   commit: string | null;
   openclawVersion?: string | null;
   openclawCommit?: string | null;
+};
+
+/** Input to POST /api/platform/google-credentials */
+export type GoogleCredentialsInput = {
+  googleCredentials: {
+    gogConfigTarball: EncryptedEnvelope;
+    email?: string;
+  };
+};
+
+/** Response from POST/DELETE /api/platform/google-credentials */
+export type GoogleCredentialsResponse = {
+  googleConnected: boolean;
 };
 
 /** Combined status + gateway token returned by tRPC getStatus */

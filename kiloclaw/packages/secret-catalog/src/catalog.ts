@@ -133,6 +133,15 @@ export const ALL_SECRET_ENV_VARS: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Env vars that are always sensitive but aren't part of the UI catalog.
+ * These are set internally by the worker (e.g. from encrypted DO state),
+ * not entered by users through the secret management UI.
+ */
+export const INTERNAL_SENSITIVE_ENV_VARS: ReadonlySet<string> = new Set([
+  'GOOGLE_GOG_CONFIG_TARBALL',
+]);
+
+/**
  * Get all entries for a given category, sorted by order (undefined sorts last).
  */
 export function getEntriesByCategory(category: SecretCategory): SecretCatalogEntry[] {

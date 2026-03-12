@@ -1,8 +1,19 @@
-import { ALL_SECRET_ENV_VARS } from '@kilocode/kiloclaw-secret-catalog';
+import {
+  ALL_SECRET_ENV_VARS,
+  INTERNAL_SENSITIVE_ENV_VARS,
+} from '@kilocode/kiloclaw-secret-catalog';
 import type { KiloClawEnv } from '../types';
-import type { EncryptedEnvelope, EncryptedChannelTokens } from '../schemas/instance-config';
+import type {
+  EncryptedEnvelope,
+  EncryptedChannelTokens,
+  GoogleCredentials,
+} from '../schemas/instance-config';
 import { deriveGatewayToken } from '../auth/gateway-token';
-import { mergeEnvVarsWithSecrets, decryptChannelTokens } from '../utils/encryption';
+import {
+  mergeEnvVarsWithSecrets,
+  decryptChannelTokens,
+  decryptWithPrivateKey,
+} from '../utils/encryption';
 import { validateUserEnvVarName } from '../utils/env-encryption';
 
 /**
@@ -15,6 +26,7 @@ export type UserConfig = {
   kilocodeApiKey?: string | null;
   kilocodeDefaultModel?: string | null;
   channels?: EncryptedChannelTokens;
+  googleCredentials?: GoogleCredentials;
   instanceFeatures?: string[];
 };
 
@@ -49,6 +61,7 @@ const SENSITIVE_KEYS = new Set([
   'KILOCODE_API_KEY',
   'OPENCLAW_GATEWAY_TOKEN',
   ...ALL_SECRET_ENV_VARS,
+  ...INTERNAL_SENSITIVE_ENV_VARS,
 ]);
 
 /**
@@ -148,6 +161,24 @@ export async function buildEnvVars(
       const channelEnv = decryptChannelTokens(userConfig.channels, env.AGENT_ENV_VARS_PRIVATE_KEY);
       // All channel tokens are sensitive
       Object.assign(sensitive, channelEnv);
+    }
+
+    // Layer 4b: Decrypt Google credentials (gog config tarball) and pass as env var.
+    // Wrapped in try/catch so corrupted credentials don't block container startup —
+    // the machine starts without Google access instead of failing entirely.
+    if (userConfig.googleCredentials && env.AGENT_ENV_VARS_PRIVATE_KEY) {
+      try {
+        const tarballBase64 = decryptWithPrivateKey(
+          userConfig.googleCredentials.gogConfigTarball,
+          env.AGENT_ENV_VARS_PRIVATE_KEY
+        );
+        sensitive.GOOGLE_GOG_CONFIG_TARBALL = tarballBase64;
+        if (userConfig.googleCredentials.email) {
+          plainEnv.GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
+        }
+      } catch (err) {
+        console.warn('Failed to decrypt Google credentials, starting without Google access:', err);
+      }
     }
   }
 

@@ -36,6 +36,7 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.kilocodeApiKeyExpiresAt = d.kilocodeApiKeyExpiresAt;
     s.kilocodeDefaultModel = d.kilocodeDefaultModel;
     s.channels = d.channels;
+    s.googleCredentials = d.googleCredentials;
     s.provisionedAt = d.provisionedAt;
     s.lastStartedAt = d.lastStartedAt;
     s.lastStoppedAt = d.lastStoppedAt;
@@ -85,6 +86,7 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.kilocodeApiKeyExpiresAt = null;
   s.kilocodeDefaultModel = null;
   s.channels = null;
+  s.googleCredentials = null;
   s.provisionedAt = null;
   s.lastStartedAt = null;
   s.lastStoppedAt = null;
@@ -127,6 +129,7 @@ export function createMutableState(): InstanceMutableState {
     kilocodeApiKeyExpiresAt: null,
     kilocodeDefaultModel: null,
     channels: null,
+    googleCredentials: null,
     provisionedAt: null,
     lastStartedAt: null,
     lastStoppedAt: null,

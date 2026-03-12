@@ -396,6 +396,18 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
+# GOG (Google Workspace CLI) KEYRING
+# ============================================================
+# GOG_KEYRING_PASSWORD is NOT a secret. The 99designs/keyring file backend
+# requires a password to operate, but gog runs inside a single-tenant VM
+# with no shared access. The value is arbitrary — it just needs to be
+# consistent across setup (google-setup/setup.mjs), container startup
+# (here), and runtime (controller/src/gog-credentials.ts). Without this
+# env var, the keyring library prompts for a password on a missing TTY
+# and fails.
+export GOG_KEYRING_PASSWORD="kiloclaw"
+
+# ============================================================
 # START CONTROLLER
 # ============================================================
 # Tell the gateway it's running under a supervisor. On SIGUSR1 restart,

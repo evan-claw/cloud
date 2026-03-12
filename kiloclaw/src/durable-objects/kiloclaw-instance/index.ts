@@ -14,6 +14,7 @@ import type {
   InstanceConfig,
   PersistedState,
   EncryptedEnvelope,
+  GoogleCredentials,
   MachineSize,
 } from '../../schemas/instance-config';
 import { DEFAULT_INSTANCE_FEATURES } from '../../schemas/instance-config';
@@ -457,6 +458,34 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return { configured };
   }
 
+  /**
+   * Store encrypted Google credentials (client_secret.json + OAuth tokens).
+   * Does NOT restart the machine; the caller should prompt the user to restart.
+   */
+  async updateGoogleCredentials(
+    credentials: GoogleCredentials
+  ): Promise<{ googleConnected: boolean }> {
+    await this.loadState();
+
+    this.s.googleCredentials = credentials;
+    await this.ctx.storage.put({ googleCredentials: this.s.googleCredentials });
+
+    return { googleConnected: true };
+  }
+
+  /**
+   * Clear stored Google credentials.
+   * Does NOT restart the machine; the caller should prompt the user to restart.
+   */
+  async clearGoogleCredentials(): Promise<{ googleConnected: boolean }> {
+    await this.loadState();
+
+    this.s.googleCredentials = null;
+    await this.ctx.storage.put({ googleCredentials: null });
+
+    return { googleConnected: false };
+  }
+
   // ── Pairing ─────────────────────────────────────────────────────────
 
   async listPairingRequests(forceRefresh = false) {
@@ -764,6 +793,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     imageVariant: string | null;
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
+    googleConnected: boolean;
   }> {
     await this.loadState();
 
@@ -798,6 +828,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       imageVariant: this.s.imageVariant,
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
+      googleConnected: this.s.googleCredentials !== null,
     };
   }
 
@@ -820,6 +851,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     imageVariant: string | null;
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
+    googleConnected: boolean;
     pendingDestroyMachineId: string | null;
     pendingDestroyVolumeId: string | null;
     pendingPostgresMarkOnFinalize: boolean;
@@ -855,6 +887,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       imageVariant: this.s.imageVariant,
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
+      googleConnected: this.s.googleCredentials !== null,
       pendingDestroyMachineId: this.s.pendingDestroyMachineId,
       pendingDestroyVolumeId: this.s.pendingDestroyVolumeId,
       pendingPostgresMarkOnFinalize: this.s.pendingPostgresMarkOnFinalize,

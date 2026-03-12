@@ -6,6 +6,8 @@ import {
   FIELD_KEY_TO_ENV_VAR,
   ENV_VAR_TO_FIELD_KEY,
   FIELD_KEY_TO_ENTRY,
+  ALL_SECRET_ENV_VARS,
+  INTERNAL_SENSITIVE_ENV_VARS,
   getEntriesByCategory,
   getFieldKeysByCategory,
 } from '../catalog.js';
@@ -326,6 +328,18 @@ describe('Secret Catalog', () => {
       expect(botEntry).toBeDefined();
       expect(botEntry).toBe(appEntry);
       expect(botEntry?.allFieldsRequired).toBe(true);
+    });
+  });
+
+  describe('INTERNAL_SENSITIVE_ENV_VARS', () => {
+    it('contains Google credential env vars', () => {
+      expect(INTERNAL_SENSITIVE_ENV_VARS.has('GOOGLE_GOG_CONFIG_TARBALL')).toBe(true);
+    });
+
+    it('does not overlap with catalog-derived ALL_SECRET_ENV_VARS', () => {
+      for (const envVar of INTERNAL_SENSITIVE_ENV_VARS) {
+        expect(ALL_SECRET_ENV_VARS.has(envVar)).toBe(false);
+      }
     });
   });
 

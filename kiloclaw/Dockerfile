@@ -54,7 +54,6 @@ RUN npm install -g mcporter@0.7.3
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.11.1
 
-
 # Install Go (available at runtime for users to `go install` additional tools)
 ENV GO_VERSION=1.26.0
 RUN ARCH="$(dpkg --print-architecture)" \

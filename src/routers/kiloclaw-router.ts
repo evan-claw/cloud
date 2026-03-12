@@ -468,6 +468,24 @@ export const kiloclawRouter = createTRPCRouter({
     return client.restoreConfig(ctx.user.id);
   }),
 
+  getGoogleSetupCommand: baseProcedure.query(({ ctx }) => {
+    // Short-lived token — the user should run the setup command promptly.
+    // Regenerated on each page load, so 1 hour is sufficient.
+    const token = generateApiToken(ctx.user, undefined, {
+      expiresIn: TOKEN_EXPIRY.oneHour,
+    });
+    const isDev = process.env.NODE_ENV === 'development';
+    const workerFlag = isDev ? ' --worker-url=http://localhost:8795' : '';
+    return {
+      command: `docker run -it --network host ghcr.io/kilo-org/google-setup --token="${token}"${workerFlag}`,
+    };
+  }),
+
+  disconnectGoogle: baseProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.clearGoogleCredentials(ctx.user.id);
+  }),
+
   getEarlybirdStatus: baseProcedure
     .output(z.object({ purchased: z.boolean() }))
     .query(async ({ ctx }) => {
