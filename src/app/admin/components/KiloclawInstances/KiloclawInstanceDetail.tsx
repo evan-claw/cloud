@@ -394,6 +394,36 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     void queryClient.invalidateQueries({ queryKey: trpc.admin.kiloclawInstances.get.queryKey() });
   };
 
+  const machineControlsEnabled = data?.destroyed_at === null && !!data?.workerStatus?.flyMachineId;
+
+  const invalidateMachineQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: trpc.admin.kiloclawInstances.get.queryKey() });
+  };
+
+  const { mutateAsync: machineStart, isPending: isMachineStarting } = useMutation(
+    trpc.admin.kiloclawInstances.machineStart.mutationOptions({
+      onSuccess: () => {
+        toast.success('Machine start requested');
+        invalidateMachineQueries();
+      },
+      onError: err => {
+        toast.error(`Failed to start machine: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: machineStop, isPending: isMachineStopping } = useMutation(
+    trpc.admin.kiloclawInstances.machineStop.mutationOptions({
+      onSuccess: () => {
+        toast.success('Machine stop requested');
+        invalidateMachineQueries();
+      },
+      onError: err => {
+        toast.error(`Failed to stop machine: ${err.message}`);
+      },
+    })
+  );
+
   const { mutateAsync: gatewayStart, isPending: isGatewayStarting } = useMutation(
     trpc.admin.kiloclawInstances.gatewayStart.mutationOptions({
       onSuccess: () => {
@@ -494,6 +524,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   }
 
   const isActive = data.destroyed_at === null;
+  const machineActionPending = isMachineStarting || isMachineStopping;
   const gatewayActionPending =
     isGatewayStarting ||
     isGatewayStopping ||
@@ -789,6 +820,51 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
             ) : null}
           </CardContent>
         </Card>
+
+        {/* Machine Controls */}
+        {machineControlsEnabled && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle>Machine Controls</CardTitle>
+                  <CardDescription>Start or stop the Fly machine</CardDescription>
+                </div>
+                <StatusBadge status={data.workerStatus?.status ?? null} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending}
+                  onClick={() => void machineStart({ userId: data.user_id })}
+                >
+                  {isMachineStarting ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-1 h-4 w-4" />
+                  )}
+                  Start Machine
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending}
+                  onClick={() => void machineStop({ userId: data.user_id })}
+                >
+                  {isMachineStopping ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Square className="mr-1 h-4 w-4" />
+                  )}
+                  Stop Machine
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Gateway Process (controller) */}
         {isActive && (
