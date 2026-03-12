@@ -59,11 +59,11 @@
       "top_provider": {
         "is_moderated": false,
         "context_length": 204800,
-        "max_completion_tokens": 65536
+        "max_completion_tokens": 131072
       },
       "pricing": {
-        "prompt": "0.000002",
-        "completion": "0.000008",
+        "prompt": "0.0000006",
+        "completion": "0.000003",
         "request": "0",
         "image": "0",
         "web_search": "0",
@@ -79,11 +79,10 @@
       ],
       "settings": {
         "included_tools": [
-          "search_and_replace"
+          "edit_file"
         ],
         "excluded_tools": [
-          "apply_diff",
-          "edit_file"
+          "apply_diff"
         ]
       },
       "preferredIndex": 1
