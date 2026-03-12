@@ -72,6 +72,7 @@ export type InstanceMutableState = {
   lastDestroyErrorAt: number | null;
   lastBoundMachineRecoveryAt: number | null;
   instanceFeatures: string[];
+  gmailNotificationsEnabled: boolean;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };

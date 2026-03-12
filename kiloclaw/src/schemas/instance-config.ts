@@ -162,6 +162,7 @@ export const PersistedStateSchema = z.object({
   // Each entry is a feature name (e.g. "npm-global-prefix") that gates runtime behavior.
   // New instances get the current feature set; legacy instances have an empty array.
   instanceFeatures: z.array(z.string()).default([]),
+  gmailNotificationsEnabled: z.boolean().default(false),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;
