@@ -69,7 +69,7 @@ test.describe('Customer Source Survey', () => {
     await expect(submitButton).toBeDisabled();
 
     // Verify Skip link exists
-    await expect(page.getByRole('link', { name: 'Skip' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Skip' })).toBeVisible();
   });
 
   test('submit button is enabled only when textarea has content', async ({ page }) => {
@@ -112,7 +112,7 @@ test.describe('Customer Source Survey', () => {
   test('skipping redirects to get-started', async ({ page }) => {
     await signInFreshUser(page);
 
-    const skipLink = page.getByRole('link', { name: 'Skip' });
+    const skipLink = page.getByRole('button', { name: 'Skip' });
     await skipLink.click();
 
     await page.waitForURL(url => url.pathname === '/get-started', {
@@ -153,7 +153,7 @@ test.describe('Customer Source Survey', () => {
     await signInFreshUser(page);
 
     // Click Skip
-    const skipLink = page.getByRole('link', { name: 'Skip' });
+    const skipLink = page.getByRole('button', { name: 'Skip' });
     await skipLink.click();
 
     await page.waitForURL(url => url.pathname === '/get-started', {
@@ -198,7 +198,7 @@ test.describe('Customer Source Survey', () => {
 
     await page.goto('/customer-source-survey?callbackPath=%2Fprofile');
 
-    const skipLink = page.getByRole('link', { name: 'Skip' });
+    const skipLink = page.getByRole('button', { name: 'Skip' });
     await skipLink.click();
 
     // Should redirect to /profile (the callbackPath), not /get-started

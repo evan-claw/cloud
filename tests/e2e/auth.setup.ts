@@ -31,7 +31,7 @@ setup('authenticate', async ({ page }) => {
 
   // If we land on the survey page, skip it to complete setup
   if (new URL(page.url()).pathname === '/customer-source-survey') {
-    await page.click('a:has-text("Skip")');
+    await page.click('button:has-text("Skip")');
     await page.waitForURL(url => url.pathname === '/get-started' || url.pathname === '/profile', {
       timeout: 10000,
       waitUntil: 'networkidle',
