@@ -11,16 +11,16 @@ export function ClawHeader({
   region,
   gatewayUrl,
   gatewayReady,
+  isSetupWizard,
 }: {
   status: ClawState;
   sandboxId: string | null;
   region: string | null;
   gatewayUrl: string;
   gatewayReady?: boolean;
+  isSetupWizard?: boolean;
 }) {
   const statusInfo = status ? CLAW_STATUS_BADGE[status] : null;
-  const displayRegion = region ? region.toUpperCase() : 'Region pending';
-
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
@@ -37,14 +37,21 @@ export function ClawHeader({
               </Badge>
             )}
           </div>
-          <p className="text-muted-foreground font-mono text-sm">
-            {displayRegion} {sandboxId ? `- ${sandboxId}` : ''}
-          </p>
+          {!isSetupWizard && region && (
+            <p className="text-muted-foreground font-mono text-sm">
+              {region.toUpperCase()} {sandboxId ? `- ${sandboxId}` : ''}
+            </p>
+          )}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <OpenClawButton canShow={status === 'running' && !!gatewayReady} gatewayUrl={gatewayUrl} />
-      </div>
+      {!isSetupWizard && (
+        <div className="flex flex-wrap items-center gap-2">
+          <OpenClawButton
+            canShow={status === 'running' && !!gatewayReady}
+            gatewayUrl={gatewayUrl}
+          />
+        </div>
+      )}
     </header>
   );
 }
