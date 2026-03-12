@@ -124,8 +124,10 @@ describe('POST /push/user/:userId', () => {
       expect(res.status).toBe(200);
       expect(globalThis.fetch).toHaveBeenCalledOnce();
       const mockFetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
-      const url: unknown = mockFetchCalls[0]?.[0];
+      const [url, fetchInit]: [unknown, RequestInit] = mockFetchCalls[0];
       expect(url).toContain('/_kilo/gmail-pubsub');
+      const headers = fetchInit?.headers as Record<string, string>;
+      expect(headers?.['fly-force-instance-id']).toBe('machine-abc');
     } finally {
       globalThis.fetch = originalFetch;
     }

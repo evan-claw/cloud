@@ -66,6 +66,7 @@ pushRoute.post('/user/:userId', async c => {
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${gatewayToken}`,
+        'fly-force-instance-id': status.flyMachineId!,
       },
       body: c.req.raw.body,
     });
