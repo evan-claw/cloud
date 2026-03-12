@@ -59,6 +59,7 @@ function GoogleAccountSection({
     })
   );
   const [copied, setCopied] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const isDisconnecting = mutations.disconnectGoogle.isPending;
   const command = setupData?.command;
 
@@ -86,12 +87,7 @@ function GoogleAccountSection({
               variant="outline"
               size="sm"
               disabled={isDisconnecting}
-              onClick={() => {
-                mutations.disconnectGoogle.mutate(undefined, {
-                  onSuccess: () => toast.success('Google account disconnected. Redeploy to apply.'),
-                  onError: err => toast.error(`Failed to disconnect: ${err.message}`),
-                });
-              }}
+              onClick={() => setConfirmDisconnect(true)}
             >
               <X className="h-4 w-4" />
               {isDisconnecting ? 'Disconnecting...' : 'Disconnect'}
@@ -124,6 +120,26 @@ function GoogleAccountSection({
           </div>
         )}
       </div>
+
+      <ConfirmActionDialog
+        open={confirmDisconnect}
+        onOpenChange={setConfirmDisconnect}
+        title="Disconnect Google Account"
+        description="This will remove your Google credentials. Reconnecting requires re-running the Docker setup flow (gcloud login, project setup, OAuth consent). Redeploy after disconnecting to apply."
+        confirmLabel="Disconnect"
+        confirmIcon={<X className="mr-1 h-4 w-4" />}
+        isPending={isDisconnecting}
+        pendingLabel="Disconnecting..."
+        onConfirm={() => {
+          mutations.disconnectGoogle.mutate(undefined, {
+            onSuccess: () => {
+              toast.success('Google account disconnected. Redeploy to apply.');
+              setConfirmDisconnect(false);
+            },
+            onError: err => toast.error(`Failed to disconnect: ${err.message}`),
+          });
+        }}
+      />
     </div>
   );
 }
