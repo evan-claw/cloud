@@ -61,9 +61,6 @@ export default function CreditsPage() {
                       Expiry Date
                     </th>
                     <th className="text-muted-foreground px-6 py-3 text-left text-xs font-medium tracking-wider uppercase">
-                      Current Balance
-                    </th>
-                    <th className="text-muted-foreground px-6 py-3 text-left text-xs font-medium tracking-wider uppercase">
                       Original Balance
                     </th>
                   </tr>
@@ -76,9 +73,6 @@ export default function CreditsPage() {
                       </td>
                       <td className="px-6 py-4 text-sm whitespace-nowrap">
                         <Skeleton className="group-even:bg-background h-5 w-20" />
-                      </td>
-                      <td className="px-6 py-4 text-sm whitespace-nowrap">
-                        <Skeleton className="group-even:bg-background h-5 w-16" />
                       </td>
                       <td className="px-6 py-4 text-sm whitespace-nowrap">
                         <Skeleton className="group-even:bg-background h-5 w-16" />
@@ -174,9 +168,6 @@ export default function CreditsPage() {
                     Expiry Date
                   </th>
                   <th className="text-muted-foreground px-6 py-3 text-left text-xs font-medium tracking-wider uppercase">
-                    Current Balance
-                  </th>
-                  <th className="text-muted-foreground px-6 py-3 text-left text-xs font-medium tracking-wider uppercase">
                     Original Balance
                   </th>
                 </tr>
@@ -201,9 +192,6 @@ export default function CreditsPage() {
                       ) : (
                         '-'
                       )}
-                    </td>
-                    <td className="px-6 py-4 text-sm whitespace-nowrap">
-                      {formatMicrodollars(block.balance_mUsd, 6)}
                     </td>
                     <td className="px-6 py-4 text-sm whitespace-nowrap">
                       {formatMicrodollars(block.amount_mUsd)}
