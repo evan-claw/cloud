@@ -18,7 +18,6 @@ import type {
   VercelProviderConfig,
 } from '@/lib/providers/openrouter/types';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
-import { isXaiModel } from '@/lib/providers/xai';
 import { isZaiModel } from '@/lib/providers/zai';
 import * as crypto from 'crypto';
 
