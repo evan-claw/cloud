@@ -2640,9 +2640,7 @@ export class TownDO extends DurableObject<Env> {
       userId: rigConfig.userId,
       agentId: triageAgent.id,
       agentName: triageAgent.name,
-      // Use 'triage' role so the container skips the git clone entirely.
-      // Triage work is purely reasoning — no code changes needed.
-      role: 'triage',
+      role: 'polecat',
       identity: triageAgent.identity,
       beadId: triageBead.bead_id,
       beadTitle: triageBead.title,
@@ -2654,6 +2652,7 @@ export class TownDO extends DurableObject<Env> {
       townConfig,
       systemPromptOverride: systemPrompt,
       platformIntegrationId: rigConfig.platformIntegrationId,
+      lightweight: true,
     });
 
     if (started) {
