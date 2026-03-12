@@ -220,6 +220,11 @@ export const kiloclawRouter = createTRPCRouter({
     return fetchKiloClawServiceDegraded();
   }),
 
+  latestVersion: baseProcedure.query(async () => {
+    const client = new KiloClawInternalClient();
+    return client.getLatestVersion();
+  }),
+
   // Status + gateway token (two internal client calls, merged for the dashboard)
   getStatus: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
@@ -374,7 +379,7 @@ export const kiloclawRouter = createTRPCRouter({
     return client.getConfig();
   }),
 
-  restartGateway: baseProcedure
+  restartMachine: baseProcedure
     .input(
       z
         .object({
@@ -393,7 +398,7 @@ export const kiloclawRouter = createTRPCRouter({
       const client = new KiloClawUserClient(
         generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
       );
-      return client.restartGateway(input?.imageTag ? { imageTag: input.imageTag } : undefined);
+      return client.restartMachine(input?.imageTag ? { imageTag: input.imageTag } : undefined);
     }),
 
   listPairingRequests: baseProcedure

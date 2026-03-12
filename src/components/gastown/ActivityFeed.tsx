@@ -13,6 +13,7 @@ import {
   PlayCircle,
   PauseCircle,
   Mail,
+  MessageSquare,
   ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -27,6 +28,7 @@ const EVENT_ICONS: Record<string, typeof Activity> = {
   review_submitted: GitMerge,
   review_completed: GitMerge,
   mail_sent: Mail,
+  agent_status: MessageSquare,
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -39,6 +41,7 @@ const EVENT_COLORS: Record<string, string> = {
   review_submitted: 'text-indigo-500',
   review_completed: 'text-green-600',
   mail_sent: 'text-sky-500',
+  agent_status: 'text-white/50',
 };
 
 type TownEvent = GastownOutputs['gastown']['getTownEvents'][number];
@@ -73,6 +76,16 @@ function eventDescription(event: {
       return `${rigPrefix}Review ${event.new_value ?? 'completed'}`;
     case 'mail_sent':
       return `${rigPrefix}Mail sent`;
+    case 'agent_status': {
+      const msg = event.new_value ?? (event.metadata?.message as string | undefined);
+      const agentName = event.metadata?.agent_name as string | undefined;
+      const rigName = event.metadata?.rig_name as string | undefined;
+      const body = msg ?? 'Agent status update';
+      // Prefer metadata rig_name over the top-level rig_name (which is
+      // never populated for bead_events rows).
+      const prefix = rigName ? `[${rigName}] ` : rigPrefix;
+      return agentName ? `${prefix}${agentName}: ${body}` : `${prefix}${body}`;
+    }
     default:
       return `${rigPrefix}${event.event_type}`;
   }

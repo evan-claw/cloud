@@ -2,7 +2,7 @@ import 'server-only';
 
 import { KILOCLAW_API_URL } from '@/lib/config.server';
 import { KiloClawApiError } from './kiloclaw-internal-client';
-import type { UserConfigResponse, PlatformStatusResponse, RestartGatewayResponse } from './types';
+import type { UserConfigResponse, PlatformStatusResponse, RestartMachineResponse } from './types';
 
 /**
  * KiloClaw worker client for user-facing routes.
@@ -50,8 +50,8 @@ export class KiloClawUserClient {
     return this.request('/api/kiloclaw/status');
   }
 
-  async restartGateway(options?: { imageTag?: string }): Promise<RestartGatewayResponse> {
-    return this.request('/api/admin/gateway/restart', {
+  async restartMachine(options?: { imageTag?: string }): Promise<RestartMachineResponse> {
+    return this.request('/api/admin/machine/restart', {
       method: 'POST',
       body: options?.imageTag ? JSON.stringify({ imageTag: options.imageTag }) : undefined,
     });

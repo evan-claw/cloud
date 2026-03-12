@@ -1,6 +1,6 @@
 import type { CodeReviewAgentConfig } from '@/lib/agent-config/core/types';
 import { resolveTemplate, generateReviewPrompt } from './generate-prompt';
-import type { PromptTemplate } from './generate-prompt';
+import type { PromptTemplate, ExistingReviewState } from './generate-prompt';
 
 // --- Fixtures ---
 
@@ -202,5 +202,117 @@ describe('generateReviewPrompt', () => {
 
     expect(prompt).not.toContain('STRICT REVIEW MODE');
     expect(prompt).not.toContain('ROAST MODE ACTIVATED');
+  });
+});
+
+// --- Incremental review ---
+
+const existingReviewStateWithSummary: ExistingReviewState = {
+  summaryComment: {
+    commentId: 123,
+    body: '<!-- kilo-review -->\n## Code Review Summary\n\n**Status:** 2 Issues Found',
+  },
+  inlineComments: [
+    { id: 1, path: 'src/foo.ts', line: 10, body: '**WARNING:** Issue one', isOutdated: false },
+    { id: 2, path: 'src/bar.ts', line: 20, body: '**CRITICAL:** Issue two', isOutdated: true },
+  ],
+  previousStatus: 'issues-found',
+  headCommitSha: 'currentsha123',
+};
+
+const existingReviewStateNoSummary: ExistingReviewState = {
+  summaryComment: null,
+  inlineComments: [],
+  previousStatus: 'no-review',
+  headCommitSha: 'currentsha123',
+};
+
+describe('generateReviewPrompt (incremental review)', () => {
+  it('uses incremental workflow when previousHeadSha and summary comment are provided', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: existingReviewStateWithSummary,
+      previousHeadSha: 'abc123prev',
+    });
+
+    expect(prompt).toContain('INCREMENTAL REVIEW MODE');
+    expect(prompt).toContain('abc123prev');
+    expect(prompt).toContain('git diff abc123prev..HEAD');
+    expect(prompt).toContain('2 Issues Found');
+    // Should contain the active comment count (1 active, 1 outdated)
+    expect(prompt).toContain('1 active');
+    // Should NOT contain the standard workflow step 1
+    expect(prompt).not.toContain('gh pr diff 42\n```');
+  });
+
+  it('uses standard workflow when previousHeadSha is null', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: existingReviewStateWithSummary,
+      previousHeadSha: null,
+    });
+
+    expect(prompt).not.toContain('INCREMENTAL REVIEW MODE');
+    expect(prompt).toContain('gh pr diff 42');
+  });
+
+  it('uses standard workflow when previousHeadSha is provided but no summary comment', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: existingReviewStateNoSummary,
+      previousHeadSha: 'abc123prev',
+    });
+
+    expect(prompt).not.toContain('INCREMENTAL REVIEW MODE');
+    expect(prompt).toContain('gh pr diff 42');
+  });
+
+  it('uses standard workflow when existingReviewState is null', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: null,
+      previousHeadSha: 'abc123prev',
+    });
+
+    expect(prompt).not.toContain('INCREMENTAL REVIEW MODE');
+    expect(prompt).toContain('gh pr diff 42');
+  });
+
+  it('still includes existing inline comments table in incremental mode', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: existingReviewStateWithSummary,
+      previousHeadSha: 'abc123prev',
+    });
+
+    // The inline comments table should still be present (section 10 in generate-prompt.ts)
+    expect(prompt).toContain('Existing Inline Comments');
+    expect(prompt).toContain('src/foo.ts');
+  });
+
+  it('uses UPDATE summary command in incremental mode', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'owner/repo', 42, {
+      reviewId: 'review-123',
+      existingReviewState: existingReviewStateWithSummary,
+      previousHeadSha: 'abc123prev',
+    });
+
+    // Summary command should be UPDATE (since summaryComment exists)
+    expect(prompt).toContain('UPDATE existing comment');
+    expect(prompt).toContain('123'); // commentId
+  });
+
+  it('works with GitLab platform in incremental mode', async () => {
+    const { prompt } = await generateReviewPrompt(baseConfig, 'group/project', 10, {
+      reviewId: 'review-456',
+      existingReviewState: existingReviewStateWithSummary,
+      platform: 'gitlab',
+      gitlabContext: { baseSha: 'base123', startSha: 'start123', headSha: 'head123' },
+      previousHeadSha: 'prevsha456',
+    });
+
+    expect(prompt).toContain('INCREMENTAL REVIEW MODE');
+    expect(prompt).toContain('prevsha456');
+    expect(prompt).toContain('glab mr diff');
   });
 });

@@ -401,6 +401,28 @@ export async function POST(
       });
     }
 
+    // Defense-in-depth: reject callbacks from superseded sessions.
+    // When the orchestrator retries with a fresh session after a failed
+    // continuation attempt, a stale failure callback from the old session
+    // may arrive and corrupt the new review's state.  If the review already
+    // has a session_id and the callback carries a different sessionId, the
+    // callback belongs to a previous (superseded) session — ignore it.
+    if (sessionId && review.session_id && sessionId !== review.session_id) {
+      logExceptInTest(
+        '[code-review-status] Stale callback from superseded session, skipping update',
+        {
+          reviewId,
+          callbackSessionId: sessionId,
+          reviewSessionId: review.session_id,
+          requestedStatus: status,
+        }
+      );
+      return NextResponse.json({
+        success: true,
+        message: 'Stale callback from superseded session',
+      });
+    }
+
     // Valid transitions:
     // - queued -> running (orchestrator starting)
     // - running -> running (sessionId update)

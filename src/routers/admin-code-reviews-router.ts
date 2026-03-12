@@ -173,8 +173,9 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       // Success rate = completed / terminal states
       successRate: terminalCount > 0 ? (completedCount / terminalCount) * 100 : 0,
       // Failure rate = (failed + interrupted) / terminal states
-      // Note: cancelled and insufficient credits are neutral (not success, not failure)
       failureRate: terminalCount > 0 ? ((failedCount + interruptedCount) / terminalCount) * 100 : 0,
+      // Cancelled rate = cancelled / terminal states (the remainder to reach 100%)
+      cancelledRate: terminalCount > 0 ? (cancelledCount / terminalCount) * 100 : 0,
       avgDurationSeconds: Number(stats.avg_duration_seconds) || 0,
       versionBreakdown: versionBreakdown?.map(row => ({
         agentVersion: row.agent_version,
@@ -225,6 +226,51 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       interrupted: Number(row.interrupted) || 0,
       inProgress: Number(row.in_progress) || 0,
       insufficientCredits: Number(row.insufficient_credits) || 0,
+    }));
+  }),
+
+  // Get cancellation reasons analysis
+  getCancellationAnalysis: adminProcedure.input(FilterSchema).query(async ({ input }) => {
+    const { startDate, endDate, userId, organizationId, ownershipType, agentVersion } = input;
+    const ownershipFilter = buildOwnershipFilter(userId, organizationId, ownershipType);
+    const agentVersionFilter = buildAgentVersionFilter(agentVersion);
+
+    const conditions = [
+      eq(cloud_agent_code_reviews.status, 'cancelled'),
+      gte(cloud_agent_code_reviews.created_at, startDate),
+      lt(cloud_agent_code_reviews.created_at, endDate),
+      ownershipFilter,
+      agentVersionFilter,
+    ].filter(Boolean) as SQL[];
+
+    const cancellationReasonExpr = sql<string>`CASE
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%superseded%' THEN 'Superseded by new commit'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%paid model%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%add credits%' THEN 'No credits (billing)'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%stream timeout%' THEN 'Stream timeout'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%cancelled%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%canceled%' THEN 'Explicitly cancelled'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%killed%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigkill%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigterm%' THEN 'Process killed'
+      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%interrupted%' THEN 'User interrupted'
+      WHEN ${cloud_agent_code_reviews.error_message} IS NULL THEN 'No reason provided'
+      ELSE 'Other'
+    END`;
+
+    const reasons = await db
+      .select({
+        reason: cancellationReasonExpr,
+        count: sql<number>`COUNT(*)`,
+        first_occurrence: sql<string>`MIN(${cloud_agent_code_reviews.created_at})::text`,
+        last_occurrence: sql<string>`MAX(${cloud_agent_code_reviews.created_at})::text`,
+      })
+      .from(cloud_agent_code_reviews)
+      .where(and(...conditions))
+      .groupBy(cancellationReasonExpr)
+      .orderBy(desc(sql`COUNT(*)`));
+
+    return reasons.map(row => ({
+      reason: row.reason,
+      count: Number(row.count) || 0,
+      firstOccurrence: row.first_occurrence,
+      lastOccurrence: row.last_occurrence,
     }));
   }),
 

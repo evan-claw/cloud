@@ -48,7 +48,7 @@ export type BeadFilter = {
 
 // -- Agents (now beads + agent_metadata) --
 
-export const AgentRole = z.enum(['polecat', 'refinery', 'mayor', 'triage']);
+export const AgentRole = z.enum(['polecat', 'refinery', 'mayor']);
 export type AgentRole = z.infer<typeof AgentRole>;
 
 export const AgentStatus = z.enum(['idle', 'working', 'stalled', 'dead']);
@@ -74,6 +74,8 @@ export type Agent = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   checkpoint: any;
   created_at: string;
+  agent_status_message: string | null;
+  agent_status_updated_at: string | null;
 };
 
 export type RegisterAgentInput = {

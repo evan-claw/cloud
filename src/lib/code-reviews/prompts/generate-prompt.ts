@@ -65,6 +65,8 @@ const PromptTemplateSchema = z.object({
   summaryCommandUpdate: z.string(),
   inlineCommentsApi: z.string(),
   fixLinkTemplate: z.string(),
+  // Incremental review workflow (used instead of `workflow` when a previous review exists)
+  incrementalReviewWorkflow: z.string().optional(),
   // Per-style overrides (optional — only needed for non-default styles like roast)
   styleGuidance: z.record(z.string(), z.string()).optional(),
   commentFormatOverrides: z.record(z.string(), z.string()).optional(),
@@ -122,6 +124,8 @@ export function resolveTemplate(
   return {
     template: {
       ...remoteTemplate,
+      incrementalReviewWorkflow:
+        remoteTemplate.incrementalReviewWorkflow ?? localTemplate.incrementalReviewWorkflow,
       styleGuidance: mergeStyleOverrides(localTemplate.styleGuidance, remoteTemplate.styleGuidance),
       commentFormatOverrides: mergeStyleOverrides(
         localTemplate.commentFormatOverrides,
@@ -172,25 +176,42 @@ export type GitLabDiffContext = {
 };
 
 /**
+ * Optional parameters for prompt generation
+ */
+export type GenerateReviewPromptOptions = {
+  /** Code review ID for generating fix link */
+  reviewId?: string;
+  /** Complete review state for intelligent decisions */
+  existingReviewState?: ExistingReviewState | null;
+  /** Platform type (defaults to 'github') */
+  platform?: CodeReviewPlatform;
+  /** GitLab-specific diff context for inline comments */
+  gitlabContext?: GitLabDiffContext;
+  /** HEAD SHA from a previous completed review (enables incremental mode) */
+  previousHeadSha?: string | null;
+};
+
+/**
  * Generates a code review prompt based on configuration
  * @param config Agent configuration with review settings
  * @param repository Repository in format "owner/repo" (GitHub) or "namespace/project" (GitLab)
  * @param prNumber Pull request number (GitHub) or merge request IID (GitLab)
- * @param reviewId Code review ID for generating fix link (optional)
- * @param existingReviewState Complete review state for intelligent decisions (optional)
- * @param platform Platform type (defaults to 'github' for backward compatibility)
- * @param gitlabContext GitLab-specific diff context for inline comments (optional)
+ * @param options Optional parameters for review context, platform, and incremental mode
  * @returns Generated prompt with version and source info
  */
 export async function generateReviewPrompt(
   config: CodeReviewAgentConfig,
   repository: string,
   prNumber?: number,
-  reviewId?: string,
-  existingReviewState?: ExistingReviewState | null,
-  platform: CodeReviewPlatform = 'github',
-  gitlabContext?: GitLabDiffContext
+  options: GenerateReviewPromptOptions = {}
 ): Promise<{ prompt: string; version: string; source: 'posthog' | 'local' }> {
+  const {
+    reviewId,
+    existingReviewState,
+    platform = 'github',
+    gitlabContext,
+    previousHeadSha,
+  } = options;
   // Load template from PostHog (remote) or local fallback
   const { template, source } = await loadPromptTemplate(platform);
   const platformConfig = getPlatformConfig(platform);
@@ -240,7 +261,21 @@ export async function generateReviewPrompt(
   prompt += template.hardConstraints + '\n\n';
 
   // 5. Workflow with placeholders replaced
-  prompt += replacePlaceholders(template.workflow) + '\n\n';
+  // Use incremental workflow when we have a previous completed review SHA and a summary comment
+  if (
+    previousHeadSha &&
+    template.incrementalReviewWorkflow &&
+    existingReviewState?.summaryComment
+  ) {
+    const activeCount = existingReviewState.inlineComments?.filter(c => !c.isOutdated).length ?? 0;
+    const incrementalWorkflow = template.incrementalReviewWorkflow
+      .replace(/{PREVIOUS_SHA}/g, previousHeadSha)
+      .replace(/{PREVIOUS_SUMMARY}/g, existingReviewState.summaryComment.body)
+      .replace(/{ACTIVE_COMMENT_COUNT}/g, String(activeCount));
+    prompt += replacePlaceholders(incrementalWorkflow) + '\n\n';
+  } else {
+    prompt += replacePlaceholders(template.workflow) + '\n\n';
+  }
 
   // 6. What to review
   prompt += template.whatToReview + '\n\n';

@@ -7,6 +7,10 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
+import {
+  createCloudAgentNextFetchClient,
+  type CloudAgentNextFetchClient,
+} from '@kilocode/worker-utils';
 import type {
   Env,
   CodeReview,
@@ -64,6 +68,9 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
   /** In-memory cache of current review state */
   private state!: CodeReview;
 
+  /** Shared typed client for cloud-agent-next tRPC endpoints */
+  private cloudAgentNextClient: CloudAgentNextFetchClient | undefined;
+
   /** Maximum time to wait for SSE stream (20 minutes) */
   private static readonly STREAM_TIMEOUT_MS = 20 * 60 * 1000;
 
@@ -87,6 +94,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+  }
+
+  private getCloudAgentNextClient(): CloudAgentNextFetchClient {
+    this.cloudAgentNextClient ??= createCloudAgentNextFetchClient(this.env.CLOUD_AGENT_NEXT_URL);
+    return this.cloudAgentNextClient;
   }
 
   /**
@@ -361,6 +373,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     };
     skipBalanceCheck?: boolean;
     agentVersion?: string;
+    previousCloudAgentSessionId?: string;
   }): Promise<{ status: CodeReviewStatus }> {
     this.state = {
       reviewId: params.reviewId,
@@ -371,6 +384,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       updatedAt: new Date().toISOString(),
       skipBalanceCheck: params.skipBalanceCheck,
       agentVersion: params.agentVersion,
+      previousCloudAgentSessionId: params.previousCloudAgentSessionId,
     };
     await this.saveState();
 
@@ -467,22 +481,24 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
    * Routes to the correct backend based on agentVersion.
    */
   private async interruptCloudAgentSession(sessionId: string): Promise<void> {
-    const baseUrl =
-      this.state.agentVersion === 'v2' ? this.env.CLOUD_AGENT_NEXT_URL : this.env.CLOUD_AGENT_URL;
-    const cloudAgentUrl = `${baseUrl}/trpc/interruptSession`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.state.authToken}`,
+    };
 
-    const response = await fetch(cloudAgentUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.state.authToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ sessionId }),
-    });
+    if (this.state.agentVersion === 'v2') {
+      await this.getCloudAgentNextClient().interruptSession(headers, { sessionId });
+    } else {
+      // Legacy cloud-agent path — raw fetch (SSE-based service, not covered by shared client)
+      const response = await fetch(`${this.env.CLOUD_AGENT_URL}/trpc/interruptSession`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Cloud agent returned ${response.status}: ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Cloud agent returned ${response.status}: ${errorText}`);
+      }
     }
   }
 
@@ -527,7 +543,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     });
 
     if (agentVersion === 'v2') {
-      await this.runWithCloudAgentNext();
+      if (this.state.previousCloudAgentSessionId) {
+        await this.runWithCloudAgentNextFollowup();
+      } else {
+        await this.runWithCloudAgentNext();
+      }
     } else {
       await this.runWithCloudAgent();
     }
@@ -545,6 +565,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
    */
   private async runWithCloudAgentNext(): Promise<void> {
     const runStartTime = Date.now();
+    const client = this.getCloudAgentNextClient();
 
     try {
       await this.updateStatus('running');
@@ -555,62 +576,39 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       });
 
       // Build common headers for prepareSession (internalApiProtectedProcedure)
-      const headers: Record<string, string> = {
+      const internalHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.state.authToken}`,
-        'Content-Type': 'application/json',
         'x-internal-api-key': this.env.INTERNAL_API_SECRET,
       };
       if (this.state.skipBalanceCheck) {
-        headers['x-skip-balance-check'] = 'true';
+        internalHeaders['x-skip-balance-check'] = 'true';
       }
 
       // Step 1: Prepare session with callback target
+      const callbackTarget = {
+        url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
+        headers: {
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
+        },
+      };
+
       const prepareInput = {
         ...this.state.sessionInput,
-        createdOnPlatform: 'code-review',
-        callbackTarget: {
-          url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
-          headers: {
-            'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
-          },
-        },
+        createdOnPlatform: 'code-review' as const,
+        callbackTarget,
       };
 
       console.log('[CodeReviewOrchestrator] Calling prepareSession', {
         reviewId: this.state.reviewId,
-        callbackUrl: prepareInput.callbackTarget.url,
+        callbackUrl: callbackTarget.url,
         createdOnPlatform: prepareInput.createdOnPlatform,
         skipBalanceCheck: this.state.skipBalanceCheck,
       });
 
-      const prepareResponse = await fetch(`${this.env.CLOUD_AGENT_NEXT_URL}/trpc/prepareSession`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(prepareInput),
-      });
-
-      if (!prepareResponse.ok) {
-        const errorText = await prepareResponse.text();
-        throw new Error(`prepareSession failed (${prepareResponse.status}): ${errorText}`);
-      }
-
-      const prepareResult: Record<string, unknown> = await prepareResponse.json();
-      const prepareData = (prepareResult?.result as Record<string, unknown>)?.data as
-        | Record<string, unknown>
-        | undefined;
-      if (
-        !prepareData ||
-        typeof prepareData.cloudAgentSessionId !== 'string' ||
-        typeof prepareData.kiloSessionId !== 'string'
-      ) {
-        throw new Error(
-          `Unexpected prepareSession response shape: ${JSON.stringify(prepareResult).slice(0, 500)}`
-        );
-      }
-      const { cloudAgentSessionId, kiloSessionId } = prepareData as {
-        cloudAgentSessionId: string;
-        kiloSessionId: string;
-      };
+      const { cloudAgentSessionId, kiloSessionId } = await client.prepareSession(
+        internalHeaders,
+        prepareInput
+      );
 
       console.log('[CodeReviewOrchestrator] Session prepared', {
         reviewId: this.state.reviewId,
@@ -626,12 +624,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
       // Step 2: Initiate execution
       // initiateFromKilocodeSessionV2 is a protectedProcedure (Bearer token only)
-      const initiateHeaders: Record<string, string> = {
+      const userHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.state.authToken}`,
-        'Content-Type': 'application/json',
       };
       if (this.state.skipBalanceCheck) {
-        initiateHeaders['x-skip-balance-check'] = 'true';
+        userHeaders['x-skip-balance-check'] = 'true';
       }
 
       console.log('[CodeReviewOrchestrator] Calling initiateFromKilocodeSessionV2', {
@@ -639,37 +636,15 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         cloudAgentSessionId,
       });
 
-      const initiateResponse = await fetch(
-        `${this.env.CLOUD_AGENT_NEXT_URL}/trpc/initiateFromKilocodeSessionV2`,
-        {
-          method: 'POST',
-          headers: initiateHeaders,
-          body: JSON.stringify({ cloudAgentSessionId }),
-        }
-      );
-
-      if (!initiateResponse.ok) {
-        const errorText = await initiateResponse.text();
-        throw new Error(
-          `initiateFromKilocodeSessionV2 failed (${initiateResponse.status}): ${errorText}`
-        );
-      }
-
-      const initiateResult: Record<string, unknown> = await initiateResponse.json();
-      const initiateData = (initiateResult?.result as Record<string, unknown>)?.data as
-        | Record<string, unknown>
-        | undefined;
-      if (!initiateData || typeof initiateData.executionId !== 'string') {
-        throw new Error(
-          `Unexpected initiateFromKilocodeSessionV2 response shape: ${JSON.stringify(initiateResult).slice(0, 500)}`
-        );
-      }
+      const initiateResult = await client.initiateFromPreparedSession(userHeaders, {
+        cloudAgentSessionId,
+      });
 
       console.log('[CodeReviewOrchestrator] Execution started', {
         reviewId: this.state.reviewId,
         cloudAgentSessionId,
-        executionId: initiateData.executionId,
-        status: initiateData.status,
+        executionId: initiateResult.executionId,
+        status: initiateResult.status,
       });
 
       // Done — cloud-agent-next callback will deliver terminal status
@@ -700,6 +675,121 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         totalExecutionTime: `${minutes}m ${seconds}s`,
         timestamp: new Date().toISOString(),
       });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // cloud-agent-next follow-up flow (session continuation)
+  // Uses sendMessageV2 to reuse an existing session from a previous review.
+  // Falls back to fresh session (prepareSession + initiate) on failure.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Orchestration via cloud-agent-next with session continuation.
+   * Calls sendMessageV2 on an existing session from a previous review.
+   * On failure (404, 409, etc.), falls back to runWithCloudAgentNext() for a fresh session.
+   */
+  private async runWithCloudAgentNextFollowup(): Promise<void> {
+    const previousSessionId = this.state.previousCloudAgentSessionId;
+    if (!previousSessionId) {
+      throw new Error('runWithCloudAgentNextFollowup called without previousCloudAgentSessionId');
+    }
+    const client = this.getCloudAgentNextClient();
+
+    console.log('[CodeReviewOrchestrator] Attempting session continuation via sendMessageV2', {
+      reviewId: this.state.reviewId,
+      previousCloudAgentSessionId: previousSessionId,
+    });
+
+    try {
+      await this.updateStatus('running');
+
+      // Build internal headers (internalApiProtectedProcedure — API key + Bearer token)
+      const internalHeaders: Record<string, string> = {
+        Authorization: `Bearer ${this.state.authToken}`,
+        'x-internal-api-key': this.env.INTERNAL_API_SECRET,
+      };
+      if (this.state.skipBalanceCheck) {
+        internalHeaders['x-skip-balance-check'] = 'true';
+      }
+
+      // Step 1: Update callback target via updateSession (internal-only endpoint).
+      // callbackTarget must be set through an internal procedure, not the
+      // user-facing sendMessageV2, to prevent SSRF via arbitrary callback URLs.
+      const callbackTarget = {
+        url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
+        headers: {
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
+        },
+      };
+
+      await client.updateSession(internalHeaders, {
+        cloudAgentSessionId: previousSessionId,
+        callbackTarget,
+      });
+
+      // Step 2: Send follow-up message (user-facing, no callbackTarget)
+      const userHeaders: Record<string, string> = {
+        Authorization: `Bearer ${this.state.authToken}`,
+      };
+      if (this.state.skipBalanceCheck) {
+        userHeaders['x-skip-balance-check'] = 'true';
+      }
+
+      console.log('[CodeReviewOrchestrator] Calling sendMessageV2', {
+        reviewId: this.state.reviewId,
+        cloudAgentSessionId: previousSessionId,
+        callbackUrl: callbackTarget.url,
+      });
+
+      const sendResult = await client.sendMessageV2(userHeaders, {
+        cloudAgentSessionId: previousSessionId,
+        prompt: this.state.sessionInput.prompt,
+        mode: this.state.sessionInput.mode,
+        model: this.state.sessionInput.model,
+        variant: this.state.sessionInput.variant,
+        githubToken: this.state.sessionInput.githubToken,
+        gitToken: this.state.sessionInput.gitToken,
+      });
+
+      // Store session ID (reusing the previous one) and execution ID
+      await this.updateStatus('running', {
+        sessionId: previousSessionId,
+      });
+
+      console.log('[CodeReviewOrchestrator] Follow-up execution started via sendMessageV2', {
+        reviewId: this.state.reviewId,
+        cloudAgentSessionId: previousSessionId,
+        executionId: sendResult.executionId,
+        status: sendResult.status,
+      });
+
+      // Done — cloud-agent-next callback will deliver terminal status
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+      console.warn('[CodeReviewOrchestrator] sendMessageV2 failed, falling back to fresh session', {
+        reviewId: this.state.reviewId,
+        previousCloudAgentSessionId: previousSessionId,
+        error: errorMessage,
+      });
+
+      // Reset status to running (it may have been set to running already, but ensure clean state)
+      // Clear previousCloudAgentSessionId so the fresh session path doesn't try followup again
+      this.state.previousCloudAgentSessionId = undefined;
+
+      try {
+        await this.runWithCloudAgentNext();
+      } catch (freshError) {
+        // runWithCloudAgentNext handles its own error/status updates, so this catch
+        // is only for unexpected throws that bypass its internal error handling
+        const freshErrorMessage =
+          freshError instanceof Error ? freshError.message : 'Unknown error';
+        console.error('[CodeReviewOrchestrator] Fresh session fallback also failed', {
+          reviewId: this.state.reviewId,
+          error: freshErrorMessage,
+        });
+      }
     }
   }
 

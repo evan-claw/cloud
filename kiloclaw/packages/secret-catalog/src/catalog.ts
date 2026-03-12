@@ -142,3 +142,13 @@ export function getEntriesByCategory(category: SecretCategory): SecretCatalogEnt
     return orderA - orderB;
   });
 }
+
+/**
+ * Get the set of all field keys for a given category.
+ * Allocates a new Set on each call — cache the result if used in a hot path.
+ */
+export function getFieldKeysByCategory(category: SecretCategory): ReadonlySet<string> {
+  return new Set(
+    SECRET_CATALOG.filter(e => e.category === category).flatMap(e => e.fields.map(f => f.key))
+  );
+}

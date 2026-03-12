@@ -6,6 +6,7 @@ import AdminPage from '@/app/admin/components/AdminPage';
 import { BreadcrumbItem, BreadcrumbPage } from '@/components/ui/breadcrumb';
 import { CodeReviewStats } from '@/app/admin/components/CodeReviewStats';
 import { CodeReviewDailyChart } from '@/app/admin/components/CodeReviewDailyChart';
+import { CodeReviewCancellationAnalysis } from '@/app/admin/components/CodeReviewCancellationAnalysis';
 import { CodeReviewErrorAnalysis } from '@/app/admin/components/CodeReviewErrorAnalysis';
 import { CodeReviewPerformanceChart } from '@/app/admin/components/CodeReviewPerformanceChart';
 import { CodeReviewUserSegmentation } from '@/app/admin/components/CodeReviewUserSegmentation';
@@ -16,6 +17,7 @@ import {
   useCodeReviewOverviewStats,
   useCodeReviewDailyStats,
   useCodeReviewPerformanceStats,
+  useCodeReviewCancellationAnalysis,
   useCodeReviewErrorAnalysis,
   useCodeReviewUserSegmentation,
   useSearchUsers,
@@ -105,6 +107,7 @@ export default function CodeReviewsPage() {
   const overviewQuery = useCodeReviewOverviewStats(filterParams);
   const dailyQuery = useCodeReviewDailyStats(filterParams);
   const performanceQuery = useCodeReviewPerformanceStats(filterParams);
+  const cancellationQuery = useCodeReviewCancellationAnalysis(filterParams);
   const errorQuery = useCodeReviewErrorAnalysis(filterParams);
   const segmentationQuery = useCodeReviewUserSegmentation(filterParams);
 
@@ -112,9 +115,17 @@ export default function CodeReviewsPage() {
     void overviewQuery.refetch();
     void dailyQuery.refetch();
     void performanceQuery.refetch();
+    void cancellationQuery.refetch();
     void errorQuery.refetch();
     void segmentationQuery.refetch();
-  }, [overviewQuery, dailyQuery, performanceQuery, errorQuery, segmentationQuery]);
+  }, [
+    overviewQuery,
+    dailyQuery,
+    performanceQuery,
+    cancellationQuery,
+    errorQuery,
+    segmentationQuery,
+  ]);
 
   // Handle selecting a user from search
   const handleSelectUser = (user: SelectedUser) => {
@@ -179,6 +190,7 @@ export default function CodeReviewsPage() {
     overviewQuery.isFetching ||
     dailyQuery.isFetching ||
     performanceQuery.isFetching ||
+    cancellationQuery.isFetching ||
     errorQuery.isFetching ||
     segmentationQuery.isFetching;
 
@@ -448,6 +460,11 @@ export default function CodeReviewsPage() {
               />
             )}
 
+            {/* Cancellation Reasons */}
+            {cancellationQuery.data && (
+              <CodeReviewCancellationAnalysis data={cancellationQuery.data} />
+            )}
+
             {/* Error Analysis */}
             {errorQuery.data && <CodeReviewErrorAnalysis data={errorQuery.data} />}
           </>
@@ -457,6 +474,7 @@ export default function CodeReviewsPage() {
         {(overviewQuery.error ||
           dailyQuery.error ||
           performanceQuery.error ||
+          cancellationQuery.error ||
           errorQuery.error ||
           segmentationQuery.error) && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4">
@@ -465,6 +483,7 @@ export default function CodeReviewsPage() {
               {overviewQuery.error?.message ||
                 dailyQuery.error?.message ||
                 performanceQuery.error?.message ||
+                cancellationQuery.error?.message ||
                 errorQuery.error?.message ||
                 segmentationQuery.error?.message ||
                 'Unknown error'}

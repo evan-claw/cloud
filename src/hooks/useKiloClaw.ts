@@ -123,8 +123,8 @@ export function useKiloClawMutations() {
         },
       })
     ),
-    restartGateway: useMutation(
-      trpc.kiloclaw.restartGateway.mutationOptions({
+    restartMachine: useMutation(
+      trpc.kiloclaw.restartMachine.mutationOptions({
         onSuccess: async () => {
           await invalidateStatus();
           await queryClient.invalidateQueries({
@@ -229,6 +229,15 @@ export function useKiloClawMyPin() {
   return useQuery(
     trpc.kiloclaw.getMyPin.queryOptions(undefined, {
       staleTime: 60_000, // pins don't change frequently
+    })
+  );
+}
+
+export function useKiloClawLatestVersion() {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.latestVersion.queryOptions(undefined, {
+      staleTime: 60_000, // latest changes infrequently
     })
   );
 }

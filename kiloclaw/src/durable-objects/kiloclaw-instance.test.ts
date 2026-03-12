@@ -2903,10 +2903,10 @@ describe('auto-destroy stale provisioned instances', () => {
 });
 
 // ============================================================================
-// restartGateway image tag override
+// restartMachine image tag override
 // ============================================================================
 
-describe('restartGateway image tag override', () => {
+describe('restartMachine image tag override', () => {
   beforeEach(() => {
     (flyClient.stopMachineAndWait as Mock).mockResolvedValue(undefined);
     (flyClient.updateMachine as Mock).mockResolvedValue(undefined);
@@ -2921,7 +2921,7 @@ describe('restartGateway image tag override', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { trackedImageTag: 'old-tag-123' });
 
-    const result = await instance.restartGateway();
+    const result = await instance.restartMachine();
 
     expect(result.success).toBe(true);
     expect(resolveLatestVersion).not.toHaveBeenCalled();
@@ -2944,7 +2944,7 @@ describe('restartGateway image tag override', () => {
       publishedAt: new Date().toISOString(),
     });
 
-    const result = await instance.restartGateway({ imageTag: 'latest' });
+    const result = await instance.restartMachine({ imageTag: 'latest' });
 
     expect(result.success).toBe(true);
     expect(resolveLatestVersion).toHaveBeenCalledOnce();
@@ -2959,7 +2959,7 @@ describe('restartGateway image tag override', () => {
 
     (resolveLatestVersion as Mock).mockResolvedValueOnce(null);
 
-    const result = await instance.restartGateway({ imageTag: 'latest' });
+    const result = await instance.restartMachine({ imageTag: 'latest' });
 
     expect(result.success).toBe(true);
     expect(resolveLatestVersion).toHaveBeenCalledOnce();
@@ -2975,7 +2975,7 @@ describe('restartGateway image tag override', () => {
       imageVariant: 'default',
     });
 
-    const result = await instance.restartGateway({ imageTag: '2026.2.25-abc123' });
+    const result = await instance.restartMachine({ imageTag: '2026.2.25-abc123' });
 
     expect(result.success).toBe(true);
     expect(resolveLatestVersion).not.toHaveBeenCalled();

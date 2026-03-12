@@ -36,10 +36,12 @@ import type {
   GitLabDiffContext,
 } from '../prompts/generate-prompt';
 import { getIntegrationById } from '@/lib/integrations/db/platform-integrations';
-import { getCodeReviewById } from '../db/code-reviews';
+import { getCodeReviewById, findPreviousCompletedReview } from '../db/code-reviews';
+import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 import {
   DEFAULT_CODE_REVIEW_MODEL,
   DEFAULT_CODE_REVIEW_MODE,
+  FEATURE_FLAG_INCREMENTAL_REVIEW,
   isActiveReviewPromo,
   REVIEW_PROMO_START,
   REVIEW_PROMO_END,
@@ -50,7 +52,6 @@ import type { CodeReviewAgentConfig } from '@/lib/agent-config/core/types';
 import { logExceptInTest, errorExceptInTest } from '@/lib/utils.server';
 import type { CodeReviewPlatform } from '../core/schemas';
 import { PLATFORM } from '@/lib/integrations/core/constants';
-import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
 
 export type PreparePayloadParams = {
   reviewId: string;
@@ -93,6 +94,8 @@ export type CodeReviewPayload = {
   skipBalanceCheck?: boolean;
   /** Which cloud agent backend to use: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next) */
   agentVersion?: string;
+  /** Cloud-agent session ID from a previous completed review, for session continuation */
+  previousCloudAgentSessionId?: string;
 };
 
 /**
@@ -314,18 +317,62 @@ export async function prepareReviewPayload(
       }
     }
 
-    // 4. Generate auth token for cloud agent with bot identifier
+    // 4. Check for previous completed review (incremental review optimization)
+    // Both previousHeadSha (for diff base) and previousCloudAgentSessionId (for session
+    // continuation) are derived from the same review row to avoid mismatches.
+    let previousHeadSha: string | null = null;
+    let previousCloudAgentSessionId: string | undefined;
+    const incrementalEnabled = await isFeatureFlagEnabled(FEATURE_FLAG_INCREMENTAL_REVIEW);
+
+    if (incrementalEnabled) {
+      try {
+        const previousReview = await findPreviousCompletedReview(
+          review.repo_full_name,
+          review.pr_number,
+          existingReviewState?.headCommitSha ?? review.head_sha,
+          platform
+        );
+        previousHeadSha = previousReview?.head_sha ?? null;
+        previousCloudAgentSessionId = previousReview?.session_id ?? undefined;
+
+        if (previousHeadSha) {
+          logExceptInTest(
+            '[prepareReviewPayload] Found previous completed review for incremental mode',
+            {
+              reviewId,
+              previousHeadSha: previousHeadSha.substring(0, 8),
+              currentHeadSha: review.head_sha.substring(0, 8),
+              previousCloudAgentSessionId,
+            }
+          );
+        }
+      } catch (error) {
+        // Non-critical - fall back to full review
+        logExceptInTest(
+          '[prepareReviewPayload] Failed to fetch previous review, falling back to full review:',
+          {
+            reviewId,
+            error,
+          }
+        );
+      }
+    }
+
+    // 5. Generate auth token for cloud agent with bot identifier
     const authToken = generateApiToken(user, { botId: 'reviewer' });
 
-    // 5. Generate dynamic review prompt (include reviewId for fix link and review state)
+    // 6. Generate dynamic review prompt
     const { prompt, version, source } = await generateReviewPrompt(
       agentConfig.config as CodeReviewAgentConfig,
       review.repo_full_name,
       review.pr_number,
-      reviewId,
-      existingReviewState,
-      platform,
-      gitlabContext
+      {
+        reviewId,
+        existingReviewState,
+        platform,
+        gitlabContext,
+        previousHeadSha,
+      }
     );
 
     logExceptInTest('[prepareReviewPayload] Generated prompt:', {
@@ -336,7 +383,7 @@ export async function prepareReviewPayload(
       promptLength: prompt.length,
     });
 
-    // 6. Prepare session input
+    // 7. Prepare session input
     // Note: cloud-agent automatically sets GH_TOKEN/GITLAB_TOKEN from token parameters
     const config = agentConfig.config as CodeReviewAgentConfig;
 
@@ -406,12 +453,13 @@ export async function prepareReviewPayload(
       });
     }
 
-    // 7. Build complete payload
+    // 8. Build complete payload
     const payload: CodeReviewPayload = {
       reviewId,
       authToken,
       sessionInput,
       owner,
+      previousCloudAgentSessionId,
     };
 
     logExceptInTest('[prepareReviewPayload] Prepared payload', {

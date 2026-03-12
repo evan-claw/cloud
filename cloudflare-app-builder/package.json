@@ -24,8 +24,8 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/containers": "^0.0.30",
-    "@cloudflare/sandbox": "0.6.7",
+    "@cloudflare/containers": "0.1.1",
+    "@cloudflare/sandbox": "0.7.13",
     "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
     "@types/jsonwebtoken": "catalog:",

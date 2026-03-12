@@ -599,6 +599,25 @@ export class CloudAgentSession extends DurableObject {
   }
 
   /**
+   * Update the callback target for this session.
+   * This allows redirecting completion callbacks to a new URL (e.g., for follow-up reviews).
+   */
+  private async updateCallbackTarget(callbackTarget: CallbackTarget): Promise<void> {
+    const metadata = await this.getMetadata();
+    if (!metadata) {
+      throw new Error('Cannot update callbackTarget: session metadata not found');
+    }
+
+    const updated = {
+      ...metadata,
+      callbackTarget,
+      version: Date.now(), // Bump version for cache invalidation
+    };
+
+    await this.updateMetadata(updated);
+  }
+
+  /**
    * Update the upstream branch for this session.
    * This allows capturing the branch after kilo execution without a full metadata write.
    */
@@ -785,7 +804,15 @@ export class CloudAgentSession extends DurableObject {
     if (!metadata?.preparedAt) {
       return { success: false, error: 'Session has not been prepared' };
     }
-    if (metadata.initiatedAt) {
+
+    // callbackTarget can be updated even after initiation (needed for follow-up
+    // reviews that reuse an existing session with a new callback URL).
+    // All other fields are immutable once initiated.
+    const allKeys = Object.keys(updates).filter(
+      k => updates[k as keyof typeof updates] !== undefined
+    );
+    const onlyCallbackTarget = allKeys.length === 1 && allKeys[0] === 'callbackTarget';
+    if (metadata.initiatedAt && !onlyCallbackTarget) {
       return { success: false, error: 'Session has already been initiated' };
     }
 
@@ -1208,13 +1235,19 @@ export class CloudAgentSession extends DurableObject {
 
   /**
    * Update execution status with state machine validation.
+   *
+   * When `suppressCallback` is true the status is persisted but no callback
+   * notification is enqueued.  Used on the followup path where the caller
+   * (orchestrator) handles the error synchronously and enqueuing a callback
+   * would race with a fallback session's callbacks.
    */
   async updateExecutionStatus(
-    params: UpdateExecutionStatusParams
+    params: UpdateExecutionStatusParams,
+    opts?: { suppressCallback?: boolean }
   ): Promise<Result<ExecutionMetadata, UpdateStatusError>> {
     const result = await this.executionQueries.updateStatus(params);
 
-    if (result.ok && this.isTerminalStatus(params.status)) {
+    if (result.ok && this.isTerminalStatus(params.status) && !opts?.suppressCallback) {
       await this.enqueueCallbackNotification(
         params.executionId,
         params.status,
@@ -1343,6 +1376,8 @@ export class CloudAgentSession extends DurableObject {
     error: string;
     streamEventType: string;
     streamPayload?: Record<string, unknown>;
+    /** When true, skip enqueuing the callback notification. */
+    suppressCallback?: boolean;
   }): Promise<boolean> {
     const { executionId, status, error, streamEventType, streamPayload } = params;
 
@@ -1354,13 +1389,16 @@ export class CloudAgentSession extends DurableObject {
     // decide whether to clean up the interrupt flag afterward.
     const wasActive = (await this.executionQueries.getActiveExecutionId()) === executionId;
 
-    // 1. Update status (enqueues callback notification on terminal)
-    const statusResult = await this.updateExecutionStatus({
-      executionId,
-      status,
-      error,
-      completedAt: Date.now(),
-    });
+    // 1. Update status (enqueues callback notification on terminal unless suppressed)
+    const statusResult = await this.updateExecutionStatus(
+      {
+        executionId,
+        status,
+        error,
+        completedAt: Date.now(),
+      },
+      { suppressCallback: params.suppressCallback }
+    );
 
     if (!statusResult.ok) {
       logger
@@ -1932,7 +1970,6 @@ export class CloudAgentSession extends DurableObject {
         await this.updateGitToken(request.tokenOverrides.gitToken);
         metadata.gitToken = request.tokenOverrides.gitToken;
       }
-
       const mode = (request.mode ?? metadata.mode ?? 'code') as ExecutionMode;
       const model = normalizeKilocodeModel(request.model ?? metadata.model);
       const variant = request.variant ?? metadata.variant;
@@ -1984,7 +2021,12 @@ export class CloudAgentSession extends DurableObject {
         kiloSessionId: metadata.kiloSessionId,
       });
 
-      return await this.executeDirectly(plan);
+      // Suppress failure callback for followup executions: the caller
+      // (orchestrator) receives the error synchronously via the tRPC
+      // response and has its own fallback logic.  Enqueuing a callback
+      // here would race with the fallback session's callbacks and
+      // corrupt the new review's state (see PLAN-callback-race-fix.md).
+      return await this.executeDirectly(plan, { suppressCallbackOnError: true });
     } catch (error) {
       // Handle ExecutionError specifically for proper error code mapping
       if (isExecutionError(error)) {
@@ -2018,8 +2060,16 @@ export class CloudAgentSession extends DurableObject {
   /**
    * Execute a plan directly using the orchestrator.
    * This replaces the queue-based enqueueExecution pattern.
+   *
+   * @param suppressCallbackOnError — when true, a pre-start failure (e.g.
+   *   workspace restore) will NOT enqueue a callback notification.  The caller
+   *   is expected to handle the error synchronously (used by the followup path
+   *   where the orchestrator falls back to a fresh session on failure).
    */
-  private async executeDirectly(plan: ExecutionPlan): Promise<StartExecutionV2Result> {
+  private async executeDirectly(
+    plan: ExecutionPlan,
+    opts?: { suppressCallbackOnError?: boolean }
+  ): Promise<StartExecutionV2Result> {
     const { executionId, sessionId, mode } = plan;
 
     logger.withFields({ sessionId, executionId }).info('executeDirectly called');
@@ -2066,6 +2116,7 @@ export class CloudAgentSession extends DurableObject {
         status: 'failed',
         error: errorMessage,
         streamEventType: 'error',
+        suppressCallback: opts?.suppressCallbackOnError,
       });
 
       throw error;

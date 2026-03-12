@@ -36,6 +36,14 @@ export function useCodeReviewPerformanceStats(params: FilterParams) {
   });
 }
 
+export function useCodeReviewCancellationAnalysis(params: FilterParams) {
+  const trpc = useTRPC();
+  return useQuery({
+    ...trpc.admin.codeReviews.getCancellationAnalysis.queryOptions(params),
+    enabled: Boolean(params.startDate && params.endDate),
+  });
+}
+
 export function useCodeReviewErrorAnalysis(params: FilterParams) {
   const trpc = useTRPC();
   return useQuery({

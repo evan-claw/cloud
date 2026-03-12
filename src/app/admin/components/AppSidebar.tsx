@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Bot,
   Sparkles,
+  MailCheck,
   FileSearch,
   GitPullRequest,
   UserX,
@@ -132,6 +133,11 @@ const productEngineeringItems: MenuItem[] = [
     title: () => 'KiloClaw',
     url: '/admin/kiloclaw',
     icon: () => <Server />,
+  },
+  {
+    title: () => 'Email Testing',
+    url: '/admin/email-testing',
+    icon: () => <MailCheck />,
   },
   {
     title: () => 'Managed Indexing',

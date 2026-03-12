@@ -7,6 +7,7 @@ import {
   ENV_VAR_TO_FIELD_KEY,
   FIELD_KEY_TO_ENTRY,
   getEntriesByCategory,
+  getFieldKeysByCategory,
 } from '../catalog.js';
 import { validateFieldValue } from '../validation.js';
 import type { SecretIconKey, SecretCatalogEntry } from '../types.js';
@@ -172,6 +173,22 @@ describe('Secret Catalog', () => {
     it('returns empty array for categories with no entries', () => {
       const tools = getEntriesByCategory('tool');
       expect(tools).toEqual([]);
+    });
+  });
+
+  describe('getFieldKeysByCategory', () => {
+    it('returns all channel field keys', () => {
+      const keys = getFieldKeysByCategory('channel');
+      expect(keys).toContain('telegramBotToken');
+      expect(keys).toContain('discordBotToken');
+      expect(keys).toContain('slackBotToken');
+      expect(keys).toContain('slackAppToken');
+      expect(keys.size).toBe(4);
+    });
+
+    it('returns empty set for categories with no entries', () => {
+      const keys = getFieldKeysByCategory('tool');
+      expect(keys.size).toBe(0);
     });
   });
 

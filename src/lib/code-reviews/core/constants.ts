@@ -33,6 +33,13 @@ export function isActiveReviewPromo(botId: string | undefined, model: string): b
 }
 
 // ============================================================================
+// Feature Flags
+// ============================================================================
+
+/** PostHog flag that gates incremental (diff-only) reviews on follow-up pushes */
+export const FEATURE_FLAG_INCREMENTAL_REVIEW = 'code-review-incremental';
+
+// ============================================================================
 // Pagination
 // ============================================================================
 

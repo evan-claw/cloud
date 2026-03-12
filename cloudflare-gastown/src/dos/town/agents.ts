@@ -65,6 +65,8 @@ function toAgent(row: AgentBeadRecord): Agent {
     last_activity_at: row.last_activity_at,
     checkpoint: row.checkpoint,
     created_at: row.created_at,
+    agent_status_message: row.agent_status_message,
+    agent_status_updated_at: row.agent_status_updated_at,
   };
 }
 
@@ -81,7 +83,8 @@ const AGENT_JOIN = /* sql */ `
          ${agent_metadata.status} AS status,
          ${agent_metadata.current_hook_bead_id},
          ${agent_metadata.dispatch_attempts}, ${agent_metadata.last_activity_at},
-         ${agent_metadata.checkpoint}
+         ${agent_metadata.checkpoint},
+         ${agent_metadata.agent_status_message}, ${agent_metadata.agent_status_updated_at}
   FROM ${beads}
   INNER JOIN ${agent_metadata} ON ${beads.bead_id} = ${agent_metadata.bead_id}
 `;
@@ -241,7 +244,9 @@ export function hookBead(sql: SqlStorage, agentId: string, beadId: string): void
       SET ${agent_metadata.columns.current_hook_bead_id} = ?,
           ${agent_metadata.columns.status} = 'idle',
           ${agent_metadata.columns.dispatch_attempts} = 0,
-          ${agent_metadata.columns.last_activity_at} = ?
+          ${agent_metadata.columns.last_activity_at} = ?,
+          ${agent_metadata.columns.agent_status_message} = NULL,
+          ${agent_metadata.columns.agent_status_updated_at} = NULL
       WHERE ${agent_metadata.bead_id} = ?
     `,
     [beadId, now(), agentId]
@@ -451,6 +456,21 @@ export function writeCheckpoint(sql: SqlStorage, agentId: string, data: unknown)
 export function readCheckpoint(sql: SqlStorage, agentId: string): unknown {
   const agent = getAgent(sql, agentId);
   return agent?.checkpoint ?? null;
+}
+
+// ── Status Message ───────────────────────────────────────
+
+export function updateAgentStatusMessage(sql: SqlStorage, agentId: string, message: string): void {
+  query(
+    sql,
+    /* sql */ `
+      UPDATE ${agent_metadata}
+      SET ${agent_metadata.columns.agent_status_message} = ?,
+          ${agent_metadata.columns.agent_status_updated_at} = ?
+      WHERE ${agent_metadata.bead_id} = ?
+    `,
+    [message, now(), agentId]
+  );
 }
 
 // ── Touch (heartbeat helper) ────────────────────────────────────────

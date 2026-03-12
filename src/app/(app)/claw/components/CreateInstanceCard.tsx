@@ -5,6 +5,7 @@ import { Plus, X } from 'lucide-react';
 import { usePostHog } from 'posthog-js/react';
 import { toast } from 'sonner';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
+import { useKiloClawLatestVersion, useKiloClawMyPin } from '@/hooks/useKiloClaw';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import { Button } from '@/components/ui/button';
@@ -12,23 +13,49 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { ChannelTokenInput } from './ChannelTokenInput';
 import { CHANNELS, CHANNEL_TYPES, type ChannelType } from './channel-config';
-import { KILOCODE_CATALOG_IDS } from './SettingsTab';
+import { getCreateModelOptions } from './modelSupport';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
 export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) {
   const posthog = usePostHog();
   const { data: modelsData, isLoading: isLoadingModels } = useOpenRouterModels();
+  const { data: myPin, isLoading: isLoadingPin, isError: isPinLookupError } = useKiloClawMyPin();
+  const { data: latestVersion, isLoading: isLoadingLatestVersion } = useKiloClawLatestVersion();
   const [selectedModel, setSelectedModel] = useState('');
   const [addedChannels, setAddedChannels] = useState<Set<ChannelType>>(new Set());
   const [tokens, setTokens] = useState<Record<string, string>>({});
+  const latestOpenClawVersion = latestVersion?.openclawVersion;
+  const hasPin = myPin != null;
+  const hasUnknownPinnedVersion = hasPin && !myPin?.openclaw_version;
+  const isLoadingProvisionTargetVersion = isLoadingPin || (!hasPin && isLoadingLatestVersion);
+  const hasProvisionTargetError = isPinLookupError || hasUnknownPinnedVersion;
+  const modelLoadError = isPinLookupError
+    ? 'Failed to load version pin state. Refresh and try again.'
+    : hasUnknownPinnedVersion
+      ? 'Pinned image version metadata is unavailable. Remove or update the pin to select a model.'
+      : undefined;
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
-      (modelsData?.data || [])
-        .filter(model => KILOCODE_CATALOG_IDS.has(model.id))
-        .map(model => ({ id: model.id, name: model.name })),
-    [modelsData]
+      getCreateModelOptions({
+        models: (modelsData?.data || []).map(model => ({ id: model.id, name: model.name })),
+        hasPin,
+        hasPinLookupError: isPinLookupError,
+        pinnedOpenClawVersion: myPin?.openclaw_version,
+        latestOpenClawVersion,
+        isLoadingPin,
+        isLoadingLatestVersion,
+      }),
+    [
+      hasPin,
+      isLoadingLatestVersion,
+      isLoadingPin,
+      isPinLookupError,
+      latestOpenClawVersion,
+      modelsData,
+      myPin,
+    ]
   );
 
   function addChannel(channel: ChannelType) {
@@ -70,7 +97,12 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
   }
 
   function handleCreate() {
-    if (isLoadingModels) {
+    if (hasProvisionTargetError) {
+      toast.error(modelLoadError || 'Failed to resolve provision target version.');
+      return;
+    }
+
+    if (isLoadingModels || isLoadingProvisionTargetVersion) {
       toast.error('Models are still loading; try again in a moment.');
       return;
     }
@@ -123,8 +155,14 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
           models={modelOptions}
           value={selectedModel}
           onValueChange={setSelectedModel}
-          isLoading={isLoadingModels}
-          disabled={mutations.provision.isPending || isLoadingModels}
+          error={modelLoadError}
+          isLoading={isLoadingModels || isLoadingProvisionTargetVersion}
+          disabled={
+            mutations.provision.isPending ||
+            isLoadingModels ||
+            isLoadingProvisionTargetVersion ||
+            hasProvisionTargetError
+          }
           required
         />
 
