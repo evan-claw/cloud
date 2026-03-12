@@ -5,7 +5,7 @@ import {
   organization_memberships,
   kilocode_users,
 } from '@kilocode/db/schema';
-import { eq, and, isNull, isNotNull, or, sql } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -41,15 +41,17 @@ type GitLabLookupFailure = {
 
 export type GitLabLookupResult = GitLabLookupSuccess | GitLabLookupFailure;
 
-const GitLabMetadataSchema = z.object({
-  access_token: z.string().optional(),
-  refresh_token: z.string().optional(),
-  token_expires_at: z.string().optional(),
-  gitlab_instance_url: z.string().optional(),
-  client_id: z.string().optional(),
-  client_secret: z.string().optional(),
-  auth_type: z.enum(['oauth', 'pat']).optional(),
-});
+const GitLabMetadataSchema = z
+  .object({
+    access_token: z.string().optional(),
+    refresh_token: z.string().optional(),
+    token_expires_at: z.string().optional(),
+    gitlab_instance_url: z.string().optional(),
+    client_id: z.string().optional(),
+    client_secret: z.string().optional(),
+    auth_type: z.enum(['oauth', 'pat']).optional(),
+  })
+  .passthrough();
 
 export class GitLabLookupService {
   private db: WorkerDb | null = null;
@@ -105,24 +107,16 @@ export class GitLabLookupService {
         and(
           eq(platform_integrations.platform, 'gitlab'),
           eq(platform_integrations.integration_status, 'active'),
-          or(
-            and(
-              isNotNull(platform_integrations.owned_by_organization_id),
-              eq(
-                platform_integrations.owned_by_organization_id,
-                sql`${params.orgId ?? null}::uuid`
-              ),
-              isNotNull(organization_memberships.id)
-            ),
-            and(
-              isNotNull(platform_integrations.owned_by_user_id),
-              eq(platform_integrations.owned_by_user_id, params.userId)
-            )
-          )
+          params.orgId
+            ? and(
+                eq(platform_integrations.owned_by_organization_id, sql`${params.orgId}::uuid`),
+                isNotNull(organization_memberships.id)
+              )
+            : and(
+                isNotNull(platform_integrations.owned_by_user_id),
+                eq(platform_integrations.owned_by_user_id, params.userId)
+              )
         )
-      )
-      .orderBy(
-        sql`CASE WHEN ${platform_integrations.owned_by_organization_id} IS NOT NULL THEN 0 ELSE 1 END`
       )
       .limit(1);
 
