@@ -113,7 +113,12 @@ async function handleHttpRequest(
 }
 
 export async function startController(env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  writeKiloCliConfig(env as Record<string, string | undefined>);
+  // Write Kilo CLI config before starting the gateway. Best-effort: log and continue on failure.
+  try {
+    writeKiloCliConfig(env as Record<string, string | undefined>);
+  } catch (err) {
+    console.error('[kilo-cli] Failed to write config:', err);
+  }
 
   const config = loadRuntimeConfig(env);
 
