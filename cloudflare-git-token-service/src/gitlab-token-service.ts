@@ -59,7 +59,7 @@ export class GitLabTokenService {
       return { success: true, token: metadata.access_token, instanceUrl };
     }
 
-    if (isTokenExpired(metadata.token_expires_at)) {
+    if (metadata.token_expires_at && isTokenExpired(metadata.token_expires_at)) {
       if (!metadata.refresh_token) {
         return { success: false, reason: 'token_expired_no_refresh' };
       }
