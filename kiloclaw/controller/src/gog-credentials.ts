@@ -1,7 +1,7 @@
 /**
  * Sets up gogcli credentials by extracting a pre-built config tarball.
  *
- * When the container starts with GOOGLE_GOG_CONFIG_TARBALL env var, this module:
+ * When the container starts with KILOCLAW_GOG_CONFIG_TARBALL env var, this module:
  * 1. Base64-decodes the tarball to a temp file
  * 2. Extracts it to /root/.config/ (produces /root/.config/gogcli/)
  * 3. Sets GOG_KEYRING_BACKEND, GOG_KEYRING_PASSWORD, GOG_ACCOUNT env vars
@@ -45,7 +45,7 @@ export async function writeGogCredentials(
         })),
   };
 
-  const tarballBase64 = env.GOOGLE_GOG_CONFIG_TARBALL;
+  const tarballBase64 = env.KILOCLAW_GOG_CONFIG_TARBALL;
 
   if (!tarballBase64) {
     // Clean up stale config from a previous run (e.g. after disconnect)
@@ -88,8 +88,8 @@ export async function writeGogCredentials(
   // (start-openclaw.sh), and here.
   env.GOG_KEYRING_BACKEND = 'file';
   env.GOG_KEYRING_PASSWORD = 'kiloclaw';
-  if (env.GOOGLE_ACCOUNT_EMAIL) {
-    env.GOG_ACCOUNT = env.GOOGLE_ACCOUNT_EMAIL;
+  if (env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL) {
+    env.GOG_ACCOUNT = env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL;
   }
 
   return true;

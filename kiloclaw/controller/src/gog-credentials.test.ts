@@ -22,12 +22,12 @@ describe('writeGogCredentials', () => {
     writeGogCredentials = mod.writeGogCredentials;
   });
 
-  it('extracts tarball and sets env vars when GOOGLE_GOG_CONFIG_TARBALL is set', async () => {
+  it('extracts tarball and sets env vars when KILOCLAW_GOG_CONFIG_TARBALL is set', async () => {
     const deps = mockDeps();
     const dir = '/root/.config/gogcli';
     const env: Record<string, string | undefined> = {
-      GOOGLE_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
-      GOOGLE_ACCOUNT_EMAIL: 'user@gmail.com',
+      KILOCLAW_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
+      KILOCLAW_GOOGLE_ACCOUNT_EMAIL: 'user@gmail.com',
     };
     const result = await writeGogCredentials(env, dir, deps);
 
@@ -58,10 +58,10 @@ describe('writeGogCredentials', () => {
     expect(env.GOG_ACCOUNT).toBe('user@gmail.com');
   });
 
-  it('works without GOOGLE_ACCOUNT_EMAIL', async () => {
+  it('works without KILOCLAW_GOOGLE_ACCOUNT_EMAIL', async () => {
     const deps = mockDeps();
     const env: Record<string, string | undefined> = {
-      GOOGLE_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
+      KILOCLAW_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
     };
     const result = await writeGogCredentials(env, '/root/.config/gogcli', deps);
 
@@ -103,7 +103,7 @@ describe('writeGogCredentials', () => {
     deps.execFileSync.mockImplementation(() => callOrder.push('execFileSync'));
 
     const env: Record<string, string | undefined> = {
-      GOOGLE_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
+      KILOCLAW_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
     };
     await writeGogCredentials(env, '/root/.config/gogcli', deps);
 
@@ -117,7 +117,7 @@ describe('writeGogCredentials', () => {
     });
 
     const env: Record<string, string | undefined> = {
-      GOOGLE_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
+      KILOCLAW_GOG_CONFIG_TARBALL: FAKE_TARBALL_BASE64,
     };
 
     await expect(writeGogCredentials(env, '/root/.config/gogcli', deps)).rejects.toThrow(

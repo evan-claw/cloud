@@ -174,9 +174,9 @@ export async function buildEnvVars(
           userConfig.googleCredentials.gogConfigTarball,
           env.AGENT_ENV_VARS_PRIVATE_KEY
         );
-        sensitive.GOOGLE_GOG_CONFIG_TARBALL = tarballBase64;
+        sensitive.KILOCLAW_GOG_CONFIG_TARBALL = tarballBase64;
         if (userConfig.googleCredentials.email) {
-          plainEnv.GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
+          plainEnv.KILOCLAW_GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
         }
       } catch (err) {
         console.warn('Failed to decrypt Google credentials, starting without Google access:', err);
@@ -206,7 +206,7 @@ export async function buildEnvVars(
 
   // Gmail notifications flag (non-sensitive, non-user-overridable)
   if (userConfig?.gmailNotificationsEnabled) {
-    plainEnv.GMAIL_NOTIFICATIONS_ENABLED = 'true';
+    plainEnv.KILOCLAW_GMAIL_NOTIFICATIONS = 'true';
   }
 
   return { env: plainEnv, sensitive };

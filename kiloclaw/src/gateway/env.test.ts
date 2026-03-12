@@ -311,10 +311,10 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
-    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBe('user@gmail.com');
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL).toBe('user@gmail.com');
     // Should not leak into plaintext
-    expect(result.env.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.env.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
   });
 
   it('decrypts Google gog config tarball without email', async () => {
@@ -328,8 +328,8 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
-    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL).toBeUndefined();
   });
 
   it('continues without Google access when credential decryption fails', async () => {
@@ -348,7 +348,7 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
       'Failed to decrypt Google credentials, starting without Google access:',
       expect.any(Error)
@@ -365,7 +365,7 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
   });
 
   // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────
@@ -445,26 +445,26 @@ describe('buildEnvVars', () => {
 
   // ─── Gmail notifications flag ────────────────────────────────────────
 
-  it('sets GMAIL_NOTIFICATIONS_ENABLED when gmailNotificationsEnabled is true', async () => {
+  it('sets KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is true', async () => {
     const env = createMockEnv();
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       gmailNotificationsEnabled: true,
     });
-    expect(result.env.GMAIL_NOTIFICATIONS_ENABLED).toBe('true');
+    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBe('true');
   });
 
-  it('omits GMAIL_NOTIFICATIONS_ENABLED when gmailNotificationsEnabled is false', async () => {
+  it('omits KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is false', async () => {
     const env = createMockEnv();
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
       gmailNotificationsEnabled: false,
     });
-    expect(result.env.GMAIL_NOTIFICATIONS_ENABLED).toBeUndefined();
+    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBeUndefined();
   });
 
-  it('omits GMAIL_NOTIFICATIONS_ENABLED when gmailNotificationsEnabled is undefined', async () => {
+  it('omits KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is undefined', async () => {
     const env = createMockEnv();
     const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {});
-    expect(result.env.GMAIL_NOTIFICATIONS_ENABLED).toBeUndefined();
+    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBeUndefined();
   });
 
   it('every DEFAULT_INSTANCE_FEATURES entry has a FEATURE_TO_ENV_VAR mapping', () => {

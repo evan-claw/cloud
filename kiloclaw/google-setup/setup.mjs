@@ -436,106 +436,102 @@ console.log('Redeploy your kiloclaw instance to activate.');
 
 console.log('\nSetting up Gmail push notifications...');
 
-const gmailPushWorkerUrl = process.env.GMAIL_PUSH_WORKER_URL;
-if (!gmailPushWorkerUrl) {
-  console.warn('GMAIL_PUSH_WORKER_URL not set, skipping Pub/Sub setup.');
-  console.warn('Gmail push notifications will not work until Pub/Sub is configured.');
-} else {
-  // Step 1: Create Pub/Sub topic (idempotent)
-  console.log('Creating Pub/Sub topic gog-gmail-watch...');
-  try {
-    execSync('gcloud pubsub topics create gog-gmail-watch --quiet', {
-      stdio: 'pipe',
-    });
-    console.log('Topic created.');
-  } catch {
-    console.log('Topic already exists (ok).');
+const gmailPushWorkerUrl = process.env.GMAIL_PUSH_WORKER_URL || 'https://kiloclaw-gmail-push.kiloapps.ai';
+
+// Step 1: Create Pub/Sub topic (idempotent)
+console.log('Creating Pub/Sub topic gog-gmail-watch...');
+try {
+  execSync('gcloud pubsub topics create gog-gmail-watch --quiet', {
+    stdio: 'pipe',
+  });
+  console.log('Topic created.');
+} catch {
+  console.log('Topic already exists (ok).');
+}
+
+// Step 2: Grant Gmail API push publisher role
+console.log('Granting Gmail push publisher role...');
+try {
+  execSync(
+    'gcloud pubsub topics add-iam-policy-binding gog-gmail-watch ' +
+    '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
+    '--role="roles/pubsub.publisher" --quiet',
+    { stdio: 'pipe' }
+  );
+  console.log('Publisher role granted.');
+} catch (err) {
+  console.warn('Warning: Could not grant publisher role:', err.message);
+}
+
+// Step 3: Get GCP project ID for topic path
+const gcpProject = execSync('gcloud config get-value project', { encoding: 'utf8' }).trim();
+console.log(`GCP project: ${gcpProject}`);
+
+// Step 4: Create or update push subscription
+// Extract userId from JWT for the push subscription URL
+let pushUserId;
+try {
+  const [, jwtPayload] = token.split('.');
+  const claims = JSON.parse(Buffer.from(jwtPayload, 'base64url').toString());
+  pushUserId = claims.sub;
+} catch {
+  console.warn('Warning: Could not extract userId from token, skipping Pub/Sub setup.');
+}
+
+if (pushUserId) {
+  // Generate HMAC-SHA256 token so the push endpoint rejects unauthenticated callers.
+  // Must match cloudflare-gmail-push/src/auth/push-token.ts logic.
+  const internalApiSecret = process.env.INTERNAL_API_SECRET;
+  let pushToken = '';
+  if (internalApiSecret) {
+    const { createHmac } = await import('node:crypto');
+    pushToken = createHmac('sha256', internalApiSecret).update(pushUserId).digest('hex').slice(0, 32);
+  } else {
+    console.warn('Warning: INTERNAL_API_SECRET not set — push endpoint will be unauthenticated.');
   }
 
-  // Step 2: Grant Gmail API push publisher role
-  console.log('Granting Gmail push publisher role...');
+  const tokenPath = pushToken ? `/${pushToken}` : '';
+  const pushEndpoint = `${gmailPushWorkerUrl}/push/user/${pushUserId}${tokenPath}`;
+  console.log(`Creating push subscription → ${pushEndpoint}`);
   try {
+    // Push auth uses an HMAC URL token (derived from INTERNAL_API_SECRET).
+    // OIDC push auth (--push-auth-service-account) is omitted for simplicity
+    // but can be added later with a user-owned SA for defense-in-depth.
     execSync(
-      'gcloud pubsub topics add-iam-policy-binding gog-gmail-watch ' +
-      '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
-      '--role="roles/pubsub.publisher" --quiet',
+      `gcloud pubsub subscriptions create gog-gmail-push ` +
+      `--topic=gog-gmail-watch ` +
+      `--push-endpoint="${pushEndpoint}" ` +
+      `--ack-deadline=30 --quiet`,
       { stdio: 'pipe' }
     );
-    console.log('Publisher role granted.');
-  } catch (err) {
-    console.warn('Warning: Could not grant publisher role:', err.message);
-  }
-
-  // Step 3: Get GCP project ID for topic path
-  const gcpProject = execSync('gcloud config get-value project', { encoding: 'utf8' }).trim();
-  console.log(`GCP project: ${gcpProject}`);
-
-  // Step 4: Create or update push subscription
-  // Extract userId from JWT for the push subscription URL
-  let pushUserId;
-  try {
-    const [, jwtPayload] = token.split('.');
-    const claims = JSON.parse(Buffer.from(jwtPayload, 'base64url').toString());
-    pushUserId = claims.sub;
+    console.log('Push subscription created.');
   } catch {
-    console.warn('Warning: Could not extract userId from token, skipping Pub/Sub setup.');
-  }
-
-  if (pushUserId) {
-    // Generate HMAC-SHA256 token so the push endpoint rejects unauthenticated callers.
-    // Must match cloudflare-gmail-push/src/auth/push-token.ts logic.
-    const internalApiSecret = process.env.INTERNAL_API_SECRET;
-    let pushToken = '';
-    if (internalApiSecret) {
-      const { createHmac } = await import('node:crypto');
-      pushToken = createHmac('sha256', internalApiSecret).update(pushUserId).digest('hex').slice(0, 32);
-    } else {
-      console.warn('Warning: INTERNAL_API_SECRET not set — push endpoint will be unauthenticated.');
-    }
-
-    const tokenPath = pushToken ? `/${pushToken}` : '';
-    const pushEndpoint = `${gmailPushWorkerUrl}/push/user/${pushUserId}${tokenPath}`;
-    console.log(`Creating push subscription → ${pushEndpoint}`);
+    // Subscription may already exist — update it
     try {
-      // Push auth uses an HMAC URL token (derived from INTERNAL_API_SECRET).
-      // OIDC push auth (--push-auth-service-account) is omitted for simplicity
-      // but can be added later with a user-owned SA for defense-in-depth.
       execSync(
-        `gcloud pubsub subscriptions create gog-gmail-push ` +
-        `--topic=gog-gmail-watch ` +
-        `--push-endpoint="${pushEndpoint}" ` +
-        `--ack-deadline=30 --quiet`,
+        `gcloud pubsub subscriptions update gog-gmail-push ` +
+        `--push-endpoint="${pushEndpoint}" --quiet`,
         { stdio: 'pipe' }
       );
-      console.log('Push subscription created.');
-    } catch {
-      // Subscription may already exist — update it
-      try {
-        execSync(
-          `gcloud pubsub subscriptions update gog-gmail-push ` +
-          `--push-endpoint="${pushEndpoint}" --quiet`,
-          { stdio: 'pipe' }
-        );
-        console.log('Push subscription updated.');
-      } catch (err) {
-        console.warn('Warning: Could not create/update push subscription:', err.message);
-      }
-    }
-
-    // Step 5: Register Gmail watch
-    console.log('Registering Gmail watch...');
-    try {
-      execSync(
-        `gog gmail watch start --account="${userEmail}" ` +
-        `--topic="projects/${gcpProject}/topics/gog-gmail-watch"`,
-        { stdio: 'inherit', env: gogEnv }
-      );
-      console.log('Gmail watch registered successfully.');
+      console.log('Push subscription updated.');
     } catch (err) {
-      console.warn('Warning: Gmail watch registration failed:', err.message);
-      console.warn('You can register manually later with: gog gmail watch start');
+      console.warn('Warning: Could not create/update push subscription:', err.message);
     }
   }
 
-  console.log('\nGmail push notification setup complete.');
+  // Step 5: Register Gmail watch
+  console.log('Registering Gmail watch...');
+  try {
+    execSync(
+      `gog gmail watch start --account="${userEmail}" ` +
+      `--topic="projects/${gcpProject}/topics/gog-gmail-watch"`,
+      { stdio: 'inherit', env: gogEnv }
+    );
+    console.log('Gmail watch registered successfully.');
+  } catch (err) {
+    console.warn('Warning: Gmail watch registration failed:', err.message);
+    console.warn('You can register manually later with: gog gmail watch start');
+  }
 }
+
+console.log('\nGmail push notification setup complete.');

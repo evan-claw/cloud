@@ -137,14 +137,14 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   });
 
   let gmailWatchSupervisor: Supervisor | null = null;
-  const gmailNotificationsEnabled = env.GMAIL_NOTIFICATIONS_ENABLED === 'true';
-  const hasGogCredentials = Boolean(env.GOOGLE_GOG_CONFIG_TARBALL);
+  const gmailNotificationsEnabled = env.KILOCLAW_GMAIL_NOTIFICATIONS === 'true';
+  const hasGogCredentials = Boolean(env.KILOCLAW_GOG_CONFIG_TARBALL);
 
   if (gmailNotificationsEnabled && hasGogCredentials) {
-    const googleAccountEmail = env.GOOGLE_ACCOUNT_EMAIL;
+    const googleAccountEmail = env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL;
     if (!googleAccountEmail) {
       console.warn(
-        '[controller] GMAIL_NOTIFICATIONS_ENABLED=true but GOOGLE_ACCOUNT_EMAIL missing, skipping gmail watch'
+        '[controller] KILOCLAW_GMAIL_NOTIFICATIONS=true but KILOCLAW_GOOGLE_ACCOUNT_EMAIL missing, skipping gmail watch'
       );
     } else {
       gmailWatchSupervisor = createSupervisor({
@@ -171,7 +171,7 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
     }
   } else if (gmailNotificationsEnabled && !hasGogCredentials) {
     console.warn(
-      '[controller] GMAIL_NOTIFICATIONS_ENABLED=true but no Google credentials, skipping gmail watch'
+      '[controller] KILOCLAW_GMAIL_NOTIFICATIONS=true but no Google credentials, skipping gmail watch'
     );
   }
 
