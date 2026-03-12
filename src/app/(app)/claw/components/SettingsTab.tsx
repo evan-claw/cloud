@@ -38,33 +38,6 @@ import { VersionPinCard } from './VersionPinCard';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
-/**
- * Maps a catalog entry ID to whether the entry is "configured" based on
- * the channel status from the config endpoint. The config endpoint returns
- * per-field booleans (telegram, discord, slackBot, slackApp) rather than
- * per-entry booleans, so we need this bridge mapping.
- *
- * IMPORTANT: This switch must be updated when new channel entries are added
- * to the secret catalog. Unknown entry IDs silently return false ("Not configured").
- * The proper fix is to make the config endpoint return per-entry-id status
- * derived from the catalog, eliminating this manual mapping.
- */
-function isEntryConfigured(
-  entryId: string,
-  channelStatus: { telegram: boolean; discord: boolean; slackBot: boolean; slackApp: boolean }
-): boolean {
-  switch (entryId) {
-    case 'telegram':
-      return channelStatus.telegram;
-    case 'discord':
-      return channelStatus.discord;
-    case 'slack':
-      return channelStatus.slackBot && channelStatus.slackApp;
-    default:
-      return false;
-  }
-}
-
 function GoogleAccountSection({
   connected,
   mutations,
