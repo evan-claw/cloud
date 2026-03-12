@@ -55,12 +55,13 @@ const nextConfig = {
           destination: 'https://us-assets.i.posthog.com/static/:path*',
         },
         {
-          source: '/ingest/:path*',
-          destination: 'https://us.i.posthog.com/:path*',
-        },
-        {
           source: '/ingest/decide',
           destination: 'https://us.i.posthog.com/decide',
+        },
+        // Catch-all must be last — otherwise it swallows /decide and /static
+        {
+          source: '/ingest/:path*',
+          destination: 'https://us.i.posthog.com/:path*',
         },
         {
           source: '/.well-known/appspecific/com.chrome.devtools.json',
