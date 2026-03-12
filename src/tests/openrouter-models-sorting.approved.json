@@ -765,7 +765,7 @@
     },
     {
       "id": "kilo/auto",
-      "name": "Deprecated: Kilo Auto Frontier",
+      "name": "Deprecated Kilo Auto Frontier",
       "created": 0,
       "description": "kilo/auto is deprecated, use kilo-auto/frontier instead",
       "architecture": {
@@ -806,7 +806,7 @@
     },
     {
       "id": "kilo/auto-free",
-      "name": "Deprecated: Kilo Auto Free",
+      "name": "Deprecated Kilo Auto Free",
       "created": 0,
       "description": "kilo/auto-free is deprecated, use kilo-auto/free instead",
       "architecture": {
@@ -851,7 +851,7 @@
     },
     {
       "id": "kilo/auto-small",
-      "name": "Deprecated: Kilo Auto Small",
+      "name": "Deprecated Kilo Auto Small",
       "created": 0,
       "description": "kilo/auto-small is deprecated, use kilo-auto/small instead",
       "architecture": {

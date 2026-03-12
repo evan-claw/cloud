@@ -181,7 +181,7 @@ export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingS
       return {
         ...model,
         id: legacyId,
-        name: 'Deprecated: ' + model.name,
+        name: 'Deprecated ' + model.name,
         description: `${legacyId} is deprecated, use ${model.id} instead`,
       };
     })

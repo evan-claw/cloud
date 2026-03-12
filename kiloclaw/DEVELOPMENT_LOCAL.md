@@ -211,18 +211,19 @@ Both are included in `vercel env pull` (see root `DEVELOPMENT.md`):
 
 Provisioning requires a Docker image in the Fly registry. For initial setup,
 existing images from a team member are usually sufficient. Run `push-dev.sh`
-only when changing the Docker image or OpenClaw startup behavior.
+when changing the Docker image, OpenClaw startup behavior, or the Node
+controller (e.g., adding new `/_kilo/` routes).
 
 ### Docker authentication
 
 ```bash
-# One-time setup
+# Run before each push — the token expires after 5 minutes
 fly auth docker
 ```
 
-The auth token from `fly auth docker` expires after 5 minutes. If the push
-takes longer (e.g., due to low upload bandwidth), Fly returns an error saying
-it "doesn't recognize the app." Workarounds:
+If the push takes longer than 5 minutes (e.g., due to low upload bandwidth),
+the token expires mid-push and Fly returns an error saying it "doesn't
+recognize the app." Workarounds:
 
 - Push from a machine with decent upload speed
 - Use an org token directly instead of `fly auth docker`
@@ -243,9 +244,32 @@ This will:
    This must match `FLY_REGISTRY_APP` or new instances won't find the image.
 3. Auto-update `FLY_IMAGE_TAG`, `FLY_IMAGE_DIGEST`, and `OPENCLAW_VERSION` in `.dev.vars`
 
+Each push creates a unique tag (`dev-<timestamp>`) and only updates your local
+`.dev.vars`. Other developers' machines are unaffected — they keep running
+whatever `FLY_IMAGE_TAG` is in their own `.dev.vars`.
+
 The image is large, so pushes are slow. After pushing, restart the worker
-(`pnpm run dev`) to pick up the new values, then destroy and re-provision your
-instance from the dashboard.
+(`pnpm run dev`) to pick up the new values, then restart your instance from the
+dashboard. A restart is sufficient to pick up the new image — you only need to
+destroy and re-provision if the volume or Fly app config changed.
+
+### When do I need to push a new image?
+
+The Docker image bundles the **Node controller** (`controller/src/`) and
+**OpenClaw**. The KiloClaw **worker** (`src/`) runs on Cloudflare and does NOT
+require an image push — `pnpm run dev` picks up worker changes immediately.
+
+Push a new image when you change:
+
+- Controller routes or logic (`controller/src/`)
+- The Dockerfile or startup scripts
+- OpenClaw version (pinned in the Dockerfile)
+
+**Symptom of a stale controller image:** the worker calls a new `/_kilo/` route
+that exists in your local controller code but not in the deployed image. The
+request falls through to the proxy, which returns a bare `401 Unauthorized`
+instead of the expected `controller_route_unavailable` code. This surfaces as a
+`GatewayControllerError: Unauthorized` in the worker logs.
 
 ## Provisioning and Using an Instance
 

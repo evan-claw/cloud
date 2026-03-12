@@ -962,6 +962,21 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return gateway.patchConfigOnMachine(this.s, this.env, patch);
   }
 
+  /** Returns null if the controller is too old to have the /_kilo/config/read endpoint. */
+  async getOpenclawConfig(): Promise<{ config: Record<string, unknown>; etag?: string } | null> {
+    await this.loadState();
+    return gateway.getOpenclawConfig(this.s, this.env);
+  }
+
+  /** Returns null if the controller is too old to have the /_kilo/config/replace endpoint. */
+  async replaceConfigOnMachine(
+    config: Record<string, unknown>,
+    etag?: string
+  ): Promise<{ ok: boolean } | null> {
+    await this.loadState();
+    return gateway.replaceConfigOnMachine(this.s, this.env, config, etag);
+  }
+
   // ── Restart machine (user-facing) ──────────────────────────────────
 
   async restartMachine(options?: {

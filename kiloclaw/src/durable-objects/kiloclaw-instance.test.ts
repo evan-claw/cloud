@@ -2641,7 +2641,12 @@ describe('provision: instance feature flags', () => {
     await instance.provision('user-1', {});
 
     const features = storage._store.get('instanceFeatures') as string[];
-    expect(features).toEqual(['npm-global-prefix', 'pip-global-prefix', 'uv-global-prefix']);
+    expect(features).toEqual([
+      'npm-global-prefix',
+      'pip-global-prefix',
+      'uv-global-prefix',
+      'kilo-cli',
+    ]);
   });
 
   it('preserves existing features on re-provision (does not reset to defaults)', async () => {

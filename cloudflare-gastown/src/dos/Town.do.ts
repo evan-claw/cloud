@@ -757,6 +757,36 @@ export class TownDO extends DurableObject<Env> {
     if (input.status === 'merged' && sourceBeadId) {
       this.dispatchUnblockedBeads(sourceBeadId);
     }
+
+    // When a review fails or conflicts (rework), the source bead was
+    // returned to in_progress. Re-hook a polecat and re-dispatch so the
+    // rework starts automatically. The original polecat may already be
+    // working on something else, so fall back to getOrCreateAgent.
+    if ((input.status === 'failed' || input.status === 'conflict') && sourceBeadId) {
+      const sourceBead = beadOps.getBead(this.sql, sourceBeadId);
+      if (sourceBead?.rig_id) {
+        try {
+          const reworkAgent = agents.getOrCreateAgent(
+            this.sql,
+            'polecat',
+            sourceBead.rig_id,
+            this.townId
+          );
+          agents.hookBead(this.sql, reworkAgent.id, sourceBeadId);
+          this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
+            console.error(
+              `${TOWN_LOG} completeReviewWithResult: fire-and-forget rework dispatch failed for bead=${sourceBeadId}`,
+              err
+            )
+          );
+        } catch (err) {
+          console.warn(
+            `${TOWN_LOG} completeReviewWithResult: could not dispatch rework for bead=${sourceBeadId}:`,
+            err
+          );
+        }
+      }
+    }
   }
 
   async agentDone(agentId: string, input: AgentDoneInput): Promise<void> {
@@ -965,6 +995,24 @@ export class TownDO extends DurableObject<Env> {
         resolution_notes: input.resolution_notes,
       },
     });
+
+    // Log a triage_resolved event on the target bead so the action shows
+    // up in the activity feed for the bead that was actually affected.
+    const targetBeadId = snapshotHookedBeadId ?? targetAgentId;
+    if (targetBeadId && targetBeadId !== input.triage_request_bead_id) {
+      beadOps.logBeadEvent(this.sql, {
+        beadId: targetBeadId,
+        agentId: input.agent_id,
+        eventType: 'triage_resolved',
+        newValue: action,
+        metadata: {
+          action,
+          resolution_notes: input.resolution_notes,
+          triage_request_bead_id: input.triage_request_bead_id,
+          target_agent_id: targetAgentId,
+        },
+      });
+    }
 
     // If this triage request was created for an escalation, close the
     // linked escalation bead too so it doesn't sit open indefinitely.
@@ -3245,7 +3293,7 @@ export class TownDO extends DurableObject<Env> {
       [
         ...query(
           this.sql,
-          /* sql */ `SELECT COUNT(*) AS cnt FROM ${beads} WHERE ${beads.status} IN ('open', 'in_progress') AND ${beads.type} NOT IN ('agent', 'message')`,
+          /* sql */ `SELECT COUNT(*) AS cnt FROM ${beads} WHERE ${beads.status} IN ('open', 'in_progress', 'in_review') AND ${beads.type} NOT IN ('agent', 'message')`,
           []
         ),
       ][0]?.cnt ?? 0
@@ -3274,6 +3322,7 @@ export class TownDO extends DurableObject<Env> {
     beads: {
       open: number;
       inProgress: number;
+      inReview: number;
       failed: number;
       triageRequests: number;
     };
@@ -3328,12 +3377,13 @@ export class TownDO extends DurableObject<Env> {
         []
       ),
     ];
-    const beadCounts = { open: 0, inProgress: 0, failed: 0, triageRequests: 0 };
+    const beadCounts = { open: 0, inProgress: 0, inReview: 0, failed: 0, triageRequests: 0 };
     for (const row of beadRows) {
       const s = `${row.status as string}`;
       const c = Number(row.cnt);
       if (s === 'open') beadCounts.open = c;
       else if (s === 'in_progress') beadCounts.inProgress = c;
+      else if (s === 'in_review') beadCounts.inReview = c;
       else if (s === 'failed') beadCounts.failed = c;
     }
 
