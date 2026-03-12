@@ -295,14 +295,22 @@ describe('array handling', () => {
     expect(providers[1].name).toBe('anthropic');
   });
 
-  it('restores secrets inside array entries from current config', () => {
+  it('strips placeholders in array entries on restore (no index-based matching)', () => {
     const redacted = redactOpenclawConfig(CONFIG_WITH_ARRAYS);
     const merged = restoreRedactedSecrets(redacted, CONFIG_WITH_ARRAYS);
 
-    expect(merged).toEqual(CONFIG_WITH_ARRAYS);
+    // Array secrets are NOT restored — placeholders are stripped to avoid
+    // position-dependent mismatches when users reorder entries.
+    const providers = (merged.models as Record<string, unknown>).providers as Array<
+      Record<string, unknown>
+    >;
+    expect(providers[0].apiKey).toBeUndefined();
+    expect(providers[0].name).toBe('openai');
+    expect(providers[1].apiKey).toBeUndefined();
+    expect(providers[1].name).toBe('anthropic');
   });
 
-  it('keeps new values in array entries when user changed a secret', () => {
+  it('keeps new values in array entries when user set a non-placeholder value', () => {
     const redacted = redactOpenclawConfig(CONFIG_WITH_ARRAYS);
     const providers = (redacted.models as Record<string, unknown>).providers as Array<
       Record<string, unknown>
@@ -314,10 +322,11 @@ describe('array handling', () => {
       Record<string, unknown>
     >;
     expect(mergedProviders[0].apiKey).toBe('sk-new-key');
-    expect(mergedProviders[1].apiKey).toBe('sk-secret-2');
+    // Placeholder in second entry is stripped
+    expect(mergedProviders[1].apiKey).toBeUndefined();
   });
 
-  it('strips unresolvable placeholders in array entries for new subtrees', () => {
+  it('strips placeholders in array entries even when currentConfig has data', () => {
     const userConfig = {
       models: {
         providers: [
@@ -335,7 +344,7 @@ describe('array handling', () => {
     expect(providers[0].baseUrl).toBe('https://example.com');
   });
 
-  it('redacts secrets in nested arrays (arrays inside array elements)', () => {
+  it('redacts secrets in nested arrays', () => {
     const config = {
       groups: [{ members: [{ apiKey: 'nested-secret', name: 'bot' }] }],
     };
@@ -345,10 +354,6 @@ describe('array handling', () => {
 
     expect(members[0].apiKey).toBe(REDACTED_PLACEHOLDER);
     expect(members[0].name).toBe('bot');
-
-    // round-trip
-    const restored = restoreRedactedSecrets(redacted, config);
-    expect(restored).toEqual(config);
   });
 
   it('handles mixed array contents (strings, numbers, objects, nulls)', () => {
@@ -374,21 +379,25 @@ describe('array handling', () => {
     expect(restored.providers).toEqual([]);
   });
 
-  it('handles deeply nested objects inside array elements', () => {
+  it('strips placeholders in deeply nested objects inside array elements', () => {
     const config = {
       list: [{ inner: { deep: { apiKey: 'deep-array-secret' } } }],
     };
     const redacted = redactOpenclawConfig(config);
     const list = redacted.list as Array<Record<string, unknown>>;
     const deep = (list[0].inner as Record<string, unknown>).deep as Record<string, unknown>;
-
     expect(deep.apiKey).toBe(REDACTED_PLACEHOLDER);
 
     const restored = restoreRedactedSecrets(redacted, config);
-    expect(restored).toEqual(config);
+    const restoredList = restored.list as Array<Record<string, unknown>>;
+    const restoredDeep = (restoredList[0].inner as Record<string, unknown>).deep as Record<
+      string,
+      unknown
+    >;
+    expect(restoredDeep.apiKey).toBeUndefined();
   });
 
-  it('strips placeholders when user array is longer than current array', () => {
+  it('strips all placeholders regardless of array length mismatch', () => {
     const userConfig = {
       providers: [
         { apiKey: REDACTED_PLACEHOLDER, name: 'existing' },
@@ -401,8 +410,7 @@ describe('array handling', () => {
 
     const merged = restoreRedactedSecrets(userConfig, currentConfig);
     const providers = merged.providers as Array<Record<string, unknown>>;
-    expect(providers[0].apiKey).toBe('real-key');
-    // Second element has no match in currentConfig — placeholder stripped
+    expect(providers[0].apiKey).toBeUndefined();
     expect(providers[1].apiKey).toBeUndefined();
     expect(providers[1].name).toBe('new-extra');
   });

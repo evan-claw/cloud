@@ -172,32 +172,12 @@ function walkAndRestore(obj: Record<string, unknown>, current: Record<string, un
         delete obj[key];
       }
     } else if (Array.isArray(value)) {
-      const currentArr = current[key];
-      if (Array.isArray(currentArr)) {
-        for (let i = 0; i < value.length; i++) {
-          const item = value[i];
-          const currentItem = currentArr[i];
-          if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-            if (
-              typeof currentItem === 'object' &&
-              currentItem !== null &&
-              !Array.isArray(currentItem)
-            ) {
-              walkAndRestore(
-                item as Record<string, unknown>,
-                currentItem as Record<string, unknown>
-              );
-            } else {
-              stripUnresolvablePlaceholders(item as Record<string, unknown>);
-            }
-          }
-        }
-      } else {
-        // Array doesn't exist in currentConfig — strip placeholders from all elements
-        for (const item of value) {
-          if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-            stripUnresolvablePlaceholders(item as Record<string, unknown>);
-          }
+      // Arrays are not walked for secret restoration — index-based matching
+      // is position-dependent and silently swaps secrets when users reorder
+      // entries. Strip any leftover placeholders so they don't leak through.
+      for (const item of value) {
+        if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+          stripUnresolvablePlaceholders(item as Record<string, unknown>);
         }
       }
     } else if (typeof value === 'object' && value !== null) {

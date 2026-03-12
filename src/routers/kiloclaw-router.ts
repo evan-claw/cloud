@@ -2,7 +2,7 @@ import 'server-only';
 
 import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
-import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
+import { baseProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/init';
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
@@ -796,10 +796,11 @@ export const kiloclawRouter = createTRPCRouter({
         });
       }
       if (err instanceof KiloClawApiError && err.statusCode === 409) {
-        const { message } = getKiloClawApiErrorPayload(err);
+        const { message, code } = getKiloClawApiErrorPayload(err);
         throw new TRPCError({
           code: 'CONFLICT',
           message: message ?? 'Instance is not provisioned or not running',
+          cause: code ? new UpstreamApiError(code) : undefined,
         });
       }
       throw new TRPCError({
@@ -836,10 +837,11 @@ export const kiloclawRouter = createTRPCRouter({
           });
         }
         if (err instanceof KiloClawApiError && err.statusCode === 409) {
-          const { message } = getKiloClawApiErrorPayload(err);
+          const { message, code } = getKiloClawApiErrorPayload(err);
           throw new TRPCError({
             code: 'CONFLICT',
             message: message ?? 'Instance is not provisioned or not running',
+            cause: code ? new UpstreamApiError(code) : undefined,
           });
         }
         throw new TRPCError({
