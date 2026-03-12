@@ -24,6 +24,7 @@ import type {
   ControllerVersionResponse,
   GoogleCredentialsInput,
   GoogleCredentialsResponse,
+  GmailNotificationsResponse,
 } from './types';
 
 /**
@@ -260,6 +261,19 @@ export class KiloClawInternalClient {
 
   async clearGoogleCredentials(userId: string): Promise<GoogleCredentialsResponse> {
     return this.request(`/api/platform/google-credentials?userId=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async enableGmailNotifications(userId: string): Promise<GmailNotificationsResponse> {
+    return this.request('/api/platform/gmail-notifications', {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async disableGmailNotifications(userId: string): Promise<GmailNotificationsResponse> {
+    return this.request(`/api/platform/gmail-notifications?userId=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
     });
   }

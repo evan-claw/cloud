@@ -486,6 +486,16 @@ export const kiloclawRouter = createTRPCRouter({
     return client.clearGoogleCredentials(ctx.user.id);
   }),
 
+  setGmailNotifications: baseProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      if (input.enabled) {
+        return client.enableGmailNotifications(ctx.user.id);
+      }
+      return client.disableGmailNotifications(ctx.user.id);
+    }),
+
   getEarlybirdStatus: baseProcedure
     .output(z.object({ purchased: z.boolean() }))
     .query(async ({ ctx }) => {
