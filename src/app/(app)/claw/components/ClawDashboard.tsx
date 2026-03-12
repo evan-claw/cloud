@@ -48,6 +48,13 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
   const { data: isServiceDegraded } = useKiloClawServiceDegraded();
   const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
 
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const instanceYoung =
+    instanceStatus !== null &&
+    instanceStatus.provisionedAt !== null &&
+    Date.now() - instanceStatus.provisionedAt < SEVEN_DAYS_MS;
+  const configServiceNudgeVisible = !instanceStatus || instanceYoung;
+
   const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
   const onSecretsChanged = useCallback((entryId: string) => {
@@ -86,6 +93,25 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
                 check our status page for live updates
               </a>
             </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {configServiceNudgeVisible && (
+        <Alert>
+          <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              Need help getting KiloClaw configured? Get up and running in one hour with 2 months
+              free KiloClaw hosting included.
+            </span>
+            <a
+              href="https://kilo.ai/kiloclaw/config-service"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex shrink-0 items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors"
+            >
+              Learn more
+            </a>
           </AlertDescription>
         </Alert>
       )}
