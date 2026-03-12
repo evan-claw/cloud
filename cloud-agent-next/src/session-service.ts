@@ -578,10 +578,7 @@ export class SessionService {
     if (env.KILO_OPENROUTER_BASE) {
       providerOptions.baseURL = env.KILO_OPENROUTER_BASE;
     }
-    const isInteractive =
-      !createdOnPlatform ||
-      createdOnPlatform === 'cloud-agent' ||
-      createdOnPlatform === 'app-builder';
+    const isInteractive = !createdOnPlatform;
     const commandGuardPolicy = getCommandGuardPolicy(createdOnPlatform);
 
     const permission: Record<string, unknown> = {

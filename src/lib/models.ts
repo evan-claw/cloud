@@ -2,7 +2,11 @@
  * Utility functions for working with AI models
  */
 
-import { KILO_AUTO_FREE_MODEL, KILO_AUTO_FRONTIER_MODEL } from '@/lib/kilo-auto-model';
+import {
+  KILO_AUTO_BALANCED_MODEL,
+  KILO_AUTO_FREE_MODEL,
+  KILO_AUTO_FRONTIER_MODEL,
+} from '@/lib/kilo-auto-model';
 import {
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -20,6 +24,7 @@ export const PRIMARY_DEFAULT_MODEL = CLAUDE_SONNET_CURRENT_MODEL_ID;
 
 export const preferredModels = [
   KILO_AUTO_FRONTIER_MODEL.id,
+  KILO_AUTO_BALANCED_MODEL.id,
   KILO_AUTO_FREE_MODEL.id,
   'nvidia/nemotron-3-super-120b-a12b:free',
   minimax_m25_free_model.is_enabled ? minimax_m25_free_model.public_id : 'minimax/minimax-m2.5',

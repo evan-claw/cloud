@@ -1303,7 +1303,7 @@ describe('SessionService', () => {
       };
     };
 
-    it.each([undefined, 'cloud-agent', 'app-builder'])(
+    it.each([undefined])(
       'should NOT include question:deny for interactive platform %s',
       async createdOnPlatform => {
         const { sandbox, sandboxCreateSession } = setupForPlatformTest();
@@ -1332,34 +1332,40 @@ describe('SessionService', () => {
       }
     );
 
-    it.each(['slack', 'security-agent', 'webhook', 'code-review', 'auto-triage', 'autofix'])(
-      'should include question:deny for non-interactive platform %s',
-      async createdOnPlatform => {
-        const { sandbox, sandboxCreateSession } = setupForPlatformTest();
-        const sessionId: SessionId = 'agent_noninteractive_test';
-        mockedSetupWorkspace.mockResolvedValue({
-          workspacePath: `/workspace/org/user/sessions/${sessionId}`,
-          sessionHome: `/home/${sessionId}`,
-        });
+    it.each([
+      'cloud-agent',
+      'app-builder',
+      'slack',
+      'security-agent',
+      'webhook',
+      'code-review',
+      'auto-triage',
+      'autofix',
+    ])('should include question:deny for non-interactive platform %s', async createdOnPlatform => {
+      const { sandbox, sandboxCreateSession } = setupForPlatformTest();
+      const sessionId: SessionId = 'agent_noninteractive_test';
+      mockedSetupWorkspace.mockResolvedValue({
+        workspacePath: `/workspace/org/user/sessions/${sessionId}`,
+        sessionHome: `/home/${sessionId}`,
+      });
 
-        const service = new SessionService();
-        await service.initiate({
-          sandbox,
-          sandboxId: 'org__user',
-          orgId: 'org',
-          userId: 'user',
-          sessionId,
-          kilocodeToken: 'token',
-          kilocodeModel: 'test-model',
-          githubRepo: 'acme/repo',
-          env: mockEnv,
-          createdOnPlatform,
-        });
+      const service = new SessionService();
+      await service.initiate({
+        sandbox,
+        sandboxId: 'org__user',
+        orgId: 'org',
+        userId: 'user',
+        sessionId,
+        kilocodeToken: 'token',
+        kilocodeModel: 'test-model',
+        githubRepo: 'acme/repo',
+        env: mockEnv,
+        createdOnPlatform,
+      });
 
-        const config = getConfigContent(sandboxCreateSession);
-        expect(config.permission.question).toBe('deny');
-      }
-    );
+      const config = getConfigContent(sandboxCreateSession);
+      expect(config.permission.question).toBe('deny');
+    });
 
     it('should include read-only command guard policy for code-review sessions', async () => {
       const { sandbox, sandboxCreateSession } = setupForPlatformTest();

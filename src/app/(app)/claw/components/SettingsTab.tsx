@@ -18,9 +18,14 @@ import { toast } from 'sonner';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
-import { calverAtLeast, cleanVersion } from '@/lib/kiloclaw/version';
+import { calverAtLeast, cleanVersion, getRunningVersionBadge } from '@/lib/kiloclaw/version';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
-import { useControllerVersion, useKiloClawConfig, useKiloClawMyPin } from '@/hooks/useKiloClaw';
+import {
+  useControllerVersion,
+  useKiloClawConfig,
+  useKiloClawLatestVersion,
+  useKiloClawMyPin,
+} from '@/hooks/useKiloClaw';
 import { useTRPC } from '@/lib/trpc/utils';
 import { useDefaultModelSelection } from '../hooks/useDefaultModelSelection';
 import { getSettingsModelOptions } from './modelSupport';
@@ -126,13 +131,13 @@ function GoogleAccountSection({
 export function SettingsTab({
   status,
   mutations,
-  onChannelsChanged,
-  dirtyChannels,
+  onSecretsChanged,
+  dirtySecrets,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
-  onChannelsChanged?: (channelType: string) => void;
-  dirtyChannels: Set<string>;
+  onSecretsChanged?: (entryId: string) => void;
+  dirtySecrets: Set<string>;
 }) {
   const posthog = usePostHog();
   const { data: config } = useKiloClawConfig();
@@ -144,10 +149,12 @@ export function SettingsTab({
     isError: isControllerVersionError,
   } = useControllerVersion(isRunning);
   const { data: myPin } = useKiloClawMyPin();
+  const { data: latestVersion } = useKiloClawLatestVersion();
   const [confirmDestroy, setConfirmDestroy] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const trackedVersion = cleanVersion(status.openclawVersion);
   const runningVersion = cleanVersion(controllerVersion?.openclawVersion);
+  const latestAvailableVersion = cleanVersion(latestVersion?.openclawVersion);
   const hasModelSelectionError = isRunning && isControllerVersionError;
   const modelSelectionError = hasModelSelectionError
     ? 'Failed to load the running OpenClaw version. Retry before changing the default model.'
@@ -219,7 +226,22 @@ export function SettingsTab({
   // Old image: the DO returns null when the controller lacks /_kilo/version,
   // and the platform route converts that to { version: null, commit: null }.
   const needsImageUpgrade = isRunning && controllerVersion && !controllerVersion.version;
-  const versionMismatch = trackedVersion && runningVersion && trackedVersion !== runningVersion;
+  // User self-updated OpenClaw on-machine — running version differs from what the image shipped with
+  const isModified = getRunningVersionBadge(runningVersion, trackedVersion) === 'modified';
+  // A newer image exists in the catalog with a newer OpenClaw version — user should redeploy.
+  // Suppress when the user already self-updated past the catalog version (redeploying would downgrade),
+  // or when the running version is non-calver and we can't determine ordering.
+  const catalogNewerThanImage =
+    !!trackedVersion &&
+    !!latestAvailableVersion &&
+    latestAvailableVersion !== trackedVersion &&
+    calverAtLeast(latestAvailableVersion, trackedVersion);
+  const updateAvailable =
+    catalogNewerThanImage &&
+    (!isModified ||
+      (!!runningVersion &&
+        calverAtLeast(latestAvailableVersion, runningVersion) &&
+        latestAvailableVersion !== runningVersion));
   const isPinned = !!myPin;
 
   // Show version section when running with a tracked version — even if running version is unknown yet
@@ -278,20 +300,38 @@ export function SettingsTab({
                       </TooltipContent>
                     </Tooltip>
                   )}
-                  {versionMismatch && (
+                  {updateAvailable && (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Badge
                           variant="outline"
-                          className="border-amber-500/30 bg-amber-500/15 text-amber-400"
+                          className="border-orange-500/30 bg-orange-500/15 text-orange-400"
+                        >
+                          Update available
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>
+                          A newer OpenClaw version ({latestAvailableVersion}) is available —
+                          redeploy to upgrade
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                  {isModified && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge
+                          variant="outline"
+                          className="border-zinc-500/30 bg-zinc-500/15 text-zinc-400"
                         >
                           Modified
                         </Badge>
                       </TooltipTrigger>
                       <TooltipContent>
                         <p>
-                          OpenClaw was updated on this machine independently of the image —
-                          redeploying will revert to the image version ({trackedVersion})
+                          OpenClaw was self-updated on this machine — redeploying will revert to the
+                          image version ({trackedVersion})
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -311,11 +351,18 @@ export function SettingsTab({
                 </code>
               </div>
             </div>
-            {versionMismatch && (
+            {updateAvailable && (
               <p className="text-muted-foreground mt-2 text-xs">
                 {isPinned
-                  ? `Redeploying will replace the running version with your pinned image version (${trackedVersion}).`
-                  : `Redeploying will replace the running version with the image version (${trackedVersion}).`}
+                  ? `A newer OpenClaw version (${latestAvailableVersion}) is available. You are pinned to an older image — update your pin to redeploy with the latest.`
+                  : `A newer OpenClaw version (${latestAvailableVersion}) is available. Redeploy to upgrade.`}
+              </p>
+            )}
+            {isModified && (
+              <p className="text-muted-foreground mt-2 text-xs">
+                {isPinned
+                  ? `OpenClaw was self-updated on this machine. Redeploying will revert to your pinned image version (${trackedVersion}).`
+                  : `OpenClaw was self-updated on this machine. Redeploying will revert to the image version (${trackedVersion}).`}
               </p>
             )}
           </div>
@@ -377,8 +424,8 @@ export function SettingsTab({
               entry={entry}
               configured={configuredSecrets[entry.id] ?? false}
               mutations={mutations}
-              onSecretsChanged={onChannelsChanged}
-              isDirty={dirtyChannels.has(entry.id)}
+              onSecretsChanged={onSecretsChanged}
+              isDirty={dirtySecrets.has(entry.id)}
             />
           ))}
         </div>

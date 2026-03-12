@@ -51,6 +51,22 @@ export const KILO_AUTO_FREE_MODEL: AutoModel = {
   opencode_settings: undefined,
 };
 
+export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
+  id: 'kilo-auto/balanced',
+  name: 'Kilo Auto Balanced',
+  description: 'Automatically routes your request for a balanced mix of price and performance.',
+  context_length: 204800,
+  max_completion_tokens: 131072,
+  prompt_price: '0.0000006',
+  completion_price: '0.000003',
+  supports_images: false,
+  roocode_settings: {
+    included_tools: ['edit_file'],
+    excluded_tools: ['apply_diff'],
+  },
+  opencode_settings: undefined,
+};
+
 export const KILO_AUTO_SMALL_MODEL: AutoModel = {
   id: 'kilo-auto/small',
   name: 'Kilo Auto Small',
@@ -67,7 +83,12 @@ export const KILO_AUTO_SMALL_MODEL: AutoModel = {
   },
 };
 
-export const AUTO_MODELS = [KILO_AUTO_FRONTIER_MODEL, KILO_AUTO_FREE_MODEL, KILO_AUTO_SMALL_MODEL];
+export const AUTO_MODELS = [
+  KILO_AUTO_FRONTIER_MODEL,
+  KILO_AUTO_BALANCED_MODEL,
+  KILO_AUTO_FREE_MODEL,
+  KILO_AUTO_SMALL_MODEL,
+];
 
 export function isKiloAutoModel(model: string) {
   return AUTO_MODELS.some(m => m.id === model) || legacyMapping[model] !== undefined;
@@ -79,7 +100,7 @@ type ResolvedAutoModel = {
   verbosity?: Verbosity;
 };
 
-const CODE_MODEL: ResolvedAutoModel = {
+const FRONTIER_CODE_MODEL: ResolvedAutoModel = {
   model: CLAUDE_SONNET_CURRENT_MODEL_ID,
   reasoning: { enabled: true },
   verbosity: 'low',
@@ -87,7 +108,7 @@ const CODE_MODEL: ResolvedAutoModel = {
 
 // Mode → model mappings for kilo-auto/frontier routing.
 // Add/remove/modify entries here to change routing behavior.
-const MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
+const FRONTIER_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   // Opus modes (planning, reasoning, orchestration, debugging)
   [
     'plan',
@@ -119,7 +140,31 @@ const MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
     'explore',
     { model: CLAUDE_SONNET_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'medium' },
   ],
-  ['code', CODE_MODEL],
+  ['code', FRONTIER_CODE_MODEL],
+]);
+
+const KIMI_K25_MODEL_ID = 'moonshotai/kimi-k2.5';
+
+const MINIMAX_M25_MODEL_ID = minimax_m25_free_model.is_enabled
+  ? minimax_m25_free_model.public_id
+  : 'minimax/minimax-m2.5';
+
+const BALANCED_CODE_MODEL: ResolvedAutoModel = {
+  model: MINIMAX_M25_MODEL_ID,
+};
+
+// Mode → model mappings for kilo-auto/balanced routing.
+// Uses Kimi K2.5 where Frontier uses Opus, Minimax M2.5 where Frontier uses Sonnet.
+const BALANCED_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
+  ['plan', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['general', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['architect', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['orchestrator', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['ask', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['debug', { model: KIMI_K25_MODEL_ID, reasoning: { enabled: true } }],
+  ['build', { model: MINIMAX_M25_MODEL_ID }],
+  ['explore', { model: MINIMAX_M25_MODEL_ID }],
+  ['code', BALANCED_CODE_MODEL],
 ]);
 
 const legacyMapping: Record<string, string | undefined> = {
@@ -128,14 +173,19 @@ const legacyMapping: Record<string, string | undefined> = {
   'kilo/auto-small': KILO_AUTO_SMALL_MODEL.id,
 };
 
-export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck() {
-  const mapping = Object.fromEntries(Object.entries(legacyMapping).map(([a, b]) => [b, a]));
-  return AUTO_MODELS.map(m => ({
-    ...m,
-    id: mapping[m.id],
-    name: 'Deprecated: ' + m.name,
-    description: `${mapping[m.id]} is deprecated, use ${m.id} instead`,
-  }));
+export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck(): AutoModel[] {
+  return Object.entries(legacyMapping)
+    .map(([legacyId, currentId]) => {
+      const model = AUTO_MODELS.find(m => m.id === currentId);
+      if (!model) return null;
+      return {
+        ...model,
+        id: legacyId,
+        name: 'Deprecated: ' + model.name,
+        description: `${legacyId} is deprecated, use ${model.id} instead`,
+      };
+    })
+    .filter(m => m !== null);
 }
 
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
@@ -147,5 +197,8 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
     return { model: 'openai/gpt-5-nano' };
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
-  return MODE_TO_MODEL.get(mode) ?? CODE_MODEL;
+  if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
+    return BALANCED_MODE_TO_MODEL.get(mode) ?? BALANCED_CODE_MODEL;
+  }
+  return FRONTIER_MODE_TO_MODEL.get(mode) ?? FRONTIER_CODE_MODEL;
 }
