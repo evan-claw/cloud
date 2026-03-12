@@ -448,6 +448,28 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
     }
   }),
 
+  machineStart: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to start machine';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.start(input.userId);
+    } catch (err) {
+      console.error('Failed to start machine for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
+  machineStop: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to stop machine';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.stop(input.userId);
+    } catch (err) {
+      console.error('Failed to stop machine for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
   destroy: adminProcedure.input(DestroyInstanceSchema).mutation(async ({ input, ctx }) => {
     const [instance] = await db
       .select({
