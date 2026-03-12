@@ -8,6 +8,7 @@ import { getUserFromAuthOrRedirect } from '@/lib/user.server';
 import { getStytchStatus } from '@/lib/stytch';
 import { PageContainer } from '@/components/layouts/PageContainer';
 import { isValidCallbackPath } from '@/lib/getSignInCallbackUrl';
+import { maybeInterceptWithSurvey } from '@/lib/survey-redirect';
 
 export default async function AccountVerificationPage({ searchParams }: AppPageProps) {
   const user = await getUserFromAuthOrRedirect('/users/sign_in');
@@ -20,19 +21,8 @@ export default async function AccountVerificationPage({ searchParams }: AppPageP
     const hasValidCallback =
       callbackPath && typeof callbackPath === 'string' && isValidCallbackPath(callbackPath);
 
-    if (user.customer_source === null) {
-      // Route through customer source survey before final destination
-      if (hasValidCallback) {
-        redirect(`/customer-source-survey?callbackPath=${encodeURIComponent(callbackPath)}`);
-      }
-      redirect('/customer-source-survey');
-    } else {
-      // Survey already completed — go directly to destination
-      if (hasValidCallback) {
-        redirect(callbackPath);
-      }
-      redirect('/get-started');
-    }
+    const finalDestination = hasValidCallback ? callbackPath : '/get-started';
+    redirect(maybeInterceptWithSurvey(user, finalDestination));
   }
 
   return (

@@ -1,5 +1,6 @@
 import { getProfileRedirectPath, getUserFromAuth } from '@/lib/user.server';
 import { isValidCallbackPath } from '@/lib/getSignInCallbackUrl';
+import { maybeInterceptWithSurvey } from '@/lib/survey-redirect';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { APP_URL } from '@/lib/constants';
@@ -33,8 +34,8 @@ export async function GET(request: NextRequest) {
       } else {
         responsePath = '/account-verification';
       }
-    } else if (user.customer_source === null) {
-      responsePath = `/customer-source-survey?callbackPath=${encodeURIComponent(responsePath)}`;
+    } else {
+      responsePath = maybeInterceptWithSurvey(user, responsePath);
     }
   }
 

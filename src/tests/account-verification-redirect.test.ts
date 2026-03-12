@@ -6,12 +6,8 @@
  *   redirect directly to the final destination (callbackPath or /get-started),
  *   skipping the survey entirely.
  * - If stytchStatus !== null AND user.customer_source === null:
- *   redirect to /customer-source-survey (with optional callbackPath forwarding).
+ *   redirect to /customer-source-survey with callbackPath forwarding.
  * - If stytchStatus === null: render the page (no redirect).
- *
- * The current implementation has a bug: it ALWAYS redirects through
- * /customer-source-survey when stytchStatus !== null, even if the user
- * has already completed the survey (customer_source is set).
  */
 
 import React from 'react';
@@ -146,7 +142,7 @@ describe('account-verification redirect logic', () => {
   // Case: verified user who has NOT completed the survey
   // ---------------------------------------------------------------
   describe('when stytchStatus is non-null AND customer_source is null (survey not completed)', () => {
-    it('should redirect to /customer-source-survey', async () => {
+    it('should redirect to /customer-source-survey with /get-started as default destination', async () => {
       const user = makeUser({ customer_source: null });
       mockGetUserFromAuthOrRedirect.mockResolvedValue(user);
       mockGetStytchStatus.mockResolvedValue(true);
@@ -154,7 +150,9 @@ describe('account-verification redirect logic', () => {
       await renderPage();
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      expect(mockRedirect).toHaveBeenCalledWith('/customer-source-survey');
+      expect(mockRedirect).toHaveBeenCalledWith(
+        `/customer-source-survey?callbackPath=${encodeURIComponent('/get-started')}`
+      );
     });
 
     it('should redirect to /customer-source-survey with callbackPath forwarded', async () => {
@@ -197,9 +195,7 @@ describe('account-verification redirect logic', () => {
       await renderPage();
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      // CORRECT: skip the survey, go straight to /get-started
       expect(mockRedirect).toHaveBeenCalledWith('/get-started');
-      // INCORRECT (current bug): redirects to /customer-source-survey
     });
 
     it('should redirect directly to callbackPath when customer_source is set', async () => {
@@ -210,9 +206,7 @@ describe('account-verification redirect logic', () => {
       await renderPage({ callbackPath: '/get-started' });
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      // CORRECT: go straight to the callbackPath, skip the survey
       expect(mockRedirect).toHaveBeenCalledWith('/get-started');
-      // INCORRECT (current bug): redirects to /customer-source-survey?callbackPath=...
     });
 
     it('should redirect directly to an org callbackPath when customer_source is set', async () => {
@@ -223,9 +217,7 @@ describe('account-verification redirect logic', () => {
       await renderPage({ callbackPath: '/organizations/some-org-id' });
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      // CORRECT: go straight to the org page, skip the survey
       expect(mockRedirect).toHaveBeenCalledWith('/organizations/some-org-id');
-      // INCORRECT (current bug): redirects to /customer-source-survey?callbackPath=...
     });
 
     it('should redirect to /get-started when customer_source is empty string (skipped survey)', async () => {
@@ -236,9 +228,7 @@ describe('account-verification redirect logic', () => {
       await renderPage();
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      // CORRECT: empty string means user explicitly skipped — treat as completed
       expect(mockRedirect).toHaveBeenCalledWith('/get-started');
-      // INCORRECT (current bug): redirects to /customer-source-survey
     });
 
     it('should redirect directly to callbackPath when customer_source is empty string (skipped)', async () => {
@@ -266,7 +256,9 @@ describe('account-verification redirect logic', () => {
       await renderPage();
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      expect(mockRedirect).toHaveBeenCalledWith('/customer-source-survey');
+      expect(mockRedirect).toHaveBeenCalledWith(
+        `/customer-source-survey?callbackPath=${encodeURIComponent('/get-started')}`
+      );
     });
 
     it('should skip survey when customer_source is set even with stytchStatus=false', async () => {
@@ -293,8 +285,10 @@ describe('account-verification redirect logic', () => {
       await renderPage({ callbackPath: 'https://evil.com/phish' });
 
       expect(mockRedirect).toHaveBeenCalledTimes(1);
-      // Invalid callbackPath is dropped — redirect to survey without it
-      expect(mockRedirect).toHaveBeenCalledWith('/customer-source-survey');
+      // Invalid callbackPath is dropped — redirect to survey with default destination
+      expect(mockRedirect).toHaveBeenCalledWith(
+        `/customer-source-survey?callbackPath=${encodeURIComponent('/get-started')}`
+      );
     });
 
     it('should ignore invalid callbackPath for user with customer_source set', async () => {
