@@ -16,12 +16,22 @@ export default async function AccountVerificationPage({ searchParams }: AppPageP
   const stytchStatus = await getStytchStatus(user, telemetry_id, await headers());
 
   if (stytchStatus !== null) {
-    // Route through customer source survey before final destination
     const callbackPath = params.callbackPath;
-    if (callbackPath && typeof callbackPath === 'string' && isValidCallbackPath(callbackPath)) {
-      redirect(`/customer-source-survey?callbackPath=${encodeURIComponent(callbackPath)}`);
+    const hasValidCallback = callbackPath && typeof callbackPath === 'string' && isValidCallbackPath(callbackPath);
+
+    if (user.customer_source === null) {
+      // Route through customer source survey before final destination
+      if (hasValidCallback) {
+        redirect(`/customer-source-survey?callbackPath=${encodeURIComponent(callbackPath)}`);
+      }
+      redirect('/customer-source-survey');
+    } else {
+      // Survey already completed — go directly to destination
+      if (hasValidCallback) {
+        redirect(callbackPath);
+      }
+      redirect('/get-started');
     }
-    redirect('/customer-source-survey');
   }
 
   return (
