@@ -47,6 +47,7 @@ packages:
   - 'kiloclaw/packages/secret-catalog'
   - 'cloudflare-gastown'
   - 'cloudflare-gastown/container'
+  - 'cloudflare-gmail-push'
 
 ignoredBuiltDependencies:
   - '@sentry/cli'

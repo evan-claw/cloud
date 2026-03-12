@@ -10,16 +10,16 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "hono": "^4.7.6",
-    "jose": "^6.0.11"
+    "hono": "catalog:",
+    "jose": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.34",
-    "@cloudflare/workers-types": "^4.20250312.0",
+    "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
-    "tsgo": "workspace:*",
-    "typescript": "catalog:default",
-    "vitest": "~3.0.9",
-    "wrangler": "^4.14.4"
+    "@typescript/native-preview": "7.0.0-dev.20251019.1",
+    "typescript": "catalog:",
+    "vitest": "~3.2.4",
+    "wrangler": "catalog:"
   }
 }
