@@ -104,6 +104,7 @@ describe('POST /push/user/:userId', () => {
     expect(mockQueue.send).toHaveBeenCalledWith({
       userId: TEST_USER,
       pubSubBody,
+      messageId: '123',
     });
   });
 

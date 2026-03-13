@@ -3,6 +3,7 @@ import { handleQueue } from './consumer';
 import type { AppEnv, GmailPushQueueMessage } from './types';
 
 const TEST_USER = 'user123';
+const TEST_MESSAGE_ID = 'pubsub-msg-1';
 const TEST_PUBSUB_BODY = JSON.stringify({ message: { data: 'dGVzdA==' } });
 const TEST_HISTORY_ID = '3525';
 const TEST_PUBSUB_DATA = btoa(
@@ -25,13 +26,29 @@ function createMockMessage(body: GmailPushQueueMessage): {
   };
 }
 
-function createMockEnv(kiloclawFetch: ReturnType<typeof vi.fn>) {
+function createMockIdempotencyStub(isDuplicate = false) {
   return {
+    checkAndMark: vi.fn().mockResolvedValue(isDuplicate),
+  };
+}
+
+function createMockEnv(
+  kiloclawFetch: ReturnType<typeof vi.fn>,
+  idempotencyStub = createMockIdempotencyStub()
+) {
+  const queueSend = vi.fn().mockResolvedValue(undefined);
+  const idFromName = vi.fn().mockReturnValue('do-id');
+  const env = {
     KILOCLAW: { fetch: kiloclawFetch } as unknown as Fetcher,
     OIDC_AUDIENCE: 'https://test-audience.example.com',
     INTERNAL_API_SECRET: { get: () => Promise.resolve('test-internal-secret') },
-    GMAIL_PUSH_QUEUE: {} as unknown as Queue<GmailPushQueueMessage>,
-  } satisfies AppEnv;
+    GMAIL_PUSH_QUEUE: { send: queueSend } as unknown as Queue<GmailPushQueueMessage>,
+    IDEMPOTENCY: {
+      idFromName,
+      get: vi.fn().mockReturnValue(idempotencyStub),
+    },
+  } as unknown as AppEnv;
+  return { env, queueSend, idFromName };
 }
 
 function createBatch(
@@ -81,20 +98,28 @@ describe('handleQueue', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('retries when machine is not running', async () => {
+  it('re-enqueues with backoff when machine is not running', async () => {
     const kiloclawFetch = mockKiloclawResponses({
       flyAppName: null,
       flyMachineId: null,
       status: 'stopped',
     });
-    const env = createMockEnv(kiloclawFetch);
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
-    expect(msg.retry).toHaveBeenCalledOnce();
-    expect(msg.ack).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 1 }),
+      expect.objectContaining({ delaySeconds: 60 })
+    );
   });
 
   it('acks without forwarding when gmail notifications are disabled', async () => {
@@ -107,32 +132,42 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn();
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
     expect(msg.ack).toHaveBeenCalledOnce();
     expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
     // Should NOT forward to controller
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('retries when kiloclaw status lookup fails', async () => {
+  it('re-enqueues with backoff when kiloclaw status lookup fails', async () => {
     const kiloclawFetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
-    const env = createMockEnv(kiloclawFetch);
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
-    expect(msg.retry).toHaveBeenCalledOnce();
-    expect(msg.ack).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).toHaveBeenCalledOnce();
   });
 
-  it('retries when gateway token lookup fails', async () => {
+  it('re-enqueues with backoff when gateway token lookup fails', async () => {
     const kiloclawFetch = vi.fn((req: Request) => {
       const url = new URL(req.url);
       if (url.pathname.includes('status')) {
@@ -150,14 +185,19 @@ describe('handleQueue', () => {
       // gateway-token returns error
       return Promise.resolve(new Response('error', { status: 500 }));
     });
-    const env = createMockEnv(kiloclawFetch);
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
-    expect(msg.retry).toHaveBeenCalledOnce();
-    expect(msg.ack).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).toHaveBeenCalledOnce();
   });
 
   it('acks on successful controller delivery', async () => {
@@ -170,15 +210,20 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
     expect(msg.ack).toHaveBeenCalledOnce();
     expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
 
     // Verify correct headers on controller request
     const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
@@ -201,18 +246,23 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('bad request', { status: 400 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
     expect(msg.ack).toHaveBeenCalledOnce();
     expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
   });
 
-  it('retries on controller 5xx', async () => {
+  it('re-enqueues with backoff on controller 5xx', async () => {
     const kiloclawFetch = mockKiloclawResponses(
       {
         flyAppName: 'test-app',
@@ -222,18 +272,26 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
-    expect(msg.retry).toHaveBeenCalledOnce();
-    expect(msg.ack).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 1 }),
+      expect.objectContaining({ delaySeconds: 60 })
+    );
   });
 
-  it('retries on controller network error', async () => {
+  it('re-enqueues with backoff on controller network error', async () => {
     const kiloclawFetch = mockKiloclawResponses(
       {
         flyAppName: 'test-app',
@@ -243,15 +301,20 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('network error'));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
 
-    expect(msg.retry).toHaveBeenCalledOnce();
-    expect(msg.ack).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+    expect(queueSend).toHaveBeenCalledOnce();
   });
 
   it('updates gmail history id on DO after successful delivery', async () => {
@@ -277,9 +340,13 @@ describe('handleQueue', () => {
       }
       return Promise.resolve(new Response('not found', { status: 404 }));
     });
-    const env = createMockEnv(kiloclawFetch);
+    const { env } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
@@ -320,9 +387,13 @@ describe('handleQueue', () => {
       }
       return Promise.resolve(new Response('not found', { status: 404 }));
     });
-    const env = createMockEnv(kiloclawFetch);
+    const { env } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
@@ -342,9 +413,13 @@ describe('handleQueue', () => {
       },
       'gw-token-xyz'
     );
-    const env = createMockEnv(kiloclawFetch);
+    const { env } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
-    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: invalidBody });
+    const msg = createMockMessage({
+      userId: TEST_USER,
+      pubSubBody: invalidBody,
+      messageId: TEST_MESSAGE_ID,
+    });
     const batch = createBatch([msg]);
 
     await handleQueue(batch, env);
@@ -381,18 +456,139 @@ describe('handleQueue', () => {
       return Promise.resolve(new Response('not found', { status: 404 }));
     });
 
-    const env = createMockEnv(kiloclawFetch);
+    const { env, queueSend } = createMockEnv(kiloclawFetch);
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
 
-    const msgOk = createMockMessage({ userId: 'user-ok', pubSubBody: TEST_PUBSUB_BODY });
-    const msgStopped = createMockMessage({ userId: 'user-stopped', pubSubBody: TEST_PUBSUB_BODY });
+    const msgOk = createMockMessage({
+      userId: 'user-ok',
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: 'msg-ok',
+    });
+    const msgStopped = createMockMessage({
+      userId: 'user-stopped',
+      pubSubBody: TEST_PUBSUB_BODY,
+      messageId: 'msg-stopped',
+    });
     const batch = createBatch([msgOk, msgStopped]);
 
     await handleQueue(batch, env);
 
     expect(msgOk.ack).toHaveBeenCalledOnce();
     expect(msgOk.retry).not.toHaveBeenCalled();
-    expect(msgStopped.retry).toHaveBeenCalledOnce();
-    expect(msgStopped.ack).not.toHaveBeenCalled();
+    expect(msgStopped.ack).toHaveBeenCalledOnce();
+    expect(msgStopped.retry).not.toHaveBeenCalled();
+    // msgStopped should have triggered a re-enqueue
+    expect(queueSend).toHaveBeenCalled();
+  });
+
+  describe('exponential backoff', () => {
+    it('doubles delay on each retry attempt', async () => {
+      const kiloclawFetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
+      const { env, queueSend } = createMockEnv(kiloclawFetch);
+
+      // Attempt 2 → delay = 60 * 2^2 = 240s
+      const msg = createMockMessage({
+        userId: TEST_USER,
+        pubSubBody: TEST_PUBSUB_BODY,
+        messageId: TEST_MESSAGE_ID,
+        attempt: 2,
+      });
+      const batch = createBatch([msg]);
+
+      await handleQueue(batch, env);
+
+      expect(queueSend).toHaveBeenCalledWith(
+        expect.objectContaining({ attempt: 3 }),
+        expect.objectContaining({ delaySeconds: 240 })
+      );
+    });
+
+    it('drops message after max retries exceeded', async () => {
+      const kiloclawFetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
+      const { env, queueSend } = createMockEnv(kiloclawFetch);
+
+      const msg = createMockMessage({
+        userId: TEST_USER,
+        pubSubBody: TEST_PUBSUB_BODY,
+        messageId: TEST_MESSAGE_ID,
+        attempt: 6,
+      });
+      const batch = createBatch([msg]);
+
+      await handleQueue(batch, env);
+
+      expect(msg.ack).toHaveBeenCalledOnce();
+      expect(queueSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('idempotency', () => {
+    it('skips duplicate messages on first delivery (attempt 0)', async () => {
+      const kiloclawFetch = vi.fn();
+      const idempotencyStub = createMockIdempotencyStub(true);
+      const { env } = createMockEnv(kiloclawFetch, idempotencyStub);
+      const msg = createMockMessage({
+        userId: TEST_USER,
+        pubSubBody: TEST_PUBSUB_BODY,
+        messageId: TEST_MESSAGE_ID,
+      });
+      const batch = createBatch([msg]);
+
+      await handleQueue(batch, env);
+
+      expect(msg.ack).toHaveBeenCalledOnce();
+      expect(kiloclawFetch).not.toHaveBeenCalled();
+    });
+
+    it('skips idempotency check on retry attempts (attempt > 0)', async () => {
+      const kiloclawFetch = mockKiloclawResponses(
+        {
+          flyAppName: 'test-app',
+          flyMachineId: 'machine-abc',
+          status: 'running',
+          gmailNotificationsEnabled: true,
+        },
+        'gw-token-xyz'
+      );
+      const idempotencyStub = createMockIdempotencyStub(true); // would block if called
+      const { env } = createMockEnv(kiloclawFetch, idempotencyStub);
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const msg = createMockMessage({
+        userId: TEST_USER,
+        pubSubBody: TEST_PUBSUB_BODY,
+        messageId: TEST_MESSAGE_ID,
+        attempt: 1,
+      });
+      const batch = createBatch([msg]);
+
+      await handleQueue(batch, env);
+
+      expect(idempotencyStub.checkAndMark).not.toHaveBeenCalled();
+      expect(msg.ack).toHaveBeenCalledOnce();
+    });
+
+    it('keys idempotency DO by userId', async () => {
+      const kiloclawFetch = mockKiloclawResponses(
+        {
+          flyAppName: 'test-app',
+          flyMachineId: 'machine-abc',
+          status: 'running',
+          gmailNotificationsEnabled: true,
+        },
+        'gw-token-xyz'
+      );
+      const { env, idFromName } = createMockEnv(kiloclawFetch);
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+      const msg = createMockMessage({
+        userId: TEST_USER,
+        pubSubBody: TEST_PUBSUB_BODY,
+        messageId: TEST_MESSAGE_ID,
+      });
+      const batch = createBatch([msg]);
+
+      await handleQueue(batch, env);
+
+      expect(idFromName).toHaveBeenCalledWith(TEST_USER);
+    });
   });
 });

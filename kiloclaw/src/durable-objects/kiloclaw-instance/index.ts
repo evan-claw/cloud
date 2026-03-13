@@ -502,12 +502,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await this.loadState();
 
     const current = this.s.gmailLastHistoryId;
-    if (current !== null) {
-      const currentNum = parseInt(current, 10);
-      const newNum = parseInt(historyId, 10);
-      if (isNaN(newNum) || newNum <= currentNum) {
-        return;
+    try {
+      const newNum = BigInt(historyId);
+      if (current !== null) {
+        const currentNum = BigInt(current);
+        if (newNum <= currentNum) {
+          return;
+        }
       }
+    } catch {
+      return; // invalid input (BigInt throws on non-numeric strings)
     }
 
     this.s.gmailLastHistoryId = historyId;

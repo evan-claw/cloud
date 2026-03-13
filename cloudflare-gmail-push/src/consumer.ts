@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { AppEnv, GmailPushQueueMessage } from './types';
 
+const MAX_RETRIES = 6;
+const BASE_DELAY_SECONDS = 60;
+
 /** Schema for the base64-decoded Pub/Sub message data from Gmail. */
 const GmailPubSubDataSchema = z.looseObject({
   historyId: z.union([z.string(), z.number()]).transform(String),
@@ -45,6 +48,17 @@ async function reportHistoryId(
   }
 }
 
+function retryWithBackoff(env: AppEnv, msg: GmailPushQueueMessage, currentAttempt: number): void {
+  if (currentAttempt >= MAX_RETRIES) {
+    console.error(
+      `[gmail-push] Max retries (${MAX_RETRIES}) exceeded for message ${msg.messageId}, dropping`
+    );
+    return;
+  }
+  const delay = BASE_DELAY_SECONDS * Math.pow(2, currentAttempt);
+  void env.GMAIL_PUSH_QUEUE.send({ ...msg, attempt: currentAttempt + 1 }, { delaySeconds: delay });
+}
+
 export async function handleQueue(
   batch: MessageBatch<GmailPushQueueMessage>,
   env: AppEnv
@@ -53,7 +67,25 @@ export async function handleQueue(
 }
 
 async function processMessage(message: Message<GmailPushQueueMessage>, env: AppEnv): Promise<void> {
-  const { userId, pubSubBody } = message.body;
+  const msg = message.body;
+  const { userId, pubSubBody } = msg;
+  const attempt = msg.attempt ?? 0;
+
+  // Idempotency check only on first delivery (attempt 0).
+  // There are two sources of redelivery:
+  // 1. Pub/Sub redeliveries — same messageId, attempt 0. These are duplicates
+  //    and must be blocked (the original was already enqueued or processed).
+  // 2. Our own exponential retries — same messageId, attempt > 0. These are
+  //    intentional re-enqueues after transient failures and must proceed.
+  if (attempt === 0) {
+    const id = env.IDEMPOTENCY.idFromName(userId);
+    const stub = env.IDEMPOTENCY.get(id);
+    const duplicate = await stub.checkAndMark(msg.messageId);
+    if (duplicate) {
+      message.ack();
+      return;
+    }
+  }
 
   try {
     const internalSecret = await env.INTERNAL_API_SECRET.get();
@@ -67,7 +99,8 @@ async function processMessage(message: Message<GmailPushQueueMessage>, env: AppE
 
     if (!statusRes.ok) {
       console.warn(`[gmail-push] Status lookup failed for user ${userId}: ${statusRes.status}`);
-      message.retry();
+      retryWithBackoff(env, msg, attempt);
+      message.ack();
       return;
     }
 
@@ -81,7 +114,8 @@ async function processMessage(message: Message<GmailPushQueueMessage>, env: AppE
 
     if (!status.flyAppName || !status.flyMachineId || status.status !== 'running') {
       console.warn(`[gmail-push] Machine not running for user ${userId}, retrying`);
-      message.retry();
+      retryWithBackoff(env, msg, attempt);
+      message.ack();
       return;
     }
 
@@ -103,7 +137,8 @@ async function processMessage(message: Message<GmailPushQueueMessage>, env: AppE
       console.error(
         `[gmail-push] Gateway token lookup failed for user ${userId}: ${tokenRes.status}`
       );
-      message.retry();
+      retryWithBackoff(env, msg, attempt);
+      message.ack();
       return;
     }
 
@@ -128,9 +163,11 @@ async function processMessage(message: Message<GmailPushQueueMessage>, env: AppE
     }
 
     console.error(`[gmail-push] Controller returned ${controllerRes.status} for user ${userId}`);
-    message.retry();
+    retryWithBackoff(env, msg, attempt);
+    message.ack();
   } catch (err) {
     console.error(`[gmail-push] Error delivering to user ${userId}:`, err);
-    message.retry();
+    retryWithBackoff(env, msg, attempt);
+    message.ack();
   }
 }

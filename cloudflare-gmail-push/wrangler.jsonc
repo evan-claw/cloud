@@ -32,6 +32,10 @@
   ],
   "queues": {
     "producers": [{ "binding": "GMAIL_PUSH_QUEUE", "queue": "gmail-push-notifications" }],
-    "consumers": [{ "queue": "gmail-push-notifications", "max_retries": 10, "retry_delay": 60 }],
+    "consumers": [{ "queue": "gmail-push-notifications" }],
   },
+  "durable_objects": {
+    "bindings": [{ "name": "IDEMPOTENCY", "class_name": "GmailPushIdempotency" }],
+  },
+  "migrations": [{ "tag": "v1", "new_classes": ["GmailPushIdempotency"] }],
 }

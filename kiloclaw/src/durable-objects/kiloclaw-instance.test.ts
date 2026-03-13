@@ -1945,6 +1945,72 @@ describe('updateGmailNotifications', () => {
 });
 
 // ============================================================================
+// updateGmailHistoryId
+// ============================================================================
+
+describe('updateGmailHistoryId', () => {
+  it('stores historyId when none exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: null });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '100' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('updates when new value is greater', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('200');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '200' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores when new value is equal', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('ignores when new value is lower', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '200' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores invalid (non-numeric) input', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('not-a-number');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+});
+
+// ============================================================================
 // parseRegions + deprioritizeRegion (pure functions)
 // ============================================================================
 
