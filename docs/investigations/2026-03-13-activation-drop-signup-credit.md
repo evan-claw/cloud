@@ -8,21 +8,26 @@
 ## Finding: Free $5 Signup Credit Was Removed
 
 The **$5 automatic welcome credit** granted to new users who pass Turnstile + Stytch
-validation during signup was disabled on **March 9, 2026** and fully removed on
-**March 11, 2026**. This is the most likely cause of the observed activation drop.
+validation during signup was **merged to `main` on March 11, 2026 at 14:02:54 UTC**
+via PR #940. This is the most likely cause of the observed activation drop.
 
 ### Timeline of Changes
 
-#### 1. Initial disable (branch commits) -- March 9, 2026
+#### 1. Original branch attempt (never merged) -- March 9, 2026
 
 | Field       | Value |
 |-------------|-------|
 | Commit      | `831f1b2fbda5c8f95900603c6dbd04fc511f92dc` |
-| Date        | 2026-03-09 08:48:15 UTC |
+| Author date | 2026-03-09 08:48:15 UTC |
 | Author      | kiloconnect[bot] (initiated by Mark IJbema) |
-| Message     | `feat(credits): disable free $5 signup credit for new users` |
+| Branch      | `remove-free-5-signup-credit` |
+| PR          | #928 -- **closed without merging** on 2026-03-09 09:16:19 UTC |
 
-**What changed:**
+> **Important:** Commit `831f1b2f` was **never merged to `main`**. It exists only on
+> the stale `remove-free-5-signup-credit` branch. PR #928, which contained this commit,
+> was closed without merging. The credit was **not** disabled on `main` on March 9.
+
+**What this commit proposed (same changes later re-authored in PR #940):**
 - `src/lib/stytch.ts`: `handleSignupPromotion()` converted to a no-op -- it previously
   called `grantCreditForCategory(user, { credit_category: 'automatic-welcome-credits' })`
   to grant $5 when a user passed both Turnstile and Stytch validation.
@@ -32,16 +37,19 @@ validation during signup was disabled on **March 9, 2026** and fully removed on
   first-day notification was disabled (function returns empty array).
 - `src/lib/stytch.test.ts`: Test updated to reflect no credit is granted.
 
-#### 2. Dead code cleanup (branch commit) -- March 9, 2026
+#### 2. Re-authored PR #940 -- March 9--11, 2026
 
-| Field       | Value |
-|-------------|-------|
-| Commit      | `20dd9f8a1afda52c84b4086c0a6ff9d4b930ac6a` |
-| Date        | 2026-03-09 13:55:50 +0100 |
-| Author      | Mark IJbema |
-| Message     | `refactor: remove dead signup credit code per review` |
+A new branch `mark/remove-free-5-signup-credit` was created with re-authored commits:
 
-**What changed:**
+| # | Commit | Date (UTC) | Author | Message |
+|---|--------|------------|--------|---------|
+| 1 | `ed7c493f` | 2026-03-09 12:25:27 | Mark IJbema | `feat(credits): disable free $5 signup credit for new users` |
+| 2 | `bd0919fc` | 2026-03-09 12:37:27 | Mark IJbema | `style: run pnpm format` |
+| 3 | `20dd9f8a` | 2026-03-09 12:55:50 | Mark IJbema | `refactor: remove dead signup credit code per review` |
+
+PR #940 was created on 2026-03-09 12:26:40 UTC. These commits include the same
+functional changes as the original `831f1b2f` plus a dead-code cleanup:
+
 - `src/lib/stytch.ts`: `handleSignupPromotion()` function deleted entirely.
 - `src/app/account-verification/page.tsx`: Removed the call to `handleSignupPromotion()`.
 - `src/lib/promoCreditCategories.ts`: `automatic-welcome-credits` entry removed entirely.
@@ -55,12 +63,15 @@ validation during signup was disabled on **March 9, 2026** and fully removed on
 
 | Field       | Value |
 |-------------|-------|
-| Commit      | `47d0cc2d2b8527dec33cdb42e85adc4192ff8310` |
-| Date        | 2026-03-11 15:02:54 +0100 |
-| Author      | Mark IJbema |
+| Merge commit | `47d0cc2d2b8527dec33cdb42e85adc4192ff8310` |
+| Merged at   | **2026-03-11 14:02:54 UTC** |
+| Merged by   | Mark IJbema |
+| PR          | #940 |
 | Message     | `feat(credits): remove free $5 credit for new users (#940)` |
 
-This merge commit landed the above two commits onto `main`.
+This merge commit landed the three re-authored commits (`ed7c493f`, `bd0919fc`,
+`20dd9f8a`) onto `main`. The original commit `831f1b2f` from the closed PR #928 was
+**not** included -- it remains only on the stale `remove-free-5-signup-credit` branch.
 
 ---
 
@@ -130,8 +141,11 @@ sign up, but does not affect activation of those who do successfully sign up.
 The primary cause of the activation drop for new users who passed Stytch validation is
 almost certainly the **removal of the $5 automatic welcome credit**. This was:
 
-1. **Disabled on March 9** (commit `831f1b2f`) -- `handleSignupPromotion()` became a no-op
-2. **Fully removed on March 11** (PR #940, commit `47d0cc2d`) -- all code deleted
+1. **Authored on March 9** (commit `831f1b2f` on branch, PR #928 closed without merging)
+2. **Merged to `main` on March 11 at 14:02:54 UTC** (PR #940, merge commit `47d0cc2d`)
+
+The credit was **not** disabled on `main` on March 9. The original PR #928 was closed
+and a new PR #940 was created with re-authored commits, which was merged two days later.
 
 Before this change, every new user who passed both Turnstile and Stytch validation
 received a $5 credit automatically via `grantCreditForCategory()` with category
