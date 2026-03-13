@@ -1,4 +1,17 @@
+import { z } from 'zod';
 import type { AppEnv, GmailPushQueueMessage } from './types';
+
+/** Schema for the base64-decoded Pub/Sub message data from Gmail. */
+const GmailPubSubDataSchema = z.looseObject({
+  historyId: z.union([z.string(), z.number()]).transform(String),
+});
+
+/** Schema for the outer Pub/Sub push envelope. */
+const PubSubEnvelopeSchema = z.looseObject({
+  message: z.looseObject({
+    data: z.string(),
+  }),
+});
 
 /**
  * Best-effort: extract historyId from Pub/Sub payload and report to DO.
@@ -11,13 +24,11 @@ async function reportHistoryId(
   internalSecret: string
 ): Promise<void> {
   try {
-    const parsed = JSON.parse(pubSubBody);
-    const data = parsed?.message?.data;
-    if (typeof data !== 'string') return;
+    const envelope = PubSubEnvelopeSchema.safeParse(JSON.parse(pubSubBody));
+    if (!envelope.success) return;
 
-    const decoded = JSON.parse(atob(data));
-    const historyId = decoded?.historyId;
-    if (typeof historyId !== 'string' && typeof historyId !== 'number') return;
+    const decoded = GmailPubSubDataSchema.safeParse(JSON.parse(atob(envelope.data.message.data)));
+    if (!decoded.success) return;
 
     await env.KILOCLAW.fetch(
       new Request('https://kiloclaw/api/platform/gmail-history-id', {
@@ -26,7 +37,7 @@ async function reportHistoryId(
           'content-type': 'application/json',
           'x-internal-api-key': internalSecret,
         },
-        body: JSON.stringify({ userId, historyId: String(historyId) }),
+        body: JSON.stringify({ userId, historyId: decoded.data.historyId }),
       })
     );
   } catch (err) {

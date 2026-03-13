@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "hono": "catalog:",
-    "jose": "catalog:"
+    "jose": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.34",
