@@ -483,12 +483,35 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     this.s.googleCredentials = null;
     this.s.gmailNotificationsEnabled = false;
+    this.s.gmailLastHistoryId = null;
     await this.ctx.storage.put({
       googleCredentials: null,
       gmailNotificationsEnabled: false,
+      gmailLastHistoryId: null,
     });
 
     return { googleConnected: false };
+  }
+
+  /**
+   * Update the last-seen Gmail history ID.
+   * Only writes if the new value is numerically greater than the stored one,
+   * preventing out-of-order updates from overwriting newer state.
+   */
+  async updateGmailHistoryId(historyId: string): Promise<void> {
+    await this.loadState();
+
+    const current = this.s.gmailLastHistoryId;
+    if (current !== null) {
+      const currentNum = parseInt(current, 10);
+      const newNum = parseInt(historyId, 10);
+      if (isNaN(newNum) || newNum <= currentNum) {
+        return;
+      }
+    }
+
+    this.s.gmailLastHistoryId = historyId;
+    await this.persist({ gmailLastHistoryId: historyId });
   }
 
   /**

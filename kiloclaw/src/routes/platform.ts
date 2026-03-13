@@ -27,6 +27,11 @@ import { z } from 'zod';
 import { withDORetry } from '@kilocode/worker-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
 
+const GmailHistoryIdSchema = z.object({
+  userId: z.string().min(1),
+  historyId: z.string().min(1),
+});
+
 const KiloCodeConfigPatchSchema = z.object({
   userId: z.string().min(1),
   kilocodeApiKey: z.string().nullable().optional(),
@@ -331,6 +336,26 @@ platform.delete('/gmail-notifications', async c => {
     return c.json(updated, 200);
   } catch (err) {
     const { message, status } = sanitizeError(err, 'gmail-notifications disable');
+    return jsonError(message, status);
+  }
+});
+
+// POST /api/platform/gmail-history-id — best-effort historyId tracking from queue consumer
+platform.post('/gmail-history-id', async c => {
+  const result = await parseBody(c, GmailHistoryIdSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, historyId } = result.data;
+
+  try {
+    await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailHistoryId(historyId),
+      'updateGmailHistoryId'
+    );
+    return c.json({ ok: true }, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-history-id update');
     return jsonError(message, status);
   }
 });

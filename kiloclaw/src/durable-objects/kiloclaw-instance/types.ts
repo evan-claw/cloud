@@ -73,6 +73,7 @@ export type InstanceMutableState = {
   lastBoundMachineRecoveryAt: number | null;
   instanceFeatures: string[];
   gmailNotificationsEnabled: boolean;
+  gmailLastHistoryId: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };
