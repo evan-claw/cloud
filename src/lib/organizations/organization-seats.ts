@@ -129,15 +129,16 @@ async function handleSubscriptionEventInternal(
   );
 
   const lineItems = subscription.items.data ?? [];
-  const firstLineItem = lineItems[0];
-  if (!firstLineItem?.current_period_end) {
-    throw new Error(`No period end found in invoice line items subscription ${subscription.id}`);
-  }
 
   // Filter to only seat-related line items, excluding non-seat products (KiloPass, KiloClaw, etc.).
   // When a subscription has multiple prices for Kilo Teams (e.g., paid seats at one price
   // and free seats at another), Stripe stores them as separate line items.
   const seatLineItems = lineItems.filter(isSeatLineItem);
+
+  const firstSeatLineItem = seatLineItems[0];
+  if (!firstSeatLineItem?.current_period_end) {
+    throw new Error(`No seat line items with period end found in subscription ${subscription.id}`);
+  }
 
   const seatCount = seatLineItems.reduce((total, item) => total + (item.quantity ?? 0), 0);
 
@@ -148,9 +149,9 @@ async function handleSubscriptionEventInternal(
     return total + (unitAmount / 100) * itemQuantity;
   }, 0);
 
-  // use the start & end date of the line item (which is in seconds, not millis)
-  const startDate = new Date(firstLineItem.current_period_start * 1000);
-  const endDate = new Date(firstLineItem.current_period_end * 1000);
+  // Use the billing period from the first seat line item (in seconds, not millis)
+  const startDate = new Date(firstSeatLineItem.current_period_start * 1000);
+  const endDate = new Date(firstSeatLineItem.current_period_end * 1000);
 
   // ensure user is owner of org...we have an on-conflict do nothing here so this is idempontent-ish
   await addUserToOrganization(meta.organizationId, meta.kiloUserId, 'owner');
