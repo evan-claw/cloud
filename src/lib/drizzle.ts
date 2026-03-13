@@ -65,7 +65,7 @@ function getReplicaUrl(): string {
 // Keep low because Vercel can spawn 100+ concurrent serverless instances,
 // each with its own pool, all hitting the same pgbouncer. At max:100, a cold-start
 // cascade can open 100×N connections simultaneously and overwhelm pgbouncer.
-const max = 10;
+const max = 15;
 
 const idleTimeoutMillis = 10_000;
 
