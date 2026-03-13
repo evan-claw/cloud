@@ -87,6 +87,7 @@ export function applyAnthropicModelSettings(
     // additionally it is a common bug to forget adding cache breakpoints
     // we may want to gate this for Kilo-clients at some point
     if (requestToMutate.kind === 'chat_completions') {
+      //todo: figure out whether this is possible before making responses generally available
       addCacheBreakpoints(requestToMutate.body.messages);
     }
   }
