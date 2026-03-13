@@ -28,8 +28,6 @@ import {
   isAnonymousContext,
   type AnonymousUserContext,
 } from '@/lib/anonymous';
-import { checkPromotionLimit } from '@/lib/free-model-rate-limiter';
-import { PROMOTION_MAX_REQUESTS, PROMOTION_WINDOW_HOURS } from '@/lib/constants';
 import { emitApiMetricsForResponse } from '@/lib/o11y/api-metrics.server';
 import { normalizeModelId } from '@/lib/model-utils';
 import { buildUpstreamBody, type EmbeddingProxyRequest } from '@/lib/embeddings/embedding-request';
@@ -39,7 +37,6 @@ import { getVercelInferenceProviderConfigForUserByok } from '@/lib/providers/ver
 export const maxDuration = 300;
 
 const PAID_MODEL_AUTH_REQUIRED = 'PAID_MODEL_AUTH_REQUIRED';
-const PROMOTION_MODEL_LIMIT_REACHED = 'PROMOTION_MODEL_LIMIT_REACHED';
 
 async function embeddingProxyRequest(params: {
   body: Record<string, unknown>;
@@ -128,27 +125,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
           error: {
             code: PAID_MODEL_AUTH_REQUIRED,
             message: 'You need to sign in to use this model.',
-          },
-        },
-        { status: 401 }
-      );
-    }
-
-    const promotionLimit = await checkPromotionLimit(ipAddress);
-    if (!promotionLimit.allowed) {
-      console.warn(
-        `Promotion model limit exceeded, ip: ${ipAddress}, ` +
-          `model: ${requestedModelLowerCased}, ` +
-          `requests: ${promotionLimit.requestCount}/${PROMOTION_MAX_REQUESTS} ` +
-          `in ${PROMOTION_WINDOW_HOURS}h window`
-      );
-      return NextResponse.json(
-        {
-          error: {
-            code: PROMOTION_MODEL_LIMIT_REACHED,
-            message:
-              'Sign up for free to continue and explore 500 other models. ' +
-              'Takes 2 minutes, no credit card required. Or come back later.',
           },
         },
         { status: 401 }
