@@ -621,7 +621,7 @@ if (!pushUserId) {
     console.log('Push subscription created.');
   } catch (createErr) {
     const createOutput = createErr.stderr?.toString() ?? createErr.message;
-    if (createOutput.includes('ALREADY_EXISTS')) {
+    if (createOutput.includes('ALREADY_EXISTS') || createOutput.includes('already exists')) {
       // Subscription exists — update it
       try {
         execSync(
