@@ -101,6 +101,19 @@ export const PROVIDERS = {
   },
 } as const satisfies Record<string, Provider>;
 
+async function checkBYOK(
+  user: User | AnonymousUserContext,
+  requestedModel: string,
+  organizationId: string | undefined
+): Promise<BYOKResult[] | null> {
+  if (isAnonymousContext(user)) return null;
+  const modelProviders = await getModelUserByokProviders(requestedModel);
+  if (modelProviders.length === 0) return null;
+  return organizationId
+    ? getBYOKforOrganization(db, organizationId, modelProviders)
+    : getBYOKforUser(db, user.id, modelProviders);
+}
+
 export async function getProvider(
   requestedModel: string,
   request: OpenRouterChatCompletionRequest,
@@ -108,17 +121,13 @@ export async function getProvider(
   organizationId: string | undefined,
   taskId: string | undefined
 ): Promise<{ provider: Provider; userByok: BYOKResult[] | null; customLlm: CustomLlm | null }> {
-  if (!isAnonymousContext(user)) {
-    const modelProviders = await getModelUserByokProviders(requestedModel);
-    const userByok =
-      modelProviders.length === 0
-        ? null
-        : organizationId
-          ? await getBYOKforOrganization(db, organizationId, modelProviders)
-          : await getBYOKforUser(db, user.id, modelProviders);
-    if (userByok) {
-      return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok, customLlm: null };
-    }
+  const userByokFromByokCheck = await checkBYOK(user, requestedModel, organizationId);
+  if (userByokFromByokCheck) {
+    return {
+      provider: PROVIDERS.VERCEL_AI_GATEWAY,
+      userByok: userByokFromByokCheck,
+      customLlm: null,
+    };
   }
 
   if (requestedModel.startsWith('kilo-internal/') && organizationId) {
@@ -184,18 +193,10 @@ export async function getEmbeddingProvider(
   user: User | AnonymousUserContext,
   organizationId: string | undefined
 ): Promise<{ provider: Provider; userByok: BYOKResult[] | null }> {
-  // 1. BYOK check (same as chat completions)
-  if (!isAnonymousContext(user)) {
-    const modelProviders = await getModelUserByokProviders(requestedModel);
-    const userByok =
-      modelProviders.length === 0
-        ? null
-        : organizationId
-          ? await getBYOKforOrganization(db, organizationId, modelProviders)
-          : await getBYOKforUser(db, user.id, modelProviders);
-    if (userByok) {
-      return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok };
-    }
+  // 1. BYOK check
+  const userByok = await checkBYOK(user, requestedModel, organizationId);
+  if (userByok) {
+    return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok };
   }
 
   // 2. Mistral direct for mistralai/* models
