@@ -3,10 +3,12 @@
 ## Problem
 
 The current push endpoint uses two auth layers:
+
 1. **HMAC-SHA256 URL token** (mandatory) — derived from `INTERNAL_API_SECRET`
 2. **Google OIDC JWT** (optional) — validated if present, skipped if missing
 
 This has two issues:
+
 - The google-setup Docker image needs `INTERNAL_API_SECRET` to derive the HMAC token for the Pub/Sub subscription URL. No secret should be baked into or required by the Docker image.
 - OIDC is stronger than the HMAC token (cryptographically signed by Google, short-lived, audience-scoped) but is currently optional.
 
@@ -80,6 +82,7 @@ Lines 481-522: Replace the HMAC token generation block with OIDC-configured subs
 - Add `--push-auth-service-account=gmail-api-push@system.gserviceaccount.com` and `--push-auth-token-audience=${gmailPushWorkerUrl}` to the `gcloud pubsub subscriptions create/update` commands
 
 The audience passed to `--push-auth-token-audience` **must exactly match** the worker's `OIDC_AUDIENCE` env var:
+
 - Prod: `https://gmail-push.kilocode.workers.dev`
 - Dev: `https://gmail-push-dev.kilocode.workers.dev`
 
