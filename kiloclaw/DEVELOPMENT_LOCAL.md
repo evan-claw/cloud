@@ -162,7 +162,7 @@ are auto-managed and which require manual setup.
 | `FLY_ORG_SLUG`     | Fly org slug (read by script for token creation)                                        | Example      | No           |
 | `FLY_REGISTRY_APP` | Shared Fly app that holds Docker images (e.g., `kiloclaw-dev`)                          | Example      | No           |
 | `FLY_APP_NAME`     | Legacy fallback app name for existing instances (may be removed in future)              | Example      | No           |
-| `FLY_REGION`       | Region priority list, e.g. `us,eu`. Tries US first, falls back to EU, then gives up.   | Example      | No           |
+| `FLY_REGION`       | Region priority list, e.g. `us,eu`. Tries US first, falls back to EU, then gives up.    | Example      | No           |
 | `FLY_IMAGE_TAG`    | Docker image tag. Set automatically by `scripts/push-dev.sh`, or use `latest` to start. | push-dev.sh  | Yes          |
 | `FLY_IMAGE_DIGEST` | Docker image digest. Set automatically by `scripts/push-dev.sh`.                        | push-dev.sh  | Yes          |
 | `OPENCLAW_VERSION` | OpenClaw version in the image. Set automatically by `scripts/push-dev.sh`.              | push-dev.sh  | Yes          |
@@ -180,9 +180,9 @@ values or use `latest` (if a `latest` tag exists in the registry).
 
 **Encryption:**
 
-| Variable                     | Description                                                                                                        | Source     | Auto-managed |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------- | ------------ |
-| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). Get the **dev** version from 1Password (engineering vault). Quote the value in `.dev.vars`. | 1Password  | No           |
+| Variable                     | Description                                                                                                        | Source    | Auto-managed |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------- | ------------ |
+| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). Get the **dev** version from 1Password (engineering vault). Quote the value in `.dev.vars`. | 1Password | No           |
 
 **Other:**
 
