@@ -2678,10 +2678,13 @@ describe('controller-first pairing', () => {
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ code: 'controller_route_unavailable', error: 'Unauthorized' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      new Response(
+        JSON.stringify({ code: 'controller_route_unavailable', error: 'Unauthorized' }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
     );
 
     (flyClient.execCommand as Mock).mockResolvedValue({
@@ -2779,12 +2782,14 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ success: true, message: 'Pairing approved' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, message: 'Pairing approved' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
 
     const result = await instance.approvePairingRequest('telegram', 'ABC123');
 
@@ -2797,12 +2802,14 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'Invalid channel name' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'Invalid channel name' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
 
     const result = await instance.approvePairingRequest('telegram', 'ABC123');
 
@@ -2839,14 +2846,18 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ success: true, message: 'Device pairing approved' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, message: 'Device pairing approved' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
 
-    const result = await instance.approveDevicePairingRequest('58f4ac67-12b4-4f6e-adee-ff3463a7c30c');
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
 
     expect(result).toEqual({ success: true, message: 'Device pairing approved' });
     expect(flyClient.execCommand).not.toHaveBeenCalled();
@@ -2870,7 +2881,9 @@ describe('controller-first pairing', () => {
       stderr: '',
     });
 
-    const result = await instance.approveDevicePairingRequest('58f4ac67-12b4-4f6e-adee-ff3463a7c30c');
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
 
     expect(result).toEqual({ success: true, message: 'Device pairing approved' });
     expect(flyClient.execCommand).toHaveBeenCalled();
@@ -2881,14 +2894,18 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'Invalid request ID' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'Invalid request ID' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
 
-    const result = await instance.approveDevicePairingRequest('58f4ac67-12b4-4f6e-adee-ff3463a7c30c');
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
 
     expect(result).toEqual({ success: false, message: 'Invalid request ID' });
     expect(flyClient.execCommand).not.toHaveBeenCalled();
@@ -2982,12 +2999,14 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
 
     (flyClient.execCommand as Mock).mockResolvedValue({
       exit_code: 0,
@@ -3043,12 +3062,14 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
 
     (flyClient.execCommand as Mock).mockResolvedValue({
       exit_code: 0,
@@ -3067,12 +3088,14 @@ describe('controller-first pairing', () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, { flyAppName: 'acct-test' });
 
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: 'Unauthorized', code: 'controller_route_unavailable' }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
 
     (flyClient.execCommand as Mock).mockResolvedValue({
       exit_code: 0,
@@ -3080,7 +3103,9 @@ describe('controller-first pairing', () => {
       stderr: '',
     });
 
-    const result = await instance.approveDevicePairingRequest('58f4ac67-12b4-4f6e-adee-ff3463a7c30c');
+    const result = await instance.approveDevicePairingRequest(
+      '58f4ac67-12b4-4f6e-adee-ff3463a7c30c'
+    );
 
     expect(result).toEqual({ success: true, message: 'Device pairing approved' });
     expect(flyClient.execCommand).toHaveBeenCalled();
