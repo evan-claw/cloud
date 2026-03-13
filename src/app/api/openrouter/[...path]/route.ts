@@ -40,7 +40,10 @@ import {
 import { getBalanceAndOrgSettings } from '@/lib/organizations/organization-usage';
 import { ENABLE_TOOL_REPAIR, repairTools } from '@/lib/tool-calling';
 import { isFreePromptTrainingAllowed } from '@/lib/providers/openrouter/types';
-import { rewriteFreeModelResponse } from '@/lib/rewriteModelResponse';
+import {
+  rewriteFreeModelResponse_ChatCompletions,
+  rewriteFreeModelResponse_Responses,
+} from '@/lib/rewriteModelResponse';
 import {
   createAnonymousContext,
   isAnonymousContext,
@@ -549,12 +552,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   // rewriteFreeModelResponse only handles Chat Completions format responses.
   if (
-    requestBodyParsed.kind === 'chat_completions' &&
     provider.id !== 'custom' &&
     (isKiloFreeModel(originalModelIdLowerCased) ||
       isActiveReviewPromo(botId, originalModelIdLowerCased))
   ) {
-    return rewriteFreeModelResponse(response, originalModelIdLowerCased);
+    return requestBodyParsed.kind === 'chat_completions'
+      ? rewriteFreeModelResponse_Responses(response, originalModelIdLowerCased)
+      : rewriteFreeModelResponse_ChatCompletions(response, originalModelIdLowerCased);
   }
 
   return wrapInSafeNextResponse(response);
