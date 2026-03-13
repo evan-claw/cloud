@@ -527,10 +527,25 @@ export const kiloclawRouter = createTRPCRouter({
     .input(z.object({ enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const client = new KiloClawInternalClient();
-      if (input.enabled) {
-        return client.enableGmailNotifications(ctx.user.id);
+      try {
+        if (input.enabled) {
+          return await client.enableGmailNotifications(ctx.user.id);
+        }
+        return await client.disableGmailNotifications(ctx.user.id);
+      } catch (err) {
+        if (err instanceof KiloClawApiError && err.statusCode >= 400 && err.statusCode < 500) {
+          let message = `Failed to update Gmail notifications (${err.statusCode})`;
+          try {
+            const parsed = JSON.parse(err.responseBody);
+            if (typeof parsed.error === 'string') message = parsed.error;
+            else if (typeof parsed.message === 'string') message = parsed.message;
+          } catch {
+            if (err.responseBody) message = err.responseBody;
+          }
+          throw new TRPCError({ code: 'BAD_REQUEST', message });
+        }
+        throw err;
       }
-      return client.disableGmailNotifications(ctx.user.id);
     }),
 
   getEarlybirdStatus: baseProcedure
