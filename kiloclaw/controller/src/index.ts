@@ -17,6 +17,7 @@ import { registerGmailPushRoute } from './routes/gmail-push';
 import { CONTROLLER_COMMIT, CONTROLLER_VERSION } from './version';
 import { writeKiloCliConfig } from './kilo-cli-config';
 import { writeGogCredentials } from './gog-credentials';
+import { startWatchRenewal, stopWatchRenewal } from './gmail-watch-renewal';
 
 export type RuntimeConfig = {
   port: number;
@@ -172,6 +173,7 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
           '20000',
         ],
       });
+      startWatchRenewal(googleAccountEmail);
     }
   }
 
@@ -234,6 +236,7 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
     shuttingDown = true;
     console.log(`[controller] Received ${signal}, shutting down`);
 
+    stopWatchRenewal();
     await Promise.all(
       [supervisor.shutdown(signal), gmailWatchSupervisor?.shutdown(signal)].filter(Boolean)
     );
