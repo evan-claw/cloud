@@ -14,7 +14,6 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.34",
-    "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
     "typescript": "catalog:",
