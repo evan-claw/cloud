@@ -647,6 +647,15 @@ const encryptedSelfServicePromos: readonly EncryptedSelfServicePromoCreditCatego
     description: 'Builders event promotional credit',
     total_redemptions_allowed: 200,
   },
+  {
+    // TODO: re-encrypt with production key: pnpm promo encrypt CLAWNYC
+    encrypted_credit_category: 'BQvtkd104X5pIN+mKn21Tw==:PLQKIZGhb19EG21tRBjV7w==:0MmIBfnr3g==',
+    description: 'Claw NYC promotional credit',
+    amount_usd: 10,
+    is_user_selfservicable: true,
+    is_idempotent: true,
+    total_redemptions_allowed: 2_000,
+  },
 ];
 
 const selfServicePromos: readonly SelfServicePromoCreditCategoryConfig[] =
