@@ -226,14 +226,25 @@ export async function createNewMachine(
   } catch (err) {
     // Safety net: if the machine already exists (e.g. DO state lost flyMachineId
     // and metadata recovery didn't run or failed), adopt it instead of crashing.
-    if (err instanceof fly.FlyApiError && err.status === 409 && err.body.includes('already_exists')) {
+    if (
+      err instanceof fly.FlyApiError &&
+      err.status === 409 &&
+      err.body.includes('already_exists')
+    ) {
       const match = err.body.match(/machine ID (\w+)/);
       if (match) {
         const existingId = match[1];
         console.log('[DO] Machine already exists (409), adopting:', existingId);
         state.flyMachineId = existingId;
         await ctx.storage.put(storageUpdate({ flyMachineId: existingId }));
-        await startExistingMachine(flyConfig, ctx, state, machineConfig, minSecretsVersion, envFlyRegion);
+        await startExistingMachine(
+          flyConfig,
+          ctx,
+          state,
+          machineConfig,
+          minSecretsVersion,
+          envFlyRegion
+        );
         return;
       }
     }

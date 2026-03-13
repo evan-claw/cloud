@@ -162,7 +162,6 @@ dist
 
 .dev.vars*
 !.dev.vars.example
-scripts/.dev-start.conf
 .env*
 !.env.example
 .wrangler/
