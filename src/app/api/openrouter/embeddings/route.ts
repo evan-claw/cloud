@@ -1,7 +1,7 @@
 import { NextResponse, type NextResponse as NextResponseType } from 'next/server';
 import { type NextRequest } from 'next/server';
 import { generateProviderSpecificHash } from '@/lib/providerHash';
-import type { MicrodollarUsageContext } from '@/lib/processUsage';
+import type { MicrodollarUsageContext } from '@/lib/processUsage.types';
 import { validateFeatureHeader, FEATURE_HEADER } from '@/lib/feature-detection';
 import { getEmbeddingProvider, type Provider } from '@/lib/providers';
 import { debugSaveProxyRequest } from '@/lib/debugUtils';
