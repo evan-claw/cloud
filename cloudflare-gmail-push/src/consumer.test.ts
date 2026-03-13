@@ -4,6 +4,14 @@ import type { AppEnv, GmailPushQueueMessage } from './types';
 
 const TEST_USER = 'user123';
 const TEST_PUBSUB_BODY = JSON.stringify({ message: { data: 'dGVzdA==' } });
+const TEST_HISTORY_ID = '3525';
+const TEST_PUBSUB_DATA = btoa(
+  JSON.stringify({ emailAddress: 'user@gmail.com', historyId: TEST_HISTORY_ID })
+);
+const TEST_PUBSUB_BODY_WITH_HISTORY = JSON.stringify({
+  message: { data: TEST_PUBSUB_DATA, messageId: '123' },
+  subscription: 'projects/test/subscriptions/test-sub',
+});
 
 function createMockMessage(body: GmailPushQueueMessage): {
   body: GmailPushQueueMessage;
@@ -53,6 +61,9 @@ function mockKiloclawResponses(
     }
     if (url.pathname.includes('gateway-token') && gatewayToken) {
       return Promise.resolve(new Response(JSON.stringify({ gatewayToken })));
+    }
+    if (url.pathname.includes('gmail-history-id')) {
+      return Promise.resolve(new Response('ok', { status: 200 }));
     }
     return Promise.resolve(new Response('not found', { status: 404 }));
   });
@@ -241,6 +252,105 @@ describe('handleQueue', () => {
 
     expect(msg.retry).toHaveBeenCalledOnce();
     expect(msg.ack).not.toHaveBeenCalled();
+  });
+
+  it('updates gmail history id on DO after successful delivery', async () => {
+    const kiloclawFetch = vi.fn((req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname.includes('status')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              flyAppName: 'test-app',
+              flyMachineId: 'machine-abc',
+              status: 'running',
+              gmailNotificationsEnabled: true,
+            })
+          )
+        );
+      }
+      if (url.pathname.includes('gateway-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ gatewayToken: 'gw-token-xyz' })));
+      }
+      if (url.pathname.includes('gmail-history-id')) {
+        return Promise.resolve(new Response('ok', { status: 200 }));
+      }
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    });
+    const env = createMockEnv(kiloclawFetch);
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY });
+    const batch = createBatch([msg]);
+
+    await handleQueue(batch, env);
+
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+
+    const historyIdCall = kiloclawFetch.mock.calls.find((call: [Request]) =>
+      new URL(call[0].url).pathname.includes('gmail-history-id')
+    );
+    expect(historyIdCall).toBeDefined();
+    const historyIdReq = historyIdCall![0] as Request;
+    const body = JSON.parse(await historyIdReq.text()) as { userId: string; historyId: string };
+    expect(body.userId).toBe(TEST_USER);
+    expect(body.historyId).toBe(TEST_HISTORY_ID);
+  });
+
+  it('still acks if gmail-history-id update fails', async () => {
+    const kiloclawFetch = vi.fn((req: Request) => {
+      const url = new URL(req.url);
+      if (url.pathname.includes('status')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              flyAppName: 'test-app',
+              flyMachineId: 'machine-abc',
+              status: 'running',
+              gmailNotificationsEnabled: true,
+            })
+          )
+        );
+      }
+      if (url.pathname.includes('gateway-token')) {
+        return Promise.resolve(new Response(JSON.stringify({ gatewayToken: 'gw-token-xyz' })));
+      }
+      if (url.pathname.includes('gmail-history-id')) {
+        return Promise.resolve(new Response('server error', { status: 500 }));
+      }
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    });
+    const env = createMockEnv(kiloclawFetch);
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY_WITH_HISTORY });
+    const batch = createBatch([msg]);
+
+    await handleQueue(batch, env);
+
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
+  });
+
+  it('still acks if pubsub data cannot be decoded', async () => {
+    const invalidBody = JSON.stringify({ message: { data: '!!!invalid!!!' } });
+    const kiloclawFetch = mockKiloclawResponses(
+      {
+        flyAppName: 'test-app',
+        flyMachineId: 'machine-abc',
+        status: 'running',
+        gmailNotificationsEnabled: true,
+      },
+      'gw-token-xyz'
+    );
+    const env = createMockEnv(kiloclawFetch);
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
+    const msg = createMockMessage({ userId: TEST_USER, pubSubBody: invalidBody });
+    const batch = createBatch([msg]);
+
+    await handleQueue(batch, env);
+
+    expect(msg.ack).toHaveBeenCalledOnce();
+    expect(msg.retry).not.toHaveBeenCalled();
   });
 
   it('handles multiple messages independently', async () => {

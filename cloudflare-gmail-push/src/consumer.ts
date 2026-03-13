@@ -1,5 +1,39 @@
 import type { AppEnv, GmailPushQueueMessage } from './types';
 
+/**
+ * Best-effort: extract historyId from Pub/Sub payload and report to DO.
+ * Failures are logged but never cause message retry.
+ */
+async function reportHistoryId(
+  userId: string,
+  pubSubBody: string,
+  env: AppEnv,
+  internalSecret: string
+): Promise<void> {
+  try {
+    const parsed = JSON.parse(pubSubBody);
+    const data = parsed?.message?.data;
+    if (typeof data !== 'string') return;
+
+    const decoded = JSON.parse(atob(data));
+    const historyId = decoded?.historyId;
+    if (typeof historyId !== 'string' && typeof historyId !== 'number') return;
+
+    await env.KILOCLAW.fetch(
+      new Request('https://kiloclaw/api/platform/gmail-history-id', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-api-key': internalSecret,
+        },
+        body: JSON.stringify({ userId, historyId: String(historyId) }),
+      })
+    );
+  } catch (err) {
+    console.warn(`[gmail-push] Failed to report historyId for user ${userId}:`, err);
+  }
+}
+
 export async function handleQueue(
   batch: MessageBatch<GmailPushQueueMessage>,
   env: AppEnv
@@ -78,6 +112,7 @@ async function processMessage(message: Message<GmailPushQueueMessage>, env: AppE
 
     if (controllerRes.ok || (controllerRes.status >= 400 && controllerRes.status < 500)) {
       message.ack();
+      await reportHistoryId(userId, pubSubBody, env, internalSecret);
       return;
     }
 
