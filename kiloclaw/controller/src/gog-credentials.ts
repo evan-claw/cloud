@@ -10,6 +10,84 @@ import path from 'node:path';
 
 const GOG_CONFIG_DIR = '/root/.config/gogcli';
 
+/**
+ * Sanitize an account email into a filename, matching gog's internal logic.
+ * Lowercase, then replace any non-alphanumeric character with underscore.
+ */
+export function sanitizeAccountForPath(account: string): string {
+  const trimmed = account.toLowerCase().trim();
+  if (!trimmed) return 'unknown';
+  return trimmed.replace(/[^a-z0-9]/g, '_');
+}
+
+export type PatchDeps = {
+  readFileSync: (path: string, encoding: 'utf-8') => string;
+  writeFileSync: (path: string, data: string) => void;
+  existsSync: (path: string) => boolean;
+};
+
+/**
+ * Patch the gog gmail-watch state file with a newer historyId from the DO.
+ * Only writes if the new value is numerically greater than the file's value.
+ * Best-effort: logs warnings on failure, never throws.
+ */
+export function patchGogHistoryId(opts: {
+  account: string;
+  historyId: string;
+  configDir?: string;
+  deps?: PatchDeps;
+}): void {
+  const { account, historyId, configDir = GOG_CONFIG_DIR } = opts;
+
+  let deps: PatchDeps;
+  if (opts.deps) {
+    deps = opts.deps;
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('node:fs') as typeof import('node:fs');
+    deps = {
+      readFileSync: (p, enc) => fs.readFileSync(p, enc),
+      writeFileSync: (p, data) => fs.writeFileSync(p, data),
+      existsSync: p => fs.existsSync(p),
+    };
+  }
+
+  const sanitized = sanitizeAccountForPath(account);
+  const stateFilePath = path.join(configDir, 'state', 'gmail-watch', `${sanitized}.json`);
+
+  if (!deps.existsSync(stateFilePath)) {
+    console.warn(`[gog] State file not found, skipping historyId patch: ${stateFilePath}`);
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    const raw = deps.readFileSync(stateFilePath, 'utf-8');
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    console.warn(`[gog] Failed to parse state file, skipping historyId patch: ${stateFilePath}`);
+    return;
+  }
+
+  const fileHistoryId = parsed.historyId;
+  const fileValue = typeof fileHistoryId === 'string' ? BigInt(fileHistoryId) : BigInt(0);
+  const envValue = BigInt(historyId);
+
+  if (envValue <= fileValue) {
+    return;
+  }
+
+  parsed.historyId = historyId;
+  try {
+    deps.writeFileSync(stateFilePath, JSON.stringify(parsed, null, 2));
+    console.log(
+      `[gog] Patched historyId in ${stateFilePath}: ${String(fileHistoryId)} → ${historyId}`
+    );
+  } catch {
+    console.warn(`[gog] Failed to write state file: ${stateFilePath}`);
+  }
+}
+
 export type GogCredentialsDeps = {
   mkdirSync: (dir: string, opts: { recursive: boolean }) => void;
   writeFileSync: (path: string, data: Buffer) => void;
@@ -90,6 +168,15 @@ export async function writeGogCredentials(
   env.GOG_KEYRING_PASSWORD = 'kiloclaw';
   if (env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL) {
     env.GOG_ACCOUNT = env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL;
+  }
+
+  const lastHistoryId = env.KILOCLAW_GMAIL_LAST_HISTORY_ID;
+  if (lastHistoryId && env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL) {
+    patchGogHistoryId({
+      account: env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL,
+      historyId: lastHistoryId,
+      configDir,
+    });
   }
 
   return true;
