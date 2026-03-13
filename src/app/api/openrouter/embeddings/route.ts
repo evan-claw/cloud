@@ -28,11 +28,7 @@ import {
   isAnonymousContext,
   type AnonymousUserContext,
 } from '@/lib/anonymous';
-import {
-  checkFreeModelRateLimit,
-  logFreeModelRequest,
-  checkPromotionLimit,
-} from '@/lib/free-model-rate-limiter';
+import { checkPromotionLimit } from '@/lib/free-model-rate-limiter';
 import { PROMOTION_MAX_REQUESTS, PROMOTION_WINDOW_HOURS } from '@/lib/constants';
 import { emitApiMetricsForResponse } from '@/lib/o11y/api-metrics.server';
 import { normalizeModelId } from '@/lib/model-utils';
