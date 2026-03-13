@@ -1,8 +1,7 @@
 import { randomUUID } from 'crypto';
 import { db } from './drizzle';
-import type { MicrodollarUsage, Organization } from '@kilocode/db/schema';
+import type { MicrodollarUsage } from '@kilocode/db/schema';
 import { microdollar_usage } from '@kilocode/db/schema';
-import type { FeatureValue } from '@/lib/feature-detection';
 import { createTimer } from '@/lib/timer';
 import type { OpenAI } from 'openai';
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
@@ -11,7 +10,6 @@ import type {
   OpenRouterGeneration,
 } from './providers/openrouter/types';
 import { fetchGeneration, PROVIDERS } from './providers';
-import type { FraudDetectionHeaders } from './utils';
 import { toMicrodollars } from './utils';
 import { captureException, captureMessage, startSpan, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
@@ -30,44 +28,23 @@ import { appendKiloPassAuditLog } from '@/lib/kilo-pass/issuance';
 import { KiloPassAuditLogAction, KiloPassAuditLogResult } from '@/lib/kilo-pass/enums';
 import { reportAbuseCost } from '@/lib/abuse-service';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
+import type {
+  BalanceUpdateResult,
+  ChatCompletionChunk,
+  CoreUsageWithMetaData,
+  JustTheCostsUsageStats,
+  MaybeHasOpenRouterUsage,
+  MaybeHasVercelProviderMetaData,
+  Message,
+  MicrodollarUsageContext,
+  MicrodollarUsageStats,
+  NotYetCostedUsageStats,
+  OpenRouterError,
+  OpenRouterUsage,
+  UsageMetaData,
+} from '@/lib/processUsage.types';
 
 const posthogClient = PostHogClient();
-
-export type OpenRouterUsage = {
-  cost?: number;
-  is_byok?: boolean | null;
-  cost_details?: { upstream_inference_cost: number };
-  completion_tokens: number;
-  completion_tokens_details: { reasoning_tokens: number };
-  prompt_tokens: number;
-  prompt_tokens_details: { cached_tokens: number };
-  total_tokens: number;
-}; //ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
-
-type VercelProviderMetaData = { gateway?: { routing?: { finalProvider?: string } } };
-
-type MaybeHasVercelProviderMetaData = {
-  choices?: {
-    message?: {
-      provider_metadata?: VercelProviderMetaData;
-    };
-  }[];
-};
-
-type MaybeHasVercelProviderMetaDataChunk = {
-  choices?: {
-    delta?: { provider_metadata?: VercelProviderMetaData };
-  }[];
-};
-
-type MaybeHasOpenRouterUsage = {
-  usage?: OpenRouterUsage | null;
-  provider?: string | null;
-};
-
-export type ChatCompletionChunk = OpenAI.Chat.Completions.ChatCompletionChunk &
-  MaybeHasOpenRouterUsage &
-  MaybeHasVercelProviderMetaDataChunk;
 
 // For BYOK (Bring Your Own Key) requests, OpenRouter only reports 5% of the actual cost
 // because that's what they charge for the BYOK feature. Although we now use upstream_inference_cost, we still do some sanity checks.
@@ -104,12 +81,6 @@ export function extractPromptInfo(body: OpenRouterChatCompletionRequest) {
   }
 }
 
-interface Message {
-  role: string;
-  content?: string | { type?: string; text?: string }[];
-  parts?: { text?: string }[];
-}
-
 const extractMessageTextContent = (m: Message) =>
   typeof m.content === 'string'
     ? m.content
@@ -120,76 +91,8 @@ const extractMessageTextContent = (m: Message) =>
           .join('\n')
       : '';
 
-type NotYetCostedUsageStats = {
-  messageId: string | null;
-  model: string | null;
-  responseContent: string;
-  hasError: boolean;
-  inference_provider: string | null;
-  upstream_id: string | null;
-  finish_reason: string | null;
-  latency: number | null;
-  moderation_latency: number | null;
-  generation_time: number | null;
-  streamed: boolean | null;
-  cancelled: boolean | null;
-};
-
-type JustTheCostsUsageStats = {
-  cost_mUsd: number;
-  cacheDiscount_mUsd?: number;
-  /** The real cost before any free/BYOK/promo zeroing. Set by processTokenData. */
-  market_cost?: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheWriteTokens: number;
-  cacheHitTokens: number;
-  is_byok: boolean | null;
-};
-
-export type MicrodollarUsageStats = NotYetCostedUsageStats & JustTheCostsUsageStats;
-
-export type PromptInfo = {
-  system_prompt_prefix: string;
-  system_prompt_length: number;
-  user_prompt_prefix: string;
-};
-
-export type MicrodollarUsageContext = {
-  kiloUserId: string;
-  fraudHeaders: FraudDetectionHeaders;
-  organizationId?: Organization['id'];
-  provider: ProviderId;
-  requested_model: string;
-  promptInfo: PromptInfo;
-  max_tokens: number | null;
-  has_middle_out_transform: boolean | null;
-  isStreaming: boolean;
-  prior_microdollar_usage: number;
-  /** User email for authenticated users - used as PostHog distinctId. Undefined for anonymous users. */
-  posthog_distinct_id?: string;
-  project_id: string | null;
-  status_code: number | null;
-  editor_name: string | null;
-  machine_id: string | null;
-  /** True if user/org is using their own API key - cost should be zeroed out */
-  user_byok: boolean;
-  has_tools: boolean;
-  botId?: string;
-  tokenSource?: string;
-  /** Request ID from abuse service classify response, for cost tracking correlation. 0 means skip. */
-  abuse_request_id?: number;
-  /** Which product feature generated this API call. NULL if header not sent. */
-  feature: FeatureValue | null;
-  /** Client session/task identifier from X-KiloCode-TaskId header. */
-  session_id: string | null;
-  /** Client mode from x-kilocode-mode header (e.g. 'code', 'build', 'architect'). */
-  mode: string | null;
-  /** The auto model ID when one was requested (e.g. 'kilo-auto/free'). */
-  auto_model: string | null;
-};
-
 export type UsageContextInfo = ReturnType<typeof extractUsageContextInfo>;
+
 export function extractUsageContextInfo(usageContext: MicrodollarUsageContext) {
   return {
     kilo_user_id: usageContext.kiloUserId,
@@ -212,11 +115,6 @@ export function extractUsageContextInfo(usageContext: MicrodollarUsageContext) {
     auto_model: usageContext.auto_model,
   };
 }
-
-export type CoreUsageWithMetaData = {
-  core: MicrodollarUsage;
-  metadata: UsageMetaData;
-};
 
 export function toInsertableDbUsageRecord(
   usageStats: MicrodollarUsageStats,
@@ -344,8 +242,6 @@ async function sendFirstUsageEvent(usage: MicrodollarUsage, posthog_distinct_id:
   }
 }
 
-type BalanceUpdateResult = { newMicrodollarsUsed: number } | null;
-
 async function sendFirstMicrodollarUsageEventIfNeeded(
   balanceUpdateResult: BalanceUpdateResult,
   usage: MicrodollarUsage,
@@ -413,42 +309,6 @@ ${metaDataKindName}_cte AS (
   UNION ALL
   SELECT ${metaDataKindName}_id FROM ${metaDataKindName}_ins
 )`;
-
-export type UsageMetaData = {
-  id: string;
-  message_id: string;
-  created_at: string;
-  http_x_forwarded_for: string | null;
-  http_x_vercel_ip_city: string | null;
-  http_x_vercel_ip_country: string | null;
-  http_x_vercel_ip_latitude: number | null;
-  http_x_vercel_ip_longitude: number | null;
-  http_x_vercel_ja4_digest: string | null;
-  user_prompt_prefix: string | null;
-  system_prompt_prefix: string | null;
-  system_prompt_length: number | null;
-  http_user_agent: string | null;
-  max_tokens: number | null;
-  has_middle_out_transform: boolean | null;
-  status_code: number | null;
-  upstream_id: string | null;
-  finish_reason: string | null;
-  latency: number | null;
-  moderation_latency: number | null;
-  generation_time: number | null;
-  is_byok: boolean | null;
-  is_user_byok: boolean;
-  streamed: boolean | null;
-  cancelled: boolean | null;
-  editor_name: string | null;
-  has_tools: boolean | null;
-  machine_id: string | null;
-  feature: string | null;
-  session_id: string | null;
-  mode: string | null;
-  auto_model: string | null;
-  market_cost: number | null;
-};
 
 export async function insertUsageRecord(
   coreUsageFields: MicrodollarUsage,
@@ -683,13 +543,6 @@ export function countAndStoreUsage(
 
   return usageStatsPromise.then(usageStats => processTokenData(usageStats, usageContext));
 }
-
-type OpenRouterError = {
-  message: string;
-  code: string;
-  metadata?: Record<string, unknown>;
-  provider_name?: string;
-};
 
 export function processOpenRouterUsage(
   usage: OpenRouterUsage | null | undefined,

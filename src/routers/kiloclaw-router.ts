@@ -74,6 +74,10 @@ const kilocodeDefaultModelSchema = z
     'kilocodeDefaultModel must start with kilocode/ and include a provider'
   );
 
+// TODO: Replace with catalog-driven schema. This hardcoded list must be kept
+// in sync with @kilocode/kiloclaw-secret-catalog channel entries. Any new
+// catalog channel entry will render in the UI but be silently stripped here
+// by Zod. Migrate provision path to use patchSecrets pipeline instead.
 const channelsSchema = z
   .object({
     telegramBotToken: z.string().optional(),

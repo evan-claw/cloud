@@ -1,6 +1,6 @@
 import { ReasoningDetailType } from '@/lib/custom-llm/reasoning-details';
 import { getOutputHeaders } from '@/lib/llm-proxy-helpers';
-import type { ChatCompletionChunk, OpenRouterUsage } from '@/lib/processUsage';
+import type { ChatCompletionChunk, OpenRouterUsage } from '@/lib/processUsage.types';
 import type { MessageWithReasoning } from '@/lib/providers/openrouter/types';
 import type { EventSourceMessage } from 'eventsource-parser';
 import { createParser } from 'eventsource-parser';

@@ -43,6 +43,9 @@ export const InstanceConfigSchema = z.object({
   kilocodeApiKey: z.string().nullable().optional(),
   kilocodeApiKeyExpiresAt: z.string().nullable().optional(),
   kilocodeDefaultModel: z.string().nullable().optional(),
+  // TODO: Legacy hardcoded channel storage. Kept for backward compat with
+  // existing DO state and the decryptChannelTokens/buildEnvVars startup path.
+  // Migrate to read from encryptedSecrets via catalog, then remove.
   channels: z
     .object({
       telegramBotToken: EncryptedEnvelopeSchema.optional(),
@@ -66,6 +69,8 @@ export type InstanceConfig = z.infer<typeof InstanceConfigSchema>;
 export type EncryptedEnvelope = z.infer<typeof EncryptedEnvelopeSchema>;
 export type EncryptedChannelTokens = NonNullable<InstanceConfig['channels']>;
 
+// TODO: Legacy — no UI callers remain. Remove alongside patchChannels tRPC
+// mutation and PATCH /api/platform/channels worker route.
 export const ChannelsPatchSchema = z.object({
   userId: z.string().min(1),
   channels: z.object({

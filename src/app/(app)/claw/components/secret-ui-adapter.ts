@@ -1,8 +1,6 @@
-'use client';
-
 import type React from 'react';
 import type { SecretIconKey } from '@kilocode/kiloclaw-secret-catalog';
-import { Send, Slack, Key } from 'lucide-react';
+import { Send, Slack, Key, Github } from 'lucide-react';
 import { DiscordIcon } from './icons/DiscordIcon';
 
 const ICON_MAP: Record<SecretIconKey, React.ComponentType<{ className?: string }>> = {
@@ -10,6 +8,7 @@ const ICON_MAP: Record<SecretIconKey, React.ComponentType<{ className?: string }
   discord: DiscordIcon,
   slack: Slack,
   key: Key,
+  github: Github,
 };
 
 export function getIcon(iconKey: SecretIconKey): React.ComponentType<{ className?: string }> {

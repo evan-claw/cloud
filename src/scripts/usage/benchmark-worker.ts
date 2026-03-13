@@ -1,7 +1,8 @@
 import { parentPort, workerData } from 'worker_threads';
-import { insertUsageRecord, type UsageMetaData } from '@/lib/processUsage';
+import { insertUsageRecord } from '@/lib/processUsage';
 import type { MicrodollarUsage } from '@kilocode/db/schema';
 import { closeAllDrizzleConnections } from '@/lib/drizzle';
+import type { UsageMetaData } from '@/lib/processUsage.types';
 
 type RecordPair = { core: MicrodollarUsage; metadata: UsageMetaData };
 
