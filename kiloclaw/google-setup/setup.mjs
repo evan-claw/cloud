@@ -30,7 +30,7 @@ const token = tokenArg?.substring(tokenArg.indexOf('=') + 1);
 const workerUrlArg = args.find(a => a.startsWith('--worker-url='));
 const workerUrl = workerUrlArg
   ? workerUrlArg.substring(workerUrlArg.indexOf('=') + 1)
-  : 'https://claw.kilo.ai';
+  : 'https://claw.kilosessions.ai';
 
 if (!token) {
   console.error('Usage: docker run -it --network host kilocode/google-setup --token=<session-jwt>');
@@ -47,7 +47,7 @@ try {
     );
     process.exit(1);
   }
-  if (workerUrl !== 'https://claw.kilo.ai') {
+  if (workerUrl !== 'https://claw.kilosessions.ai') {
     console.warn(`Warning: using non-default worker URL: ${workerUrl}`);
   }
 } catch {
