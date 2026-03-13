@@ -1,7 +1,7 @@
 import { test, describe, expect } from '@jest/globals';
 import {
-  parseMicrodollarUsageFromStream,
-  parseMicrodollarUsageFromString,
+  parseResponsesMicrodollarUsageFromStream,
+  parseResponsesMicrodollarUsageFromString,
   processResponsesApiUsage,
 } from './processUsage.responses';
 import { verifyApproval } from '../tests/helpers/approval.helper';
@@ -104,7 +104,7 @@ describe('parseMicrodollarUsageFromStream approval tests', () => {
     const inputFile = join(sampleDir, openrouterResponses);
     const nodeStream = createReadStream(inputFile);
     const stream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
-    const result = await parseMicrodollarUsageFromStream(
+    const result = await parseResponsesMicrodollarUsageFromStream(
       stream,
       'fake-user-id',
       undefined,
@@ -121,7 +121,7 @@ describe('parseMicrodollarUsageFromStream approval tests', () => {
     const inputFile = join(sampleDir, vercelResponses);
     const nodeStream = createReadStream(inputFile);
     const stream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
-    const result = await parseMicrodollarUsageFromStream(
+    const result = await parseResponsesMicrodollarUsageFromStream(
       stream,
       'fake-user-id',
       undefined,
@@ -153,7 +153,7 @@ describe('parseMicrodollarUsageFromStream approval tests', () => {
       },
     });
 
-    const result = await parseMicrodollarUsageFromStream(
+    const result = await parseResponsesMicrodollarUsageFromStream(
       stream,
       'fake-user-id',
       undefined,
@@ -171,7 +171,7 @@ describe('parseMicrodollarUsageFromString approval tests', () => {
   test(openrouterResponsesJson, async () => {
     const inputFile = join(sampleDir, openrouterResponsesJson);
     const jsonString = await readFile(inputFile, 'utf-8');
-    const result = parseMicrodollarUsageFromString(jsonString, 'fake-user-id', 200);
+    const result = parseResponsesMicrodollarUsageFromString(jsonString, 200);
     const resultString = JSON.stringify(result, null, 2);
     const approvalFilePath = inputFile + '.approved.json';
     await verifyApproval(resultString, approvalFilePath);
@@ -181,7 +181,7 @@ describe('parseMicrodollarUsageFromString approval tests', () => {
   test(vercelResponsesJson, async () => {
     const inputFile = join(sampleDir, vercelResponsesJson);
     const jsonString = await readFile(inputFile, 'utf-8');
-    const result = parseMicrodollarUsageFromString(jsonString, 'fake-user-id', 200);
+    const result = parseResponsesMicrodollarUsageFromString(jsonString, 200);
     const resultString = JSON.stringify(result, null, 2);
     const approvalFilePath = inputFile + '.approved.json';
     await verifyApproval(resultString, approvalFilePath);

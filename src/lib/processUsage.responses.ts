@@ -118,7 +118,7 @@ function extractResponseContent(output: OpenAI.Responses.ResponseOutputItem[]): 
     .join('');
 }
 
-export async function parseMicrodollarUsageFromStream(
+export async function parseResponsesMicrodollarUsageFromStream(
   stream: ReadableStream,
   kiloUserId: string,
   openrouterRequestSpan: Span | undefined,
@@ -258,9 +258,8 @@ export async function parseMicrodollarUsageFromStream(
   return { ...coreProps, ...costs };
 }
 
-export function parseMicrodollarUsageFromString(
+export function parseResponsesMicrodollarUsageFromString(
   fullResponse: string,
-  kiloUserId: string,
   statusCode: number
 ): MicrodollarUsageStats {
   const responseJson = JSON.parse(fullResponse) as ResponsesApiResponse | null;

@@ -45,6 +45,10 @@ import type {
   PromptInfo,
   UsageMetaData,
 } from '@/lib/processUsage.types';
+import {
+  parseResponsesMicrodollarUsageFromStream,
+  parseResponsesMicrodollarUsageFromString,
+} from '@/lib/processUsage.responses';
 
 const posthogClient = PostHogClient();
 
@@ -537,21 +541,44 @@ export function countAndStoreUsage(
   usageContext: MicrodollarUsageContext,
   openrouterRequestSpan: Span | undefined
 ) {
-  const usageStatsPromise = !clonedReponse.body
-    ? Promise.resolve(null)
-    : usageContext.isStreaming
-      ? parseMicrodollarUsageFromStream(
-          clonedReponse.body,
-          usageContext.kiloUserId,
-          openrouterRequestSpan,
-          usageContext.provider,
-          clonedReponse.status
-        )
-      : clonedReponse
-          .text()
-          .then(content =>
-            parseMicrodollarUsageFromString(content, usageContext.kiloUserId, clonedReponse.status)
-          );
+  let usageStatsPromise: Promise<MicrodollarUsageStats | null> = Promise.resolve(null);
+
+  if (clonedReponse.body) {
+    if (usageContext.api_kind === 'responses') {
+      usageStatsPromise = usageContext.isStreaming
+        ? parseResponsesMicrodollarUsageFromStream(
+            clonedReponse.body,
+            usageContext.kiloUserId,
+            openrouterRequestSpan,
+            usageContext.provider,
+            clonedReponse.status
+          )
+        : clonedReponse
+            .text()
+            .then(content =>
+              parseResponsesMicrodollarUsageFromString(content, clonedReponse.status)
+            );
+    }
+    if (usageContext.api_kind === 'chat_completions') {
+      usageStatsPromise = usageContext.isStreaming
+        ? parseMicrodollarUsageFromStream(
+            clonedReponse.body,
+            usageContext.kiloUserId,
+            openrouterRequestSpan,
+            usageContext.provider,
+            clonedReponse.status
+          )
+        : clonedReponse
+            .text()
+            .then(content =>
+              parseMicrodollarUsageFromString(
+                content,
+                usageContext.kiloUserId,
+                clonedReponse.status
+              )
+            );
+    }
+  }
 
   return usageStatsPromise.then(usageStats => processTokenData(usageStats, usageContext));
 }
