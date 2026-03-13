@@ -141,7 +141,6 @@ export async function buildUserEnvVars(
       channels: state.channels ?? undefined,
       googleCredentials: state.googleCredentials ?? undefined,
       instanceFeatures: state.instanceFeatures,
-      gmailNotificationsEnabled: state.gmailNotificationsEnabled,
     }
   );
 

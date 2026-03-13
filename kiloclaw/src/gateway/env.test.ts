@@ -443,30 +443,6 @@ describe('buildEnvVars', () => {
     expect(result.env.KILOCLAW_NPM_GLOBAL_PREFIX).toBe('true');
   });
 
-  // ─── Gmail notifications flag ────────────────────────────────────────
-
-  it('sets KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is true', async () => {
-    const env = createMockEnv();
-    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
-      gmailNotificationsEnabled: true,
-    });
-    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBe('true');
-  });
-
-  it('omits KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is false', async () => {
-    const env = createMockEnv();
-    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
-      gmailNotificationsEnabled: false,
-    });
-    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBeUndefined();
-  });
-
-  it('omits KILOCLAW_GMAIL_NOTIFICATIONS when gmailNotificationsEnabled is undefined', async () => {
-    const env = createMockEnv();
-    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {});
-    expect(result.env.KILOCLAW_GMAIL_NOTIFICATIONS).toBeUndefined();
-  });
-
   it('every DEFAULT_INSTANCE_FEATURES entry has a FEATURE_TO_ENV_VAR mapping', () => {
     for (const feature of DEFAULT_INSTANCE_FEATURES) {
       expect(
