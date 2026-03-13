@@ -5,8 +5,9 @@ Receives Gmail push notifications from Google Cloud Pub/Sub and forwards them to
 ## Architecture
 
 ```
-Gmail API → Pub/Sub topic → Push subscription → this worker
-  → service binding → kiloclaw DO (status + gateway token lookup)
+Gmail API → Pub/Sub topic → Push subscription → this worker (OIDC validation)
+  → Cloudflare Queue (gmail-push-notifications)
+  → consumer: service binding → kiloclaw DO (status + gateway token lookup)
   → fly-force-instance-id → controller /_kilo/gmail-pubsub
   → gog gmail watch serve (localhost:3002)
 ```
@@ -81,17 +82,15 @@ GMAIL_PUSH_WORKER_URL=https://<tunnel-hostname>.trycloudflare.com
 
 Then enable notifications in the Settings UI and send an email to the connected Gmail account.
 
-### Quick Smoke Test (no Pub/Sub needed)
+### Smoke Testing
 
-Curl the local worker directly (OIDC validation is skipped in local dev when no auth header is present):
+The push route requires a valid Google OIDC JWT, so you can't curl it directly without Pub/Sub. To test the worker logic in isolation, run the unit tests:
 
 ```bash
-curl -X POST "http://localhost:8787/push/user/<your-user-id>" \
-  -H 'Content-Type: application/json' \
-  -d '{"message":{"data":"eyJoaXN0b3J5SWQiOjEyMzR9","messageId":"test-123"}}'
+pnpm test
 ```
 
-Expected: `{"ok":true}` if the bot is running, `{"ok":true,"skipped":"machine-not-running"}` if not.
+For a full E2E smoke test, use the Local E2E Testing flow above — send an email to the connected Gmail account and watch the worker logs for `[gmail-push]` entries.
 
 ### Tunnel URL changes
 
