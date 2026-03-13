@@ -28,7 +28,6 @@ test.describe('Top-Level Pages', () => {
     { name: 'Connected Accounts', url: '/connected-accounts' },
     { name: 'Account Deleted', url: '/account-deleted' },
     // Onboarding/auth pages
-    { name: 'Customer Source Survey', url: '/customer-source-survey' },
     { name: 'Get Started', url: '/get-started' },
     { name: 'Welcome', url: '/welcome' },
     { name: 'Device Auth', url: '/device-auth?code=FOOBAR' },
