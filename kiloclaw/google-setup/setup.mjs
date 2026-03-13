@@ -507,12 +507,7 @@ try {
   }
 }
 
-// Step 3: Get GCP project ID for topic path
-const gcpProject = execSync('gcloud config get-value project', { encoding: 'utf8' }).trim();
-console.log(`GCP project: ${gcpProject}`);
-
-// Step 4: Create or update push subscription
-// Extract userId from JWT for the push subscription URL
+// Step 3: Extract userId from JWT for the push subscription URL
 let pushUserId;
 try {
   const [, jwtPayload] = token.split('.');
@@ -528,7 +523,14 @@ if (!pushUserId) {
   pushSetupOk = false;
 }
 
-if (pushUserId) {
+if (pushUserId && pushSetupOk) {
+  // Get GCP project ID for topic path and SA email
+  const gcpProject = execSync('gcloud config get-value project', { encoding: 'utf8' }).trim();
+  if (!gcpProject || gcpProject === '(unset)') {
+    console.error('Error: No active GCP project. Run setup again from the beginning.');
+    pushSetupOk = false;
+  }
+
   // Create a project-level service account for Pub/Sub push OIDC auth.
   // Each user's GCP project gets its own SA — the worker validates
   // issuer + audience only (not the SA email).
