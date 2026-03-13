@@ -20,10 +20,10 @@ Push requests are authenticated in two layers:
 
 ## API Endpoints
 
-| Endpoint | Method | Auth | Description |
-| --- | --- | --- | --- |
-| `/health` | GET | None | Health check |
-| `/push/user/:userId/:token` | POST | HMAC token + optional OIDC | Receive Pub/Sub push |
+| Endpoint                    | Method | Auth                       | Description          |
+| --------------------------- | ------ | -------------------------- | -------------------- |
+| `/health`                   | GET    | None                       | Health check         |
+| `/push/user/:userId/:token` | POST   | HMAC token + optional OIDC | Receive Pub/Sub push |
 
 ## Development
 
@@ -137,19 +137,19 @@ Deploys to: `cloudflare-gmail-push`
 
 ## Secrets (via Secrets Store)
 
-| Secret | Description |
-| --- | --- |
+| Secret                | Description                                                      |
+| --------------------- | ---------------------------------------------------------------- |
 | `INTERNAL_API_SECRET` | Shared secret for service binding auth and HMAC token derivation |
 
 ## Environment Variables
 
-| Variable | Description |
-| --- | --- |
+| Variable        | Description                                              |
+| --------------- | -------------------------------------------------------- |
 | `OIDC_AUDIENCE` | Expected audience claim for optional OIDC JWT validation |
 
 ## Service Bindings
 
-| Binding | Target Worker | Environment |
-| --- | --- | --- |
-| `KILOCLAW` | `kiloclaw` | Production |
+| Binding    | Target Worker  | Environment |
+| ---------- | -------------- | ----------- |
+| `KILOCLAW` | `kiloclaw`     | Production  |
 | `KILOCLAW` | `kiloclaw-dev` | Development |

@@ -14,15 +14,15 @@
 
 ## File Map
 
-| File | Action | Responsibility |
-|---|---|---|
-| `cloudflare-gmail-push/src/types.ts` | Modify | Add `GmailPushQueueMessage` interface, add `GMAIL_PUSH_QUEUE` to `Env` |
-| `cloudflare-gmail-push/src/routes/push.ts` | Modify | Strip delivery logic, read body as string, enqueue, return 200 |
-| `cloudflare-gmail-push/src/routes/push.test.ts` | Modify | Add queue mock to env, update assertions for enqueue behavior |
-| `cloudflare-gmail-push/src/consumer.ts` | Create | Queue consumer: iterate batch, lookup machine, forward to controller, ack/retry |
-| `cloudflare-gmail-push/src/consumer.test.ts` | Create | Test consumer: ack/retry per scenario |
-| `cloudflare-gmail-push/src/index.ts` | Modify | Export `{ fetch, queue }` instead of Hono app default |
-| `cloudflare-gmail-push/wrangler.jsonc` | Modify | Add queue producer + consumer config for prod and dev |
+| File                                            | Action | Responsibility                                                                  |
+| ----------------------------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `cloudflare-gmail-push/src/types.ts`            | Modify | Add `GmailPushQueueMessage` interface, add `GMAIL_PUSH_QUEUE` to `Env`          |
+| `cloudflare-gmail-push/src/routes/push.ts`      | Modify | Strip delivery logic, read body as string, enqueue, return 200                  |
+| `cloudflare-gmail-push/src/routes/push.test.ts` | Modify | Add queue mock to env, update assertions for enqueue behavior                   |
+| `cloudflare-gmail-push/src/consumer.ts`         | Create | Queue consumer: iterate batch, lookup machine, forward to controller, ack/retry |
+| `cloudflare-gmail-push/src/consumer.test.ts`    | Create | Test consumer: ack/retry per scenario                                           |
+| `cloudflare-gmail-push/src/index.ts`            | Modify | Export `{ fetch, queue }` instead of Hono app default                           |
+| `cloudflare-gmail-push/wrangler.jsonc`          | Modify | Add queue producer + consumer config for prod and dev                           |
 
 ---
 
@@ -31,6 +31,7 @@
 ### Task 1: Update types and wrangler config
 
 **Files:**
+
 - Modify: `cloudflare-gmail-push/src/types.ts`
 - Modify: `cloudflare-gmail-push/wrangler.jsonc`
 
@@ -97,6 +98,7 @@ git commit -m "feat(gmail-push): add queue message type and wrangler queue confi
 ### Task 2: Write failing tests for producer enqueue behavior
 
 **Files:**
+
 - Modify: `cloudflare-gmail-push/src/routes/push.test.ts`
 
 - [ ] **Step 1: Update `createApp()` helper to include queue mock**
@@ -131,6 +133,7 @@ function createApp() {
 - [ ] **Step 2: Replace the "machine not running" and "forwards push" tests**
 
 Remove:
+
 - `it('returns 200 when machine is not running', ...)` — queue consumer handles this now
 - `it('forwards push to controller and returns 200 on success', ...)` — delivery is consumer's job
 
@@ -193,6 +196,7 @@ Expected: New enqueue tests FAIL (push.ts still does delivery, doesn't call queu
 ### Task 3: Implement producer — slim down push route to auth + enqueue
 
 **Files:**
+
 - Modify: `cloudflare-gmail-push/src/routes/push.ts`
 
 - [ ] **Step 1: Replace push route with auth + enqueue**
@@ -261,6 +265,7 @@ git commit -m "feat(gmail-push): refactor push route to auth + enqueue (producer
 ### Task 4: Write failing tests for queue consumer
 
 **Files:**
+
 - Create: `cloudflare-gmail-push/src/consumer.test.ts`
 
 - [ ] **Step 1: Create consumer test file**
@@ -275,9 +280,11 @@ import type { Env, GmailPushQueueMessage } from './types';
 const TEST_USER = 'user123';
 const TEST_PUBSUB_BODY = JSON.stringify({ message: { data: 'dGVzdA==' } });
 
-function createMockMessage(
-  body: GmailPushQueueMessage
-): { body: GmailPushQueueMessage; ack: ReturnType<typeof vi.fn>; retry: ReturnType<typeof vi.fn> } {
+function createMockMessage(body: GmailPushQueueMessage): {
+  body: GmailPushQueueMessage;
+  ack: ReturnType<typeof vi.fn>;
+  retry: ReturnType<typeof vi.fn>;
+} {
   return {
     body,
     ack: vi.fn(),
@@ -350,9 +357,7 @@ describe('handleQueue', () => {
   });
 
   it('retries when kiloclaw status lookup fails', async () => {
-    const kiloclawFetch = vi.fn().mockResolvedValue(
-      new Response('error', { status: 500 })
-    );
+    const kiloclawFetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
     const env = createMockEnv(kiloclawFetch);
     const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
     const batch = createBatch([msg]);
@@ -438,9 +443,7 @@ describe('handleQueue', () => {
       'gw-token-xyz'
     );
     const env = createMockEnv(kiloclawFetch);
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('error', { status: 500 })
-    );
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
     const msg = createMockMessage({ userId: TEST_USER, pubSubBody: TEST_PUBSUB_BODY });
     const batch = createBatch([msg]);
 
@@ -474,15 +477,17 @@ describe('handleQueue', () => {
         if (userId === 'user-ok') {
           return Promise.resolve(
             new Response(
-              JSON.stringify({ flyAppName: 'app-ok', flyMachineId: 'machine-ok', status: 'running' })
+              JSON.stringify({
+                flyAppName: 'app-ok',
+                flyMachineId: 'machine-ok',
+                status: 'running',
+              })
             )
           );
         }
         // user-stopped has no machine
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ flyAppName: null, flyMachineId: null, status: 'stopped' })
-          )
+          new Response(JSON.stringify({ flyAppName: null, flyMachineId: null, status: 'stopped' }))
         );
       }
       if (url.pathname.includes('gateway-token')) {
@@ -517,6 +522,7 @@ Expected: All consumer tests FAIL with "Cannot find module './consumer'" or simi
 ### Task 5: Implement queue consumer
 
 **Files:**
+
 - Create: `cloudflare-gmail-push/src/consumer.ts`
 
 - [ ] **Step 1: Create `src/consumer.ts`**
@@ -533,10 +539,7 @@ export async function handleQueue(
   }
 }
 
-async function processMessage(
-  message: Message<GmailPushQueueMessage>,
-  env: Env
-): Promise<void> {
+async function processMessage(message: Message<GmailPushQueueMessage>, env: Env): Promise<void> {
   const { userId, pubSubBody } = message.body;
 
   try {
@@ -631,6 +634,7 @@ git commit -m "feat(gmail-push): add queue consumer with per-message ack/retry"
 ### Task 6: Update worker entry point to export queue handler
 
 **Files:**
+
 - Modify: `cloudflare-gmail-push/src/index.ts`
 
 - [ ] **Step 1: Update `src/index.ts` to export fetch + queue**
