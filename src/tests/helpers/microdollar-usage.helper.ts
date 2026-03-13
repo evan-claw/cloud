@@ -2,12 +2,14 @@ import type { MicrodollarUsage } from '@kilocode/db/schema';
 import {
   toInsertableDbUsageRecord,
   insertUsageRecord,
-  type MicrodollarUsageStats,
-  type MicrodollarUsageContext,
   type UsageContextInfo,
-  type CoreUsageWithMetaData,
 } from '@/lib/processUsage';
 import { EmptyFraudDetectionHeaders } from '@/lib/utils';
+import type {
+  CoreUsageWithMetaData,
+  MicrodollarUsageContext,
+  MicrodollarUsageStats,
+} from '@/lib/processUsage.types';
 
 function defineDefaultUsageStats(): MicrodollarUsageStats {
   return {

@@ -1,12 +1,6 @@
 import { after, NextResponse, type NextRequest } from 'next/server';
 import { FEATURE_HEADER, type FeatureValue } from '@/lib/feature-detection';
-import {
-  type MicrodollarUsageContext,
-  type PromptInfo,
-  type MicrodollarUsageStats,
-  countAndStoreUsage,
-  logMicrodollarUsage,
-} from '@/lib/processUsage';
+import { countAndStoreUsage, logMicrodollarUsage } from '@/lib/processUsage';
 import { startInactiveSpan, captureException, captureMessage } from '@sentry/nextjs';
 import { APP_URL, FIRST_TOPUP_BONUS_AMOUNT } from '@/lib/constants';
 import { summarizeUserPayments } from '@/lib/creditTransactions';
@@ -28,6 +22,11 @@ import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { sentryRootSpan } from './getRootSpan';
 import { isKiloStealthModel, kiloFreeModels } from '@/lib/models';
+import type {
+  MicrodollarUsageContext,
+  MicrodollarUsageStats,
+  PromptInfo,
+} from '@/lib/processUsage.types';
 
 // FIM suffix markers for tracking purposes - used to wrap suffix in a fake system prompt format
 // This allows FIM requests to be tracked consistently with chat requests

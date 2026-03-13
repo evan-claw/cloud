@@ -5,8 +5,9 @@ import { randomUUID } from 'crypto';
 import { getUserFromAuth } from '@/lib/user.server';
 import { findUserById } from '@/lib/user';
 import { forceImmediateExpirationRecomputation } from '@/lib/balanceCache';
-import { insertUsageRecord, type UsageMetaData } from '@/lib/processUsage';
+import { insertUsageRecord } from '@/lib/processUsage';
 import type { MicrodollarUsage } from '@kilocode/db/schema';
+import type { UsageMetaData } from '@/lib/processUsage.types';
 
 export async function POST(
   request: NextRequest,

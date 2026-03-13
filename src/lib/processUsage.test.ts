@@ -1,5 +1,5 @@
 import { test, describe, expect } from '@jest/globals';
-import type { MicrodollarUsageStats, MicrodollarUsageContext } from './processUsage';
+import type { MicrodollarUsageStats, MicrodollarUsageContext } from './processUsage.types';
 import {
   extractPromptInfo,
   parseMicrodollarUsageFromStream,
