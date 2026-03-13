@@ -137,14 +137,13 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   });
 
   let gmailWatchSupervisor: Supervisor | null = null;
-  const gmailNotificationsEnabled = env.KILOCLAW_GMAIL_NOTIFICATIONS === 'true';
   const hasGogCredentials = Boolean(env.KILOCLAW_GOG_CONFIG_TARBALL);
 
-  if (gmailNotificationsEnabled && hasGogCredentials) {
+  if (hasGogCredentials) {
     const googleAccountEmail = env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL;
     if (!googleAccountEmail) {
       console.warn(
-        '[controller] KILOCLAW_GMAIL_NOTIFICATIONS=true but KILOCLAW_GOOGLE_ACCOUNT_EMAIL missing, skipping gmail watch'
+        '[controller] KILOCLAW_GOG_CONFIG_TARBALL present but KILOCLAW_GOOGLE_ACCOUNT_EMAIL missing, skipping gmail watch'
       );
     } else {
       gmailWatchSupervisor = createSupervisor({
@@ -169,10 +168,6 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
         ],
       });
     }
-  } else if (gmailNotificationsEnabled && !hasGogCredentials) {
-    console.warn(
-      '[controller] KILOCLAW_GMAIL_NOTIFICATIONS=true but no Google credentials, skipping gmail watch'
-    );
   }
 
   const app = new Hono();
