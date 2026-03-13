@@ -436,6 +436,9 @@ console.log('\nSetting up Gmail push notifications...');
 const gmailPushWorkerUrl =
   process.env.GMAIL_PUSH_WORKER_URL || 'https://kiloclaw-gmail.kiloapps.io';
 
+// Track whether push setup succeeded — used in the final summary message.
+let pushSetupOk = true;
+
 // Step 1: Create Pub/Sub topic (idempotent)
 console.log('Creating Pub/Sub topic gog-gmail-watch...');
 try {
@@ -443,8 +446,15 @@ try {
     stdio: 'pipe',
   });
   console.log('Topic created.');
-} catch {
-  console.log('Topic already exists (ok).');
+} catch (topicErr) {
+  const topicOutput = topicErr.stderr?.toString() ?? topicErr.message;
+  if (topicOutput.includes('ALREADY_EXISTS') || topicOutput.includes('already exists')) {
+    console.log('Topic already exists (ok).');
+  } else {
+    console.error('Error: Could not create Pub/Sub topic. Gmail push notifications will not work.');
+    console.error(topicOutput);
+    pushSetupOk = false;
+  }
 }
 
 // Step 2: Grant Gmail API push publisher role
@@ -485,12 +495,15 @@ try {
       );
       console.log('Publisher role granted.');
     } catch (retryErr) {
-      console.warn(
-        'Warning: Still could not grant publisher role. Gmail push notifications may not work.'
+      console.error(
+        'Error: Still could not grant publisher role. Gmail push notifications will not work.'
       );
+      pushSetupOk = false;
     }
   } else {
-    console.warn('Warning: Could not grant publisher role:', err.message);
+    console.error('Error: Could not grant publisher role. Gmail push notifications will not work.');
+    console.error(errOutput);
+    pushSetupOk = false;
   }
 }
 
@@ -510,12 +523,12 @@ try {
 }
 
 if (!pushUserId) {
-  console.error('Error: Could not extract userId from token. Pub/Sub subscription not created.');
-  console.error('Gmail push notifications will not work.');
-  process.exit(1);
+  console.warn('Warning: Could not extract userId from token. Skipping Pub/Sub setup.');
+  console.warn('Gmail push notifications will not work, but Google Workspace access will.');
+  pushSetupOk = false;
 }
 
-{
+if (pushUserId) {
   // Create a project-level service account for Pub/Sub push OIDC auth.
   // Each user's GCP project gets its own SA — the worker validates
   // issuer + audience only (not the SA email).
@@ -534,7 +547,9 @@ if (!pushUserId) {
     if (saOutput.includes('already exists')) {
       console.log('Service account already exists (ok).');
     } else {
-      console.warn('Warning: Could not create service account:', saOutput);
+      console.error('Error: Could not create push auth service account. Gmail push notifications will not work.');
+      console.error(saOutput);
+      pushSetupOk = false;
     }
   }
 
@@ -553,10 +568,12 @@ if (!pushUserId) {
     );
     console.log('Token creator role granted.');
   } catch (tokenErr) {
-    console.warn(
-      'Warning: Could not grant token creator role:',
-      tokenErr.stderr?.toString() ?? tokenErr.message
+    console.error(
+      'Error: Could not grant token creator role. Pub/Sub will not be able to sign push requests.'
     );
+    console.error(tokenErr.stderr?.toString() ?? tokenErr.message);
+    console.error('Gmail push notifications will not work.');
+    pushSetupOk = false;
   }
 
   const subscriptionName = `gog-gmail-push-${pushUserId.slice(0, 8)}`;
@@ -596,10 +613,12 @@ if (!pushUserId) {
           'Error: Could not update push subscription:',
           updateErr.stderr?.toString() ?? updateErr.message
         );
+        pushSetupOk = false;
       }
     } else {
       console.error('Error: Could not create push subscription:');
       console.error(createOutput);
+      pushSetupOk = false;
     }
   }
 
@@ -613,8 +632,9 @@ if (!pushUserId) {
     );
     console.log('Gmail watch registered successfully.');
   } catch (err) {
-    console.warn('Warning: Gmail watch registration failed:', err.message);
-    console.warn('You can register manually later with: gog gmail watch start');
+    console.error('Error: Gmail watch registration failed:', err.message);
+    console.error('Re-run the setup to retry.');
+    pushSetupOk = false;
   }
 }
 
@@ -656,12 +676,18 @@ if (!postRes.ok) {
   process.exit(1);
 }
 
-console.log('\nGoogle account connected!');
-console.log('Credentials sent to your kiloclaw instance.');
-if (userEmail) {
-  console.log(`Connected account: ${userEmail}`);
+console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('  Setup complete!');
+console.log('');
+console.log(`  Google account connected: ${userEmail}`);
+console.log('  Your bot can now use Gmail, Calendar, Drive, Docs, Sheets, and more.');
+console.log('');
+console.log('  Next steps:');
+console.log('  1. Restart your kiloclaw instance to activate Google services');
+if (pushSetupOk) {
+  console.log('  2. Enable Gmail notifications in Settings → Google Account');
+} else {
+  console.log('  2. Gmail push notifications could not be set up (see errors above).');
+  console.log('     Google Workspace access will still work. Re-run setup to retry.');
 }
-
-console.log('\nSetup complete!');
-console.log('Your bot can now use Gmail, Calendar, Drive, Docs, Sheets, and more.');
-console.log('Redeploy your kiloclaw instance to activate.');
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
