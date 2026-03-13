@@ -52,7 +52,7 @@ export function CustomerSourceSurvey({ redirectPath }: CustomerSourceSurveyProps
           {isSkipping ? 'Skipping...' : 'Skip'}
         </button>
         <Button
-          onClick={() => submitSource({ source })}
+          onClick={() => submitSource({ source: source.trim() })}
           disabled={isPending || isSkipping || source.trim().length === 0}
         >
           {isPending ? 'Submitting...' : 'Submit'}
