@@ -200,11 +200,13 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   // Extract fraud/project headers
   const { fraudHeaders, projectId } = extractFraudAndProjectHeaders(request);
 
-  let { provider, userByok } = await getEmbeddingProvider(
+  const embeddingProviderResult = await getEmbeddingProvider(
     requestedModelLowerCased,
     user,
     organizationId
   );
+  let { provider } = embeddingProviderResult;
+  const { userByok } = embeddingProviderResult;
 
   console.debug(`Embedding request routing to ${provider.id}`);
 
