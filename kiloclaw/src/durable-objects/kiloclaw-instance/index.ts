@@ -545,7 +545,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await flyMachines.ensureVolume(flyConfig, this.ctx, this.s, this.env, 'start');
 
     // Verify volume region matches cached flyRegion
-    if (this.s.flyVolumeId && !this.s.flyMachineId) {
+    if (this.s.flyVolumeId) {
       try {
         const volume = await fly.getVolume(flyConfig, this.s.flyVolumeId);
         if (volume.region !== this.s.flyRegion) {
