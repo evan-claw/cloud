@@ -49,7 +49,7 @@ describe('gmail-watch-renewal', () => {
     expect(spawn).toHaveBeenCalledTimes(3);
   });
 
-  it('does not throw if spawn fails', () => {
+  it('does not throw if spawn fails synchronously', () => {
     const spawn = vi.fn().mockImplementation(() => {
       throw new Error('gog failed');
     });
@@ -59,6 +59,18 @@ describe('gmail-watch-renewal', () => {
     expect(() => {
       vi.advanceTimersByTime(60 * 60 * 1000);
     }).not.toThrow();
+  });
+
+  it('does not throw if spawn rejects asynchronously', async () => {
+    const spawn = vi.fn().mockRejectedValue(new Error('gog failed'));
+
+    startWatchRenewal('user@gmail.com', spawn);
+    vi.advanceTimersByTime(60 * 60 * 1000);
+
+    // Flush the microtask queue so the rejected promise is handled
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   it('stopWatchRenewal prevents the initial spawn', () => {
