@@ -62,9 +62,8 @@ import { customLlmRequest } from '@/lib/custom-llm/customLlmRequest';
 import { normalizeModelId } from '@/lib/model-utils';
 import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
-import { isKiloAutoModel, resolveAutoModel } from '@/lib/kilo-auto-model';
+import { applyResolvedAutoModel, isKiloAutoModel } from '@/lib/kilo-auto-model';
 import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplicateReasoning';
-import type OpenAI from 'openai';
 import type { MicrodollarUsageContext, PromptInfo } from '@/lib/processUsage.types';
 
 export const maxDuration = 800;
@@ -135,20 +134,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   let autoModel: string | null = null;
   if (isKiloAutoModel(requestedModelLowerCased)) {
     autoModel = requestedModelLowerCased;
-    const resolved = resolveAutoModel(requestedModelLowerCased, modeHeader);
-    requestBodyParsed.body.model = resolved.model;
-    if (resolved.reasoning) requestBodyParsed.body.reasoning = resolved.reasoning;
-    if (resolved.verbosity) {
-      if (requestBodyParsed.kind === 'chat_completions') {
-        requestBodyParsed.body.verbosity =
-          resolved.verbosity as OpenRouterChatCompletionRequest['verbosity'];
-      } else {
-        requestBodyParsed.body.text = {
-          ...requestBodyParsed.body.text,
-          verbosity: resolved.verbosity as OpenAI.Responses.ResponseTextConfig['verbosity'],
-        };
-      }
-    }
+    applyResolvedAutoModel(requestedModelLowerCased, requestBodyParsed, modeHeader);
   }
 
   const originalModelIdLowerCased = requestBodyParsed.body.model.toLowerCase();
