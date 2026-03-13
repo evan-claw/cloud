@@ -8,7 +8,7 @@
   "placement": { "mode": "smart" },
   "vars": {
     // Used for OIDC validation when push auth is configured on the Pub/Sub subscription
-    "OIDC_AUDIENCE": "https://gmail-push.kilocode.workers.dev",
+    "OIDC_AUDIENCE": "https://kiloclaw-gmail.kiloapps.io",
   },
   "services": [
     {
@@ -20,7 +20,7 @@
     {
       "binding": "INTERNAL_API_SECRET",
       "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
-      "secret_name": "INTERNAL_API_SECRET_PROD",
+      "secret_name": "INTERNAL_API_SECRET",
     },
   ],
   "queues": {

@@ -393,11 +393,7 @@ console.log('  3. Click "Continue"');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 try {
-  await runCommand('gog', [
-    'auth', 'add', userEmail,
-    '--services=all',
-    '--force-consent',
-  ], {
+  await runCommand('gog', ['auth', 'add', userEmail, '--services=all', '--force-consent'], {
     env: gogEnv,
   });
 } catch (err) {
@@ -416,14 +412,16 @@ try {
     env: gogEnv,
   }).trim();
   const parsed = JSON.parse(authList);
-  const accounts = Array.isArray(parsed) ? parsed : parsed.accounts ?? [];
+  const accounts = Array.isArray(parsed) ? parsed : (parsed.accounts ?? []);
   const found = accounts.some(a => a.email === userEmail || a.account === userEmail);
   if (!found) {
     throw new Error(`Account ${userEmail} not found in gog auth list`);
   }
   console.log('Credentials verified.\n');
 } catch (err) {
-  console.error('Credential verification failed — the OAuth flow may not have completed correctly.');
+  console.error(
+    'Credential verification failed — the OAuth flow may not have completed correctly.'
+  );
   console.error(err.message);
   console.error('Please re-run the setup and try again.');
   process.exit(1);
@@ -478,7 +476,8 @@ if (userEmail) {
 
 console.log('\nSetting up Gmail push notifications...');
 
-const gmailPushWorkerUrl = process.env.GMAIL_PUSH_WORKER_URL || 'https://kiloclaw-gmail-push.kiloapps.ai';
+const gmailPushWorkerUrl =
+  process.env.GMAIL_PUSH_WORKER_URL || 'https://kiloclaw-gmail-push.kiloapps.ai';
 
 // Step 1: Create Pub/Sub topic (idempotent)
 console.log('Creating Pub/Sub topic gog-gmail-watch...');
@@ -496,8 +495,8 @@ console.log('Granting Gmail push publisher role...');
 try {
   execSync(
     'gcloud pubsub topics add-iam-policy-binding gog-gmail-watch ' +
-    '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
-    '--role="roles/pubsub.publisher" --quiet',
+      '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
+      '--role="roles/pubsub.publisher" --quiet',
     { stdio: 'pipe' }
   );
   console.log('Publisher role granted.');
@@ -510,7 +509,9 @@ try {
     console.log('  Gmail push notifications require this binding.');
     console.log('');
     console.log('  Fix it in the Cloud Console:');
-    console.log(`  1. Open: https://console.cloud.google.com/iam-admin/orgpolicies/iam-allowedPolicyMemberDomains?project=${projectId}`);
+    console.log(
+      `  1. Open: https://console.cloud.google.com/iam-admin/orgpolicies/iam-allowedPolicyMemberDomains?project=${projectId}`
+    );
     console.log('  2. Click "Manage Policy"');
     console.log('  3. Under "Policy source", select "Override parent\'s policy"');
     console.log('  4. Under "Policy enforcement", select "Replace"');
@@ -521,13 +522,15 @@ try {
     try {
       execSync(
         'gcloud pubsub topics add-iam-policy-binding gog-gmail-watch ' +
-        '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
-        '--role="roles/pubsub.publisher" --quiet',
+          '--member="serviceAccount:gmail-api-push@system.gserviceaccount.com" ' +
+          '--role="roles/pubsub.publisher" --quiet',
         { stdio: 'pipe' }
       );
       console.log('Publisher role granted.');
     } catch (retryErr) {
-      console.warn('Warning: Still could not grant publisher role. Gmail push notifications may not work.');
+      console.warn(
+        'Warning: Still could not grant publisher role. Gmail push notifications may not work.'
+      );
     }
   } else {
     console.warn('Warning: Could not grant publisher role:', err.message);
@@ -565,7 +568,7 @@ if (!pushUserId) {
   try {
     execSync(
       `gcloud iam service-accounts create ${pushSaName} ` +
-      `--display-name="Gmail push notification auth" --quiet`,
+        `--display-name="Gmail push notification auth" --quiet`,
       { stdio: 'pipe' }
     );
     console.log('Service account created.');
@@ -587,30 +590,32 @@ if (!pushUserId) {
     ).trim();
     execSync(
       `gcloud iam service-accounts add-iam-policy-binding ${pushSaEmail} ` +
-      `--member="serviceAccount:service-${projectNumber}@gcp-sa-pubsub.iam.gserviceaccount.com" ` +
-      `--role="roles/iam.serviceAccountTokenCreator" --quiet`,
+        `--member="serviceAccount:service-${projectNumber}@gcp-sa-pubsub.iam.gserviceaccount.com" ` +
+        `--role="roles/iam.serviceAccountTokenCreator" --quiet`,
       { stdio: 'pipe' }
     );
     console.log('Token creator role granted.');
   } catch (tokenErr) {
-    console.warn('Warning: Could not grant token creator role:', tokenErr.stderr?.toString() ?? tokenErr.message);
+    console.warn(
+      'Warning: Could not grant token creator role:',
+      tokenErr.stderr?.toString() ?? tokenErr.message
+    );
   }
 
   const subscriptionName = `gog-gmail-push-${pushUserId.slice(0, 8)}`;
   // Audience must exactly match the worker's OIDC_AUDIENCE env var.
-  // Default matches prod; override via OIDC_AUDIENCE env var for dev.
-  const oidcAudience = process.env.OIDC_AUDIENCE || 'https://gmail-push.kilocode.workers.dev';
+  const oidcAudience = 'https://kiloclaw-gmail.kiloapps.io';
   const pushEndpoint = `${gmailPushWorkerUrl}/push/user/${pushUserId}`;
   console.log(`Creating push subscription ${subscriptionName} → ${pushEndpoint}`);
   console.log(`OIDC audience: ${oidcAudience}`);
   try {
     execSync(
       `gcloud pubsub subscriptions create ${subscriptionName} ` +
-      `--topic=gog-gmail-watch ` +
-      `--push-endpoint="${pushEndpoint}" ` +
-      `--push-auth-service-account="${pushSaEmail}" ` +
-      `--push-auth-token-audience="${oidcAudience}" ` +
-      `--ack-deadline=30 --quiet`,
+        `--topic=gog-gmail-watch ` +
+        `--push-endpoint="${pushEndpoint}" ` +
+        `--push-auth-service-account="${pushSaEmail}" ` +
+        `--push-auth-token-audience="${oidcAudience}" ` +
+        `--ack-deadline=30 --quiet`,
       { stdio: 'pipe' }
     );
     console.log('Push subscription created.');
@@ -621,15 +626,18 @@ if (!pushUserId) {
       try {
         execSync(
           `gcloud pubsub subscriptions update ${subscriptionName} ` +
-          `--push-endpoint="${pushEndpoint}" ` +
-          `--push-auth-service-account="${pushSaEmail}" ` +
-          `--push-auth-token-audience="${oidcAudience}" ` +
-          `--quiet`,
+            `--push-endpoint="${pushEndpoint}" ` +
+            `--push-auth-service-account="${pushSaEmail}" ` +
+            `--push-auth-token-audience="${oidcAudience}" ` +
+            `--quiet`,
           { stdio: 'pipe' }
         );
         console.log('Push subscription updated.');
       } catch (updateErr) {
-        console.error('Error: Could not update push subscription:', updateErr.stderr?.toString() ?? updateErr.message);
+        console.error(
+          'Error: Could not update push subscription:',
+          updateErr.stderr?.toString() ?? updateErr.message
+        );
       }
     } else {
       console.error('Error: Could not create push subscription:');
@@ -642,7 +650,7 @@ if (!pushUserId) {
   try {
     execSync(
       `gog gmail watch start --account="${userEmail}" ` +
-      `--topic="projects/${gcpProject}/topics/gog-gmail-watch"`,
+        `--topic="projects/${gcpProject}/topics/gog-gmail-watch"`,
       { stdio: 'inherit', env: gogEnv }
     );
     console.log('Gmail watch registered successfully.');
