@@ -49,14 +49,22 @@ export default function ClawPage() {
     );
   }
 
-  // New user with no access and no instance at all (never provisioned) —
+  // Brand-new user with no access and no instance (never provisioned) —
   // show welcome page without waiting for the KiloClaw Worker.
-  // Destroyed instances (instance.exists === false) must NOT land here;
-  // they proceed to ClawDashboard where the AccessLockedDialog handles them.
-  if (billingQuery.data && !billingQuery.data.hasAccess && billingQuery.data.instance === null) {
+  // Expired earlybird/trial users must NOT land here even if they never
+  // provisioned; they proceed to ClawDashboard where AccessLockedDialog
+  // shows the appropriate locked state.
+  const billing = billingQuery.data;
+  const isNewUser =
+    billing &&
+    !billing.hasAccess &&
+    billing.instance === null &&
+    !billing.earlybird &&
+    !billing.trial?.expired;
+  if (isNewUser) {
     return (
       <div className="container m-auto flex w-full max-w-[1140px] flex-col gap-6 p-4 md:p-6">
-        <WelcomePage trialEligible={billingQuery.data.trialEligible} />
+        <WelcomePage trialEligible={billing.trialEligible} />
       </div>
     );
   }
