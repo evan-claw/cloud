@@ -1,27 +1,39 @@
-# Copy this to .dev.vars and fill in your values
-# .dev.vars is gitignored and used by wrangler dev
+# KiloClaw worker secrets (used by wrangler dev).
+# The dev-start script creates .dev.vars from this file on first run.
+#
+# Most values below are working defaults. The script auto-manages:
+#   NEXTAUTH_SECRET, INTERNAL_API_SECRET  (synced from Vercel)
+#   FLY_API_TOKEN                         (auto-created/refreshed)
+#   KILOCODE_API_BASE_URL                 (set from tunnel URL)
+#
+# Values you may need to set manually:
+#   AGENT_ENV_VARS_PRIVATE_KEY            (get from 1Password)
+#   FLY_IMAGE_TAG / FLY_IMAGE_DIGEST / OPENCLAW_VERSION
+#                                         (set by scripts/push-dev.sh,
+#                                          or ask a team member for values)
 
-# Auth
+# Auth (synced automatically from Vercel by the dev-start script)
 NEXTAUTH_SECRET=dev-secret-change-me
 INTERNAL_API_SECRET=dev-internal-secret
+
+# Auth (static defaults — these work as-is for local dev)
 GATEWAY_TOKEN_SECRET=dev-gateway-secret-kiloclaw
 # Override WORKER_ENV to "development" for local development.
 # Production default is set in wrangler.jsonc. This selects the development
 # Fly app naming prefix ("dev-") for per-user app creation.
 WORKER_ENV=development
 
-# Optional: Override KiloCode provider base URL (local dev only)
+# Tunnel URL (set automatically by the dev-start script)
 # OpenClaw's native kilocode provider hardcodes https://api.kilo.ai/api/gateway/.
-# In dev, set this to a Cloudflare tunnel or ngrok URL pointing to your local Next.js app
-# so that Fly machines route model requests through the tunnel instead of production.
-# e.g.: `cloudflared tunnel --url http://localhost:3000`
+# In dev, the script sets this to the Cloudflare tunnel URL pointing to your
+# local Next.js app so Fly machines route model requests through the tunnel.
 # KILOCODE_API_BASE_URL=https://<tunnel>.trycloudflare.com/api/gateway/
 
 # Fly.io Machines API
-# Get an org-scoped token (run: `fly tokens create -o kilo-dev my-dev-token`)
+# Token is auto-created/refreshed by the dev-start script.
 FLY_API_TOKEN=fo1_...
-# Your Fly org slug (run: `fly orgs list`). Use `kilo-dev` for Kilo team
-# members, or `personal` if you're running under your own Fly account.
+# Fly org slug. The dev-start script reads this value for token creation.
+# Use "kilo-dev" for Kilo team members, or "personal" for your own Fly account.
 FLY_ORG_SLUG=kilo-dev
 # Shared Docker image registry app (images are pushed here, referenced by all per-user apps)
 FLY_REGISTRY_APP=kiloclaw-dev
@@ -31,8 +43,7 @@ FLY_REGISTRY_APP=kiloclaw-dev
 # The platform API can override per-user at provision time.
 FLY_REGION=us,eu
 # Docker image tag on registry.fly.io/{FLY_REGISTRY_APP}:{tag}.
-# In dev, use "latest" or run scripts/push-dev.sh which sets a timestamped tag.
-# In production, pin to a version (e.g., v40, sha-abc1234).
+# Set automatically by scripts/push-dev.sh, or use "latest" to start.
 FLY_IMAGE_TAG=latest
 # OpenClaw version (must match the openclaw@x.x.x version in the Dockerfile).
 # Used by the worker to self-register the version → image tag mapping in KV,
@@ -51,6 +62,7 @@ FLY_APP_NAME=kiloclaw-dev
 OPENCLAW_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8795,http://claw.kilosessions.ai
 
 # Encryption (for user secrets)
+# Get the dev version from 1Password (engineering vault). Quote the value.
 # AGENT_ENV_VARS_PRIVATE_KEY=...
 
 # Hyperdrive is configured in wrangler.jsonc, not here.
