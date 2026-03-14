@@ -32,6 +32,7 @@ import SidebarUserFooter from './SidebarUserFooter';
 import { ENABLE_DEPLOY_FEATURE } from '@/lib/constants';
 import { isEnabledForUser } from '@/lib/code-indexing/util';
 import { useFeatureFlagEnabled } from 'posthog-js/react';
+import { useGastownEnabled } from '@/hooks/useGastownEnabled';
 import KiloCrabIcon from '@/components/KiloCrabIcon';
 
 export default function PersonalAppSidebar(props: React.ComponentProps<typeof Sidebar>) {
@@ -39,7 +40,7 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
 
   // Feature flags
   const isAutoTriageFeatureEnabled = useFeatureFlagEnabled('auto-triage-feature');
-  const isGastownEnabled = useFeatureFlagEnabled('gastown-access');
+  const isGastownEnabled = useGastownEnabled();
   const isDevelopment = process.env.NODE_ENV === 'development';
 
   // Dashboard group

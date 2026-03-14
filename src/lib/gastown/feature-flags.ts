@@ -1,4 +1,5 @@
 import { isFeatureFlagEnabled } from '@/lib/posthog-feature-flags';
+import { GASTOWN_MANUAL_USER_IDS } from './manual-access';
 
 const GASTOWN_ACCESS_FLAG = 'gastown-access';
 
@@ -13,9 +14,14 @@ const GASTOWN_ACCESS_FLAG = 'gastown-access';
  *
  * See #901 for details.
  */
-export async function isGastownEnabled(userId: string): Promise<boolean> {
+export async function isGastownEnabled(userId?: string): Promise<boolean> {
   if (process.env.NODE_ENV !== 'production') {
     return true;
   }
-  return isFeatureFlagEnabled(GASTOWN_ACCESS_FLAG, userId);
+
+  if (!userId) {
+    return false;
+  }
+
+  return GASTOWN_MANUAL_USER_IDS.has(userId) || isFeatureFlagEnabled(GASTOWN_ACCESS_FLAG, userId);
 }
