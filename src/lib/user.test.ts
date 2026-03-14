@@ -30,6 +30,7 @@ import {
   security_analysis_queue,
   security_analysis_owner_state,
   kiloclaw_earlybird_purchases,
+  kiloclaw_subscriptions,
   bot_requests,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
@@ -850,6 +851,57 @@ describe('User', () => {
           .where(eq(kiloclaw_earlybird_purchases.user_id, user.id))
           .then(r => r[0].count)
       ).toBe(0);
+    });
+
+    it('should delete kiloclaw_subscriptions for the user', async () => {
+      const user = await insertTestUser();
+
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'canceled',
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_subscriptions)
+          .where(eq(kiloclaw_subscriptions.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+    });
+
+    it('should throw SoftDeletePreconditionError for active KiloClaw subscription', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'active',
+        cancel_at_period_end: false,
+      });
+
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      // User should not be modified
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
+    });
+
+    it('should throw SoftDeletePreconditionError for KiloClaw subscription pending cancellation', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'active',
+        cancel_at_period_end: true,
+      });
+
+      // Active subscriptions with cancel_at_period_end are still live in Stripe
+      // until period end and can emit lifecycle webhooks, so deletion is blocked.
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
     });
   });
 

@@ -1,0 +1,107 @@
+'use client';
+
+import { useState, type ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc/utils';
+import { BillingBanner } from './BillingBanner';
+import { AccessLockedDialog } from './AccessLockedDialog';
+import { PlanSelectionDialog } from './PlanSelectionDialog';
+import { SubscriptionCard } from './SubscriptionCard';
+import { CancelDialog } from './CancelDialog';
+import { deriveBannerState, deriveLockReason, formatBillingDate } from './billing-types';
+
+function EarlybirdActiveCard({ expiresAt }: { expiresAt: string }) {
+  return (
+    <div className="border-brand-primary/30 bg-brand-primary/5 flex items-center gap-3 rounded-xl border p-4">
+      <span className="text-xl">🦀</span>
+      <div className="flex-1">
+        <span className="text-brand-primary text-sm font-semibold">
+          Thanks for being an early KiloClaw subscriber.
+        </span>
+        <span className="text-muted-foreground ml-2 text-sm">
+          Your earlybird hosting expires {formatBillingDate(expiresAt)}.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+type BillingWrapperProps = {
+  children: ReactNode;
+};
+
+export function BillingWrapper({ children }: BillingWrapperProps) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data: billing } = useQuery(trpc.kiloclaw.getBillingStatus.queryOptions());
+
+  const [showPlanDialog, setShowPlanDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+
+  const reactivate = useMutation(trpc.kiloclaw.reactivateSubscription.mutationOptions());
+  const billingPortal = useMutation(trpc.kiloclaw.createBillingPortalSession.mutationOptions());
+
+  if (!billing) {
+    return <>{children}</>;
+  }
+
+  const lockReason = deriveLockReason(billing);
+  const bannerState = deriveBannerState(billing);
+
+  function handleSubscribe() {
+    setShowPlanDialog(true);
+  }
+
+  function handleReactivate() {
+    reactivate.mutate(undefined, {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.kiloclaw.getBillingStatus.queryKey(),
+        });
+      },
+    });
+  }
+
+  function handleUpdatePayment() {
+    billingPortal.mutate(undefined, {
+      onSuccess: result => {
+        window.location.href = result.url;
+      },
+    });
+  }
+
+  return (
+    <>
+      {/* Banner — or earlybird card in the banner position */}
+      {bannerState === 'earlybird_active' && billing.earlybird ? (
+        <EarlybirdActiveCard expiresAt={billing.earlybird.expiresAt} />
+      ) : (
+        <BillingBanner
+          billing={billing}
+          onSubscribeClick={handleSubscribe}
+          onReactivateClick={handleReactivate}
+          onUpdatePaymentClick={handleUpdatePayment}
+        />
+      )}
+
+      {/* Lock dialog — blocks interaction when access is revoked */}
+      <AccessLockedDialog
+        reason={lockReason}
+        onSubscribeClick={handleSubscribe}
+        onUpdatePaymentClick={handleUpdatePayment}
+      />
+
+      {/* Dashboard content */}
+      {children}
+
+      {/* Subscription card — shown below the main dashboard card */}
+      <SubscriptionCard billing={billing} onCancelClick={() => setShowCancelDialog(true)} />
+
+      {/* Plan selection dialog */}
+      <PlanSelectionDialog open={showPlanDialog} onOpenChange={setShowPlanDialog} />
+
+      {/* Cancel confirmation dialog */}
+      <CancelDialog open={showCancelDialog} onOpenChange={setShowCancelDialog} billing={billing} />
+    </>
+  );
+}

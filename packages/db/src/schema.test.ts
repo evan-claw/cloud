@@ -97,6 +97,10 @@ describe('database schema', () => {
         'security.sync.completed',
         'security.audit_log.exported',
       ],
+      KiloClawPlan: ['trial', 'commit', 'standard'],
+      KiloClawScheduledPlan: ['commit', 'standard'],
+      KiloClawScheduledBy: ['auto', 'user'],
+      KiloClawSubscriptionStatus: ['trialing', 'active', 'past_due', 'canceled', 'unpaid'],
     };
 
     const actualEnumValues: Record<string, string[]> = {};

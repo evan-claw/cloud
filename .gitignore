@@ -97,3 +97,5 @@ supabase/.temp
 .husky/_/
 
 .dev-logs/
+
+.kilo/plans

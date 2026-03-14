@@ -12,6 +12,7 @@ import {
   type TemplateName,
 } from '@/lib/email';
 import * as z from 'zod';
+import { format } from 'date-fns';
 
 const templateNames: [TemplateName, ...TemplateName[]] = [
   'orgSubscription',
@@ -26,6 +27,15 @@ const templateNames: [TemplateName, ...TemplateName[]] = [
   'ossInviteExistingUser',
   'ossExistingOrgProvisioned',
   'deployFailed',
+  'clawTrialEndingSoon',
+  'clawTrialExpiresTomorrow',
+  'clawSuspendedTrial',
+  'clawSuspendedSubscription',
+  'clawSuspendedPayment',
+  'clawDestructionWarning',
+  'clawInstanceDestroyed',
+  'clawEarlybirdEndingSoon',
+  'clawEarlybirdExpiresTomorrow',
 ];
 
 const TemplateNameSchema = z.enum(templateNames);
@@ -37,6 +47,7 @@ type ProviderName = (typeof providerNames)[number];
 const ProviderNameSchema = z.enum(providerNames);
 
 function fixtureTemplateVars(template: TemplateName): Record<string, string | RawHtml> {
+  const formatDate = (d: Date) => format(d, 'MMMM d, yyyy');
   const orgId = 'fixture-org-id';
   const organization_url = `${NEXTAUTH_URL}/organizations/${orgId}`;
   const invoices_url = `${NEXTAUTH_URL}/organizations/${orgId}/payment-details`;
@@ -112,6 +123,36 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
         deployment_url: `${NEXTAUTH_URL}/deployments/fixture-id`,
         repository: 'acme/my-app',
       };
+    case 'clawTrialEndingSoon':
+      return { days_remaining: '5', claw_url: `${NEXTAUTH_URL}/claw` };
+    case 'clawTrialExpiresTomorrow':
+      return { claw_url: `${NEXTAUTH_URL}/claw` };
+    case 'clawSuspendedTrial':
+      return {
+        destruction_date: formatDate(new Date(Date.now() + 7 * 86_400_000)),
+        claw_url: `${NEXTAUTH_URL}/claw`,
+      };
+    case 'clawSuspendedSubscription':
+      return {
+        destruction_date: formatDate(new Date(Date.now() + 7 * 86_400_000)),
+        claw_url: `${NEXTAUTH_URL}/claw`,
+      };
+    case 'clawSuspendedPayment':
+      return {
+        destruction_date: formatDate(new Date(Date.now() + 7 * 86_400_000)),
+        claw_url: `${NEXTAUTH_URL}/claw`,
+      };
+    case 'clawDestructionWarning':
+      return {
+        destruction_date: formatDate(new Date(Date.now() + 2 * 86_400_000)),
+        claw_url: `${NEXTAUTH_URL}/claw`,
+      };
+    case 'clawInstanceDestroyed':
+      return { claw_url: `${NEXTAUTH_URL}/claw` };
+    case 'clawEarlybirdEndingSoon':
+      return { days_remaining: '14', expiry_date: '2026-09-26', claw_url: `${NEXTAUTH_URL}/claw` };
+    case 'clawEarlybirdExpiresTomorrow':
+      return { expiry_date: '2026-09-26', claw_url: `${NEXTAUTH_URL}/claw` };
   }
   throw new Error(`Unknown template: ${template}`);
 }

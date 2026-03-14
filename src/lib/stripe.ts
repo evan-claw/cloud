@@ -48,6 +48,14 @@ import { appendKiloPassAuditLog } from '@/lib/kilo-pass/issuance';
 import { maybeMapStripeScheduleStatusToDb } from '@/lib/kilo-pass/scheduled-change-release';
 import { invoiceLooksLikeKiloPassByPriceId } from '@/lib/kilo-pass/stripe-invoice-classifier.server';
 import {
+  handleKiloClawSubscriptionCreated,
+  handleKiloClawSubscriptionUpdated,
+  handleKiloClawSubscriptionDeleted,
+  handleKiloClawScheduleEvent,
+  handleKiloClawInvoicePaid,
+} from '@/lib/kiloclaw/stripe-handlers';
+import { invoiceLooksLikeKiloClawByPriceId } from '@/lib/kiloclaw/stripe-invoice-classifier.server';
+import {
   STRIPE_ENTERPRISE_SUBSCRIPTION_PRODUCT_ID,
   STRIPE_TEAMS_SUBSCRIPTION_PRODUCT_ID,
 } from '@/lib/config.server';
@@ -621,6 +629,12 @@ export async function processStripePaymentEventHook(event: Stripe.Event) {
         break;
       }
 
+      // KiloClaw invoice.paid — e.g. commit renewal invoices
+      if (invoiceLooksLikeKiloClawByPriceId(invoice)) {
+        await handleKiloClawInvoicePaid({ eventId: event.id, invoice });
+        break;
+      }
+
       // Handle auto-topup (user or organization)
       const isUserAutoTopup = invoice.metadata?.type === 'auto-topup';
       const isOrgAutoTopup = invoice.metadata?.type === 'org-auto-topup';
@@ -757,6 +771,14 @@ export async function processStripePaymentEventHook(event: Stripe.Event) {
         break;
       }
 
+      if (event.data.object.metadata?.type === 'kiloclaw') {
+        await handleKiloClawSubscriptionCreated({
+          eventId: event.id,
+          subscription: event.data.object,
+        });
+        break;
+      }
+
       await handleSubscriptionEvent(
         event.data.object,
         event.request?.idempotency_key ?? undefined,
@@ -774,6 +796,21 @@ export async function processStripePaymentEventHook(event: Stripe.Event) {
         break;
       }
 
+      if (event.data.object.metadata?.type === 'kiloclaw') {
+        if (event.type === 'customer.subscription.deleted') {
+          await handleKiloClawSubscriptionDeleted({
+            eventId: event.id,
+            subscription: event.data.object,
+          });
+        } else {
+          await handleKiloClawSubscriptionUpdated({
+            eventId: event.id,
+            subscription: event.data.object,
+          });
+        }
+        break;
+      }
+
       await handleSubscriptionEvent(event.data.object, event.request?.idempotency_key ?? undefined);
       break;
 
@@ -786,6 +823,14 @@ export async function processStripePaymentEventHook(event: Stripe.Event) {
 
     case 'subscription_schedule.updated': {
       const schedule = event.data.object;
+
+      // Try KiloClaw schedule handling first
+      await handleKiloClawScheduleEvent({
+        eventId: event.id,
+        schedule,
+      });
+      // Note: handleKiloClawScheduleEvent returns silently if the schedule
+      // doesn't belong to a KiloClaw subscription (no matching stripe_schedule_id)
 
       const scheduleId = schedule.id;
       const scheduleStatus = schedule.status;
