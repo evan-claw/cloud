@@ -260,8 +260,24 @@ async function fetchKiloClawServiceDegraded(): Promise<boolean> {
  * Ensure the user has billing access for provisioning: auto-create a trial row
  * for new users, allow active/past_due/trialing/earlybird, and reject otherwise.
  * Used by both `provision` and its backward-compatible alias `updateConfig`.
+ *
+ * Earlybird is checked first so earlybird purchasers never get an accidental
+ * trial row, and expired earlybird users cannot regain access by provisioning.
  */
 async function ensureProvisionAccess(userId: string): Promise<void> {
+  // Check earlybird before anything else — active earlybird grants access,
+  // expired earlybird must not fall through to the trial bootstrap.
+  const [earlybird] = await db
+    .select({ id: kiloclaw_earlybird_purchases.id })
+    .from(kiloclaw_earlybird_purchases)
+    .where(eq(kiloclaw_earlybird_purchases.user_id, userId))
+    .limit(1);
+  if (earlybird) {
+    if (new Date(KILOCLAW_EARLYBIRD_EXPIRY_DATE) > new Date()) return;
+    // Expired earlybird — fall through to subscription check, but must not
+    // auto-create a trial (spec: user must manually subscribe).
+  }
+
   const [existing] = await db
     .select({
       status: kiloclaw_subscriptions.status,
@@ -272,9 +288,10 @@ async function ensureProvisionAccess(userId: string): Promise<void> {
     .where(eq(kiloclaw_subscriptions.user_id, userId))
     .limit(1);
 
-  if (!existing) {
-    // New user — start trial. Use onConflictDoNothing so concurrent
-    // requests (e.g. double-submit) don't fail on the unique user_id constraint.
+  if (!existing && !earlybird) {
+    // New user with no earlybird purchase — start trial.
+    // Use onConflictDoNothing so concurrent requests (e.g. double-submit)
+    // don't fail on the unique user_id constraint.
     const now = new Date();
     const trialEndsAt = new Date(now.getTime() + KILOCLAW_TRIAL_DURATION_DAYS * 86_400_000);
     await db
@@ -290,26 +307,18 @@ async function ensureProvisionAccess(userId: string): Promise<void> {
     return;
   }
 
-  // Mirror requireKiloClawAccess: active always passes; past_due passes only
-  // until the billing lifecycle cron sets suspended_at.
-  if (existing.status === 'active') return;
-  if (existing.status === 'past_due' && !existing.suspended_at) return;
-  if (
-    existing.status === 'trialing' &&
-    existing.trial_ends_at &&
-    new Date(existing.trial_ends_at) > new Date()
-  ) {
-    return;
-  }
-
-  // Check earlybird
-  const [earlybird] = await db
-    .select({ id: kiloclaw_earlybird_purchases.id })
-    .from(kiloclaw_earlybird_purchases)
-    .where(eq(kiloclaw_earlybird_purchases.user_id, userId))
-    .limit(1);
-  if (earlybird && new Date(KILOCLAW_EARLYBIRD_EXPIRY_DATE) > new Date()) {
-    return;
+  if (existing) {
+    // Mirror requireKiloClawAccess: active always passes; past_due passes only
+    // until the billing lifecycle cron sets suspended_at.
+    if (existing.status === 'active') return;
+    if (existing.status === 'past_due' && !existing.suspended_at) return;
+    if (
+      existing.status === 'trialing' &&
+      existing.trial_ends_at &&
+      new Date(existing.trial_ends_at) > new Date()
+    ) {
+      return;
+    }
   }
 
   throw new TRPCError({
