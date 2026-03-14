@@ -1064,10 +1064,76 @@ function copyId(id) {
   navigator.clipboard.writeText(id).then(() => toast('Copied: ' + id));
 }
 
+function log(msg, cls) {
+  const logEl = el('apiLog');
+  logEl.innerHTML += '<span class="' + (cls || 'info') + '">' + esc(msg) + '</span>\\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 async function refreshAll() {
   if (!rigId()) { toast('Enter a Rig ID', true); return; }
   saveRigToHistory(rigId());
   await Promise.all([loadAgents(), loadBeads()]);
+}
+
+// ── Status WebSocket ─────────────────────────────────────────────────
+
+let statusWs = null;
+let statusWsReconnectTimer = null;
+let statusWsTownId = null;
+
+function disconnectStatusWs() {
+  if (statusWsReconnectTimer) { clearTimeout(statusWsReconnectTimer); statusWsReconnectTimer = null; }
+  if (statusWs) { try { statusWs.close(); } catch {} statusWs = null; }
+  statusWsTownId = null;
+}
+
+function connectStatusWs() {
+  const tid = townId();
+  if (!tid) return;
+
+  // If the town changed, tear down the old socket first
+  if (statusWsTownId && statusWsTownId !== tid) {
+    disconnectStatusWs();
+  }
+
+  if (statusWs && (statusWs.readyState === WebSocket.OPEN || statusWs.readyState === WebSocket.CONNECTING)) return;
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/api/towns/' + tid + '/status/ws';
+  log('[ws] connecting to ' + url, 'info');
+
+  const ws = new WebSocket(url);
+  statusWs = ws;
+  statusWsTownId = tid;
+
+  ws.onopen = () => {
+    log('[ws] status connected', 'ok');
+  };
+
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.channel === 'bead') {
+      log('[bead] ' + msg.type + ': ' + (msg.title ?? msg.beadId) + ' → ' + (msg.status ?? ''), 'info');
+    } else if (msg.channel === 'convoy') {
+      log('[convoy] ' + msg.convoyId.slice(0, 8) + ' progress: ' + msg.closedBeads + '/' + msg.totalBeads, 'info');
+    } else {
+      // Existing alarm status snapshot — no-op, handled by alarm loop display
+    }
+  };
+
+  ws.onclose = () => {
+    log('[ws] status disconnected', 'err');
+    statusWs = null;
+    // Reconnect after 5s (only if still targeting the same town)
+    if (statusWsReconnectTimer) clearTimeout(statusWsReconnectTimer);
+    statusWsReconnectTimer = setTimeout(connectStatusWs, 5000);
+  };
+
+  ws.onerror = () => {
+    // onclose fires after onerror; let it handle reconnect
+  };
 }
 
 // ── Init ────────────────────────────────────────────────────────────
@@ -1086,6 +1152,10 @@ renderRigHistory();
 if (lastRig) {
   refreshAll();
 }
+
+// Connect the status WebSocket on load and reconnect when the town ID changes
+connectStatusWs();
+el('townId').addEventListener('change', connectStatusWs);
 </script>
 </body>
 </html>`;
