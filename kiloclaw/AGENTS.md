@@ -302,4 +302,4 @@ Each Fly Machine is tagged with `kiloclaw_user_id` and `kiloclaw_sandbox_id` met
 
 ## Default Machine Spec
 
-`shared-cpu-2x`, 4GB RAM (~$21.54/mo when running, free when stopped). Configurable per-user via `machineSize` in the provision API.
+`shared-cpu-2x`, 3 GB RAM (3072 MB) (~$21.54/mo when running, free when stopped). Configurable per-user via `machineSize` in the provision API.
