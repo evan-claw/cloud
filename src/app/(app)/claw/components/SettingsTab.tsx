@@ -101,7 +101,7 @@ function GoogleAccountSection({
         {!connected && command && (
           <div className="space-y-2">
             <p className="text-muted-foreground text-xs">
-              Run this command in your terminal to connect your Google account:
+              Run this command in a terminal on your local machine to connect your Google account:
             </p>
             <div className="relative">
               <pre className="bg-muted overflow-x-auto rounded-md p-3 pr-10 text-xs">
