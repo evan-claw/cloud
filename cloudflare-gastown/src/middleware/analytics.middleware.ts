@@ -96,10 +96,10 @@ export async function instrumented(
       route,
       error,
       userId: c.get('kiloUserId') || c.get('agentJWT')?.userId,
-      townId: c.req.param('townId') as string | undefined,
-      rigId: c.req.param('rigId') as string | undefined,
-      agentId: c.req.param('agentId') as string | undefined,
-      beadId: c.req.param('beadId') as string | undefined,
+      townId: c.req.param('townId'),
+      rigId: c.req.param('rigId'),
+      agentId: c.req.param('agentId'),
+      beadId: c.req.param('beadId'),
       durationMs,
     });
   }
