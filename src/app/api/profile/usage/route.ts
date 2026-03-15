@@ -1,7 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getUserFromAuth } from '@/lib/user.server';
-import { db } from '@/lib/drizzle';
+import { readDb } from '@/lib/drizzle';
+import { timedUsageQuery } from '@/lib/usage-query';
 import { microdollar_usage } from '@kilocode/db/schema';
 import { eq, sql, desc, isNull, and } from 'drizzle-orm';
 
@@ -60,12 +61,22 @@ export async function GET(request: NextRequest) {
   }
 
   // Query usage data
-  const usage = await db
-    .select(selectFields)
-    .from(microdollar_usage)
-    .where(whereClause)
-    .groupBy(...groupByClause)
-    .orderBy(...orderByClause);
+  const usage = await timedUsageQuery(
+    {
+      db: readDb,
+      route: 'profile/usage',
+      queryLabel: 'profile_usage_by_date',
+      scope: 'user',
+      period: null,
+    },
+    tx =>
+      tx
+        .select(selectFields)
+        .from(microdollar_usage)
+        .where(whereClause)
+        .groupBy(...groupByClause)
+        .orderBy(...orderByClause),
+  );
 
   return NextResponse.json({
     usage,

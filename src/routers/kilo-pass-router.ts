@@ -1,5 +1,5 @@
 import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
-import { db } from '@/lib/drizzle';
+import { db, readDb } from '@/lib/drizzle';
 import { getKiloPassStateForUser } from '@/lib/kilo-pass/state';
 import { client as stripe } from '@/lib/stripe-client';
 import { getStripePriceIdForKiloPass } from '@/lib/kilo-pass/stripe-price-ids.server';
@@ -36,6 +36,7 @@ import {
   KILO_PASS_TIER_CONFIG,
 } from '@/lib/kilo-pass/constants';
 import { fromMicrodollars } from '@/lib/utils';
+import { timedUsageQuery } from '@/lib/usage-query';
 import type Stripe from 'stripe';
 import { dayjs } from '@/lib/kilo-pass/dayjs';
 import { getRewardfulReferral } from '@/lib/rewardful';
@@ -187,19 +188,31 @@ async function getCurrentPeriodUsageUsd(params: {
   startInclusiveIso: string;
   endExclusiveIso: string;
 }): Promise<number> {
-  const result = await db
-    .select({
-      totalCost_mUsd: sql<unknown>`COALESCE(${sum(microdollar_usage.cost)}, 0)`,
-    })
-    .from(microdollar_usage)
-    .where(
-      and(
-        eq(microdollar_usage.kilo_user_id, params.kiloUserId),
-        isNull(microdollar_usage.organization_id),
-        sql`${microdollar_usage.created_at} >= ${params.startInclusiveIso}`,
-        sql`${microdollar_usage.created_at} < ${params.endExclusiveIso}`
-      )
-    );
+  // Use primary (db) not replica: this drives the subscription-state response
+  // shown immediately after usage writes, so staleness would misstate billing.
+  const result = await timedUsageQuery(
+    {
+      db,
+      route: 'kiloPass.getState',
+      queryLabel: 'kilo_pass_period_usage',
+      scope: 'user',
+      period: `${params.startInclusiveIso}/${params.endExclusiveIso}`,
+    },
+    tx =>
+      tx
+        .select({
+          totalCost_mUsd: sql<unknown>`COALESCE(${sum(microdollar_usage.cost)}, 0)`,
+        })
+        .from(microdollar_usage)
+        .where(
+          and(
+            eq(microdollar_usage.kilo_user_id, params.kiloUserId),
+            isNull(microdollar_usage.organization_id),
+            sql`${microdollar_usage.created_at} >= ${params.startInclusiveIso}`,
+            sql`${microdollar_usage.created_at} < ${params.endExclusiveIso}`
+          )
+        )
+  );
 
   const raw = Number(result[0]?.totalCost_mUsd);
   const totalCost_mUsd = isNaN(raw) ? 0 : raw;
@@ -265,18 +278,28 @@ export const kiloPassRouter = createTRPCRouter({
       // Use last 3 months from now (rolling window).
       const startInclusive = sql`(NOW() - INTERVAL '3 months')`;
 
-      const result = await db
-        .select({
-          totalCost_mUsd: sql<unknown>`COALESCE(${sum(microdollar_usage.cost)}, 0)`,
-        })
-        .from(microdollar_usage)
-        .where(
-          and(
-            eq(microdollar_usage.kilo_user_id, ctx.user.id),
-            isNull(microdollar_usage.organization_id),
-            sql`${microdollar_usage.created_at} >= ${startInclusive}`
-          )
-        );
+      const result = await timedUsageQuery(
+        {
+          db: readDb,
+          route: 'kiloPass.getAverageMonthlyUsageLast3Months',
+          queryLabel: 'kilo_pass_avg_3mo_usage',
+          scope: 'user',
+          period: '3months',
+        },
+        tx =>
+          tx
+            .select({
+              totalCost_mUsd: sql<unknown>`COALESCE(${sum(microdollar_usage.cost)}, 0)`,
+            })
+            .from(microdollar_usage)
+            .where(
+              and(
+                eq(microdollar_usage.kilo_user_id, ctx.user.id),
+                isNull(microdollar_usage.organization_id),
+                sql`${microdollar_usage.created_at} >= ${startInclusive}`
+              )
+            )
+      );
 
       const totalCostRaw = Number(result[0]?.totalCost_mUsd);
       const totalCost_mUsd = isNaN(totalCostRaw) ? 0 : totalCostRaw;

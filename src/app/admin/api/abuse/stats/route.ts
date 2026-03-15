@@ -1,9 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getUserFromAuth } from '@/lib/user.server';
-import { db } from '@/lib/drizzle';
+import { readDb } from '@/lib/drizzle';
 import { microdollar_usage } from '@kilocode/db/schema';
 import { sql } from 'drizzle-orm';
+import { timedUsageQuery } from '@/lib/usage-query';
 
 export async function GET(_request: NextRequest): Promise<
   NextResponse<
@@ -30,28 +31,48 @@ export async function GET(_request: NextRequest): Promise<
   }
 
   // Execute the query to get abuse statistics for the last hour
-  const hourlyResult = await db
-    .select({
-      abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
-      total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
-      abuse_request_count: sql<number>`COUNT(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN 1 END)`,
-      total_request_count: sql<number>`COUNT(*)`,
-    })
-    .from(microdollar_usage)
-    .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '1 hour'`);
+  const hourlyResult = await timedUsageQuery(
+    {
+      db: readDb,
+      route: 'admin/abuse/stats',
+      queryLabel: 'admin_abuse_hourly',
+      scope: 'admin',
+      period: '1h',
+    },
+    tx =>
+      tx
+        .select({
+          abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
+          total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
+          abuse_request_count: sql<number>`COUNT(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN 1 END)`,
+          total_request_count: sql<number>`COUNT(*)`,
+        })
+        .from(microdollar_usage)
+        .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '1 hour'`),
+  );
 
   const hourlyStats = hourlyResult[0];
 
   // Execute the query to get abuse statistics for the last 24 hours
-  const dailyResult = await db
-    .select({
-      abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
-      total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
-      abuse_tokens: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens} ELSE 0 END)`,
-      total_tokens: sql<number>`SUM(${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens})`,
-    })
-    .from(microdollar_usage)
-    .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '24 hours'`);
+  const dailyResult = await timedUsageQuery(
+    {
+      db: readDb,
+      route: 'admin/abuse/stats',
+      queryLabel: 'admin_abuse_daily',
+      scope: 'admin',
+      period: '24h',
+    },
+    tx =>
+      tx
+        .select({
+          abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
+          total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
+          abuse_tokens: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens} ELSE 0 END)`,
+          total_tokens: sql<number>`SUM(${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens})`,
+        })
+        .from(microdollar_usage)
+        .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '24 hours'`),
+  );
 
   const dailyStats = dailyResult[0];
 
