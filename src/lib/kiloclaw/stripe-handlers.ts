@@ -217,6 +217,11 @@ export async function handleKiloClawSubscriptionCreated(params: {
             plan === 'commit'
               ? sql`COALESCE(${kiloclaw_subscriptions.commit_ends_at}, ${periods.current_period_end})`
               : null,
+          // Reset delinquency/suspension state from a previous subscription so
+          // the new subscription gets a full 14-day grace period on first failure.
+          past_due_since: null,
+          suspended_at: null,
+          destruction_deadline: null,
         },
       });
 
