@@ -153,6 +153,10 @@ export async function handleKiloClawSubscriptionCreated(params: {
   const periods = getSubscriptionPeriods(subscription);
   const status = mapStripeStatus(subscription.status);
 
+  // Capture suspension state before the upsert clears it, so auto-resume
+  // can fire for re-subscribing users who were previously suspended.
+  let wasSuspended = false;
+
   await db.transaction(async tx => {
     // Guard against stale subscription.created retries: if the user already has
     // a row referencing a different Stripe subscription, this event is outdated
@@ -164,10 +168,13 @@ export async function handleKiloClawSubscriptionCreated(params: {
       .select({
         stripe_subscription_id: kiloclaw_subscriptions.stripe_subscription_id,
         status: kiloclaw_subscriptions.status,
+        suspended_at: kiloclaw_subscriptions.suspended_at,
       })
       .from(kiloclaw_subscriptions)
       .where(eq(kiloclaw_subscriptions.user_id, kiloUserId))
       .limit(1);
+
+    wasSuspended = !!existingRow?.suspended_at;
 
     if (
       existingRow &&
@@ -309,14 +316,10 @@ export async function handleKiloClawSubscriptionCreated(params: {
     }
   });
 
-  // Auto-resume: if user was suspended, start their instance and clear suspension
-  const [subRow] = await db
-    .select({ suspended_at: kiloclaw_subscriptions.suspended_at })
-    .from(kiloclaw_subscriptions)
-    .where(eq(kiloclaw_subscriptions.user_id, kiloUserId))
-    .limit(1);
-
-  if (subRow?.suspended_at) {
+  // Auto-resume: if user was suspended before this re-subscription, start their
+  // instance and clear suspension cycle emails. wasSuspended was captured inside
+  // the transaction before the upsert cleared suspended_at.
+  if (wasSuspended) {
     await autoResumeIfSuspended(kiloUserId);
   }
 

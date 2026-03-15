@@ -1311,6 +1311,7 @@ export const kiloclawRouter = createTRPCRouter({
     const commitStillActive = commitEndDate && commitEndDate.getTime() > Date.now();
 
     if (sub.plan === 'commit' && commitStillActive && !sub.stripe_schedule_id) {
+      let scheduleId: string | null = null;
       try {
         const commitPriceId = getStripePriceIdForClawPlan('commit');
         const standardPriceId = getStripePriceIdForClawPlan('standard');
@@ -1318,6 +1319,7 @@ export const kiloclawRouter = createTRPCRouter({
         const schedule = await stripe.subscriptionSchedules.create({
           from_subscription: sub.stripe_subscription_id,
         });
+        scheduleId = schedule.id;
 
         const commitEndTimestamp = Math.floor(commitEndDate.getTime() / 1000);
         const currentPhase = schedule.phases[0];
@@ -1374,6 +1376,22 @@ export const kiloclawRouter = createTRPCRouter({
             error: scheduleError instanceof Error ? scheduleError.message : String(scheduleError),
           }
         );
+
+        // Release any orphaned schedule that was created before the failure.
+        // subscriptionSchedules.create() attaches the schedule to the subscription;
+        // if we don't release it, Stripe retains a dangling schedule that drifts
+        // from local state (which has no stripe_schedule_id).
+        if (scheduleId) {
+          try {
+            await stripe.subscriptionSchedules.release(scheduleId);
+          } catch (releaseError) {
+            logBillingError('Failed to release orphaned schedule during reactivation rollback', {
+              user_id: ctx.user.id,
+              schedule_id: scheduleId,
+              error: releaseError instanceof Error ? releaseError.message : String(releaseError),
+            });
+          }
+        }
 
         await stripe.subscriptions.update(sub.stripe_subscription_id, {
           cancel_at_period_end: true,
