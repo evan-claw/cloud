@@ -71,7 +71,7 @@ overrides:
   vite: '>=6.4.1'
   qs: '>=6.14.1'
   serialize-javascript: '>=7.0.3'
-  hono: '>=4.12.7'
+  hono: ^4.12.7
   undici@^6: ^6.24.1
 
 importers:
@@ -618,7 +618,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       jsonwebtoken:
         specifier: 'catalog:'
@@ -706,7 +706,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       workers-tagged-logger:
         specifier: 'catalog:'
@@ -804,7 +804,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/worker-utils
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
     devDependencies:
       '@cloudflare/workers-types':
@@ -829,7 +829,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/worker-utils
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       zod:
         specifier: 'catalog:'
@@ -857,7 +857,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/worker-utils
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
     devDependencies:
       '@cloudflare/workers-types':
@@ -885,7 +885,7 @@ importers:
         specifier: workspace:*
         version: link:../packages/worker-utils
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       workers-tagged-logger:
         specifier: 'catalog:'
@@ -934,7 +934,7 @@ importers:
         specifier: ^10.25.0
         version: 10.25.0(@cloudflare/workers-types@4.20260305.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       tar-stream:
         specifier: ^3.1.7
@@ -983,7 +983,7 @@ importers:
   cloudflare-deploy-infra/dispatcher:
     dependencies:
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       hono-rate-limiter:
         specifier: ^0.5.3
@@ -1044,7 +1044,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       itty-time:
         specifier: ^1.0.6
@@ -1105,7 +1105,7 @@ importers:
         specifier: 7.0.37
         version: 7.0.37
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       zod:
         specifier: 'catalog:'
@@ -1210,7 +1210,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       zod:
         specifier: 'catalog:'
@@ -1312,7 +1312,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       zod:
         specifier: 'catalog:'
@@ -1364,7 +1364,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       workers-tagged-logger:
         specifier: 'catalog:'
@@ -1425,7 +1425,7 @@ importers:
         specifier: 'catalog:'
         version: 0.45.1(@cloudflare/workers-types@4.20260305.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(bun-types@1.3.10)(pg@8.18.0)
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       jose:
         specifier: ^6.0.0
@@ -1539,7 +1539,7 @@ importers:
         specifier: 'catalog:'
         version: 1.0.20
       hono:
-        specifier: '>=4.12.7'
+        specifier: ^4.12.7
         version: 4.12.7
       jose:
         specifier: 'catalog:'
@@ -3182,14 +3182,14 @@ packages:
     resolution: {integrity: sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==}
     engines: {node: '>=18.14.1'}
     peerDependencies:
-      hono: '>=4.12.7'
+      hono: ^4.12.7
 
   '@hono/trpc-server@0.4.2':
     resolution: {integrity: sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
-      hono: '>=4.12.7'
+      hono: ^4.12.7
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -8378,7 +8378,7 @@ packages:
   hono-rate-limiter@0.5.3:
     resolution: {integrity: sha512-M0DxbVMpPELEzLi0AJg1XyBHLGJXz7GySjsPoK+gc5YeeBsdGDGe+2RvVuCAv8ydINiwlbxqYMNxUEyYfRji/A==}
     peerDependencies:
-      hono: '>=4.12.7'
+      hono: ^4.12.7
       unstorage: ^1.17.3
     peerDependenciesMeta:
       unstorage:
