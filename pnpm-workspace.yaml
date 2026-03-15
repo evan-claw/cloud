@@ -8,7 +8,7 @@ catalog:
   drizzle-kit: ^0.31.9
   drizzle-orm: ^0.45.1
   eslint: ^9.39.3
-  hono: ^4.12.1
+  hono: ^4.12.7
   jose: ^6.0.0
   jsonwebtoken: ^9.0.3
   prettier: ^3.8.1
@@ -78,6 +78,8 @@ minimumReleaseAgeExclude:
   - serialize-javascript@7.0.3
   - '@kilocode/plugin'
   - '@kilocode/sdk'
+  # undici@6.24.x fixes multiple WebSocket DoS and HTTP smuggling vulns
+  - undici@6.24.1
 
 onlyBuiltDependencies:
   - '@swc/core'

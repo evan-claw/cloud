@@ -160,7 +160,7 @@
     "@types/react-dom": "^19.2.2",
     "@typescript/native-preview": "7.0.0-dev.20251019.1",
     "babel-plugin-react-compiler": "^1.0.0",
-    "dependency-cruiser": "^17.3.1",
+    "dependency-cruiser": "^17.3.8",
     "dotenv": "^17.2.3",
     "eslint": "catalog:",
     "eslint-config-prettier": "^10.1.8",
