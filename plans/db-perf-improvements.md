@@ -156,12 +156,41 @@ Do **not** apply one blanket timeout policy to all reads.
 - **Effect:** Runaway interactive queries are cancelled in seconds instead of holding connections for 10-22s.
 - **Risk:** Low. Any interactive query hitting 5s is already broken from a UX perspective.
 
-### 1c. Route admin read queries to replica
+### 1c. Route read-only microdollar_usage aggregation queries to replica
 
-- **Files:** `src/app/admin/api/abuse/daily-stats/route.ts`, `src/app/admin/api/abuse/stats/route.ts`, `src/app/admin/api/abuse/hourly-stats/route.ts`
-- **Change:** Use `readDb` instead of `db` for these read-only aggregation queries. All three admin abuse endpoints read from the primary despite being pure aggregation reads.
-- **Effect:** Removes 1h/12h/24h/7d full-scan aggregations from the primary's connection pool.
-- **Risk:** Very low. Slight staleness from replication lag is acceptable for admin dashboards.
+All queries listed below are pure SELECT/aggregation over `microdollar_usage`, return data directly, and do not participate in read-then-write flows. `readDb` is already used in user-facing hot paths (`getUserFromAuth()` in `user.server.ts:674`, FIM balance gating in `fim/completions/route.ts:155`) with documented replication lag of typically <100ms (`drizzle.ts:207`).
+
+- **Admin abuse stats:**
+  - `src/app/admin/api/abuse/daily-stats/route.ts`
+  - `src/app/admin/api/abuse/stats/route.ts`
+  - `src/app/admin/api/abuse/hourly-stats/route.ts`
+  - **Change:** Use `readDb` instead of `db`. Slight staleness is acceptable for admin dashboards.
+
+- **Profile usage:**
+  - `src/app/api/profile/usage/route.ts:63`
+  - **Change:** Use `readDb` instead of `db`. Pure aggregation returned as JSON.
+
+- **User autocomplete metrics:**
+  - `src/routers/user-router.ts:162`
+  - **Change:** Use `readDb` instead of `db`. Pure aggregation returned directly.
+
+- **Kilo Pass billing reads:**
+  - `src/routers/kilo-pass-router.ts:190` (`getCurrentPeriodUsageUsd`)
+  - `src/routers/kilo-pass-router.ts:268` (`getAverageMonthlyUsageLast3Months`)
+  - **Change:** Use `readDb` instead of `db`. These are safe to move: `getCurrentPeriodUsageUsd` is used in the user-facing `getState` response, but acceptable replica staleness for billing-period display is ~100ms against aggregations over multi-day windows.
+
+- **Org summary:**
+  - `src/routers/organizations/organization-router.ts:282`
+  - **Change:** Use `readDb` instead of `db`. Pure 30-day cost/token aggregation.
+
+- **Org usage details (microdollar_usage queries only):**
+  - `src/routers/organizations/organization-usage-details-router.ts:158` (`getTimeSeries`)
+  - `src/routers/organizations/organization-usage-details-router.ts:296` (`get`)
+  - `src/routers/organizations/organization-usage-details-router.ts:345` (`getAutocomplete`)
+  - **Change:** Use `readDb` instead of `db`. All three are pure aggregations with JOINs, returned directly. Note: `getAIAdoptionTimeseries` (line 367) is excluded — it is not a `microdollar_usage` hotspot.
+
+- **Effect:** Moves all hot `microdollar_usage` aggregation reads off the primary's connection pool, not just the admin subset. This materially reduces the number of long-running reads competing for the primary's 15-connection pool.
+- **Risk:** Very low. All queries are pure reads. Replication lag (~100ms) is acceptable for dashboard and billing-period display.
 
 ### Phase 1 exit criteria
 
@@ -412,7 +441,7 @@ Documented for reference if growth continues beyond the rollup threshold:
 |------|-------|----------------------|---------------------|------|
 | 1 | 1a: Add query timing and tagging | Yes | No | None |
 | 2 | 1b: Enforce scoped statement timeouts | Yes | No | Low |
-| 3 | 1c: Route admin to replica | Yes | No | Very low |
+| 3 | 1c: Route read-only microdollar_usage aggregations to replica | Yes | No | Very low |
 | 4 | 2a: Profile usage period selector (API + UI) | Yes (behind flag) | No | Medium |
 | 5 | 2b: User autocomplete period param | With step 4 (behind flag) | No | Medium |
 | 6 | 2c: Org autocomplete date bound | Yes | No | Low |
