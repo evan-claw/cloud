@@ -28,6 +28,13 @@ import type {
   GmailNotificationsResponse,
 } from './types';
 
+export interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: FileNode[];
+}
+
 /**
  * Error thrown when the KiloClaw API returns a non-OK response.
  * Preserves the HTTP status code and response body for structured
@@ -262,6 +269,28 @@ export class KiloClawInternalClient {
     return this.request('/api/platform/openclaw-config', {
       method: 'POST',
       body: JSON.stringify({ userId, config, ...(etag !== undefined && { etag }) }),
+    });
+  }
+
+  async getFileTree(userId: string): Promise<{ tree: FileNode[] }> {
+    return this.request(`/api/platform/files/tree?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async readFile(userId: string, filePath: string): Promise<{ content: string; etag: string }> {
+    return this.request(
+      `/api/platform/files/read?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(filePath)}`
+    );
+  }
+
+  async writeFile(
+    userId: string,
+    filePath: string,
+    content: string,
+    etag?: string
+  ): Promise<{ etag: string }> {
+    return this.request('/api/platform/files/write', {
+      method: 'POST',
+      body: JSON.stringify({ userId, path: filePath, content, etag }),
     });
   }
 
