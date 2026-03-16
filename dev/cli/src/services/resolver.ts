@@ -1,4 +1,4 @@
-import { getService, type ServiceDef } from "./registry";
+import { getService, type ServiceDef } from './registry';
 
 /**
  * Given target service names, returns the full set of services needed

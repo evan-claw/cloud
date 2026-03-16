@@ -1,23 +1,23 @@
 #!/usr/bin/env bun
-import { resolve as resolvePath } from "path";
-import { up } from "./commands/up";
-import { down } from "./commands/down";
-import { status } from "./commands/status";
-import { envCheck } from "./commands/env";
-import { tunnel } from "./commands/tunnel";
-import { logs } from "./commands/logs";
-import { getServiceNames } from "./services/registry";
-import { getProject, getProjectNames, projects } from "./projects/index";
-import * as ui from "./utils/ui";
+import { resolve as resolvePath } from 'path';
+import { up } from './commands/up';
+import { down } from './commands/down';
+import { status } from './commands/status';
+import { envCheck } from './commands/env';
+import { tunnel } from './commands/tunnel';
+import { logs } from './commands/logs';
+import { getServiceNames } from './services/registry';
+import { getProject, getProjectNames, projects } from './projects/index';
+import * as ui from './utils/ui';
 
-const ROOT = resolvePath(import.meta.dir, "..", "..", "..");
+const ROOT = resolvePath(import.meta.dir, '..', '..', '..');
 
 const args = process.argv.slice(2);
 
 // Support both `kilo dev up` and `kilo up` (skip "dev" if present)
 let command = args[0];
 let commandArgs = args.slice(1);
-if (command === "dev") {
+if (command === 'dev') {
   command = args[1];
   commandArgs = args.slice(2);
 }
@@ -48,34 +48,34 @@ async function main() {
   }
 
   switch (command) {
-    case "up":
+    case 'up':
       await up(commandArgs, ROOT);
       break;
 
-    case "down":
+    case 'down':
       await down(ROOT);
       break;
 
-    case "status":
+    case 'status':
       await status(ROOT);
       break;
 
-    case "env":
+    case 'env':
       await envCheck(ROOT);
       break;
 
-    case "tunnel":
+    case 'tunnel':
       await tunnel(commandArgs, ROOT);
       break;
 
-    case "logs":
-    case "ls":
+    case 'logs':
+    case 'ls':
       await logs(commandArgs, ROOT);
       break;
 
-    case "help":
-    case "--help":
-    case "-h":
+    case 'help':
+    case '--help':
+    case '-h':
     case undefined:
       printHelp();
       break;
@@ -92,31 +92,29 @@ async function main() {
   }
 }
 
-function printProjectHelp(project: import("./projects/types").ProjectDef) {
+function printProjectHelp(project: import('./projects/types').ProjectDef) {
   const cmds = Object.entries(project.commands);
   console.log(`
 ${ui.bold(project.name)} — ${project.description}
 
-${ui.bold("Commands:")}
-${cmds.map(([name, cmd]) => `  ${name.padEnd(20)} ${cmd.description}`).join("\n")}
+${ui.bold('Commands:')}
+${cmds.map(([name, cmd]) => `  ${name.padEnd(20)} ${cmd.description}`).join('\n')}
 
-${ui.bold("Usage:")}
+${ui.bold('Usage:')}
   pnpm kilo ${project.name} <command> [options]
 `);
 }
 
 function printHelp() {
-  const projectList = projects
-    .map((p) => `  ${p.name.padEnd(20)} ${p.description}`)
-    .join("\n");
+  const projectList = projects.map(p => `  ${p.name.padEnd(20)} ${p.description}`).join('\n');
 
   console.log(`
-${ui.bold("kilo dev")} — Local development CLI
+${ui.bold('kilo dev')} — Local development CLI
 
-${ui.bold("Usage:")}
+${ui.bold('Usage:')}
   pnpm kilo <command> [options]
 
-${ui.bold("Commands:")}
+${ui.bold('Commands:')}
   up [services...]   Start services (default: nextjs + infra)
   down               Stop Docker infrastructure (Ctrl+C stops dev servers)
   status             Show status of all services
@@ -124,10 +122,10 @@ ${ui.bold("Commands:")}
   tunnel [--name N]  Start a cloudflared tunnel
   logs [service]     Tail service logs (or list services)
 
-${ui.bold("Projects:")}
+${ui.bold('Projects:')}
 ${projectList}
 
-${ui.bold("Examples:")}
+${ui.bold('Examples:')}
   pnpm kilo up                       Start Next.js + Postgres + Redis
   pnpm kilo up kiloclaw              Start KiloClaw + all its dependencies
   pnpm kilo kiloclaw setup           KiloClaw-specific setup (Fly token, secrets)
@@ -137,12 +135,12 @@ ${ui.bold("Examples:")}
   pnpm kilo status                   Check what's running
   pnpm kilo env check                Validate all .dev.vars files
 
-${ui.bold("Services:")}
-  ${getServiceNames().join(", ")}
+${ui.bold('Services:')}
+  ${getServiceNames().join(', ')}
 `);
 }
 
-main().catch((err) => {
+main().catch(err => {
   ui.error(err.message);
   process.exit(1);
 });

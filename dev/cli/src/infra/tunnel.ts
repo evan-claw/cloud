@@ -1,5 +1,5 @@
-import * as ui from "../utils/ui";
-import { type Subprocess } from "bun";
+import * as ui from '../utils/ui';
+import { type Subprocess } from 'bun';
 
 export interface TunnelResult {
   process: Subprocess;
@@ -8,9 +8,9 @@ export interface TunnelResult {
 
 export async function startQuickTunnel(port: number): Promise<TunnelResult> {
   const command = `cloudflared tunnel --url http://localhost:${port}`;
-  const proc = Bun.spawn(["sh", "-c", command], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const proc = Bun.spawn(['sh', '-c', command], {
+    stdout: 'pipe',
+    stderr: 'pipe',
     env: process.env,
   });
 
@@ -19,23 +19,23 @@ export async function startQuickTunnel(port: number): Promise<TunnelResult> {
 }
 
 export function startNamedTunnel(name: string): Subprocess {
-  return Bun.spawn(["sh", "-c", `cloudflared tunnel run ${name}`], {
-    stdout: "inherit",
-    stderr: "inherit",
+  return Bun.spawn(['sh', '-c', `cloudflared tunnel run ${name}`], {
+    stdout: 'inherit',
+    stderr: 'inherit',
     env: process.env,
   });
 }
 
 async function captureUrl(
   stream: ReadableStream<Uint8Array> | null,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string | null> {
   if (!stream) return null;
 
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   const start = Date.now();
-  let buffer = "";
+  let buffer = '';
 
   while (Date.now() - start < timeoutMs) {
     const result = await Promise.race([
