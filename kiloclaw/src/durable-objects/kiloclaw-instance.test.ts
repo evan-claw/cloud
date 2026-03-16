@@ -1229,6 +1229,88 @@ describe('createNewMachine: persist ID before waitForState', () => {
   });
 });
 
+describe('createNewMachine 409 recovery', () => {
+  it('adopts existing machine when createMachine returns 409 already_exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    // createMachine throws 409 with machine ID in the body
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('conflict', 409, 'already_exists machine ID abc123def')
+    );
+    // getMachine for startExistingMachine
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'abc123def',
+      state: 'stopped',
+      region: 'iad',
+      config: { env: {}, guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+    (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'abc123def' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.start('user-1');
+
+    // Should have adopted the machine ID from the 409 body
+    expect(storage._store.get('flyMachineId')).toBe('abc123def');
+    // Should NOT have called createMachine a second time
+    expect(flyClient.createMachine).toHaveBeenCalledTimes(1);
+    // Should have started the existing machine
+    expect(flyClient.getMachine).toHaveBeenCalledWith(expect.anything(), 'abc123def');
+  });
+
+  it('logs and re-throws when 409 body has already_exists but no machine ID', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('conflict', 409, 'already_exists: conflict')
+    );
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await expect(instance.start('user-1')).rejects.toThrow('conflict');
+
+    // Should have logged the body for debugging
+    expect(console.error).toHaveBeenCalledWith(
+      '[DO] 409 already_exists but could not extract machine ID from body:',
+      'already_exists: conflict'
+    );
+  });
+
+  it('re-throws 409 without already_exists in body', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('conflict', 409, 'some other conflict')
+    );
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await expect(instance.start('user-1')).rejects.toThrow('conflict');
+
+    // Should NOT have tried to extract machine ID
+    expect(console.error).not.toHaveBeenCalledWith(
+      expect.stringContaining('could not extract machine ID'),
+      expect.anything()
+    );
+  });
+
+  it('re-throws non-409 errors from createMachine', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('internal error', 500, 'server error')
+    );
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await expect(instance.start('user-1')).rejects.toThrow('internal error');
+
+    // Machine ID should not have been set (stays null from seed)
+    expect(storage._store.get('flyMachineId')).toBeNull();
+  });
+});
+
 describe('gateway process control via controller', () => {
   it('allows gateway status calls when machine ID exists even if DO status is stale', async () => {
     const { instance, storage } = createInstance();

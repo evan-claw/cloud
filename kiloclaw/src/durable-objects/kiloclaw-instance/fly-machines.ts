@@ -1,6 +1,6 @@
 import type { KiloClawEnv } from '../../types';
 import type { FlyClientConfig } from '../../fly/client';
-import type { FlyMachineConfig } from '../../fly/types';
+import type { FlyMachine, FlyMachineConfig } from '../../fly/types';
 import * as fly from '../../fly/client';
 import {
   DEFAULT_VOLUME_SIZE_GB,
@@ -216,11 +216,45 @@ export async function createNewMachine(
   minSecretsVersion?: number,
   envFlyRegion?: string
 ): Promise<void> {
-  const machine = await fly.createMachine(flyConfig, machineConfig, {
-    name: state.sandboxId ?? undefined,
-    region: state.flyRegion ?? envFlyRegion ?? undefined,
-    minSecretsVersion,
-  });
+  let machine: FlyMachine;
+  try {
+    machine = await fly.createMachine(flyConfig, machineConfig, {
+      name: state.sandboxId ?? undefined,
+      region: state.flyRegion ?? envFlyRegion ?? undefined,
+      minSecretsVersion,
+    });
+  } catch (err) {
+    // Safety net: if the machine already exists (e.g. DO state lost flyMachineId
+    // and metadata recovery didn't run or failed), adopt it instead of crashing.
+    if (
+      err instanceof fly.FlyApiError &&
+      err.status === 409 &&
+      err.body.includes('already_exists')
+    ) {
+      const match = err.body.match(/machine ID (\w+)/);
+      if (match) {
+        const existingId = match[1];
+        console.log('[DO] Machine already exists (409), adopting:', existingId);
+        state.flyMachineId = existingId;
+        await ctx.storage.put(storageUpdate({ flyMachineId: existingId }));
+        await startExistingMachine(
+          flyConfig,
+          ctx,
+          state,
+          machineConfig,
+          minSecretsVersion,
+          envFlyRegion
+        );
+        return;
+      } else {
+        console.error(
+          '[DO] 409 already_exists but could not extract machine ID from body:',
+          err.body.slice(0, 500)
+        );
+      }
+    }
+    throw err;
+  }
   state.flyMachineId = machine.id;
 
   await ctx.storage.put(storageUpdate({ flyMachineId: machine.id }));
