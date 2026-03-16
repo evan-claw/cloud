@@ -39,6 +39,19 @@ export function isSecretKey(key: string): boolean {
 export const REDACTED_PLACEHOLDER = '__REDACTED__';
 
 /**
+ * Regex-based redaction for raw text when JSON.parse fails.
+ * Matches `"secretKey": "value"` patterns and replaces the value with the
+ * placeholder. This is intentionally conservative — it only matches double-quoted
+ * string values to avoid corrupting the file further.
+ */
+export function redactRawText(raw: string): string {
+  const keyAlternation =
+    'apiKey|apiSecret|token|botToken|appToken|secret|password|credential|accessToken|refreshToken|privateKey';
+  const pattern = new RegExp(`("(?:${keyAlternation})"\\s*:\\s*)"(?!__REDACTED__)[^"]+"`, 'gi');
+  return raw.replace(pattern, `$1"${REDACTED_PLACEHOLDER}"`);
+}
+
+/**
  * Read a nested value from an object by key path.
  * Returns undefined if any intermediate key is missing or not an object.
  */

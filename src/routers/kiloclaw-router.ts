@@ -35,7 +35,11 @@ import {
 import { client as stripe } from '@/lib/stripe-client';
 import { APP_URL } from '@/lib/constants';
 import { getRewardfulReferral } from '@/lib/rewardful';
-import { redactOpenclawConfig, restoreRedactedSecrets } from '@/lib/kiloclaw/config-redaction';
+import {
+  redactOpenclawConfig,
+  redactRawText,
+  restoreRedactedSecrets,
+} from '@/lib/kiloclaw/config-redaction';
 
 /**
  * Error codes whose messages may contain raw internal details (e.g. filesystem
@@ -864,8 +868,9 @@ export const kiloclawRouter = createTRPCRouter({
             const redacted = redactOpenclawConfig(parsed);
             return { content: JSON.stringify(redacted, null, 2), etag: result.etag };
           } catch {
-            // Return raw content if we can't parse it — lets the user fix broken JSON in the editor
-            return result;
+            // Can't parse — redact secrets from raw text so they don't leak to the browser,
+            // but still return content so the user can fix the broken JSON in the editor.
+            return { content: redactRawText(result.content), etag: result.etag };
           }
         }
         return result;
@@ -928,12 +933,22 @@ export const kiloclawRouter = createTRPCRouter({
             });
           }
           const currentResult = await client.readFile(ctx.user.id, 'openclaw.json');
-          const currentConfig = JSON.parse(currentResult.content) as Record<string, unknown>;
-          const merged = restoreRedactedSecrets(
-            userConfig as Record<string, unknown>,
-            currentConfig
-          );
-          content = JSON.stringify(merged, null, 2);
+          let currentConfig: Record<string, unknown> | null = null;
+          try {
+            currentConfig = JSON.parse(currentResult.content) as Record<string, unknown>;
+          } catch {
+            // Current file is broken JSON — skip secret restoration so the user
+            // can actually save their repair. No secrets to restore from a broken file.
+          }
+          if (currentConfig) {
+            const merged = restoreRedactedSecrets(
+              userConfig as Record<string, unknown>,
+              currentConfig
+            );
+            content = JSON.stringify(merged, null, 2);
+          } else {
+            content = JSON.stringify(userConfig, null, 2);
+          }
         }
 
         return await client.writeFile(ctx.user.id, input.path, content, input.etag);
