@@ -1580,6 +1580,39 @@ describe('metadata recovery via alarm', () => {
   });
 });
 
+describe('start: metadata recovery re-arms alarm', () => {
+  it('schedules alarm when recovery finds a running machine and start fast-paths', async () => {
+    const { instance, storage } = createInstance();
+    // Instance has identity but lost its machine ID; status is stopped.
+    await seedProvisioned(storage, { flyMachineId: null, status: 'stopped' });
+
+    // attemptMetadataRecovery will find a started machine and set status to 'running'
+    (flyClient.listMachines as Mock).mockResolvedValue([
+      fakeMachine({
+        id: 'recovered-machine',
+        state: 'started',
+        region: 'iad',
+        config: { image: 'test:latest', mounts: [{ volume: 'vol-1', path: '/root' }] },
+      }),
+    ]);
+    // getMachine confirms the machine is started (used by the fast-path check)
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+
+    await instance.start('user-1');
+
+    // Fast-path returned: no machine creation
+    expect(flyClient.createMachine).not.toHaveBeenCalled();
+    // Status should be running
+    expect(storage._store.get('status')).toBe('running');
+    // Alarm must have been scheduled (not null)
+    expect(storage._getAlarm()).not.toBeNull();
+  });
+});
+
 // ============================================================================
 // updateChannels
 // ============================================================================

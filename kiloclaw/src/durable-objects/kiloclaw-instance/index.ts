@@ -674,6 +674,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
             }
           }
           console.log('[DO] Machine already running, mount verified');
+          await this.scheduleAlarm();
           return;
         }
         console.log('[DO] Status is running but machine state is:', machine.state, '-- restarting');
