@@ -32,7 +32,16 @@ export default function SidebarMenuList({ items, label = 'Dashboard' }: SidebarM
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map(item => {
-            const isActive = pathname === item.url || pathname.startsWith(item.url + '/');
+            const matchesPrefix = pathname === item.url || pathname.startsWith(item.url + '/');
+            const hasMoreSpecificMatch =
+              matchesPrefix &&
+              items.some(
+                other =>
+                  other.url !== item.url &&
+                  other.url.length > item.url.length &&
+                  (pathname === other.url || pathname.startsWith(other.url + '/')),
+              );
+            const isActive = matchesPrefix && !hasMoreSpecificMatch;
             return (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild>
