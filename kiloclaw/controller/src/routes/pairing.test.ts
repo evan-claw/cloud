@@ -97,21 +97,6 @@ describe('/_kilo/pairing routes', () => {
       expect(cache.refreshChannelPairing).toHaveBeenCalledOnce();
     });
 
-    it('returns stale cache when refresh throws', async () => {
-      const cache = createMockCache();
-      vi.mocked(cache.refreshChannelPairing).mockRejectedValueOnce(new Error('refresh boom'));
-      const app = createApp(cache);
-
-      const resp = await app.request('/_kilo/pairing/channels?refresh=true', {
-        headers: authHeaders(),
-      });
-      expect(resp.status).toBe(200);
-      // Still returns cache data despite refresh failure
-      const body = await resp.json();
-      expect(body).toHaveProperty('requests');
-      expect(cache.refreshChannelPairing).toHaveBeenCalledOnce();
-    });
-
     it('does not refresh when refresh param is absent', async () => {
       const cache = createMockCache();
       const app = createApp(cache);
@@ -136,20 +121,6 @@ describe('/_kilo/pairing routes', () => {
         lastUpdated: '2026-03-12T00:00:00.000Z',
       });
       expect(cache.refreshDevicePairing).not.toHaveBeenCalled();
-    });
-
-    it('returns stale cache when device refresh throws', async () => {
-      const cache = createMockCache();
-      vi.mocked(cache.refreshDevicePairing).mockRejectedValueOnce(new Error('refresh boom'));
-      const app = createApp(cache);
-
-      const resp = await app.request('/_kilo/pairing/devices?refresh=true', {
-        headers: authHeaders(),
-      });
-      expect(resp.status).toBe(200);
-      const body = await resp.json();
-      expect(body).toHaveProperty('requests');
-      expect(cache.refreshDevicePairing).toHaveBeenCalledOnce();
     });
 
     it('calls refreshDevicePairing when refresh=true', async () => {
@@ -199,7 +170,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Invalid channel name',
-        error: 'Invalid channel name',
       });
     });
 
@@ -222,7 +192,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Command failed',
-        error: 'Command failed',
       });
     });
 
@@ -255,7 +224,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Invalid request body',
-        error: 'Invalid request body',
       });
     });
   });
@@ -295,7 +263,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Invalid request ID',
-        error: 'Invalid request ID',
       });
     });
 
@@ -318,7 +285,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Command failed',
-        error: 'Command failed',
       });
     });
 
@@ -351,7 +317,6 @@ describe('/_kilo/pairing routes', () => {
       expect(body).toEqual({
         success: false,
         message: 'Invalid request body',
-        error: 'Invalid request body',
       });
     });
   });
@@ -386,7 +351,7 @@ describe('/_kilo/pairing routes', () => {
       expect(body).not.toHaveProperty('error');
     });
 
-    it('approve error response has success, message, and error fields', async () => {
+    it('approve error response has success and message fields', async () => {
       const cache = createMockCache();
       vi.mocked(cache.approveChannel).mockResolvedValueOnce({
         success: false,
@@ -400,11 +365,10 @@ describe('/_kilo/pairing routes', () => {
         headers: jsonHeaders(),
         body: JSON.stringify({ channel: 'BAD', code: 'ABC123' }),
       });
-      const body = (await resp.json()) as { success: boolean; message: string; error: string };
+      const body = (await resp.json()) as { success: boolean; message: string };
       expect(body).toHaveProperty('success', false);
       expect(body).toHaveProperty('message');
-      expect(body).toHaveProperty('error');
-      expect(body.error).toBe(body.message);
+      expect(body).not.toHaveProperty('error');
     });
   });
 });

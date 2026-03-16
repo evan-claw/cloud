@@ -2,18 +2,12 @@ import type { Context } from 'hono';
 import type { Hono } from 'hono';
 import { timingSafeTokenEqual } from '../auth';
 import type { ApproveResult, PairingCache } from '../pairing-cache';
+import { isRecord } from '../pairing-cache';
 import { getBearerToken } from './gateway';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function approveResponse(c: Context, result: ApproveResult): Response {
   const { statusHint, ...rest } = result;
-  if (result.success) {
-    return c.json(rest, statusHint);
-  }
-  return c.json({ ...rest, error: result.message }, statusHint);
+  return c.json(rest, statusHint);
 }
 
 export function registerPairingRoutes(app: Hono, cache: PairingCache, expectedToken: string): void {
@@ -28,22 +22,14 @@ export function registerPairingRoutes(app: Hono, cache: PairingCache, expectedTo
 
   app.get('/_kilo/pairing/channels', async c => {
     if (c.req.query('refresh') === 'true') {
-      try {
-        await cache.refreshChannelPairing();
-      } catch (err) {
-        console.error('[pairing-routes] channel refresh failed:', err);
-      }
+      await cache.refreshChannelPairing();
     }
     return c.json(cache.getChannelPairing());
   });
 
   app.get('/_kilo/pairing/devices', async c => {
     if (c.req.query('refresh') === 'true') {
-      try {
-        await cache.refreshDevicePairing();
-      } catch (err) {
-        console.error('[pairing-routes] device refresh failed:', err);
-      }
+      await cache.refreshDevicePairing();
     }
     return c.json(cache.getDevicePairing());
   });
@@ -53,18 +39,14 @@ export function registerPairingRoutes(app: Hono, cache: PairingCache, expectedTo
     try {
       body = await c.req.json();
     } catch {
-      return c.json(
-        { success: false, message: 'Invalid request body', error: 'Invalid request body' },
-        400
-      );
+      return c.json({ success: false, message: 'Invalid request body' }, 400);
     }
 
     const obj = isRecord(body) ? body : {};
     const channel = typeof obj['channel'] === 'string' ? obj['channel'] : undefined;
     const code = typeof obj['code'] === 'string' ? obj['code'] : undefined;
     if (!channel || !code) {
-      const msg = 'Missing required fields: channel and code';
-      return c.json({ success: false, message: msg, error: msg }, 400);
+      return c.json({ success: false, message: 'Missing required fields: channel and code' }, 400);
     }
 
     return approveResponse(c, await cache.approveChannel(channel, code));
@@ -75,17 +57,13 @@ export function registerPairingRoutes(app: Hono, cache: PairingCache, expectedTo
     try {
       body = await c.req.json();
     } catch {
-      return c.json(
-        { success: false, message: 'Invalid request body', error: 'Invalid request body' },
-        400
-      );
+      return c.json({ success: false, message: 'Invalid request body' }, 400);
     }
 
     const obj = isRecord(body) ? body : {};
     const requestId = typeof obj.requestId === 'string' ? obj.requestId : undefined;
     if (!requestId) {
-      const msg = 'Missing required field: requestId';
-      return c.json({ success: false, message: msg, error: msg }, 400);
+      return c.json({ success: false, message: 'Missing required field: requestId' }, 400);
     }
 
     return approveResponse(c, await cache.approveDevice(requestId));
