@@ -903,6 +903,20 @@ describe('User', () => {
       const userAfter = await findUserById(user.id);
       expect(userAfter!.google_user_email).toBe(user.google_user_email);
     });
+
+    it('should throw SoftDeletePreconditionError for trialing KiloClaw subscription', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'trial',
+        status: 'trialing',
+        trial_ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+      });
+
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
+    });
   });
 
   describe('forceImmediateExpirationRecomputation', () => {

@@ -412,7 +412,7 @@ export class SoftDeletePreconditionError extends Error {
  *
  * Preconditions (will throw SoftDeletePreconditionError if violated):
  * - User must not have an active, non-cancelling Kilo Pass subscription
- * - User must not have an active, non-cancelling KiloClaw subscription
+ * - User must not have a live KiloClaw subscription (active, past_due, unpaid, or trialing)
  *
  * What is kept:
  * - The kilocode_users row (anonymized)
@@ -474,15 +474,16 @@ export async function softDeleteUser(userId: string) {
       );
     }
 
-    // Block soft-delete for any active KiloClaw subscription (even if cancel_at_period_end
-    // is true — it's still live in Stripe until period end and can emit lifecycle webhooks).
+    // Block soft-delete for any live KiloClaw subscription. This includes
+    // trialing — the user may have a running Fly instance, and deleting the
+    // row without destroying the instance would orphan it.
     const liveClawSubscriptions = await tx
       .select({ id: kiloclaw_subscriptions.id, status: kiloclaw_subscriptions.status })
       .from(kiloclaw_subscriptions)
       .where(
         and(
           eq(kiloclaw_subscriptions.user_id, userId),
-          inArray(kiloclaw_subscriptions.status, ['active', 'past_due', 'unpaid'])
+          inArray(kiloclaw_subscriptions.status, ['active', 'past_due', 'unpaid', 'trialing'])
         )
       );
 

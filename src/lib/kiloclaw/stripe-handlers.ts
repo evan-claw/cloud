@@ -444,13 +444,14 @@ export async function handleKiloClawScheduleEvent(params: {
       scheduled_by: null,
     };
 
-    // Apply the scheduled plan on terminal statuses. This is safe even for
-    // 'released' because intentional releases (cancelSubscription,
-    // cancelPlanSwitch) clear stripe_schedule_id locally before the webhook
-    // fires, so the WHERE clause below won't match the row. Only natural
-    // schedule releases (end_behavior: 'release' completing all phases) still
-    // have the schedule_id set, meaning the plan transition should be applied.
-    if ((scheduleStatus === 'completed' || scheduleStatus === 'released') && row.scheduled_plan) {
+    // Apply the scheduled plan only on 'completed'. Our schedules use
+    // end_behavior: 'release', so natural transitions fire as 'released' —
+    // but so do intentional cancels (cancelSubscription, cancelPlanSwitch).
+    // Since subscription.updated already picks up the new price via
+    // detectPlanFromSubscription, we don't need to apply the plan here for
+    // 'released'. Restricting to 'completed' eliminates the race where a
+    // cancel-release webhook arrives before the local DB clears the schedule.
+    if (scheduleStatus === 'completed' && row.scheduled_plan) {
       updateSet.plan = row.scheduled_plan;
       if (row.scheduled_plan === 'standard') {
         updateSet.commit_ends_at = null;
