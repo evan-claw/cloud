@@ -18,6 +18,7 @@ import type {
   VercelProviderConfig,
   OpenRouterChatCompletionRequest,
   GatewayResponsesRequest,
+  GatewayMessagesRequest,
 } from '@/lib/providers/openrouter/types';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
 import { isZaiModel } from '@/lib/providers/zai';
@@ -57,7 +58,7 @@ function isLikelyAvailableOnAllGateways(requestedModel: string) {
 
 export async function shouldRouteToVercel(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest | GatewayMessagesRequest,
   randomSeed: string
 ) {
   if (request.provider?.data_collection === 'deny') {

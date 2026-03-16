@@ -119,7 +119,7 @@ async function checkBYOK(
 
 export async function getProvider(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest | GatewayMessagesRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
@@ -256,7 +256,10 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
 
 function applyPreferredProvider(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest | GatewayResponsesRequest
+  requestToMutate:
+    | OpenRouterChatCompletionRequest
+    | GatewayResponsesRequest
+    | GatewayMessagesRequest
 ) {
   const preferredProviderOrder = getPreferredProviderOrder(requestedModel);
   if (preferredProviderOrder.length === 0) {

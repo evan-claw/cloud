@@ -49,7 +49,10 @@ export function applyXaiModelSettings(
   requestToMutate: GatewayRequest,
   extraHeaders: Record<string, string>
 ) {
-  if (requestedModel === grok_code_fast_1_optimized_free_model.public_id) {
+  if (
+    requestedModel === grok_code_fast_1_optimized_free_model.public_id &&
+    requestToMutate.kind === 'chat_completions'
+  ) {
     delete requestToMutate.body.reasoning;
   }
 

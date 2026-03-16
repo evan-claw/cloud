@@ -13,15 +13,14 @@ import type {
 import type { GatewayMessagesRequest } from '@/lib/providers/openrouter/types';
 
 // ref: https://docs.anthropic.com/en/api/messages
-type AnthropicUsage = {
+// Anthropic usage combined with OpenRouter cost fields
+// ref: https://docs.anthropic.com/en/api/messages
+// ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
+type MessagesApiUsage = {
   input_tokens: number;
   output_tokens: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
-};
-
-// OpenRouter adds cost fields on top of Anthropic's usage
-type MessagesApiUsage = AnthropicUsage & {
   cost?: number;
   is_byok?: boolean | null;
   cost_details?: { upstream_inference_cost: number };
@@ -44,7 +43,11 @@ type MessagesStreamEvent =
   | { type: 'content_block_start'; index: number; content_block: { type: string; text?: string } }
   | { type: 'content_block_delta'; index: number; delta: { type: string; text?: string } }
   | { type: 'content_block_stop'; index: number }
-  | { type: 'message_delta'; delta: { stop_reason: string | null }; usage: { output_tokens: number } }
+  | {
+      type: 'message_delta';
+      delta: { stop_reason: string | null };
+      usage: { output_tokens: number };
+    }
   | { type: 'message_stop' }
   | { type: 'error'; error: { type: string; message: string } };
 
@@ -91,7 +94,14 @@ function processMessagesApiUsage(
   }
 
   // No cost info available
-  return { inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens, cost_mUsd: 0, is_byok: null };
+  return {
+    inputTokens,
+    outputTokens,
+    cacheHitTokens,
+    cacheWriteTokens,
+    cost_mUsd: 0,
+    is_byok: null,
+  };
 }
 
 export async function parseMessagesMicrodollarUsageFromStream(
@@ -159,7 +169,11 @@ export async function parseMessagesMicrodollarUsageFromStream(
         inputUsage = json.message.usage as MessagesApiUsage;
       }
 
-      if (json.type === 'content_block_delta' && json.delta.type === 'text_delta' && json.delta.text) {
+      if (
+        json.type === 'content_block_delta' &&
+        json.delta.type === 'text_delta' &&
+        json.delta.text
+      ) {
         responseContent += json.delta.text;
       }
 
@@ -197,9 +211,8 @@ export async function parseMessagesMicrodollarUsageFromStream(
   }
 
   // Merge input and output usage together
-  const usage: MessagesApiUsage | null = inputUsage
-    ? { ...inputUsage, output_tokens: outputTokens }
-    : null;
+  const usage: MessagesApiUsage | null =
+    inputUsage !== null ? Object.assign({}, inputUsage, { output_tokens: outputTokens }) : null;
 
   const coreProps = {
     messageId,
@@ -261,9 +274,7 @@ export function extractMessagesPromptInfo(body: GatewayMessagesRequest): PromptI
         ? body.system.map(b => b.text).join('\n')
         : '';
 
-  const lastUserMessage = body.messages
-    .filter(m => m.role === 'user')
-    .at(-1);
+  const lastUserMessage = body.messages.filter(m => m.role === 'user').at(-1);
 
   let userPrompt = '';
   if (lastUserMessage) {
