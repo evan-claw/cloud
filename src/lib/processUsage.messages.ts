@@ -28,8 +28,6 @@ type MessagesApiUsage = {
 
 type AnthropicMessageResponse = {
   id: string;
-  type: 'message';
-  role: 'assistant';
   model: string;
   content: Array<{ type: string; text?: string }>;
   stop_reason: string | null;
@@ -166,7 +164,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
       if (json.type === 'message_start') {
         messageId = json.message.id;
         model = json.message.model;
-        inputUsage = json.message.usage as MessagesApiUsage;
+        inputUsage = json.message.usage;
       }
 
       if (
@@ -239,7 +237,7 @@ export function parseMessagesMicrodollarUsageFromString(
 ): MicrodollarUsageStats {
   const responseJson = JSON.parse(fullResponse) as AnthropicMessageResponse | null;
 
-  const usage = responseJson?.usage as MessagesApiUsage | undefined;
+  const usage = responseJson?.usage;
 
   const responseContent =
     responseJson?.content
