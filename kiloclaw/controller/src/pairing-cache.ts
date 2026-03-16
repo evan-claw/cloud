@@ -38,7 +38,7 @@ export type PairingCache = {
   approveChannel: (channel: string, code: string) => Promise<ApproveResult>;
   approveDevice: (requestId: string) => Promise<ApproveResult>;
   onPairingLogLine: (line: string) => void;
-  start: () => void;
+  start: () => Promise<void>;
   cleanup: () => void;
 };
 
@@ -271,12 +271,13 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
     }, DEBOUNCE_DELAY_MS);
   };
 
-  const start = (): void => {
+  const start = async (): Promise<void> => {
     if (started) return;
     started = true;
 
-    // refreshAll uses Promise.allSettled internally — errors are logged per-refresh
-    void refreshAll();
+    // Await the initial refresh so callers can ensure the cache is populated before
+    // serving requests (addresses empty-cache window on fresh startup).
+    await refreshAll();
 
     periodicTimer = setInterval(() => {
       void refreshAll();
