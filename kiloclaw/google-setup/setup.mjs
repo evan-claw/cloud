@@ -32,6 +32,11 @@ const workerUrl = workerUrlArg
   ? workerUrlArg.substring(workerUrlArg.indexOf('=') + 1)
   : 'https://claw.kilosessions.ai';
 
+const gmailPushWorkerUrlArg = args.find(a => a.startsWith('--gmail-push-worker-url='));
+const gmailPushWorkerUrl = gmailPushWorkerUrlArg
+  ? gmailPushWorkerUrlArg.substring(gmailPushWorkerUrlArg.indexOf('=') + 1)
+  : 'https://kiloclaw-gmail.kiloapps.io';
+
 if (!token) {
   console.error('Usage: docker run -it --network host kilocode/google-setup --token=<session-jwt>');
   process.exit(1);
@@ -432,9 +437,6 @@ try {
 // ---------------------------------------------------------------------------
 
 console.log('\nSetting up Gmail push notifications...');
-
-const gmailPushWorkerUrl =
-  process.env.GMAIL_PUSH_WORKER_URL || 'https://kiloclaw-gmail.kiloapps.io';
 
 // Track whether push setup succeeded — used in the final summary message.
 let pushSetupOk = true;

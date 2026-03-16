@@ -512,9 +512,9 @@ export const kiloclawRouter = createTRPCRouter({
     const isDev = process.env.NODE_ENV === 'development';
     const imageTag = isDev ? ':dev' : '';
     const workerFlag = isDev ? ' --worker-url=http://localhost:8795' : '';
-    const envFlags = isDev ? ' -e GMAIL_PUSH_WORKER_URL=${GMAIL_PUSH_WORKER_URL}' : '';
+    const gmailPushFlag = isDev ? ' --gmail-push-worker-url=${GMAIL_PUSH_WORKER_URL}' : '';
     return {
-      command: `docker run -it --network host${envFlags} ghcr.io/kilo-org/google-setup${imageTag} --token="${token}"${workerFlag}`,
+      command: `docker run -it --network host ghcr.io/kilo-org/google-setup${imageTag} --token="${token}"${workerFlag}${gmailPushFlag}`,
     };
   }),
 
