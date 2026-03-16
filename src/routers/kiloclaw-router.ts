@@ -942,7 +942,7 @@ export const kiloclawRouter = createTRPCRouter({
     }
   }),
 
-  replaceOpenclawConfig: baseProcedure
+  replaceOpenclawConfig: clawAccessProcedure
     .input(z.object({ config: z.record(z.string(), z.unknown()), etag: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
       try {
