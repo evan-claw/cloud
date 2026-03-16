@@ -31,7 +31,8 @@ const STATE_PRIORITY: ReadonlyMap<FlyMachineState, number> = new Map([
   ['created', 3],
   ['stopping', 4],
   ['replacing', 5],
-  ['failed', 6],
+  ['suspended', 6],
+  ['failed', 7],
 ]);
 
 /**
