@@ -13,12 +13,6 @@ export type FindInstallationParams = {
   orgId?: string;
 };
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isValidUuid(value: string): boolean {
-  return UUID_REGEX.test(value);
-}
-
 const InstallationLookupResultSchema = z.object({
   platform_installation_id: z.string(),
   platform_account_login: z.string(),
@@ -77,7 +71,7 @@ export class InstallationLookupService {
     }
 
     // Validate orgId is a valid UUID if provided, to prevent database errors
-    if (params.orgId !== undefined && !isValidUuid(params.orgId)) {
+    if (params.orgId !== undefined && !z.string().uuid().safeParse(params.orgId).success) {
       return { success: false, reason: 'invalid_org_id' };
     }
 

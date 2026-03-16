@@ -7,12 +7,6 @@ import {
 } from '@kilocode/db/schema';
 import { eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
 
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isValidUuid(value: string): boolean {
-  return UUID_REGEX.test(value);
-}
-
 export type GitLabLookupParams = {
   userId: string;
   orgId?: string;
@@ -77,7 +71,7 @@ export class GitLabLookupService {
       return { success: false, reason: 'database_not_configured' };
     }
 
-    if (params.orgId !== undefined && !isValidUuid(params.orgId)) {
+    if (params.orgId !== undefined && !z.string().uuid().safeParse(params.orgId).success) {
       return { success: false, reason: 'invalid_org_id' };
     }
 
