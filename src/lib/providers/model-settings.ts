@@ -1,5 +1,6 @@
 import { giga_potato_model, giga_potato_thinking_model } from '@/lib/providers/gigapotato';
 import { isGemini3Model, isGeminiModel } from '@/lib/providers/google';
+import { isMinimaxModel } from '@/lib/providers/minimax';
 import { isMoonshotModel } from '@/lib/providers/moonshotai';
 import { isOpenAiModel } from '@/lib/providers/openai';
 import { isZaiModel } from '@/lib/providers/zai';
@@ -13,7 +14,7 @@ export function getModelSettings(model: string): ModelSettings | undefined {
       excluded_tools: ['apply_diff', 'delete_file', 'edit_file', 'write_to_file'],
     };
   }
-  if (model.startsWith('minimax/')) {
+  if (isMinimaxModel(model)) {
     return {
       included_tools: ['search_and_replace'],
       excluded_tools: ['apply_diff', 'edit_file'],
@@ -70,6 +71,12 @@ export function getModelVariants(model: string): OpenCodeSettings['variants'] {
       low: { reasoning: { enabled: true, effort: 'low' } },
       medium: { reasoning: { enabled: true, effort: 'medium' } },
       high: { reasoning: { enabled: true, effort: 'high' } },
+    };
+  }
+  if (model.startsWith('x-ai/grok-4')) {
+    return {
+      'non-reasoning': { reasoning: { enabled: false } },
+      reasoning: { reasoning: { enabled: true } },
     };
   }
   return undefined;

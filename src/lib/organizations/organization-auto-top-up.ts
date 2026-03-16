@@ -48,6 +48,9 @@ export async function createOrgAutoTopUpSetupCheckoutSession(
     ],
     invoice_creation: {
       enabled: true,
+      invoice_data: {
+        metadata: { rewardful: 'false' },
+      },
     },
     customer_update: {
       name: 'auto',

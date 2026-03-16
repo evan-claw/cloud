@@ -85,14 +85,19 @@ app.all('/sessions/:userId/:sessionId/ingest', async (c: Context<HonoContext>) =
     return c.text('Expected WebSocket upgrade', 426);
   }
 
+  const rawUserId = c.req.param('userId');
+  const sessionId = c.req.param('sessionId');
+  if (!rawUserId || !sessionId) {
+    return c.text('Missing route params', 400);
+  }
+
   let userId: string;
   try {
-    userId = decodeURIComponent(c.req.param('userId'));
+    userId = decodeURIComponent(rawUserId);
   } catch {
     return c.text('Invalid userId encoding', 400);
   }
 
-  const sessionId = c.req.param('sessionId');
   const authHeader = c.req.header('Authorization');
   const authResult = await validateKiloToken(authHeader ?? null, c.env.NEXTAUTH_SECRET);
   if (!authResult.success) {
@@ -116,14 +121,21 @@ const MAX_LOG_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
 app.put(
   '/sessions/:userId/:sessionId/logs/:executionId/:filename',
   async (c: Context<HonoContext>) => {
+    const rawUserId = c.req.param('userId');
+    const filename = c.req.param('filename');
+    const sessionId = c.req.param('sessionId');
+    const executionId = c.req.param('executionId');
+    if (!rawUserId || !filename || !sessionId || !executionId) {
+      return c.text('Missing route params', 400);
+    }
+
     let userId: string;
     try {
-      userId = decodeURIComponent(c.req.param('userId'));
+      userId = decodeURIComponent(rawUserId);
     } catch {
       return c.text('Invalid userId encoding', 400);
     }
 
-    const filename = c.req.param('filename');
     if (!ALLOWED_LOG_FILENAMES.has(filename)) {
       return c.text('Invalid filename', 400);
     }
@@ -151,8 +163,6 @@ app.put(
       return c.text('Request body too large', 413);
     }
 
-    const sessionId = c.req.param('sessionId');
-    const executionId = c.req.param('executionId');
     const safeUserId = encodeURIComponent(userId);
     const safeSessionId = encodeURIComponent(sessionId);
     const safeExecutionId = encodeURIComponent(executionId);

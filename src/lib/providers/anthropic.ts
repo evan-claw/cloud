@@ -1,4 +1,4 @@
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 import { normalizeToolCallIds } from '@/lib/tool-calling';
 import type OpenAI from 'openai';
 
@@ -77,8 +77,7 @@ export function addCacheBreakpoints(messages: OpenAI.Chat.ChatCompletionMessageP
 }
 
 export function applyAnthropicModelSettings(
-  requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
+  requestToMutate: GatewayRequest,
   extraHeaders: Record<string, string>
 ) {
   appendAnthropicBetaHeader(extraHeaders, 'fine-grained-tool-streaming-2025-05-14');
@@ -87,9 +86,15 @@ export function applyAnthropicModelSettings(
     // kilo-auto/frontier doesn't get cache breakpoints, because clients don't know it's a Claude model
     // additionally it is a common bug to forget adding cache breakpoints
     // we may want to gate this for Kilo-clients at some point
-    addCacheBreakpoints(requestToMutate.messages);
+    if (requestToMutate.kind === 'chat_completions') {
+      //todo: figure out whether this is possible before making responses generally available
+      addCacheBreakpoints(requestToMutate.body.messages);
+    }
   }
 
   // anthropic doesn't allow '.' in tool call ids
-  normalizeToolCallIds(requestToMutate, toolCallId => toolCallId.includes('.'), undefined);
+  if (requestToMutate.kind === 'chat_completions') {
+    // we can fix this later for the responses api if it's still a problem
+    normalizeToolCallIds(requestToMutate.body, toolCallId => toolCallId.includes('.'), undefined);
+  }
 }

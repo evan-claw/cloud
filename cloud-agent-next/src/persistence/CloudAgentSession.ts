@@ -170,9 +170,12 @@ export class CloudAgentSession extends DurableObject {
     super(ctx, env);
 
     // Extract sessionId from DO name pattern: "userId:sessionId"
-    // The DO name is set by the worker when creating the stub
+    // The DO name is set by the worker when creating the stub.
+    // Split on the *last* colon because userId may contain colons
+    // (e.g. "oauth/google:12345:agent_abc" → sessionId = "agent_abc").
     const doName = ctx.id.name;
-    const sessionIdPart = doName?.split(':')[1];
+    const lastColon = doName?.lastIndexOf(':') ?? -1;
+    const sessionIdPart = doName && lastColon > 0 ? doName.slice(lastColon + 1) : undefined;
     this.sessionId = sessionIdPart ? (sessionIdPart as SessionId) : undefined;
 
     const db = drizzle(ctx.storage, { logger: false });

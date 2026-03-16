@@ -4,7 +4,7 @@ import type { AgentMetadataRecord } from './db/tables/agent-metadata.table';
 
 // -- Beads --
 
-export const BeadStatus = z.enum(['open', 'in_progress', 'closed', 'failed']);
+export const BeadStatus = z.enum(['open', 'in_progress', 'in_review', 'closed', 'failed']);
 export type BeadStatus = z.infer<typeof BeadStatus>;
 
 export const BeadType = z.enum([
@@ -245,6 +245,9 @@ export const TownConfigSchema = z.object({
       sleep_after_minutes: z.number().int().min(5).max(120).optional(),
     })
     .optional(),
+
+  /** When true, all convoys are created as staged by default (agents not dispatched until started). */
+  staged_convoys_default: z.boolean().default(false),
 });
 
 export type TownConfig = z.infer<typeof TownConfigSchema>;
@@ -285,6 +288,7 @@ export const TownConfigUpdateSchema = z.object({
       sleep_after_minutes: z.number().int().min(5).max(120).optional(),
     })
     .optional(),
+  staged_convoys_default: z.boolean().optional(),
 });
 export type TownConfigUpdate = z.infer<typeof TownConfigUpdateSchema>;
 

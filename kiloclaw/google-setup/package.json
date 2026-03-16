@@ -1,0 +1,12 @@
+{
+  "name": "@kilocode/google-setup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node setup.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

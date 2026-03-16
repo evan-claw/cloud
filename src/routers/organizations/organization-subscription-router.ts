@@ -15,7 +15,6 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import {
   OrganizationIdInputSchema,
   organizationOwnerProcedure,
-  ensureOrganizationAccess,
   organizationMemberProcedure,
 } from '@/routers/organizations/utils';
 import { TRPCError } from '@trpc/server';
@@ -117,7 +116,7 @@ export const organizationsSubscriptionRouter = createTRPCRouter({
       return { status: paymentStatus };
     }),
 
-  getSubscriptionStripeUrl: baseProcedure
+  getSubscriptionStripeUrl: organizationOwnerProcedure
     .input(SubscriptionRequestSchema)
     .mutation(async ({ input, ctx }) => {
       const { user } = ctx;
@@ -132,18 +131,11 @@ export const organizationsSubscriptionRouter = createTRPCRouter({
       const customerId = await getOrCreateStripeCustomerIdForOrganization(org.id);
       const subscriptions = await getSubscriptionsForStripeCustomerId(customerId);
 
-      // if any subscriptions are not ended, throw bad request error
       if (subscriptions.find(sub => sub.ended_at == null)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'Organization has active subscription(s)',
         });
-      }
-
-      // if any subscriptions exist we need to enforce security
-      // otherwise, we can't enforce ownership as the org is still not finished being set up
-      if (subscriptions.length) {
-        await ensureOrganizationAccess(ctx, organizationId, ['owner']);
       }
 
       const result = await getStripeSeatsCheckoutUrl({

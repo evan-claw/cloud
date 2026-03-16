@@ -1,4 +1,4 @@
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 import type { ProviderId } from '@/lib/providers/provider-id';
 
 export function isGeminiModel(model: string) {
@@ -25,15 +25,13 @@ type ReadFileParametersSchema = {
   };
 };
 
-export function applyGoogleModelSettings(
-  provider: ProviderId,
-  requestToMutate: OpenRouterChatCompletionRequest
-) {
-  if (provider !== 'vercel') {
+export function applyGoogleModelSettings(provider: ProviderId, requestToMutate: GatewayRequest) {
+  if (provider !== 'vercel' || requestToMutate.kind !== 'chat_completions') {
+    // these are workarounds for the old extension, which won't support the responses api
     return;
   }
 
-  const readFileTool = requestToMutate.tools?.find(
+  const readFileTool = requestToMutate.body.tools?.find(
     tool => tool.type === 'function' && tool.function.name === 'read_file'
   );
   if (!readFileTool || readFileTool.type !== 'function') {

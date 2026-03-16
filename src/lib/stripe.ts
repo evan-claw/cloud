@@ -923,6 +923,9 @@ export async function createAutoTopUpSetupCheckoutSession(
     ],
     invoice_creation: {
       enabled: true,
+      invoice_data: {
+        metadata: { rewardful: 'false' },
+      },
     },
     customer_update: {
       name: 'auto',
@@ -991,6 +994,9 @@ export async function getStripeTopUpCheckoutUrl(
     line_items: line_items,
     invoice_creation: {
       enabled: true,
+      invoice_data: {
+        metadata: { rewardful: 'false' },
+      },
     },
     customer_update: {
       name: 'auto',
@@ -1106,7 +1112,7 @@ export async function getStripeSeatsCheckoutUrl(
         isSubscription: 'yes',
       },
       subscription_data: {
-        metadata: subscriptionMetadata,
+        metadata: { ...subscriptionMetadata, rewardful: 'false' },
       },
     });
 

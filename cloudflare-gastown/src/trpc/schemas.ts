@@ -34,7 +34,7 @@ export const RigOutput = z.object({
 export const BeadOutput = z.object({
   bead_id: z.string(),
   type: z.enum(['issue', 'message', 'escalation', 'merge_request', 'convoy', 'molecule', 'agent']),
-  status: z.enum(['open', 'in_progress', 'closed', 'failed']),
+  status: z.enum(['open', 'in_progress', 'in_review', 'closed', 'failed']),
   title: z.string(),
   body: z.string().nullable(),
   rig_id: z.string().nullable(),
@@ -118,6 +118,7 @@ export const ConvoyOutput = z.object({
   id: z.string(),
   title: z.string(),
   status: z.enum(['active', 'landed']),
+  staged: z.boolean(),
   total_beads: z.number(),
   closed_beads: z.number(),
   created_by: z.string().nullable(),
@@ -204,6 +205,7 @@ const AlarmStatusOutput = z.object({
   beads: z.object({
     open: z.number(),
     inProgress: z.number(),
+    inReview: z.number(),
     failed: z.number(),
     triageRequests: z.number(),
   }),

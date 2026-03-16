@@ -108,6 +108,17 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
       onError: err => toast.error(err.message),
     })
   );
+  const startConvoyMutation = useMutation(
+    trpc.gastown.startConvoy.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.gastown.listConvoys.queryKey({ townId }),
+        });
+        toast.success('Convoy started');
+      },
+      onError: err => toast.error(err.message),
+    })
+  );
 
   const rigs = rigsQuery.data ?? [];
   const events = townEventsQuery.data ?? [];
@@ -135,6 +146,7 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
   const userBeads = allBeads.filter(b => b.type !== 'agent');
   const openBeadCount = userBeads.filter(b => b.status === 'open').length;
   const inProgressBeadCount = userBeads.filter(b => b.status === 'in_progress').length;
+  const inReviewBeadCount = userBeads.filter(b => b.status === 'in_review').length;
   const closedBeadCount = userBeads.filter(b => b.status === 'closed').length;
   const escalationsCount = events.filter(e => e.event_type === 'escalated').length;
 
@@ -221,7 +233,10 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
         {/* Left column: activity feed */}
         <div className="min-w-0 border-r border-white/[0.06]">
           {/* Stats strip */}
-          <div className="grid grid-cols-4 border-b border-white/[0.06]">
+          <div
+            className="grid border-b border-white/[0.06]"
+            style={{ gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}
+          >
             <StatCell
               label="Open"
               value={openBeadCount}
@@ -233,6 +248,12 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
               value={inProgressBeadCount}
               icon={<Bot className="size-3.5" />}
               color="text-violet-400"
+            />
+            <StatCell
+              label="In Review"
+              value={inReviewBeadCount}
+              icon={<Eye className="size-3.5" />}
+              color="text-purple-400"
             />
             <StatCell
               label="Closed"
@@ -325,7 +346,9 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
                   onSelectBead={(beadId, rigId) => {
                     if (rigId) openDrawer({ type: 'bead', beadId, rigId });
                   }}
+                  onSelectConvoy={convoyId => openDrawer({ type: 'convoy', convoyId, townId })}
                   onCloseConvoy={convoyId => closeConvoyMutation.mutate({ townId, convoyId })}
+                  onStartConvoy={convoyId => startConvoyMutation.mutate({ townId, convoyId })}
                 />
               </div>
             </div>

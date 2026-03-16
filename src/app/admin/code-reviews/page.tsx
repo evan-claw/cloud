@@ -466,7 +466,9 @@ export default function CodeReviewsPage() {
             )}
 
             {/* Error Analysis */}
-            {errorQuery.data && <CodeReviewErrorAnalysis data={errorQuery.data} />}
+            {errorQuery.data && (
+              <CodeReviewErrorAnalysis data={errorQuery.data} filterParams={filterParams} />
+            )}
           </>
         )}
 

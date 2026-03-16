@@ -2,12 +2,14 @@ import type { MicrodollarUsage } from '@kilocode/db/schema';
 import {
   toInsertableDbUsageRecord,
   insertUsageRecord,
-  type MicrodollarUsageStats,
-  type MicrodollarUsageContext,
   type UsageContextInfo,
-  type CoreUsageWithMetaData,
 } from '@/lib/processUsage';
 import { EmptyFraudDetectionHeaders } from '@/lib/utils';
+import type {
+  CoreUsageWithMetaData,
+  MicrodollarUsageContext,
+  MicrodollarUsageStats,
+} from '@/lib/processUsage.types';
 
 function defineDefaultUsageStats(): MicrodollarUsageStats {
   return {
@@ -89,6 +91,7 @@ export function createMockUsageContext(
   prior_microdollar_usage: number
 ): MicrodollarUsageContext {
   return {
+    api_kind: 'chat_completions',
     kiloUserId,
     fraudHeaders: EmptyFraudDetectionHeaders,
     provider: 'openrouter',

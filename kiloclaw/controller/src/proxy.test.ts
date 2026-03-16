@@ -26,9 +26,27 @@ describe('HTTP proxy', () => {
 
     const noToken = await app.request('/x');
     expect(noToken.status).toBe(401);
+    expect(await noToken.json()).toEqual({ error: 'Unauthorized' });
+
+    const noTokenKilo = await app.request('/_kilo/missing');
+    expect(noTokenKilo.status).toBe(401);
+    expect(await noTokenKilo.json()).toEqual({
+      code: 'controller_route_unavailable',
+      error: 'Unauthorized',
+    });
 
     const wrongToken = await app.request('/x', { headers: { 'x-kiloclaw-proxy-token': 'bad' } });
     expect(wrongToken.status).toBe(401);
+    expect(await wrongToken.json()).toEqual({ error: 'Unauthorized' });
+
+    const wrongTokenKilo = await app.request('/_kilo/missing', {
+      headers: { 'x-kiloclaw-proxy-token': 'bad' },
+    });
+    expect(wrongTokenKilo.status).toBe(401);
+    expect(await wrongTokenKilo.json()).toEqual({
+      code: 'controller_route_unavailable',
+      error: 'Unauthorized',
+    });
   });
 
   it('proxies with valid token and strips x-kiloclaw-proxy-token', async () => {

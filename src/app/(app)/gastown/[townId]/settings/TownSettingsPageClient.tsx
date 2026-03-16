@@ -21,6 +21,9 @@ import {
   Bot,
   Shield,
   Variable,
+  Layers,
+  RefreshCw,
+  Container,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -33,8 +36,10 @@ const SECTIONS = [
   { id: 'git-auth', label: 'Git Authentication', icon: GitBranch },
   { id: 'env-vars', label: 'Environment Variables', icon: Variable },
   { id: 'agent-defaults', label: 'Agent Defaults', icon: Bot },
+  { id: 'convoys', label: 'Convoys', icon: Layers },
   { id: 'merge-strategy', label: 'Merge Strategy', icon: GitPullRequest },
   { id: 'refinery', label: 'Refinery', icon: Shield },
+  { id: 'container', label: 'Container', icon: Container },
 ] as const;
 
 function useScrollSpy(sectionIds: readonly string[]) {
@@ -91,6 +96,13 @@ export function TownSettingsPageClient({ townId }: Props) {
     })
   );
 
+  const refreshToken = useMutation(
+    trpc.gastown.refreshContainerToken.mutationOptions({
+      onSuccess: () => toast.success('Container token refreshed'),
+      onError: err => toast.error(`Token refresh failed: ${err.message}`),
+    })
+  );
+
   // Local state for form fields
   const [envVars, setEnvVars] = useState<EnvVarEntry[]>([]);
   const [githubToken, setGithubToken] = useState('');
@@ -101,6 +113,7 @@ export function TownSettingsPageClient({ townId }: Props) {
   const [refineryGates, setRefineryGates] = useState<string[]>([]);
   const [autoMerge, setAutoMerge] = useState(true);
   const [mergeStrategy, setMergeStrategy] = useState<'direct' | 'pr'>('direct');
+  const [stagedConvoysDefault, setStagedConvoysDefault] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showTokens, setShowTokens] = useState(false);
 
@@ -116,6 +129,7 @@ export function TownSettingsPageClient({ townId }: Props) {
     setRefineryGates(cfg.refinery?.gates ?? []);
     setAutoMerge(cfg.refinery?.auto_merge ?? true);
     setMergeStrategy(cfg.merge_strategy === 'pr' ? 'pr' : 'direct');
+    setStagedConvoysDefault(cfg.staged_convoys_default ?? false);
     setInitialized(true);
   }
 
@@ -141,6 +155,7 @@ export function TownSettingsPageClient({ townId }: Props) {
         ...(defaultModel ? { default_model: defaultModel } : {}),
         ...(maxPolecats ? { max_polecats_per_rig: maxPolecats } : {}),
         merge_strategy: mergeStrategy,
+        staged_convoys_default: stagedConvoysDefault,
         refinery: {
           gates: refineryGates.filter(g => g.trim()),
           auto_merge: autoMerge,
@@ -360,13 +375,37 @@ export function TownSettingsPageClient({ townId }: Props) {
                 </div>
               </SettingsSection>
 
+              {/* ── Convoys ──────────────────────────────────────── */}
+              <SettingsSection
+                id="convoys"
+                title="Convoys"
+                description="Settings for convoy (batch task) behavior."
+                icon={Layers}
+                index={3}
+              >
+                <div className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+                  <Switch
+                    checked={stagedConvoysDefault}
+                    onCheckedChange={setStagedConvoysDefault}
+                  />
+                  <div>
+                    <Label className="text-sm text-white/70">Stage convoys by default</Label>
+                    <p className="text-[11px] text-white/30">
+                      When enabled, new convoys are created in staged mode — agents are not
+                      dispatched until the convoy is explicitly started. This gives the mayor a
+                      chance to review and adjust the plan before execution begins.
+                    </p>
+                  </div>
+                </div>
+              </SettingsSection>
+
               {/* ── Merge Strategy ──────────────────────────────────── */}
               <SettingsSection
                 id="merge-strategy"
                 title="Merge Strategy"
                 description="How agent work lands in the default branch. Per-rig overrides coming soon."
                 icon={GitPullRequest}
-                index={3}
+                index={4}
               >
                 <div className="space-y-3">
                   <MergeStrategyOption
@@ -390,7 +429,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Refinery"
                 description="Quality gates run before merging polecat branches into the default branch."
                 icon={Shield}
-                index={4}
+                index={5}
                 action={
                   <button
                     onClick={addRefineryGate}
@@ -436,6 +475,39 @@ export function TownSettingsPageClient({ townId }: Props) {
                     <p className="text-[11px] text-white/30">
                       Automatically merge when all gates pass.
                     </p>
+                  </div>
+                </div>
+              </SettingsSection>
+
+              {/* ── Container ──────────────────────────────────────── */}
+              <SettingsSection
+                id="container"
+                title="Container"
+                description="Manage the town's container runtime and authentication tokens."
+                icon={Container}
+                index={6}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+                    <div>
+                      <p className="text-sm text-white/70">Container Token</p>
+                      <p className="text-[11px] text-white/30">
+                        JWT shared by all agents in the container. Auto-refreshed hourly (8h
+                        expiry). Force a refresh if agents are experiencing auth failures.
+                      </p>
+                    </div>
+                    <Button
+                      onClick={() => refreshToken.mutate({ townId })}
+                      disabled={refreshToken.isPending}
+                      variant="secondary"
+                      size="sm"
+                      className="ml-4 shrink-0 gap-1.5"
+                    >
+                      <RefreshCw
+                        className={`size-3 ${refreshToken.isPending ? 'animate-spin' : ''}`}
+                      />
+                      {refreshToken.isPending ? 'Refreshing...' : 'Refresh Token'}
+                    </Button>
                   </div>
                 </div>
               </SettingsSection>

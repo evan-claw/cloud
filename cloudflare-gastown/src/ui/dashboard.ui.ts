@@ -47,11 +47,18 @@ export function dashboardHtml(): string {
   .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; }
   .badge.open { background: #1f6feb33; color: #58a6ff; }
   .badge.in_progress { background: #d29922aa; color: #e3b341; }
+  .badge.in_review { background: #8957e533; color: #bc8cff; }
   .badge.closed { background: #3fb95033; color: #3fb950; }
+  .badge.failed { background: #f8514933; color: #f85149; }
   .badge.idle { background: #21262d; color: #8b949e; }
   .badge.working { background: #d29922aa; color: #e3b341; }
   .badge.blocked { background: #f8514933; color: #f85149; }
   .badge.dead { background: #f8514966; color: #f85149; }
+  textarea.body-edit { background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
+                       padding: 4px 8px; border-radius: 4px; font-family: inherit; font-size: 12px;
+                       width: 100%; min-height: 80px; resize: vertical; }
+  textarea.body-edit:focus { border-color: #58a6ff; outline: none; }
+  .badge.staged { background: #21262d; color: #8b949e; border: 1px dashed #30363d; }
   .empty { color: #484f58; font-style: italic; }
   #toast { position: fixed; bottom: 16px; right: 16px; background: #1f6feb;
            color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 12px;
@@ -197,6 +204,103 @@ export function dashboardHtml(): string {
 </div>
 </div>
 
+<!-- Mayor Edit Controls -->
+<div class="panel">
+  <h2>Mayor Edit Controls</h2>
+  <div class="row">
+    <label>Town ID</label>
+    <input type="text" id="mayorTownId" placeholder="town-abc" style="min-width:160px" />
+    <label style="min-width:80px">Mayor Token</label>
+    <input type="text" id="mayorToken" placeholder="Bearer token for mayor auth" style="flex:1;min-width:240px" />
+  </div>
+
+  <h2 style="margin-top:12px">Bead Edit</h2>
+  <div class="row">
+    <label>Rig ID</label>
+    <input type="text" id="editBeadRigId" placeholder="rig ID" style="min-width:160px" />
+    <label>Bead ID</label>
+    <input type="text" id="editBeadId" placeholder="bead ID" style="min-width:160px" />
+    <button onclick="mayorBeadLoad()">Load</button>
+  </div>
+  <div class="row">
+    <label>Title</label>
+    <input type="text" id="editBeadTitle" placeholder="new title (optional)" style="flex:1;min-width:200px" />
+  </div>
+  <div class="row" style="align-items:flex-start">
+    <label style="padding-top:4px">Body</label>
+    <textarea class="body-edit" id="editBeadBody" placeholder="new body (optional)"></textarea>
+  </div>
+  <div class="row">
+    <label>Status</label>
+    <select id="editBeadStatus">
+      <option value="">— unchanged —</option>
+      <option value="open">open</option>
+      <option value="in_progress">in_progress</option>
+      <option value="in_review">in_review</option>
+      <option value="closed">closed</option>
+      <option value="failed">failed</option>
+    </select>
+    <label>Priority</label>
+    <select id="editBeadPriority">
+      <option value="">— unchanged —</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+      <option value="critical">critical</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Rig</label>
+    <input type="text" id="editBeadRigIdField" placeholder="rig ID (optional)" style="min-width:140px" />
+    <label>Parent</label>
+    <input type="text" id="editBeadParentId" placeholder="parent bead ID (optional)" style="min-width:140px" />
+  </div>
+  <div class="row">
+    <label>Labels</label>
+    <input type="text" id="editBeadLabels" placeholder="comma-separated labels (e.g. bug, frontend, urgent)" style="flex:1;min-width:200px" />
+  </div>
+  <div class="row" style="align-items:flex-start">
+    <label style="padding-top:4px">Metadata</label>
+    <textarea class="body-edit" id="editBeadMetadata" placeholder='JSON object, e.g. {"key": "value"}' style="min-height:60px"></textarea>
+  </div>
+  <div class="row">
+    <button class="primary" onclick="mayorBeadSave()">Save Bead</button>
+    <label>Reassign to</label>
+    <input type="text" id="editBeadReassignAgent" placeholder="agent ID" style="min-width:160px" />
+    <button onclick="mayorBeadReassign()">Reassign</button>
+    <button class="danger" onclick="mayorBeadDelete()">Delete Bead</button>
+  </div>
+  <div id="editBeadResult"></div>
+
+  <h2 style="margin-top:12px">Agent Controls</h2>
+  <div class="row">
+    <label>Rig ID</label>
+    <input type="text" id="editAgentRigId" placeholder="rig ID" style="min-width:160px" />
+    <label>Agent ID</label>
+    <input type="text" id="editAgentId" placeholder="agent ID" style="min-width:160px" />
+  </div>
+  <div class="row">
+    <button onclick="mayorAgentReset()">Reset to Idle</button>
+    <button onclick="mayorAgentUnhook()">Unhook</button>
+  </div>
+  <div id="editAgentResult"></div>
+
+  <h2 style="margin-top:12px">Convoy Controls</h2>
+  <div class="row">
+    <label>Convoy ID</label>
+    <input type="text" id="editConvoyId" placeholder="convoy ID" style="min-width:200px" />
+    <label>Merge Mode</label>
+    <select id="editConvoyMergeMode">
+      <option value="">— unchanged —</option>
+      <option value="review-then-land">review-then-land</option>
+      <option value="review-and-merge">review-and-merge</option>
+    </select>
+    <button onclick="mayorConvoyUpdate()">Save</button>
+    <button class="danger" onclick="mayorConvoyClose()">Force Close</button>
+  </div>
+  <div id="editConvoyResult"></div>
+</div>
+
 <!-- Town Container -->
 <div class="panel">
   <h2>Town Container</h2>
@@ -258,6 +362,19 @@ export function dashboardHtml(): string {
     <button class="primary" onclick="containerSendMessage()">Send Message</button>
   </div>
   <div id="containerResult"></div>
+</div>
+
+<!-- Convoys -->
+<div class="panel">
+  <h2>Convoys</h2>
+  <div class="row">
+    <label>Town ID</label>
+    <input type="text" id="convoyTownId" placeholder="town-abc" style="min-width:160px" />
+    <label style="margin-left:8px">Mayor Token</label>
+    <input type="text" id="convoyMayorToken" placeholder="mayor token" style="min-width:200px" />
+    <button class="primary" onclick="loadConvoys()">Load Convoys</button>
+  </div>
+  <div id="convoysList"></div>
 </div>
 
 <!-- Log -->
@@ -360,6 +477,204 @@ async function api(method, path, body) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// ── Mayor API helper ─────────────────────────────────────────────────
+
+function mayorToken() { return el('mayorToken').value.trim(); }
+function mayorTownId() { return el('mayorTownId').value.trim(); }
+
+async function mayorApi(method, path, body) {
+  const log = el('apiLog');
+  const token = mayorToken();
+  const opts = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
+    },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+
+  const tag = method + ' ' + path;
+  log.innerHTML += '<span class="info">' + esc(tag) + '</span>\\n';
+
+  try {
+    const res = await fetch(path, opts);
+    const data = await res.json();
+    const cls = res.ok ? 'ok' : 'err';
+    log.innerHTML += '<span class="' + cls + '">' + res.status + '</span> '
+      + esc(JSON.stringify(data, null, 2)) + '\\n\\n';
+    log.scrollTop = log.scrollHeight;
+    if (!res.ok) toast(data.error || res.status, true);
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    log.innerHTML += '<span class="err">FETCH ERROR: ' + esc(e.message) + '</span>\\n\\n';
+    toast(e.message, true);
+    return { ok: false, status: 0, data: null };
+  }
+}
+
+// ── Mayor: Bead edit ─────────────────────────────────────────────────
+
+async function mayorBeadSave() {
+  const tId = mayorTownId();
+  const rId = el('editBeadRigId').value.trim();
+  const bId = el('editBeadId').value.trim();
+  if (!tId || !rId || !bId) { toast('Fill in Town ID, Rig ID, and Bead ID', true); return; }
+  const body = {};
+  const title = el('editBeadTitle').value.trim();
+  const bodyText = el('editBeadBody').value.trim();
+  const status = el('editBeadStatus').value;
+  const priority = el('editBeadPriority').value;
+  const rigIdField = el('editBeadRigIdField').value.trim();
+  const parentId = el('editBeadParentId').value.trim();
+  const labelsRaw = el('editBeadLabels').value.trim();
+  const metadataRaw = el('editBeadMetadata').value.trim();
+  if (title) body.title = title;
+  if (bodyText) body.body = bodyText;
+  if (status) body.status = status;
+  if (priority) body.priority = priority;
+  if (rigIdField) body.rig_id = rigIdField;
+  if (parentId) body.parent_bead_id = parentId;
+  if (labelsRaw) {
+    body.labels = labelsRaw.split(',').map(function(l) { return l.trim(); }).filter(Boolean);
+  }
+  if (metadataRaw) {
+    try { body.metadata = JSON.parse(metadataRaw); }
+    catch { toast('Invalid JSON in metadata field', true); return; }
+  }
+  if (!Object.keys(body).length) { toast('Provide at least one field to update', true); return; }
+  const r = await mayorApi('PATCH', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/beads/' + bId, body);
+  if (r.ok) {
+    el('editBeadResult').innerHTML = '<p class="ok" style="color:#3fb950">Bead updated</p>';
+    toast('Bead saved');
+    await loadBeads();
+  } else {
+    el('editBeadResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+async function mayorBeadLoad() {
+  const tId = mayorTownId();
+  const rId = el('editBeadRigId').value.trim();
+  const bId = el('editBeadId').value.trim();
+  if (!tId || !rId || !bId) { toast('Fill in Town ID, Rig ID, and Bead ID', true); return; }
+  const r = await mayorApi('GET', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/beads?limit=200');
+  if (!r.ok) { toast('Failed to load beads', true); return; }
+  const match = (r.data.data || []).find(function(b) { return b.bead_id === bId || b.id === bId; });
+  if (!match) { toast('Bead not found in rig', true); return; }
+  el('editBeadTitle').value = match.title || '';
+  el('editBeadBody').value = match.body || '';
+  el('editBeadStatus').value = match.status || '';
+  el('editBeadPriority').value = match.priority || '';
+  el('editBeadRigIdField').value = match.rig_id || '';
+  el('editBeadParentId').value = match.parent_bead_id || '';
+  var labels = match.labels;
+  if (typeof labels === 'string') { try { labels = JSON.parse(labels); } catch {} }
+  el('editBeadLabels').value = Array.isArray(labels) ? labels.join(', ') : '';
+  var meta = match.metadata;
+  if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch {} }
+  el('editBeadMetadata').value = (meta && typeof meta === 'object' && Object.keys(meta).length > 0)
+    ? JSON.stringify(meta, null, 2) : '';
+  toast('Bead loaded');
+}
+
+async function mayorBeadReassign() {
+  const tId = mayorTownId();
+  const rId = el('editBeadRigId').value.trim();
+  const bId = el('editBeadId').value.trim();
+  const agentId = el('editBeadReassignAgent').value.trim();
+  if (!tId || !rId || !bId || !agentId) { toast('Fill in Town ID, Rig ID, Bead ID, and Agent ID', true); return; }
+  const r = await mayorApi('POST', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/beads/' + bId + '/reassign', { agent_id: agentId });
+  if (r.ok) {
+    el('editBeadResult').innerHTML = '<p class="ok" style="color:#3fb950">Bead reassigned</p>';
+    toast('Bead reassigned');
+    await loadBeads();
+  } else {
+    el('editBeadResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+async function mayorBeadDelete() {
+  const tId = mayorTownId();
+  const rId = el('editBeadRigId').value.trim();
+  const bId = el('editBeadId').value.trim();
+  if (!tId || !rId || !bId) { toast('Fill in Town ID, Rig ID, and Bead ID', true); return; }
+  if (!confirm('Delete bead ' + bId + '? This cannot be undone.')) return;
+  const r = await mayorApi('DELETE', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/beads/' + bId);
+  if (r.ok) {
+    el('editBeadResult').innerHTML = '<p class="ok" style="color:#3fb950">Bead deleted</p>';
+    el('editBeadId').value = '';
+    toast('Bead deleted');
+    await loadBeads();
+  } else {
+    el('editBeadResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+// ── Mayor: Agent controls ────────────────────────────────────────────
+
+async function mayorAgentReset() {
+  const tId = mayorTownId();
+  const rId = el('editAgentRigId').value.trim();
+  const aId = el('editAgentId').value.trim();
+  if (!tId || !rId || !aId) { toast('Fill in Town ID, Rig ID, and Agent ID', true); return; }
+  const r = await mayorApi('POST', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/agents/' + aId + '/reset', {});
+  if (r.ok) {
+    el('editAgentResult').innerHTML = '<p class="ok" style="color:#3fb950">Agent reset to idle</p>';
+    toast('Agent reset');
+    await loadAgents();
+  } else {
+    el('editAgentResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+async function mayorAgentUnhook() {
+  const tId = mayorTownId();
+  const rId = el('editAgentRigId').value.trim();
+  const aId = el('editAgentId').value.trim();
+  if (!tId || !rId || !aId) { toast('Fill in Town ID, Rig ID, and Agent ID', true); return; }
+  const r = await mayorApi('DELETE', '/api/mayor/' + tId + '/tools/rigs/' + rId + '/agents/' + aId + '/hook');
+  if (r.ok) {
+    el('editAgentResult').innerHTML = '<p class="ok" style="color:#3fb950">Agent unhooked</p>';
+    toast('Agent unhooked');
+    await loadAgents();
+  } else {
+    el('editAgentResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+// ── Mayor: Convoy controls ───────────────────────────────────────────
+
+async function mayorConvoyUpdate() {
+  const tId = mayorTownId();
+  const cId = el('editConvoyId').value.trim();
+  if (!tId || !cId) { toast('Fill in Town ID and Convoy ID', true); return; }
+  const merge_mode = el('editConvoyMergeMode').value;
+  if (!merge_mode) { toast('Select a merge mode to update', true); return; }
+  const r = await mayorApi('PATCH', '/api/mayor/' + tId + '/tools/convoys/' + cId, { merge_mode });
+  if (r.ok) {
+    el('editConvoyResult').innerHTML = '<p class="ok" style="color:#3fb950">Convoy updated</p>';
+    toast('Convoy updated');
+  } else {
+    el('editConvoyResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
+async function mayorConvoyClose() {
+  const tId = mayorTownId();
+  const cId = el('editConvoyId').value.trim();
+  if (!tId || !cId) { toast('Fill in Town ID and Convoy ID', true); return; }
+  if (!confirm('Force-close convoy ' + cId + ' and all its open beads?')) return;
+  const r = await mayorApi('POST', '/api/mayor/' + tId + '/tools/convoys/' + cId + '/close', {});
+  if (r.ok) {
+    el('editConvoyResult').innerHTML = '<p class="ok" style="color:#3fb950">Convoy force-closed</p>';
+    toast('Convoy closed');
+    await loadBeads();
+  } else {
+    el('editConvoyResult').innerHTML = '<p class="err" style="color:#f85149">Error: ' + esc(r.data?.error ?? 'unknown') + '</p>';
+  }
+}
+
 function toast(msg, isErr) {
   const t = el('toast');
   t.textContent = msg;
@@ -439,21 +754,47 @@ async function loadBeads() {
 
 function renderBeads() {
   if (!beads.length) { el('beadsList').innerHTML = '<p class="empty">No beads</p>'; return; }
-  let h = '<table><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Assignee</th><th></th></tr>';
+  let h = '<table><tr><th>ID</th><th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Assignee</th><th></th></tr>';
   for (const b of beads) {
+    const bid = b.bead_id || b.id;
     h += '<tr>'
-      + '<td class="id" onclick="copyId(\\'' + b.id + '\\')">' + short(b.id) + '</td>'
+      + '<td class="id" onclick="copyId(\\'' + bid + '\\')">' + short(bid) + '</td>'
       + '<td>' + esc(b.title) + '</td>'
       + '<td>' + b.type + '</td>'
       + '<td>' + badge(b.status) + '</td>'
-      + '<td>' + (b.assignee_agent_id ? short(b.assignee_agent_id) : '—') + '</td>'
+      + '<td>' + (b.priority || 'medium') + '</td>'
+      + '<td>' + (b.assignee_agent_bead_id ? short(b.assignee_agent_bead_id) : '—') + '</td>'
       + '<td>'
-      + (b.status !== 'closed' ? '<button onclick="closeBead(\\'' + b.id + '\\')">Close</button>' : '')
+      + '<button onclick="editBead(\\'' + bid + '\\')">Edit</button> '
+      + (b.status !== 'closed' ? '<button onclick="closeBead(\\'' + bid + '\\')">Close</button>' : '')
       + '</td>'
       + '</tr>';
   }
   h += '</table>';
   el('beadsList').innerHTML = h;
+}
+
+function editBead(beadId) {
+  const b = beads.find(function(bead) { return bead.id === beadId || bead.bead_id === beadId; });
+  if (!b) { toast('Bead not found', true); return; }
+  el('editBeadId').value = beadId;
+  el('editBeadRigId').value = b.rig_id || rigId();
+  el('editBeadTitle').value = b.title || '';
+  el('editBeadBody').value = b.body || '';
+  el('editBeadStatus').value = b.status || '';
+  el('editBeadPriority').value = b.priority || '';
+  el('editBeadRigIdField').value = b.rig_id || '';
+  el('editBeadParentId').value = b.parent_bead_id || '';
+  var labels = b.labels;
+  if (typeof labels === 'string') { try { labels = JSON.parse(labels); } catch {} }
+  el('editBeadLabels').value = Array.isArray(labels) ? labels.join(', ') : '';
+  var meta = b.metadata;
+  if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch {} }
+  el('editBeadMetadata').value = (meta && typeof meta === 'object' && Object.keys(meta).length > 0)
+    ? JSON.stringify(meta, null, 2) : '';
+  // Scroll to the edit section
+  el('editBeadTitle').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  toast('Editing bead ' + short(beadId));
 }
 
 async function createBead() {
@@ -731,16 +1072,161 @@ async function containerSendMessage() {
   if (r.ok) { el('cMessage').value = ''; toast('Message sent'); }
 }
 
+// ── Convoys ──────────────────────────────────────────────────────────
+
+async function loadConvoys() {
+  const convoyTownId = el('convoyTownId').value.trim();
+  if (!convoyTownId) { toast('Set a Town ID first', true); return; }
+  const token = el('convoyMayorToken').value.trim();
+  const log = el('apiLog');
+  const path = '/api/mayor/' + convoyTownId + '/tools/convoys';
+  log.innerHTML += '<span class="info">GET ' + esc(path) + '</span>\\n';
+  try {
+    const res = await fetch(path, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    const cls = res.ok ? 'ok' : 'err';
+    log.innerHTML += '<span class="' + cls + '">' + res.status + '</span> '
+      + esc(JSON.stringify(data, null, 2)) + '\\n\\n';
+    log.scrollTop = log.scrollHeight;
+    if (!res.ok) { toast(data.error || res.status, true); return; }
+    renderConvoys(data.data || [], convoyTownId);
+  } catch (e) {
+    log.innerHTML += '<span class="err">FETCH ERROR: ' + esc(e.message) + '</span>\\n\\n';
+    toast(e.message, true);
+  }
+}
+
+function renderConvoys(convoys, convoyTownId) {
+  if (!convoys.length) { el('convoysList').innerHTML = '<p class="empty">No convoys</p>'; return; }
+  let h = '<table><tr><th>ID</th><th>Title</th><th>Status</th><th>Beads</th><th></th></tr>';
+  for (const c of convoys) {
+    const isStaged = c.staged === true;
+    const statusBadge = isStaged
+      ? '<span class="badge staged">STAGED</span>'
+      : '<span class="badge ' + (c.status || 'open') + '">' + (c.status || 'open') + '</span>';
+    const progress = (c.closed_beads != null && c.total_beads != null)
+      ? c.closed_beads + '/' + c.total_beads
+      : '—';
+    h += '<tr>'
+      + '<td class="id" onclick="copyId(\\'' + c.id + '\\')">' + short(c.id) + '</td>'
+      + '<td>' + esc(c.title || '—') + '</td>'
+      + '<td>' + statusBadge + '</td>'
+      + '<td>' + progress + '</td>'
+      + '<td>'
+      + (isStaged ? '<button class="primary" onclick="startConvoy(\\'' + c.id + '\\', \\'' + convoyTownId + '\\')">Start Convoy</button>' : '')
+      + '</td>'
+      + '</tr>';
+  }
+  h += '</table>';
+  el('convoysList').innerHTML = h;
+}
+
+async function startConvoy(convoyId, convoyTownId) {
+  const token = el('convoyMayorToken').value.trim();
+  const log = el('apiLog');
+  const path = '/api/mayor/' + convoyTownId + '/tools/convoys/' + convoyId + '/start';
+  log.innerHTML += '<span class="info">POST ' + esc(path) + '</span>\\n';
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json();
+    const cls = res.ok ? 'ok' : 'err';
+    log.innerHTML += '<span class="' + cls + '">' + res.status + '</span> '
+      + esc(JSON.stringify(data, null, 2)) + '\\n\\n';
+    log.scrollTop = log.scrollHeight;
+    if (data.success) {
+      toast('Convoy ' + convoyId.slice(0, 8) + ' started');
+      loadConvoys();
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), true);
+    }
+  } catch (e) {
+    log.innerHTML += '<span class="err">FETCH ERROR: ' + esc(e.message) + '</span>\\n\\n';
+    toast(e.message, true);
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function copyId(id) {
   navigator.clipboard.writeText(id).then(() => toast('Copied: ' + id));
 }
 
+function log(msg, cls) {
+  const logEl = el('apiLog');
+  logEl.innerHTML += '<span class="' + (cls || 'info') + '">' + esc(msg) + '</span>\\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 async function refreshAll() {
   if (!rigId()) { toast('Enter a Rig ID', true); return; }
   saveRigToHistory(rigId());
   await Promise.all([loadAgents(), loadBeads()]);
+}
+
+// ── Status WebSocket ─────────────────────────────────────────────────
+
+let statusWs = null;
+let statusWsReconnectTimer = null;
+let statusWsTownId = null;
+
+function disconnectStatusWs() {
+  if (statusWsReconnectTimer) { clearTimeout(statusWsReconnectTimer); statusWsReconnectTimer = null; }
+  if (statusWs) { try { statusWs.close(); } catch {} statusWs = null; }
+  statusWsTownId = null;
+}
+
+function connectStatusWs() {
+  const tid = townId();
+  if (!tid) return;
+
+  // If the town changed, tear down the old socket first
+  if (statusWsTownId && statusWsTownId !== tid) {
+    disconnectStatusWs();
+  }
+
+  if (statusWs && (statusWs.readyState === WebSocket.OPEN || statusWs.readyState === WebSocket.CONNECTING)) return;
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/api/towns/' + tid + '/status/ws';
+  log('[ws] connecting to ' + url, 'info');
+
+  const ws = new WebSocket(url);
+  statusWs = ws;
+  statusWsTownId = tid;
+
+  ws.onopen = () => {
+    log('[ws] status connected', 'ok');
+  };
+
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.channel === 'bead') {
+      log('[bead] ' + msg.type + ': ' + (msg.title ?? msg.beadId) + ' → ' + (msg.status ?? ''), 'info');
+    } else if (msg.channel === 'convoy') {
+      log('[convoy] ' + msg.convoyId.slice(0, 8) + ' progress: ' + msg.closedBeads + '/' + msg.totalBeads, 'info');
+    } else {
+      // Existing alarm status snapshot — no-op, handled by alarm loop display
+    }
+  };
+
+  ws.onclose = () => {
+    log('[ws] status disconnected', 'err');
+    statusWs = null;
+    // Reconnect after 5s (only if still targeting the same town)
+    if (statusWsReconnectTimer) clearTimeout(statusWsReconnectTimer);
+    statusWsReconnectTimer = setTimeout(connectStatusWs, 5000);
+  };
+
+  ws.onerror = () => {
+    // onclose fires after onerror; let it handle reconnect
+  };
 }
 
 // ── Init ────────────────────────────────────────────────────────────
@@ -759,6 +1245,10 @@ renderRigHistory();
 if (lastRig) {
   refreshAll();
 }
+
+// Connect the status WebSocket on load and reconnect when the town ID changes
+connectStatusWs();
+el('townId').addEventListener('change', connectStatusWs);
 </script>
 </body>
 </html>`;

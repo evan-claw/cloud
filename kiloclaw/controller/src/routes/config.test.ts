@@ -4,24 +4,30 @@ import { registerConfigRoutes } from './config';
 import type { Supervisor } from '../supervisor';
 
 vi.mock('../config-writer', () => ({
+  backupConfigFile: vi.fn(),
   writeBaseConfig: vi.fn(),
 }));
 
-// Mock fs at the module level (for config/patch tests)
+vi.mock('../atomic-write', () => ({
+  atomicWrite: vi.fn(),
+}));
+
+// Mock fs at the module level (for config/patch tests — readFileSync is still used directly)
 vi.mock('node:fs', () => {
   return {
     default: {
       readFileSync: vi.fn(),
-      writeFileSync: vi.fn(),
     },
   };
 });
 
-import { writeBaseConfig } from '../config-writer';
+import { backupConfigFile, writeBaseConfig } from '../config-writer';
+import { atomicWrite } from '../atomic-write';
 import fs from 'node:fs';
 
 const readMock = vi.mocked(fs.readFileSync);
-const writeMock = vi.mocked(fs.writeFileSync);
+const atomicWriteMock = vi.mocked(atomicWrite);
+const backupMock = vi.mocked(backupConfigFile);
 
 function createMockSupervisor(): Supervisor {
   const state = 'running' as const;
@@ -48,7 +54,7 @@ function authHeaders(token = 'test-token'): HeadersInit {
 
 describe('/_kilo/config/restore routes', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('rejects requests without auth', async () => {
@@ -120,6 +126,23 @@ describe('/_kilo/config/restore routes', () => {
     expect(body.error).toContain('disk full');
   });
 
+  it('restores config but does not signal when gateway is not running', async () => {
+    const app = new Hono();
+    const supervisor = createMockSupervisor();
+    vi.mocked(supervisor.getState).mockReturnValue('stopped');
+    registerConfigRoutes(app, supervisor, 'test-token');
+
+    const resp = await app.request('/_kilo/config/restore/base', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual({ ok: true, signaled: false });
+
+    expect(writeBaseConfig).toHaveBeenCalledWith(process.env);
+    expect(supervisor.signal).not.toHaveBeenCalled();
+  });
+
   it('does not leak through to catch-all proxy', async () => {
     const app = new Hono();
     const supervisor = createMockSupervisor();
@@ -134,7 +157,7 @@ describe('/_kilo/config/restore routes', () => {
 
 describe('/_kilo/config/patch routes', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it('enforces bearer auth', async () => {
@@ -177,8 +200,10 @@ describe('/_kilo/config/patch routes', () => {
     expect(resp.status).toBe(200);
     expect(await resp.json()).toEqual({ ok: true });
 
-    expect(writeMock).toHaveBeenCalledOnce();
-    const written = JSON.parse(writeMock.mock.calls[0][1] as string);
+    expect(atomicWriteMock).toHaveBeenCalledOnce();
+    // First arg should be the config path, second the serialized JSON
+    expect(atomicWriteMock.mock.calls[0][0]).toBe('/root/.openclaw/openclaw.json');
+    const written = JSON.parse(atomicWriteMock.mock.calls[0][1] as string);
     expect(written.agents.defaults.model.primary).toBe('kilocode/anthropic/claude-sonnet-4.5');
     // Existing keys preserved
     expect(written.gateway.port).toBe(3001);
@@ -228,8 +253,8 @@ describe('/_kilo/config/patch routes', () => {
     });
 
     expect(resp.status).toBe(200);
-    expect(writeMock).toHaveBeenCalledOnce();
-    const written = JSON.parse(writeMock.mock.calls[0][1] as string);
+    expect(atomicWriteMock).toHaveBeenCalledOnce();
+    const written = JSON.parse(atomicWriteMock.mock.calls[0][1] as string);
     // Banned keys are silently dropped at every depth
     expect(Object.hasOwn(written, '__proto__')).toBe(false);
     expect(Object.hasOwn(written, 'constructor')).toBe(false);
@@ -254,5 +279,370 @@ describe('/_kilo/config/patch routes', () => {
       headers: authHeaders(),
     });
     expect(resp.status).toBe(500);
+  });
+});
+
+type TestCase = {
+  route: string;
+  method?: string;
+  headers?: HeadersInit;
+  body?: string;
+  read?: () => string;
+  write?: () => void;
+  expect: {
+    status: number;
+    body?: unknown;
+    bodyContains?: Record<string, unknown>;
+    mocks?: {
+      backup?: (mock: typeof backupMock) => void;
+      write?: (mock: typeof atomicWriteMock) => void;
+    };
+  };
+};
+
+async function test(tc: TestCase) {
+  const app = new Hono();
+  registerConfigRoutes(app, createMockSupervisor(), 'test-token');
+
+  if (tc.read) {
+    readMock.mockImplementation(tc.read);
+  }
+
+  if (tc.write) {
+    atomicWriteMock.mockImplementation(tc.write);
+  }
+
+  const resp = await app.request(tc.route, {
+    method: tc.method ?? 'GET',
+    headers: tc.headers,
+    body: tc.body,
+  });
+
+  expect(resp.status).toBe(tc.expect.status);
+
+  const json =
+    tc.expect.body !== undefined || tc.expect.bodyContains !== undefined
+      ? await resp.json()
+      : undefined;
+
+  if (tc.expect.body !== undefined) {
+    expect(json).toEqual(tc.expect.body);
+  }
+
+  if (tc.expect.bodyContains !== undefined) {
+    expect(json).toMatchObject(tc.expect.bodyContains);
+  }
+
+  if (tc.expect.mocks?.write) {
+    tc.expect.mocks.write(atomicWriteMock);
+  }
+
+  if (tc.expect.mocks?.backup) {
+    tc.expect.mocks.backup(backupMock);
+  }
+}
+
+describe('/_kilo/config/read routes', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('rejects requests without auth', async () => {
+    await test({
+      route: '/_kilo/config/read',
+      expect: {
+        status: 401,
+      },
+    });
+  });
+
+  it('rejects requests with wrong token', async () => {
+    await test({
+      route: '/_kilo/config/read',
+      headers: {
+        Authorization: 'Bearer wrong-token',
+      },
+      expect: {
+        status: 401,
+      },
+    });
+  });
+
+  it('returns the parsed config with etag', async () => {
+    const config = {
+      gateway: { port: 3001 },
+      agents: { defaults: { model: { primary: 'test' } } },
+    };
+    const raw = JSON.stringify(config);
+
+    await test({
+      route: '/_kilo/config/read',
+      headers: { Authorization: 'Bearer test-token' },
+      read: () => raw,
+      expect: {
+        status: 200,
+        // Hardcoded real hash of above config, to avoid exposing or
+        // duplicating the private hash calculation function
+        body: { config, etag: 'ba2c2548ac3dbe82044f0276f9e9e03b' },
+      },
+    });
+  });
+
+  it('returns 500 when config file contains non-object JSON', async () => {
+    await test({
+      route: '/_kilo/config/read',
+      headers: { Authorization: 'Bearer test-token' },
+      read: () => '[1, 2, 3]',
+      expect: {
+        status: 500,
+        bodyContains: {
+          code: 'config_read_failed',
+          error: 'Config file does not contain a JSON object',
+        },
+      },
+    });
+  });
+
+  it('returns 500 when config file is missing', async () => {
+    await test({
+      route: '/_kilo/config/read',
+      headers: { Authorization: 'Bearer test-token' },
+      read: () => {
+        throw new Error('ENOENT: no such file');
+      },
+      expect: {
+        status: 500,
+        bodyContains: {
+          error: expect.stringContaining('Failed to read config'),
+        },
+      },
+    });
+  });
+});
+
+describe('/_kilo/config/replace routes', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('rejects requests without auth', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        config: { gateway: {} },
+      }),
+      expect: {
+        status: 401,
+      },
+    });
+  });
+
+  it('rejects requests with wrong token', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders('bad-token'),
+      body: JSON.stringify({
+        config: { gateway: {} },
+      }),
+      expect: {
+        status: 401,
+      },
+    });
+  });
+
+  it('replaces config file entirely', async () => {
+    const newConfig = { agents: { custom: true }, gateway: { port: 9999 } };
+
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ config: newConfig }),
+      expect: {
+        status: 200,
+        body: { ok: true },
+        mocks: {
+          backup: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            expect(mock).toHaveBeenCalledWith('/root/.openclaw/openclaw.json');
+          },
+          write: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            const written = JSON.parse(mock.mock.calls[0][1] as string);
+            expect(written).toEqual(newConfig);
+          },
+        },
+      },
+    });
+  });
+
+  it('replaces config when etag matches', async () => {
+    const existing = JSON.stringify({ old: true }, null, 2);
+    const newConfig = { agents: { custom: true } };
+    // md5('{\n  "old": true\n}')
+    const etag = 'd9e2d0820f656cdfc4e3a872523a92a8';
+
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      read: () => existing,
+      body: JSON.stringify({ config: newConfig, etag }),
+      expect: {
+        status: 200,
+        body: { ok: true },
+        mocks: {
+          backup: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            expect(mock).toHaveBeenCalledWith('/root/.openclaw/openclaw.json');
+          },
+          write: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            const written = JSON.parse(mock.mock.calls[0][1] as string);
+            expect(written).toEqual(newConfig);
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects replace when etag does not match', async () => {
+    const existing = JSON.stringify({ old: true }, null, 2);
+
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      read: () => existing,
+      body: JSON.stringify({ config: { new: true }, etag: 'stale-etag' }),
+      expect: {
+        status: 409,
+        bodyContains: { error: expect.stringContaining('Config was modified') },
+        mocks: {
+          backup: mock => {
+            expect(mock).not.toHaveBeenCalled();
+          },
+          write: mock => {
+            expect(mock).not.toHaveBeenCalled();
+          },
+        },
+      },
+    });
+  });
+
+  it('skips etag check when etag is not provided', async () => {
+    const newConfig = { gateway: { port: 1234 } };
+
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ config: newConfig }),
+      expect: {
+        status: 200,
+        body: { ok: true },
+        mocks: {
+          backup: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            expect(mock).toHaveBeenCalledWith('/root/.openclaw/openclaw.json');
+          },
+          write: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects non-object body', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify([1, 2, 3]),
+      expect: {
+        status: 400,
+      },
+    });
+  });
+
+  it('rejects body without config field', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ gateway: {} }),
+      expect: {
+        status: 400,
+      },
+    });
+  });
+
+  it('rejects invalid JSON', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: 'not json',
+      expect: {
+        status: 400,
+      },
+    });
+  });
+
+  it('returns 500 when write fails', async () => {
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        config: { gateway: {} },
+      }),
+      write: () => {
+        throw new Error('');
+      },
+      expect: {
+        status: 500,
+        bodyContains: { error: expect.stringContaining('Failed to replace config') },
+        mocks: {
+          backup: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+            expect(mock).toHaveBeenCalledWith('/root/.openclaw/openclaw.json');
+          },
+        },
+      },
+    });
+  });
+
+  it('returns 500 when backup fails', async () => {
+    backupMock.mockImplementation(() => {
+      throw new Error('backup failed');
+    });
+
+    await test({
+      route: '/_kilo/config/replace',
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        config: { gateway: {} },
+      }),
+      expect: {
+        status: 500,
+        bodyContains: { error: expect.stringContaining('Failed to replace config') },
+        mocks: {
+          backup: mock => {
+            expect(mock).toHaveBeenCalledOnce();
+          },
+          write: mock => {
+            expect(mock).not.toHaveBeenCalled();
+          },
+        },
+      },
+    });
   });
 });

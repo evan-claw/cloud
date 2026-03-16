@@ -23,7 +23,7 @@ describe('isFreeModel', () => {
 
     test('should return true for enabled Kilo free models', () => {
       // Test with known Kilo free models that are enabled
-      const enabledModels = kiloFreeModels.filter(m => m.is_enabled);
+      const enabledModels = kiloFreeModels.filter(m => m.status === 'public');
 
       // Should have at least some enabled models
       expect(enabledModels.length).toBeGreaterThan(0);
@@ -36,7 +36,7 @@ describe('isFreeModel', () => {
 
     test('should return false for disabled Kilo free models that do not end with :free', () => {
       const disabledModels = kiloFreeModels.filter(
-        m => !m.is_enabled && !m.public_id.endsWith(':free')
+        m => m.status === 'disabled' && !m.public_id.endsWith(':free')
       );
 
       // Disabled models without :free suffix should NOT be detected as free
@@ -47,7 +47,7 @@ describe('isFreeModel', () => {
 
     test('should return true for disabled Kilo free models that end with :free', () => {
       const disabledModelsWithFreeSuffix = kiloFreeModels.filter(
-        m => !m.is_enabled && m.public_id.endsWith(':free')
+        m => m.status === 'disabled' && m.public_id.endsWith(':free')
       );
 
       // Disabled models with :free suffix are still considered free due to the :free suffix rule

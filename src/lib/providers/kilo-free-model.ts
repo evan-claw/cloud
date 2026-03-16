@@ -9,7 +9,7 @@ export type KiloFreeModel = {
   description: string;
   context_length: number;
   max_completion_tokens: number;
-  is_enabled: boolean;
+  status: 'public' | 'hidden' | 'disabled';
   flags: KiloFreeModelFlag[];
   gateway: ProviderId;
   internal_id: string;

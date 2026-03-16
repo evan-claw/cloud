@@ -16,12 +16,14 @@ export function sentryLogger(source: string, severity: SeverityLevel = 'log') {
   const logger = consoleExceptInTest(
     severity === 'fatal' ? 'error' : severity === 'warning' ? 'warn' : severity
   );
-  return function warnInSentry(message: string, ...args: unknown[]) {
+  return function logAndMaybeCaptureInSentry(message: string, ...args: unknown[]) {
     logger(message, ...args);
-    captureMessage(message, {
-      level: severity,
-      tags: { source },
-      extra: args.length ? { args } : undefined,
-    });
+    if (severity === 'warning' || severity === 'error' || severity === 'fatal') {
+      captureMessage(message, {
+        level: severity,
+        tags: { source },
+        extra: args.length ? { args } : undefined,
+      });
+    }
   };
 }

@@ -174,6 +174,9 @@ export function useKiloClawMutations() {
           await queryClient.invalidateQueries({
             queryKey: trpc.kiloclaw.getConfig.queryKey(),
           });
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.openclawConfig.queryKey(),
+          });
         },
       })
     ),
@@ -196,6 +199,18 @@ export function useKiloClawMutations() {
           });
         },
       })
+    ),
+    replaceOpenclawConfig: useMutation(
+      trpc.kiloclaw.replaceOpenclawConfig.mutationOptions({
+        onSuccess: async () => {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.kiloclaw.openclawConfig.queryKey(),
+          });
+        },
+      })
+    ),
+    disconnectGoogle: useMutation(
+      trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus })
     ),
   };
 }
@@ -238,6 +253,21 @@ export function useKiloClawLatestVersion() {
   return useQuery(
     trpc.kiloclaw.latestVersion.queryOptions(undefined, {
       staleTime: 60_000, // latest changes infrequently
+    })
+  );
+}
+
+export function useKiloClawOpenclawConfig(enabled: boolean) {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.kiloclaw.openclawConfig.queryOptions(undefined, {
+      enabled,
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: false,
+      select: data => ({
+        openclawConfig: data.config,
+        etag: data.etag,
+      }),
     })
   );
 }

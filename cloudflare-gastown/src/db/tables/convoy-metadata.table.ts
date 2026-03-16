@@ -19,6 +19,8 @@ export const ConvoyMetadataRecord = z.object({
    *   individually, like standalone beads.
    */
   merge_mode: ConvoyMergeMode.nullable(),
+  /** 1 = staged (planned, agents not dispatched), 0 = active (SQLite boolean) */
+  staged: z.number().int().default(0),
 });
 
 export type ConvoyMetadataRecord = z.output<typeof ConvoyMetadataRecord>;
@@ -33,6 +35,7 @@ export function createTableConvoyMetadata(): string {
     landed_at: `text`,
     feature_branch: `text`,
     merge_mode: `text check(merge_mode in ('review-then-land', 'review-and-merge'))`,
+    staged: `integer not null default 0`,
   });
 }
 
@@ -41,5 +44,6 @@ export function migrateConvoyMetadata(): string[] {
   return [
     `ALTER TABLE convoy_metadata ADD COLUMN feature_branch text`,
     `ALTER TABLE convoy_metadata ADD COLUMN merge_mode text check(merge_mode in ('review-then-land', 'review-and-merge'))`,
+    `ALTER TABLE convoy_metadata ADD COLUMN staged integer not null default 0`,
   ];
 }

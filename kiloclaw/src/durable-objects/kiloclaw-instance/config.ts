@@ -139,6 +139,7 @@ export async function buildUserEnvVars(
       kilocodeApiKey,
       kilocodeDefaultModel: state.kilocodeDefaultModel ?? undefined,
       channels: state.channels ?? undefined,
+      googleCredentials: state.googleCredentials ?? undefined,
       instanceFeatures: state.instanceFeatures,
     }
   );

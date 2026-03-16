@@ -7,6 +7,7 @@ import type {
   BeadType,
   Convoy,
   ConvoyDetail,
+  ConvoyStartResult,
   GastownEnv,
   Mail,
   MayorGastownEnv,
@@ -334,10 +335,18 @@ export class MayorGastownClient {
     tasks: Array<{ title: string; body?: string; depends_on?: number[] }>;
     merge_mode?: 'review-then-land' | 'review-and-merge';
     parallel?: boolean;
+    staged?: boolean;
   }): Promise<SlingBatchResult> {
     return this.request<SlingBatchResult>(this.mayorPath('/sling-batch'), {
       method: 'POST',
       body: JSON.stringify(input),
+    });
+  }
+
+  async startConvoy(convoyId: string): Promise<ConvoyStartResult> {
+    return this.request<ConvoyStartResult>(this.mayorPath(`/convoys/${convoyId}/start`), {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   }
 
@@ -347,6 +356,64 @@ export class MayorGastownClient {
 
   async getConvoyStatus(convoyId: string): Promise<ConvoyDetail> {
     return this.request<ConvoyDetail>(this.mayorPath(`/convoys/${convoyId}`));
+  }
+
+  async updateBead(
+    rigId: string,
+    beadId: string,
+    input: {
+      title?: string;
+      body?: string;
+      status?: 'open' | 'in_progress' | 'in_review' | 'closed' | 'failed';
+      priority?: 'low' | 'medium' | 'high' | 'critical';
+      labels?: string[];
+    }
+  ): Promise<Bead> {
+    return this.request<Bead>(this.mayorPath(`/rigs/${rigId}/beads/${beadId}`), {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async reassignBead(rigId: string, beadId: string, agentId: string): Promise<Bead> {
+    return this.request<Bead>(this.mayorPath(`/rigs/${rigId}/beads/${beadId}/reassign`), {
+      method: 'POST',
+      body: JSON.stringify({ agent_id: agentId }),
+    });
+  }
+
+  async deleteBead(rigId: string, beadId: string): Promise<void> {
+    await this.request<void>(this.mayorPath(`/rigs/${rigId}/beads/${beadId}`), {
+      method: 'DELETE',
+    });
+  }
+
+  async resetAgent(rigId: string, agentId: string): Promise<void> {
+    await this.request<void>(this.mayorPath(`/rigs/${rigId}/agents/${agentId}/reset`), {
+      method: 'POST',
+    });
+  }
+
+  async closeConvoy(convoyId: string): Promise<void> {
+    await this.request<void>(this.mayorPath(`/convoys/${convoyId}/close`), {
+      method: 'POST',
+    });
+  }
+
+  async updateConvoy(
+    convoyId: string,
+    input: { merge_mode?: 'review-then-land' | 'review-and-merge'; feature_branch?: string }
+  ): Promise<void> {
+    await this.request<void>(this.mayorPath(`/convoys/${convoyId}`), {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async acknowledgeEscalation(escalationId: string): Promise<void> {
+    await this.request<void>(this.mayorPath(`/escalations/${escalationId}/acknowledge`), {
+      method: 'POST',
+    });
   }
 }
 

@@ -647,6 +647,26 @@ const encryptedSelfServicePromos: readonly EncryptedSelfServicePromoCreditCatego
     description: 'Builders event promotional credit',
     total_redemptions_allowed: 200,
   },
+  {
+    encrypted_credit_category: 'eAvvANNkXdXdhto8/cw31w==:8PjtR26E3MOZqyhVG6r30g==:2OJb8DiaCA==',
+    is_user_selfservicable: true,
+    is_idempotent: true,
+    amount_usd: 10,
+    expiry_hours: 30 * 24,
+    promotion_ends_at: new Date('2026-04-30'),
+    description: 'New York City ClawCon Credits',
+    total_redemptions_allowed: 2000,
+  },
+  {
+    encrypted_credit_category: 'FCD+K/F3UGQR533OdgPViQ==:n5QOBh7aSdIR/hxdtBI7gA==:LkUxLKCCiQw=',
+    is_user_selfservicable: true,
+    is_idempotent: true,
+    amount_usd: 10,
+    expiry_hours: 30 * 24,
+    promotion_ends_at: new Date('2026-04-30'),
+    description: 'Austin ClawCon Credits',
+    total_redemptions_allowed: 2000,
+  },
 ];
 
 const selfServicePromos: readonly SelfServicePromoCreditCategoryConfig[] =

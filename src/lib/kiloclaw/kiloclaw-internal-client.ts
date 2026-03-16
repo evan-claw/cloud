@@ -22,6 +22,9 @@ import type {
   GatewayProcessActionResponse,
   ConfigRestoreResponse,
   ControllerVersionResponse,
+  OpenclawConfigResponse,
+  GoogleCredentialsInput,
+  GoogleCredentialsResponse,
 } from './types';
 
 /**
@@ -243,6 +246,37 @@ export class KiloClawInternalClient {
     return this.request('/api/platform/config/restore', {
       method: 'POST',
       body: JSON.stringify({ userId, version }),
+    });
+  }
+
+  async getOpenclawConfig(userId: string): Promise<OpenclawConfigResponse> {
+    return this.request(`/api/platform/openclaw-config?userId=${encodeURIComponent(userId)}`);
+  }
+
+  async replaceOpenclawConfig(
+    userId: string,
+    config: Record<string, unknown>,
+    etag?: string
+  ): Promise<{ ok: true }> {
+    return this.request('/api/platform/openclaw-config', {
+      method: 'POST',
+      body: JSON.stringify({ userId, config, ...(etag !== undefined && { etag }) }),
+    });
+  }
+
+  async updateGoogleCredentials(
+    userId: string,
+    input: GoogleCredentialsInput
+  ): Promise<GoogleCredentialsResponse> {
+    return this.request('/api/platform/google-credentials', {
+      method: 'POST',
+      body: JSON.stringify({ userId, ...input }),
+    });
+  }
+
+  async clearGoogleCredentials(userId: string): Promise<GoogleCredentialsResponse> {
+    return this.request(`/api/platform/google-credentials?userId=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
     });
   }
 }

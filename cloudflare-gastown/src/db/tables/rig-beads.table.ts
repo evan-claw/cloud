@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { getTableFromZodSchema, getCreateTableQueryFromTable } from '../../util/table';
 
 const BeadType = z.enum(['issue', 'message', 'escalation', 'merge_request']);
-const BeadStatus = z.enum(['open', 'in_progress', 'closed', 'failed']);
+const BeadStatus = z.enum(['open', 'in_progress', 'in_review', 'closed', 'failed']);
 const BeadPriority = z.enum(['low', 'medium', 'high', 'critical']);
 
 export const RigBeadRecord = z.object({
@@ -31,14 +31,14 @@ export function createTableRigBeads(): string {
   return getCreateTableQueryFromTable(rig_beads, {
     id: `text primary key`,
     rig_id: `text`,
-    type: `text not null check(type in ('issue', 'message', 'escalation', 'merge_request'))`,
-    status: `text not null default 'open' check(status in ('open', 'in_progress', 'closed', 'failed'))`,
+    type: `text not null`,
+    status: `text not null default 'open'`,
     title: `text not null`,
     body: `text`,
     assignee_agent_id: `text`,
     convoy_id: `text`,
     molecule_id: `text`,
-    priority: `text default 'medium' check(priority in ('low', 'medium', 'high', 'critical'))`,
+    priority: `text default 'medium'`,
     labels: `text default '[]'`,
     metadata: `text default '{}'`,
     created_at: `text not null`,

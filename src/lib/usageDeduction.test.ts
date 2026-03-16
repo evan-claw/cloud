@@ -9,7 +9,7 @@ import {
   toInsertableDbUsageRecord,
   extractUsageContextInfo,
 } from './processUsage';
-import type { MicrodollarUsageStats } from './processUsage';
+import type { MicrodollarUsageStats } from './processUsage.types';
 
 function createMockUsageStats(cost_mUsd: number): MicrodollarUsageStats {
   return {

@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 # Install Node.js 22 (required by OpenClaw)
-ENV NODE_VERSION=22.13.1
+ENV NODE_VERSION=22.22.1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates curl gnupg git xz-utils unzip jq ripgrep rsync zstd \
@@ -48,11 +48,17 @@ RUN npm install -g openclaw@2026.3.11 \
 # Install ClawHub CLI
 RUN npm install -g clawhub
 
+# Install QMD
+RUN npm install -g @tobilu/qmd
+
 # Install mcporter (MCP server tooling)
 RUN npm install -g mcporter@0.7.3
 
 # Install summarize (web page summarization CLI)
 RUN npm install -g @steipete/summarize@0.12.0
+
+# Install Kilo CLI (agentic coding assistant for the terminal)
+RUN npm install -g @kilocode/cli@7.0.46
 
 
 # Install Go (available at runtime for users to `go install` additional tools)
@@ -107,8 +113,8 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-03-11-v60-tools-md
-RUN echo "9"
+# Build cache bust: 2026-03-12-v62-github-machine-user
+RUN echo "10"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
 COPY openclaw-device-pairing-list.js /usr/local/bin/openclaw-device-pairing-list.js

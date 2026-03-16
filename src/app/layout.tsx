@@ -117,7 +117,7 @@ export default function RootLayout({
         {process.env.NEXT_PUBLIC_REWARDFUL_ID && (
           <>
             <Script id="rewardful-queue" strategy="beforeInteractive">
-              {`(function(w,r){w._rwq=r;w[r]=w[r]||function(){(w[r].q=w[r].q||[]).push(arguments)}})(window,'rewardful');rewardful('ready',function(){if(Rewardful.referral){document.cookie='rewardful_referral='+encodeURIComponent(Rewardful.referral)+';path=/;max-age=7776000;SameSite=Lax'+(location.protocol==='https:'?';Secure':'')}});`}
+              {`(function(w,r){w._rwq=r;w[r]=w[r]||function(){(w[r].q=w[r].q||[]).push(arguments)}})(window,'rewardful');rewardful('ready',function(){if(Rewardful.referral){document.cookie='rewardful_referral='+encodeURIComponent(Rewardful.referral)+';path=/;max-age=5184000;SameSite=Lax'+(location.protocol==='https:'?';Secure':'')}});`}
             </Script>
             <Script
               strategy="beforeInteractive"

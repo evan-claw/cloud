@@ -2,7 +2,7 @@ import 'server-only';
 
 import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
-import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
+import { baseProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/init';
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
@@ -35,6 +35,37 @@ import {
 import { client as stripe } from '@/lib/stripe-client';
 import { APP_URL } from '@/lib/constants';
 import { getRewardfulReferral } from '@/lib/rewardful';
+import { redactOpenclawConfig, restoreRedactedSecrets } from '@/lib/kiloclaw/config-redaction';
+
+/**
+ * Error codes whose messages may contain raw internal details (e.g. filesystem
+ * paths) and should NOT be forwarded to the client.
+ */
+const UNSAFE_ERROR_CODES = new Set(['config_read_failed', 'config_replace_failed']);
+
+function getKiloClawApiErrorPayload(err: KiloClawApiError): { message?: string; code?: string } {
+  if (!err.responseBody) return {};
+
+  try {
+    const parsed = JSON.parse(err.responseBody) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return {};
+    }
+
+    const code = 'code' in parsed && typeof parsed.code === 'string' ? parsed.code : undefined;
+    const message =
+      'error' in parsed && typeof parsed.error === 'string' && parsed.error.length > 0
+        ? parsed.error
+        : undefined;
+
+    return {
+      message: code && UNSAFE_ERROR_CODES.has(code) ? undefined : message,
+      code,
+    };
+  } catch {
+    return {};
+  }
+}
 
 const kilocodeDefaultModelSchema = z
   .string()
@@ -43,6 +74,10 @@ const kilocodeDefaultModelSchema = z
     'kilocodeDefaultModel must start with kilocode/ and include a provider'
   );
 
+// TODO: Replace with catalog-driven schema. This hardcoded list must be kept
+// in sync with @kilocode/kiloclaw-secret-catalog channel entries. Any new
+// catalog channel entry will render in the UI but be silently stripped here
+// by Zod. Migrate provision path to use patchSecrets pipeline instead.
 const channelsSchema = z
   .object({
     telegramBotToken: z.string().optional(),
@@ -468,6 +503,24 @@ export const kiloclawRouter = createTRPCRouter({
     return client.restoreConfig(ctx.user.id);
   }),
 
+  getGoogleSetupCommand: baseProcedure.query(({ ctx }) => {
+    // Short-lived token — the user should run the setup command promptly.
+    // Regenerated on each page load, so 1 hour is sufficient.
+    const token = generateApiToken(ctx.user, undefined, {
+      expiresIn: TOKEN_EXPIRY.oneHour,
+    });
+    const isDev = process.env.NODE_ENV === 'development';
+    const workerFlag = isDev ? ' --worker-url=http://localhost:8795' : '';
+    return {
+      command: `docker run -it --network host ghcr.io/kilo-org/google-setup --token="${token}"${workerFlag}`,
+    };
+  }),
+
+  disconnectGoogle: baseProcedure.mutation(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.clearGoogleCredentials(ctx.user.id);
+  }),
+
   getEarlybirdStatus: baseProcedure
     .output(z.object({ purchased: z.boolean() }))
     .query(async ({ ctx }) => {
@@ -744,4 +797,82 @@ export const kiloclawRouter = createTRPCRouter({
 
     return { success: true };
   }),
+
+  openclawConfig: baseProcedure.query(async ({ ctx }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      const response = await client.getOpenclawConfig(ctx.user.id);
+      return {
+        ...response,
+        config: redactOpenclawConfig(response.config),
+      };
+    } catch (err) {
+      if (err instanceof KiloClawApiError && err.statusCode === 404) {
+        const { code, message } = getKiloClawApiErrorPayload(err);
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message:
+            code === 'controller_route_unavailable'
+              ? 'Instance needs redeploy to support fetching OpenClaw config'
+              : (message ?? 'Failed to fetch OpenClaw config'),
+        });
+      }
+      if (err instanceof KiloClawApiError && err.statusCode === 409) {
+        const { message, code } = getKiloClawApiErrorPayload(err);
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: message ?? 'Instance is not provisioned or not running',
+          cause: code ? new UpstreamApiError(code) : undefined,
+        });
+      }
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message:
+          err instanceof KiloClawApiError
+            ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to fetch OpenClaw config')
+            : 'Failed to fetch OpenClaw config',
+      });
+    }
+  }),
+
+  replaceOpenclawConfig: baseProcedure
+    .input(z.object({ config: z.record(z.string(), z.unknown()), etag: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+
+        // Fetch the current config so we can restore any redacted secrets
+        // that the user didn't change (they'll still have the placeholder).
+        const current = await client.getOpenclawConfig(ctx.user.id);
+        const mergedConfig = restoreRedactedSecrets(input.config, current.config);
+
+        return await client.replaceOpenclawConfig(ctx.user.id, mergedConfig, input.etag);
+      } catch (err) {
+        if (err instanceof KiloClawApiError && err.statusCode === 404) {
+          const { code, message } = getKiloClawApiErrorPayload(err);
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message:
+              code === 'controller_route_unavailable'
+                ? 'Instance cannot update OpenClaw config until redeployed'
+                : (message ?? 'Failed to replace openclaw config'),
+          });
+        }
+        if (err instanceof KiloClawApiError && err.statusCode === 409) {
+          const { message, code } = getKiloClawApiErrorPayload(err);
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: message ?? 'Instance is not provisioned or not running',
+            cause: code ? new UpstreamApiError(code) : undefined,
+          });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message:
+            err instanceof KiloClawApiError
+              ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to replace openclaw config')
+              : 'Failed to replace openclaw config',
+        });
+      }
+    }),
 });

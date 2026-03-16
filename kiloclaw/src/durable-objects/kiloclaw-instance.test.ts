@@ -156,7 +156,7 @@ function createFakeEnv() {
   return {
     FLY_API_TOKEN: 'test-token',
     FLY_APP_NAME: 'test-app',
-    FLY_REGION: 'us,eu',
+    FLY_REGION: 'dfw,ewr,iad,lax,sjc,eu',
     GATEWAY_TOKEN_SECRET: 'test-secret',
     NEXTAUTH_SECRET: 'test-nextauth-secret-at-least-32-chars',
     WORKER_ENV: 'development',
@@ -2158,8 +2158,15 @@ describe('start: 412 insufficient resources recovery', () => {
       })
     );
     // Regions are shuffled, so just check the set (deprioritize is a no-op here
-    // because 'iad' is not in FLY_REGION='us,eu')
-    expect((regions412Call[2] as string[]).sort()).toEqual(['eu', 'us']);
+    // because 'iad' is not in FLY_REGION='dfw,ewr,iad,lax,sjc,eu')
+    expect((regions412Call[2] as string[]).sort()).toEqual([
+      'dfw',
+      'eu',
+      'ewr',
+      'iad',
+      'lax',
+      'sjc',
+    ]);
     // source_volume_id should NOT be set for fresh provision
     const createVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
       .calls[0][1] as Record<string, unknown>;
@@ -2206,7 +2213,14 @@ describe('start: 412 insufficient resources recovery', () => {
       })
     );
     // Regions are shuffled — check the set
-    expect((regionsForkCall[2] as string[]).sort()).toEqual(['eu', 'us']);
+    expect((regionsForkCall[2] as string[]).sort()).toEqual([
+      'dfw',
+      'eu',
+      'ewr',
+      'iad',
+      'lax',
+      'sjc',
+    ]);
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
     // Machine was retried
@@ -2271,7 +2285,14 @@ describe('start: 412 insufficient resources recovery', () => {
       })
     );
     // Regions are shuffled then deprioritized — check the set
-    expect((regionsUpdateCall[2] as string[]).sort()).toEqual(['eu', 'us']);
+    expect((regionsUpdateCall[2] as string[]).sort()).toEqual([
+      'dfw',
+      'eu',
+      'ewr',
+      'iad',
+      'lax',
+      'sjc',
+    ]);
     // New machine was created
     expect(storage._store.get('flyMachineId')).toBe('machine-new');
     expect(storage._store.get('flyVolumeId')).toBe('vol-new');
@@ -2642,7 +2663,12 @@ describe('provision: instance feature flags', () => {
     await instance.provision('user-1', {});
 
     const features = storage._store.get('instanceFeatures') as string[];
-    expect(features).toEqual(['npm-global-prefix', 'pip-global-prefix', 'uv-global-prefix']);
+    expect(features).toEqual([
+      'npm-global-prefix',
+      'pip-global-prefix',
+      'uv-global-prefix',
+      'kilo-cli',
+    ]);
   });
 
   it('preserves existing features on re-provision (does not reset to defaults)', async () => {

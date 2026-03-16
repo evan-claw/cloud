@@ -47,10 +47,18 @@ export const ControllerVersionResponseSchema = z.object({
 
 export class GatewayControllerError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'GatewayControllerError';
     this.status = status;
+    this.code = code ?? null;
   }
 }
+
+// Treat the Openclaw config on disk as an opaque blob
+export const OpenclawConfigResponseSchema = z.object({
+  config: z.record(z.string(), z.unknown()),
+  etag: z.string(),
+});

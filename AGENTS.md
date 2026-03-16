@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## Git Safety
+
+- **Never** use `--force`, `--no-verify`, or any other flag that bypasses git hooks or safety checks without explicit user approval.
+- If a hook or check fails, diagnose the issue and either fix it or ask the user how to proceed — do not silently skip it.
+
 ## Pull Request Titles
 
 - Use the format: `type(scope): <description>`

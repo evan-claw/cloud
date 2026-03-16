@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import z from 'zod';
 import { captureException, setTag, startInactiveSpan } from '@sentry/nextjs';
-import type { MicrodollarUsageContext } from '@/lib/processUsage';
+import type { MicrodollarUsageContext } from '@/lib/processUsage.types';
 import { validateFeatureHeader, FEATURE_HEADER } from '@/lib/feature-detection';
 import { isFreeModel } from '@/lib/models';
 import { sentryRootSpan } from '@/lib/getRootSpan';
@@ -128,6 +128,7 @@ export async function POST(request: NextRequest) {
     : await getBYOKforUser(readDb, user.id, ['codestral']);
 
   const usageContext: MicrodollarUsageContext = {
+    api_kind: 'fim_completions',
     kiloUserId: user.id,
     provider: 'mistral',
     requested_model: fimModel_withOpenRouterStyleProviderPrefix,

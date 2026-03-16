@@ -1,0 +1,19 @@
+# Dev-start script configuration.
+# CLI flags override these values.
+#
+# Place this file in either location:
+#   ~/.config/kiloclaw/dev-start.conf   (shared across all worktrees)
+#   kiloclaw/scripts/.dev-start.conf    (per-worktree override, gitignored)
+
+# Named Cloudflare tunnel (leave empty for temporary quick tunnel)
+# TUNNEL_NAME=          # tunnel
+# TUNNEL_HOSTNAME=      # tunnel.yourdomain.com
+
+# RSA private key for agent env var encryption (get from 1Password, engineering vault)
+# AGENT_ENV_VARS_PRIVATE_KEY=
+
+# How to display the 3 dev processes:
+#   tabs   — separate terminal tabs (default; auto-detects iTerm2 vs Terminal.app)
+#   split  — single tab with split panes (requires iTerm2)
+#   tmux   — tmux session "kiloclaw"
+DISPLAY_MODE=tabs

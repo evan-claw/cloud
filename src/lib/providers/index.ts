@@ -3,8 +3,10 @@ import { debugSaveProxyResponseStream } from '../debugUtils';
 import { fetchWithBackoff } from '../fetchWithBackoff';
 import { captureException, captureMessage } from '@sentry/nextjs';
 import type {
+  GatewayResponsesRequest,
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
+  GatewayRequest,
 } from '@/lib/providers/openrouter/types';
 import {
   applyMistralModelSettings,
@@ -41,6 +43,7 @@ import { isOpenAiModel } from '@/lib/providers/openai';
 import { applyQwenModelSettings, isQwenModel } from '@/lib/providers/qwen';
 import type { ProviderId } from '@/lib/providers/provider-id';
 import { isZaiModel } from '@/lib/providers/zai';
+import { isMinimaxModel } from '@/lib/providers/minimax';
 
 export type Provider = {
   id: ProviderId;
@@ -86,6 +89,12 @@ export const PROVIDERS = {
     apiKey: getEnvVariable('MORPH_API_KEY'),
     hasGenerationEndpoint: false,
   },
+  OPENAI: {
+    id: 'openai',
+    apiUrl: 'https://api.openai.com/v1',
+    apiKey: getEnvVariable('OPENAI_API_KEY'),
+    hasGenerationEndpoint: false,
+  },
   VERCEL_AI_GATEWAY: {
     id: 'vercel',
     apiUrl: 'https://ai-gateway.vercel.sh/v1',
@@ -94,24 +103,33 @@ export const PROVIDERS = {
   },
 } as const satisfies Record<string, Provider>;
 
+async function checkBYOK(
+  user: User | AnonymousUserContext,
+  requestedModel: string,
+  organizationId: string | undefined
+): Promise<BYOKResult[] | null> {
+  if (isAnonymousContext(user)) return null;
+  const modelProviders = await getModelUserByokProviders(requestedModel);
+  if (modelProviders.length === 0) return null;
+  return organizationId
+    ? getBYOKforOrganization(db, organizationId, modelProviders)
+    : getBYOKforUser(db, user.id, modelProviders);
+}
+
 export async function getProvider(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest,
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
 ): Promise<{ provider: Provider; userByok: BYOKResult[] | null; customLlm: CustomLlm | null }> {
-  if (!isAnonymousContext(user)) {
-    const modelProviders = await getModelUserByokProviders(requestedModel);
-    const userByok =
-      modelProviders.length === 0
-        ? null
-        : organizationId
-          ? await getBYOKforOrganization(db, organizationId, modelProviders)
-          : await getBYOKforUser(db, user.id, modelProviders);
-    if (userByok) {
-      return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok, customLlm: null };
-    }
+  const userByokFromByokCheck = await checkBYOK(user, requestedModel, organizationId);
+  if (userByokFromByokCheck) {
+    return {
+      provider: PROVIDERS.VERCEL_AI_GATEWAY,
+      userByok: userByokFromByokCheck,
+      customLlm: null,
+    };
   }
 
   if (requestedModel.startsWith('kilo-internal/') && organizationId) {
@@ -172,6 +190,21 @@ export async function getProvider(
   };
 }
 
+export async function getEmbeddingProvider(
+  requestedModel: string,
+  user: User | AnonymousUserContext,
+  organizationId: string | undefined
+): Promise<{ provider: Provider; userByok: BYOKResult[] | null }> {
+  // 1. BYOK check — route through Vercel AI Gateway when user has their own key
+  const userByok = await checkBYOK(user, requestedModel, organizationId);
+  if (userByok) {
+    return { provider: PROVIDERS.VERCEL_AI_GATEWAY, userByok };
+  }
+
+  // 2. All non-BYOK embedding requests go through OpenRouter
+  return { provider: PROVIDERS.OPENROUTER, userByok: null };
+}
+
 function applyToolChoiceSetting(
   requestedModel: string,
   requestToMutate: OpenRouterChatCompletionRequest
@@ -205,7 +238,7 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
       OpenRouterInferenceProviderIdSchema.enum.anthropic,
     ];
   }
-  if (requestedModel.startsWith('minimax/')) {
+  if (isMinimaxModel(requestedModel)) {
     return ['minimax/fp8']; // do not prefer minimax/highspeed
   }
   if (isMistralModel(requestedModel)) {
@@ -222,7 +255,7 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
 
 function applyPreferredProvider(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest
+  requestToMutate: OpenRouterChatCompletionRequest | GatewayResponsesRequest
 ) {
   const preferredProviderOrder = getPreferredProviderOrder(requestedModel);
   if (preferredProviderOrder.length === 0) {
@@ -241,29 +274,31 @@ function applyPreferredProvider(
 export function applyProviderSpecificLogic(
   provider: Provider,
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
+  requestToMutate: GatewayRequest,
   extraHeaders: Record<string, string>,
   userByok: BYOKResult[] | null
 ) {
   const kiloFreeModel = kiloFreeModels.find(m => m.public_id === requestedModel);
   if (kiloFreeModel) {
-    requestToMutate.model = kiloFreeModel.internal_id;
+    requestToMutate.body.model = kiloFreeModel.internal_id;
     if (kiloFreeModel.inference_provider) {
-      if (requestToMutate.provider) {
-        requestToMutate.provider.only = [kiloFreeModel.inference_provider];
+      if (requestToMutate.body.provider) {
+        requestToMutate.body.provider.only = [kiloFreeModel.inference_provider];
       } else {
-        requestToMutate.provider = { only: [kiloFreeModel.inference_provider] };
+        requestToMutate.body.provider = { only: [kiloFreeModel.inference_provider] };
       }
     }
   }
 
   if (isAnthropicModel(requestedModel)) {
-    applyAnthropicModelSettings(requestedModel, requestToMutate, extraHeaders);
+    applyAnthropicModelSettings(requestToMutate, extraHeaders);
   }
 
-  applyToolChoiceSetting(requestedModel, requestToMutate);
+  if (requestToMutate.kind === 'chat_completions') {
+    applyToolChoiceSetting(requestedModel, requestToMutate.body);
+  }
 
-  applyPreferredProvider(requestedModel, requestToMutate);
+  applyPreferredProvider(requestedModel, requestToMutate.body);
 
   if (isXaiModel(requestedModel)) {
     applyXaiModelSettings(requestedModel, requestToMutate, extraHeaders);
@@ -296,7 +331,7 @@ export function applyProviderSpecificLogic(
   }
 
   if (provider.id === 'vercel') {
-    applyVercelSettings(requestedModel, requestToMutate, extraHeaders, userByok);
+    applyVercelSettings(requestedModel, requestToMutate, userByok);
   }
 }
 
@@ -312,7 +347,7 @@ export async function openRouterRequest({
   path: string;
   search: string;
   method: string;
-  body: OpenRouterChatCompletionRequest;
+  body: OpenRouterChatCompletionRequest | GatewayResponsesRequest;
   extraHeaders: Record<string, string>;
   provider: Provider;
   signal?: AbortSignal;

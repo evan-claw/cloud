@@ -1,5 +1,5 @@
 import type { KiloClawEnv } from '../../types';
-import type { PersistedState, MachineSize } from '../../schemas/instance-config';
+import type { GoogleCredentials, PersistedState, MachineSize } from '../../schemas/instance-config';
 import type { FlyClientConfig } from '../../fly/client';
 
 /**
@@ -48,6 +48,7 @@ export type InstanceMutableState = {
   kilocodeApiKeyExpiresAt: PersistedState['kilocodeApiKeyExpiresAt'];
   kilocodeDefaultModel: PersistedState['kilocodeDefaultModel'];
   channels: PersistedState['channels'];
+  googleCredentials: GoogleCredentials | null;
   provisionedAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;

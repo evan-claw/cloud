@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { generateBaseConfig, writeBaseConfig, MAX_CONFIG_BACKUPS } from './config-writer';
+import {
+  backupConfigFile,
+  generateBaseConfig,
+  writeBaseConfig,
+  MAX_CONFIG_BACKUPS,
+} from './config-writer';
 
 /** Minimal config that `openclaw onboard` would produce. */
 const ONBOARD_CONFIG = JSON.stringify({
@@ -33,6 +38,7 @@ function fakeDeps(existingConfig?: string) {
       }),
       copyFileSync: vi.fn((src: string, dest: string) => {
         copied.push({ src, dest });
+        dirEntries = [...dirEntries, dest.split('/').pop() ?? dest];
       }),
       readdirSync: vi.fn(() => dirEntries),
       unlinkSync: vi.fn((filePath: string) => {
@@ -320,6 +326,80 @@ describe('generateBaseConfig', () => {
 
     expect(config.gateway.auth).toBeUndefined();
   });
+
+  it('does not set allowInsecureAuth when AUTO_APPROVE_DEVICES is not true', () => {
+    const { deps } = fakeDeps();
+    const env = { ...minimalEnv() };
+    delete env.AUTO_APPROVE_DEVICES;
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.gateway.controlUi?.allowInsecureAuth).toBeUndefined();
+  });
+
+  it('does not set allowInsecureAuth when AUTO_APPROVE_DEVICES is false', () => {
+    const { deps } = fakeDeps();
+    const env = { ...minimalEnv(), AUTO_APPROVE_DEVICES: 'false' };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.gateway.controlUi?.allowInsecureAuth).toBeUndefined();
+  });
+
+  it('configures Telegram allowFrom from explicit comma-separated list', () => {
+    const { deps } = fakeDeps();
+    const env = {
+      ...minimalEnv(),
+      TELEGRAM_BOT_TOKEN: 'tg-token',
+      TELEGRAM_DM_ALLOW_FROM: 'user1,user2',
+    };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.channels.telegram.allowFrom).toEqual(['user1', 'user2']);
+    expect(config.channels.telegram.dmPolicy).toBe('pairing');
+  });
+});
+
+describe('backupConfigFile', () => {
+  it('backs up existing config with timestamp', () => {
+    const existing = JSON.stringify({ old: true });
+    const { deps, copied } = fakeDeps(existing);
+
+    backupConfigFile('/tmp/openclaw.json', deps);
+
+    expect(copied).toHaveLength(1);
+    expect(copied[0].src).toBe('/tmp/openclaw.json');
+    expect(copied[0].dest).toMatch(/\/tmp\/openclaw\.json\.bak\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-/);
+  });
+
+  it('prunes old backups beyond MAX_CONFIG_BACKUPS', () => {
+    const existing = JSON.stringify({ old: true });
+    const harness = fakeDeps(existing);
+    harness.setDirEntries([
+      'openclaw.json.bak.2026-02-20T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-21T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-22T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-23T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-24T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-25T10-00-00.000Z',
+      'openclaw.json.bak.2026-02-26T10-00-00.000Z',
+    ]);
+
+    backupConfigFile('/tmp/openclaw.json', harness.deps);
+
+    expect(harness.unlinked).toHaveLength(8 - MAX_CONFIG_BACKUPS);
+    expect(harness.unlinked[0]).toBe('/tmp/openclaw.json.bak.2026-02-20T10-00-00.000Z');
+    expect(harness.unlinked[1]).toBe('/tmp/openclaw.json.bak.2026-02-21T10-00-00.000Z');
+  });
+
+  it('continues if backup pruning fails', () => {
+    const existing = JSON.stringify({ old: true });
+    const harness = fakeDeps(existing);
+    harness.deps.readdirSync.mockImplementation(() => {
+      throw new Error('permission denied');
+    });
+
+    expect(() => backupConfigFile('/tmp/openclaw.json', harness.deps)).not.toThrow();
+    expect(harness.copied).toHaveLength(1);
+  });
 });
 
 describe('writeBaseConfig', () => {
@@ -413,7 +493,7 @@ describe('writeBaseConfig', () => {
 
     writeBaseConfig(minimalEnv(), '/tmp/openclaw.json', harness.deps);
 
-    expect(harness.unlinked).toHaveLength(7 - MAX_CONFIG_BACKUPS);
+    expect(harness.unlinked).toHaveLength(8 - MAX_CONFIG_BACKUPS);
     expect(harness.unlinked[0]).toBe('/tmp/openclaw.json.bak.2026-02-20T10-00-00.000Z');
     expect(harness.unlinked[1]).toBe('/tmp/openclaw.json.bak.2026-02-21T10-00-00.000Z');
   });

@@ -57,6 +57,32 @@ describe('organizations subscription trpc router', () => {
     });
   });
 
+  describe('getSubscriptionStripeUrl procedure', () => {
+    it('should throw UNAUTHORIZED error for non-owner members', async () => {
+      const caller = await createCallerForUser(memberUser.id);
+
+      await expect(
+        caller.organizations.subscription.getSubscriptionStripeUrl({
+          organizationId: testOrganization.id,
+          seats: 1,
+          cancelUrl: 'https://example.com',
+        })
+      ).rejects.toThrow('You do not have the required organizational role to access this feature');
+    });
+
+    it('should throw UNAUTHORIZED error for non-member users', async () => {
+      const caller = await createCallerForUser(_nonMemberUser.id);
+
+      await expect(
+        caller.organizations.subscription.getSubscriptionStripeUrl({
+          organizationId: testOrganization.id,
+          seats: 1,
+          cancelUrl: 'https://example.com',
+        })
+      ).rejects.toThrow('You do not have access to this organization');
+    });
+  });
+
   describe('cancel procedure', () => {
     it('should throw UNAUTHORIZED error for non-owner users', async () => {
       const caller = await createCallerForUser(memberUser.id);

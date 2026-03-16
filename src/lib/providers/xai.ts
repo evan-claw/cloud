@@ -3,6 +3,7 @@ import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import type {
   MessageWithReasoning,
   OpenRouterChatCompletionRequest,
+  GatewayRequest,
 } from '@/lib/providers/openrouter/types';
 
 export const grok_code_fast_1_optimized_free_model: KiloFreeModel = {
@@ -12,7 +13,7 @@ export const grok_code_fast_1_optimized_free_model: KiloFreeModel = {
     'An optimized variant of Grok Code Fast 1, provided free of charge for a limited time. **Note:** All prompts and completions for this model are logged by the provider and may be used to improve their services.',
   context_length: 256_000,
   max_completion_tokens: 10_000,
-  is_enabled: true,
+  status: 'public',
   flags: ['reasoning', 'prompt_cache'],
   gateway: 'martian',
   internal_id: 'x-ai/grok-code-fast-1:optimized',
@@ -45,14 +46,14 @@ export function convertReasoningDetailsToReasoningContent(
 
 export function applyXaiModelSettings(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
+  requestToMutate: GatewayRequest,
   extraHeaders: Record<string, string>
 ) {
   if (requestedModel === grok_code_fast_1_optimized_free_model.public_id) {
-    delete requestToMutate.reasoning;
+    delete requestToMutate.body.reasoning;
   }
 
   // https://kilo-code.slack.com/archives/C09922UFQHF/p1767968746782459
-  extraHeaders['x-grok-conv-id'] = requestToMutate.prompt_cache_key || crypto.randomUUID();
+  extraHeaders['x-grok-conv-id'] = requestToMutate.body.prompt_cache_key || crypto.randomUUID();
   extraHeaders['x-grok-req-id'] = crypto.randomUUID();
 }

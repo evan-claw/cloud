@@ -1471,6 +1471,7 @@ describe('kiloPassRouter', () => {
               kiloUserId: user.id,
               tier: 'tier_49',
               cadence: 'yearly',
+              rewardful: 'false',
             },
           },
           metadata: {

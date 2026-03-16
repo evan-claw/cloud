@@ -78,12 +78,12 @@ export function createMayorTools(client: MayorGastownClient) {
     gt_list_beads: tool({
       description:
         'List beads (work items) in a specific rig. ' +
-        'Optionally filter by status (open, in_progress, closed, failed) or type (issue, message, escalation, merge_request). ' +
+        'Optionally filter by status (open, in_progress, in_review, closed, failed) or type (issue, message, escalation, merge_request). ' +
         'Use this to check what work exists in a rig, what is in progress, and what has been completed.',
       args: {
         rig_id: tool.schema.string().describe('The UUID of the rig to list beads from'),
         status: tool.schema
-          .enum(['open', 'in_progress', 'closed', 'failed'])
+          .enum(['open', 'in_progress', 'in_review', 'closed', 'failed'])
           .describe('Filter by bead status')
           .optional(),
         type: tool.schema
@@ -169,6 +169,14 @@ export function createMayorTools(client: MayorGastownClient) {
               'that need ordering, which causes merge conflicts and failures.'
           )
           .optional(),
+        staged: tool.schema
+          .boolean()
+          .describe(
+            'If true, creates the convoy plan without dispatching agents. ' +
+              'The user can review and edit before calling gt_convoy_start to begin execution. ' +
+              'Default: false (dispatch immediately).'
+          )
+          .optional(),
       },
       async execute(args) {
         const result = await client.slingBatch({
@@ -177,21 +185,30 @@ export function createMayorTools(client: MayorGastownClient) {
           tasks: args.tasks,
           merge_mode: args.merge_mode,
           parallel: args.parallel,
+          staged: args.staged,
         });
 
         const beadLines = result.beads.map(
-          (b: { bead: { title: string }; agent: { name: string; id: string } }, i: number) =>
-            `  ${i + 1}. "${b.bead.title}" → ${b.agent.name} (${b.agent.id})`
+          (
+            b: { bead: { title: string }; agent: { name: string; id: string } | null },
+            i: number
+          ) =>
+            b.agent
+              ? `  ${i + 1}. "${b.bead.title}" → ${b.agent.name} (${b.agent.id})`
+              : `  ${i + 1}. "${b.bead.title}" (unassigned, pending gt_convoy_start)`
         );
         const mode = args.merge_mode ?? 'review-then-land';
+        const staged = result.convoy.staged;
         return [
-          `Convoy created: "${result.convoy.title}" (${result.convoy.id})`,
+          `Convoy ${staged ? 'staged' : 'created'}: "${result.convoy.title}" (${result.convoy.id})`,
           `Merge mode: ${mode}`,
           `Tracking ${result.convoy.total_beads} beads:`,
           ...beadLines,
-          mode === 'review-then-land'
-            ? `Beads will be reviewed and merged into the convoy feature branch. A final PR/merge to main occurs when all beads are done.`
-            : `Each bead will go through the full review + merge/PR cycle independently.`,
+          staged
+            ? `Convoy is staged — agents have NOT been dispatched. Call gt_convoy_start with convoy_id "${result.convoy.id}" when ready to begin execution.`
+            : mode === 'review-then-land'
+              ? `Beads will be reviewed and merged into the convoy feature branch. A final PR/merge to main occurs when all beads are done.`
+              : `Each bead will go through the full review + merge/PR cycle independently.`,
         ].join('\n');
       },
     }),
@@ -223,6 +240,21 @@ export function createMayorTools(client: MayorGastownClient) {
       },
     }),
 
+    gt_convoy_start: tool({
+      description:
+        'Start a staged convoy. Transitions the convoy from staged (planned but not executing) ' +
+        'to active: hooks agents to all tracked beads and begins dispatch. ' +
+        'Call this when the user approves a staged plan and says to start it.',
+      args: {
+        convoy_id: tool.schema.string().describe('The UUID of the staged convoy to start'),
+      },
+      async execute(args) {
+        const result = await client.startConvoy(args.convoy_id);
+        const beadCount = result.beads?.length ?? 0;
+        return `Convoy started. ${beadCount} bead(s) dispatched to agents.`;
+      },
+    }),
+
     gt_mail_send: tool({
       description:
         'Send a mail message to an agent in any rig. ' +
@@ -242,6 +274,119 @@ export function createMayorTools(client: MayorGastownClient) {
           body: args.body,
         });
         return `Mail sent to agent ${args.to_agent_id} in rig ${args.rig_id}.`;
+      },
+    }),
+
+    gt_bead_update: tool({
+      description: "Edit a bead's status, title, body, priority, or labels.",
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the bead belongs to'),
+        bead_id: tool.schema.string().describe('The UUID of the bead to update'),
+        title: tool.schema.string().describe('New title for the bead').optional(),
+        body: tool.schema.string().describe('New body/description for the bead').optional(),
+        status: tool.schema
+          .enum(['open', 'in_progress', 'in_review', 'closed', 'failed'])
+          .describe('New status for the bead')
+          .optional(),
+        priority: tool.schema
+          .enum(['low', 'medium', 'high', 'critical'])
+          .describe('New priority for the bead')
+          .optional(),
+        labels: tool.schema
+          .array(tool.schema.string())
+          .describe('Replacement labels array for the bead')
+          .optional(),
+      },
+      async execute(args) {
+        const bead = await client.updateBead(args.rig_id, args.bead_id, {
+          title: args.title,
+          body: args.body,
+          status: args.status,
+          priority: args.priority,
+          labels: args.labels,
+        });
+        return `Bead ${bead.bead_id} updated. Status: ${bead.status}, Priority: ${bead.priority}, Title: "${bead.title}".`;
+      },
+    }),
+
+    gt_bead_reassign: tool({
+      description: 'Reassign a bead to a different agent.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the bead belongs to'),
+        bead_id: tool.schema.string().describe('The UUID of the bead to reassign'),
+        agent_id: tool.schema.string().describe('The UUID of the agent to assign the bead to'),
+      },
+      async execute(args) {
+        const bead = await client.reassignBead(args.rig_id, args.bead_id, args.agent_id);
+        return `Bead ${bead.bead_id} reassigned to agent ${args.agent_id}.`;
+      },
+    }),
+
+    gt_bead_delete: tool({
+      description: 'Delete a bead. Use with caution — this is irreversible.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the bead belongs to'),
+        bead_id: tool.schema.string().describe('The UUID of the bead to delete'),
+      },
+      async execute(args) {
+        await client.deleteBead(args.rig_id, args.bead_id);
+        return `Bead ${args.bead_id} deleted.`;
+      },
+    }),
+
+    gt_agent_reset: tool({
+      description: 'Force-reset an agent to idle, unhooking from any bead.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the agent belongs to'),
+        agent_id: tool.schema.string().describe('The UUID of the agent to reset'),
+      },
+      async execute(args) {
+        await client.resetAgent(args.rig_id, args.agent_id);
+        return `Agent ${args.agent_id} reset to idle.`;
+      },
+    }),
+
+    gt_convoy_close: tool({
+      description: 'Force-close a convoy and optionally its tracked beads.',
+      args: {
+        convoy_id: tool.schema.string().describe('The UUID of the convoy to force-close'),
+      },
+      async execute(args) {
+        await client.closeConvoy(args.convoy_id);
+        return `Convoy ${args.convoy_id} force-closed.`;
+      },
+    }),
+
+    gt_convoy_update: tool({
+      description: 'Edit convoy metadata (merge_mode, feature_branch).',
+      args: {
+        convoy_id: tool.schema.string().describe('The UUID of the convoy to update'),
+        merge_mode: tool.schema
+          .enum(['review-then-land', 'review-and-merge'])
+          .describe('New merge mode for the convoy')
+          .optional(),
+        feature_branch: tool.schema
+          .string()
+          .describe('New feature branch name for the convoy')
+          .optional(),
+      },
+      async execute(args) {
+        await client.updateConvoy(args.convoy_id, {
+          merge_mode: args.merge_mode,
+          feature_branch: args.feature_branch,
+        });
+        return `Convoy ${args.convoy_id} updated.`;
+      },
+    }),
+
+    gt_escalation_acknowledge: tool({
+      description: 'Acknowledge an escalation.',
+      args: {
+        escalation_id: tool.schema.string().describe('The UUID of the escalation to acknowledge'),
+      },
+      async execute(args) {
+        await client.acknowledgeEscalation(args.escalation_id);
+        return `Escalation ${args.escalation_id} acknowledged.`;
       },
     }),
   };

@@ -1,0 +1,5 @@
+if command -v git-lfs >/dev/null 2>&1; then
+  git lfs post-checkout "$@"
+else
+  printf >&2 "\nWarning: 'git-lfs' not found. LFS files may not be up to date.\n\n"
+fi

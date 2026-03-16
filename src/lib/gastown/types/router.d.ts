@@ -112,8 +112,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
           last_activity_at: string | null;
           checkpoint?: unknown;
           created_at: string;
-          agent_status_message?: string | null;
-          agent_status_updated_at?: string | null;
+          agent_status_message: string | null;
+          agent_status_updated_at: string | null;
         }[];
         beads: {
           bead_id: string;
@@ -125,7 +125,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
             | 'merge_request'
             | 'message'
             | 'molecule';
-          status: 'closed' | 'failed' | 'in_progress' | 'open';
+          status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
           title: string;
           body: string | null;
           rig_id: string | null;
@@ -152,7 +152,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
     listBeads: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         rigId: string;
-        status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
+        status?: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open' | undefined;
       };
       output: {
         bead_id: string;
@@ -164,7 +164,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
           | 'merge_request'
           | 'message'
           | 'molecule';
-        status: 'closed' | 'failed' | 'in_progress' | 'open';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
         title: string;
         body: string | null;
         rig_id: string | null;
@@ -188,6 +188,45 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       output: void;
       meta: object;
     }>;
+    updateBead: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        rigId: string;
+        beadId: string;
+        title?: string | undefined;
+        body?: string | null | undefined;
+        status?: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open' | undefined;
+        priority?: 'critical' | 'high' | 'low' | 'medium' | undefined;
+        labels?: string[] | undefined;
+        metadata?: Record<string, unknown> | undefined;
+        rig_id?: string | null | undefined;
+        parent_bead_id?: string | null | undefined;
+      };
+      output: {
+        bead_id: string;
+        type:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+        title: string;
+        body: string | null;
+        rig_id: string | null;
+        parent_bead_id: string | null;
+        assignee_agent_bead_id: string | null;
+        priority: 'critical' | 'high' | 'low' | 'medium';
+        labels: string[];
+        metadata: Record<string, unknown>;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+        closed_at: string | null;
+      };
+      meta: object;
+    }>;
     listAgents: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         rigId: string;
@@ -204,8 +243,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         last_activity_at: string | null;
         checkpoint?: unknown;
         created_at: string;
-        agent_status_message?: string | null;
-        agent_status_updated_at?: string | null;
+        agent_status_message: string | null;
+        agent_status_updated_at: string | null;
       }[];
       meta: object;
     }>;
@@ -235,7 +274,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
             | 'merge_request'
             | 'message'
             | 'molecule';
-          status: 'closed' | 'failed' | 'in_progress' | 'open';
+          status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
           title: string;
           body: string | null;
           rig_id: string | null;
@@ -261,8 +300,8 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
           last_activity_at: string | null;
           checkpoint?: unknown;
           created_at: string;
-          agent_status_message?: string | null;
-          agent_status_updated_at?: string | null;
+          agent_status_message: string | null;
+          agent_status_updated_at: string | null;
         };
       };
       meta: object;
@@ -316,6 +355,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         beads: {
           open: number;
           inProgress: number;
+          inReview: number;
           failed: number;
           triageRequests: number;
         };
@@ -411,6 +451,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
               sleep_after_minutes?: number | undefined;
             }
           | undefined;
+        staged_convoys_default: boolean;
       };
       meta: object;
     }>;
@@ -447,6 +488,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
                 sleep_after_minutes?: number | undefined;
               }
             | undefined;
+          staged_convoys_default?: boolean | undefined;
         };
       };
       output: {
@@ -477,7 +519,15 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
               sleep_after_minutes?: number | undefined;
             }
           | undefined;
+        staged_convoys_default: boolean;
       };
+      meta: object;
+    }>;
+    refreshContainerToken: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+      };
+      output: void;
       meta: object;
     }>;
     getBeadEvents: import('@trpc/server').TRPCQueryProcedure<{
@@ -529,6 +579,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         id: string;
         title: string;
         status: 'active' | 'landed';
+        staged: boolean;
         total_beads: number;
         closed_beads: number;
         created_by: string | null;
@@ -550,7 +601,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       }[];
       meta: object;
     }>;
-    closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+    getConvoy: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         townId: string;
         convoyId: string;
@@ -559,6 +610,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
         id: string;
         title: string;
         status: 'active' | 'landed';
+        staged: boolean;
         total_beads: number;
         closed_beads: number;
         created_by: string | null;
@@ -577,6 +629,297 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
           bead_id: string;
           depends_on_bead_id: string;
         }[];
+      } | null;
+      meta: object;
+    }>;
+    closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        convoyId: string;
+      };
+      output: {
+        id: string;
+        title: string;
+        status: 'active' | 'landed';
+        staged: boolean;
+        total_beads: number;
+        closed_beads: number;
+        created_by: string | null;
+        created_at: string;
+        landed_at: string | null;
+        feature_branch: string | null;
+        merge_mode: string | null;
+        beads: {
+          bead_id: string;
+          title: string;
+          status: string;
+          rig_id: string | null;
+          assignee_agent_name: string | null;
+        }[];
+        dependency_edges: {
+          bead_id: string;
+          depends_on_bead_id: string;
+        }[];
+      } | null;
+      meta: object;
+    }>;
+    startConvoy: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        convoyId: string;
+      };
+      output: {
+        id: string;
+        title: string;
+        status: 'active' | 'landed';
+        staged: boolean;
+        total_beads: number;
+        closed_beads: number;
+        created_by: string | null;
+        created_at: string;
+        landed_at: string | null;
+        feature_branch: string | null;
+        merge_mode: string | null;
+        beads: {
+          bead_id: string;
+          title: string;
+          status: string;
+          rig_id: string | null;
+          assignee_agent_name: string | null;
+        }[];
+        dependency_edges: {
+          bead_id: string;
+          depends_on_bead_id: string;
+        }[];
+      } | null;
+      meta: object;
+    }>;
+    adminListBeads: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+        status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
+        type?:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule'
+          | undefined;
+        limit?: number | undefined;
+      };
+      output: {
+        bead_id: string;
+        type:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+        title: string;
+        body: string | null;
+        rig_id: string | null;
+        parent_bead_id: string | null;
+        assignee_agent_bead_id: string | null;
+        priority: 'critical' | 'high' | 'low' | 'medium';
+        labels: string[];
+        metadata: Record<string, unknown>;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+        closed_at: string | null;
+      }[];
+      meta: object;
+    }>;
+    adminListAgents: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+      };
+      output: {
+        id: string;
+        rig_id: string | null;
+        role: string;
+        name: string;
+        identity: string;
+        status: string;
+        current_hook_bead_id: string | null;
+        dispatch_attempts: number;
+        last_activity_at: string | null;
+        checkpoint?: unknown;
+        created_at: string;
+        agent_status_message: string | null;
+        agent_status_updated_at: string | null;
+      }[];
+      meta: object;
+    }>;
+    adminForceRestartContainer: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+      };
+      output: void;
+      meta: object;
+    }>;
+    adminForceResetAgent: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        agentId: string;
+      };
+      output: void;
+      meta: object;
+    }>;
+    adminForceCloseBead: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        beadId: string;
+      };
+      output: {
+        bead_id: string;
+        type:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+        title: string;
+        body: string | null;
+        rig_id: string | null;
+        parent_bead_id: string | null;
+        assignee_agent_bead_id: string | null;
+        priority: 'critical' | 'high' | 'low' | 'medium';
+        labels: string[];
+        metadata: Record<string, unknown>;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+        closed_at: string | null;
+      };
+      meta: object;
+    }>;
+    adminForceFailBead: import('@trpc/server').TRPCMutationProcedure<{
+      input: {
+        townId: string;
+        beadId: string;
+      };
+      output: {
+        bead_id: string;
+        type:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+        title: string;
+        body: string | null;
+        rig_id: string | null;
+        parent_bead_id: string | null;
+        assignee_agent_bead_id: string | null;
+        priority: 'critical' | 'high' | 'low' | 'medium';
+        labels: string[];
+        metadata: Record<string, unknown>;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+        closed_at: string | null;
+      };
+      meta: object;
+    }>;
+    adminGetAlarmStatus: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+      };
+      output: {
+        alarm: {
+          nextFireAt: string | null;
+          intervalMs: number;
+          intervalLabel: string;
+        };
+        agents: {
+          working: number;
+          idle: number;
+          stalled: number;
+          dead: number;
+          total: number;
+        };
+        beads: {
+          open: number;
+          inProgress: number;
+          inReview: number;
+          failed: number;
+          triageRequests: number;
+        };
+        patrol: {
+          guppWarnings: number;
+          guppEscalations: number;
+          stalledAgents: number;
+          orphanedHooks: number;
+        };
+        recentEvents: {
+          time: string;
+          type: string;
+          message: string;
+        }[];
+      };
+      meta: object;
+    }>;
+    adminGetTownEvents: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+        beadId?: string | undefined;
+        since?: string | undefined;
+        limit?: number | undefined;
+      };
+      output: {
+        bead_event_id: string;
+        bead_id: string;
+        agent_id: string | null;
+        event_type: string;
+        old_value: string | null;
+        new_value: string | null;
+        metadata: Record<string, unknown>;
+        created_at: string;
+        rig_id?: string | undefined;
+        rig_name?: string | undefined;
+      }[];
+      meta: object;
+    }>;
+    adminGetBead: import('@trpc/server').TRPCQueryProcedure<{
+      input: {
+        townId: string;
+        beadId: string;
+      };
+      output: {
+        bead_id: string;
+        type:
+          | 'agent'
+          | 'convoy'
+          | 'escalation'
+          | 'issue'
+          | 'merge_request'
+          | 'message'
+          | 'molecule';
+        status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+        title: string;
+        body: string | null;
+        rig_id: string | null;
+        parent_bead_id: string | null;
+        assignee_agent_bead_id: string | null;
+        priority: 'critical' | 'high' | 'low' | 'medium';
+        labels: string[];
+        metadata: Record<string, unknown>;
+        created_by: string | null;
+        created_at: string;
+        updated_at: string;
+        closed_at: string | null;
       } | null;
       meta: object;
     }>;
@@ -710,8 +1053,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
               last_activity_at: string | null;
               checkpoint?: unknown;
               created_at: string;
-              agent_status_message?: string | null;
-              agent_status_updated_at?: string | null;
+              agent_status_message: string | null;
+              agent_status_updated_at: string | null;
             }[];
             beads: {
               bead_id: string;
@@ -723,7 +1066,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
                 | 'merge_request'
                 | 'message'
                 | 'molecule';
-              status: 'closed' | 'failed' | 'in_progress' | 'open';
+              status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
               title: string;
               body: string | null;
               rig_id: string | null;
@@ -750,7 +1093,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
         listBeads: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             rigId: string;
-            status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
+            status?: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open' | undefined;
           };
           output: {
             bead_id: string;
@@ -762,7 +1105,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
               | 'merge_request'
               | 'message'
               | 'molecule';
-            status: 'closed' | 'failed' | 'in_progress' | 'open';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
             title: string;
             body: string | null;
             rig_id: string | null;
@@ -786,6 +1129,45 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           output: void;
           meta: object;
         }>;
+        updateBead: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            rigId: string;
+            beadId: string;
+            title?: string | undefined;
+            body?: string | null | undefined;
+            status?: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open' | undefined;
+            priority?: 'critical' | 'high' | 'low' | 'medium' | undefined;
+            labels?: string[] | undefined;
+            metadata?: Record<string, unknown> | undefined;
+            rig_id?: string | null | undefined;
+            parent_bead_id?: string | null | undefined;
+          };
+          output: {
+            bead_id: string;
+            type:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+            title: string;
+            body: string | null;
+            rig_id: string | null;
+            parent_bead_id: string | null;
+            assignee_agent_bead_id: string | null;
+            priority: 'critical' | 'high' | 'low' | 'medium';
+            labels: string[];
+            metadata: Record<string, unknown>;
+            created_by: string | null;
+            created_at: string;
+            updated_at: string;
+            closed_at: string | null;
+          };
+          meta: object;
+        }>;
         listAgents: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             rigId: string;
@@ -802,8 +1184,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             last_activity_at: string | null;
             checkpoint?: unknown;
             created_at: string;
-            agent_status_message?: string | null;
-            agent_status_updated_at?: string | null;
+            agent_status_message: string | null;
+            agent_status_updated_at: string | null;
           }[];
           meta: object;
         }>;
@@ -833,7 +1215,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
                 | 'merge_request'
                 | 'message'
                 | 'molecule';
-              status: 'closed' | 'failed' | 'in_progress' | 'open';
+              status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
               title: string;
               body: string | null;
               rig_id: string | null;
@@ -859,8 +1241,8 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
               last_activity_at: string | null;
               checkpoint?: unknown;
               created_at: string;
-              agent_status_message?: string | null;
-              agent_status_updated_at?: string | null;
+              agent_status_message: string | null;
+              agent_status_updated_at: string | null;
             };
           };
           meta: object;
@@ -914,6 +1296,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             beads: {
               open: number;
               inProgress: number;
+              inReview: number;
               failed: number;
               triageRequests: number;
             };
@@ -1009,6 +1392,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
                   sleep_after_minutes?: number | undefined;
                 }
               | undefined;
+            staged_convoys_default: boolean;
           };
           meta: object;
         }>;
@@ -1045,6 +1429,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
                     sleep_after_minutes?: number | undefined;
                   }
                 | undefined;
+              staged_convoys_default?: boolean | undefined;
             };
           };
           output: {
@@ -1075,7 +1460,15 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
                   sleep_after_minutes?: number | undefined;
                 }
               | undefined;
+            staged_convoys_default: boolean;
           };
+          meta: object;
+        }>;
+        refreshContainerToken: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+          };
+          output: void;
           meta: object;
         }>;
         getBeadEvents: import('@trpc/server').TRPCQueryProcedure<{
@@ -1127,6 +1520,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             id: string;
             title: string;
             status: 'active' | 'landed';
+            staged: boolean;
             total_beads: number;
             closed_beads: number;
             created_by: string | null;
@@ -1148,7 +1542,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
           }[];
           meta: object;
         }>;
-        closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+        getConvoy: import('@trpc/server').TRPCQueryProcedure<{
           input: {
             townId: string;
             convoyId: string;
@@ -1157,6 +1551,7 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
             id: string;
             title: string;
             status: 'active' | 'landed';
+            staged: boolean;
             total_beads: number;
             closed_beads: number;
             created_by: string | null;
@@ -1175,6 +1570,297 @@ export declare const wrappedGastownRouter: import('@trpc/server').TRPCBuiltRoute
               bead_id: string;
               depends_on_bead_id: string;
             }[];
+          } | null;
+          meta: object;
+        }>;
+        closeConvoy: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            convoyId: string;
+          };
+          output: {
+            id: string;
+            title: string;
+            status: 'active' | 'landed';
+            staged: boolean;
+            total_beads: number;
+            closed_beads: number;
+            created_by: string | null;
+            created_at: string;
+            landed_at: string | null;
+            feature_branch: string | null;
+            merge_mode: string | null;
+            beads: {
+              bead_id: string;
+              title: string;
+              status: string;
+              rig_id: string | null;
+              assignee_agent_name: string | null;
+            }[];
+            dependency_edges: {
+              bead_id: string;
+              depends_on_bead_id: string;
+            }[];
+          } | null;
+          meta: object;
+        }>;
+        startConvoy: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            convoyId: string;
+          };
+          output: {
+            id: string;
+            title: string;
+            status: 'active' | 'landed';
+            staged: boolean;
+            total_beads: number;
+            closed_beads: number;
+            created_by: string | null;
+            created_at: string;
+            landed_at: string | null;
+            feature_branch: string | null;
+            merge_mode: string | null;
+            beads: {
+              bead_id: string;
+              title: string;
+              status: string;
+              rig_id: string | null;
+              assignee_agent_name: string | null;
+            }[];
+            dependency_edges: {
+              bead_id: string;
+              depends_on_bead_id: string;
+            }[];
+          } | null;
+          meta: object;
+        }>;
+        adminListBeads: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+            status?: 'closed' | 'failed' | 'in_progress' | 'open' | undefined;
+            type?:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule'
+              | undefined;
+            limit?: number | undefined;
+          };
+          output: {
+            bead_id: string;
+            type:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+            title: string;
+            body: string | null;
+            rig_id: string | null;
+            parent_bead_id: string | null;
+            assignee_agent_bead_id: string | null;
+            priority: 'critical' | 'high' | 'low' | 'medium';
+            labels: string[];
+            metadata: Record<string, unknown>;
+            created_by: string | null;
+            created_at: string;
+            updated_at: string;
+            closed_at: string | null;
+          }[];
+          meta: object;
+        }>;
+        adminListAgents: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+          };
+          output: {
+            id: string;
+            rig_id: string | null;
+            role: string;
+            name: string;
+            identity: string;
+            status: string;
+            current_hook_bead_id: string | null;
+            dispatch_attempts: number;
+            last_activity_at: string | null;
+            checkpoint?: unknown;
+            created_at: string;
+            agent_status_message: string | null;
+            agent_status_updated_at: string | null;
+          }[];
+          meta: object;
+        }>;
+        adminForceRestartContainer: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+          };
+          output: void;
+          meta: object;
+        }>;
+        adminForceResetAgent: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            agentId: string;
+          };
+          output: void;
+          meta: object;
+        }>;
+        adminForceCloseBead: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            beadId: string;
+          };
+          output: {
+            bead_id: string;
+            type:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+            title: string;
+            body: string | null;
+            rig_id: string | null;
+            parent_bead_id: string | null;
+            assignee_agent_bead_id: string | null;
+            priority: 'critical' | 'high' | 'low' | 'medium';
+            labels: string[];
+            metadata: Record<string, unknown>;
+            created_by: string | null;
+            created_at: string;
+            updated_at: string;
+            closed_at: string | null;
+          };
+          meta: object;
+        }>;
+        adminForceFailBead: import('@trpc/server').TRPCMutationProcedure<{
+          input: {
+            townId: string;
+            beadId: string;
+          };
+          output: {
+            bead_id: string;
+            type:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+            title: string;
+            body: string | null;
+            rig_id: string | null;
+            parent_bead_id: string | null;
+            assignee_agent_bead_id: string | null;
+            priority: 'critical' | 'high' | 'low' | 'medium';
+            labels: string[];
+            metadata: Record<string, unknown>;
+            created_by: string | null;
+            created_at: string;
+            updated_at: string;
+            closed_at: string | null;
+          };
+          meta: object;
+        }>;
+        adminGetAlarmStatus: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+          };
+          output: {
+            alarm: {
+              nextFireAt: string | null;
+              intervalMs: number;
+              intervalLabel: string;
+            };
+            agents: {
+              working: number;
+              idle: number;
+              stalled: number;
+              dead: number;
+              total: number;
+            };
+            beads: {
+              open: number;
+              inProgress: number;
+              inReview: number;
+              failed: number;
+              triageRequests: number;
+            };
+            patrol: {
+              guppWarnings: number;
+              guppEscalations: number;
+              stalledAgents: number;
+              orphanedHooks: number;
+            };
+            recentEvents: {
+              time: string;
+              type: string;
+              message: string;
+            }[];
+          };
+          meta: object;
+        }>;
+        adminGetTownEvents: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+            beadId?: string | undefined;
+            since?: string | undefined;
+            limit?: number | undefined;
+          };
+          output: {
+            bead_event_id: string;
+            bead_id: string;
+            agent_id: string | null;
+            event_type: string;
+            old_value: string | null;
+            new_value: string | null;
+            metadata: Record<string, unknown>;
+            created_at: string;
+            rig_id?: string | undefined;
+            rig_name?: string | undefined;
+          }[];
+          meta: object;
+        }>;
+        adminGetBead: import('@trpc/server').TRPCQueryProcedure<{
+          input: {
+            townId: string;
+            beadId: string;
+          };
+          output: {
+            bead_id: string;
+            type:
+              | 'agent'
+              | 'convoy'
+              | 'escalation'
+              | 'issue'
+              | 'merge_request'
+              | 'message'
+              | 'molecule';
+            status: 'closed' | 'failed' | 'in_progress' | 'in_review' | 'open';
+            title: string;
+            body: string | null;
+            rig_id: string | null;
+            parent_bead_id: string | null;
+            assignee_agent_bead_id: string | null;
+            priority: 'critical' | 'high' | 'low' | 'medium';
+            labels: string[];
+            metadata: Record<string, unknown>;
+            created_by: string | null;
+            created_at: string;
+            updated_at: string;
+            closed_at: string | null;
           } | null;
           meta: object;
         }>;

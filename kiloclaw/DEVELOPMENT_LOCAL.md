@@ -55,77 +55,74 @@ app as a kind of image registry for all other apps -- in dev, that app is
 1. Accept the Fly.io org invite(s) from your email (there should be two --
    check spam if you only see one).
 2. Verify with `fly orgs list` -- the dev org should appear.
-3. Create an org-scoped token for dev use (personal tokens also have production
-   access):
+3. Log in to the Fly CLI: `fly auth login`
 
-```bash
-fly tokens create -o kilo-dev my-dev-token
-```
-
-Save this token -- you'll need it for `FLY_API_TOKEN` in `.dev.vars`.
+The dev-start script creates and refreshes Fly API tokens automatically -- you
+don't need to manage tokens manually.
 
 ## Quick Start
 
+One-time prerequisites:
+
+1. Link the Vercel project (from monorepo root): `vercel link`
+2. Accept Fly.io org invites and `fly auth login` (see above)
+
+Then, from the `kiloclaw/` directory:
+
 ```bash
-# 1. Install dependencies (run from monorepo root)
-pnpm install
-
-# 2. Copy the example env file (from kiloclaw/)
-cp kiloclaw/.dev.vars.example kiloclaw/.dev.vars
-
-# 3. Edit .dev.vars -- see "Environment Variables" below
-
-# 4. Ensure Next.js has KiloClaw env vars (from monorepo root).
-#    `vercel env pull` includes KILOCLAW_API_URL and
-#    KILOCLAW_INTERNAL_API_SECRET. If you haven't run it yet, see
-#    the root DEVELOPMENT.md for Next.js setup.
-
-# 5. Start the local database (from monorepo root)
-docker compose -f dev/docker-compose.yml up -d
-
-# 6. Run database migrations (from monorepo root)
-pnpm drizzle migrate
-
-# 7. Start the tunnel (separate terminal)
-cloudflared tunnel --url http://localhost:3000
-# Copy the tunnel URL into KILOCODE_API_BASE_URL in .dev.vars
-
-# 8. Start Next.js (separate terminal, from monorepo root)
-pnpm dev
-
-# 9. Start the KiloClaw worker (separate terminal, from kiloclaw/)
-pnpm run dev
+./scripts/dev-start.sh
 ```
 
-Each of the three long-running processes (tunnel, Next.js, worker) needs its
-own terminal tab. The Next.js app must run on port 3000 -- other services
-depend on it.
+The script handles everything: creates `.dev.vars` if missing, pulls Vercel
+env, syncs secrets, validates/refreshes the Fly token, installs dependencies,
+starts the database, runs migrations, starts a Cloudflare tunnel (and captures
+the URL into `.dev.vars`), and launches all three processes.
+
+Open <http://localhost:3000> to use the dashboard.
+
+### Display modes
+
+Control how the three processes are displayed with `--display <mode>`:
+
+| Mode    | Description                                                           |
+| ------- | --------------------------------------------------------------------- |
+| `tabs`  | Separate terminal tabs (default; auto-detects iTerm2 vs Terminal.app) |
+| `split` | Single tab with split panes (requires iTerm2)                         |
+| `tmux`  | tmux session `kiloclaw` (attach with `tmux attach -t kiloclaw`)       |
+
+### Other flags
+
+| Flag                       | Description                                          |
+| -------------------------- | ---------------------------------------------------- |
+| `--has-controller-changes` | Build and push a new Docker image before starting    |
+| `--tunnel-name <name>`     | Use a named Cloudflare tunnel instead of a quick one |
+
+### Script configuration
+
+Save defaults in a config file so you don't need to pass flags every time.
+The script checks two locations (project-local overrides user-global):
+
+| Location                            | Scope                       |
+| ----------------------------------- | --------------------------- |
+| `kiloclaw/scripts/.dev-start.conf`  | Per-worktree (gitignored)   |
+| `~/.config/kiloclaw/dev-start.conf` | Shared across all worktrees |
+
+See `scripts/.dev-start.conf.example` for available options. CLI flags
+override config file values.
 
 ## Tunnel setup
 
-Use Cloudflare Tunnel (recommended) or ngrok to expose your local Next.js:
-
-```bash
-# Cloudflare Tunnel (free, no account needed for quick tunnels)
-cloudflared tunnel --url http://localhost:3000
-
-# Or ngrok
-ngrok http 3000
-```
-
-Copy the tunnel URL and set it in `.dev.vars`:
-
-```
-KILOCODE_API_BASE_URL=https://<your-tunnel>.trycloudflare.com/api/gateway/
-```
+The dev-start script automatically starts a Cloudflare quick tunnel, captures
+its URL, and writes `KILOCODE_API_BASE_URL` into `.dev.vars`. You generally
+don't need to manage this manually.
 
 ### Free vs named tunnels
 
-- **Free quick tunnel**: hostname changes on every restart of `cloudflared`.
-  Update `.dev.vars` and restart the worker when the URL changes.
+- **Free quick tunnel** (default): hostname changes on every restart. The
+  script handles this automatically.
 - **Named tunnel**: preconfigure in the Cloudflare dashboard for a persistent
-  hostname (e.g., `yourname.devclaw.dev`). Avoids updating the URL on each
-  restart.
+  hostname (e.g., `yourname.devclaw.dev`). Use `--tunnel-name <name>` or set
+  `TUNNEL_NAME` and `TUNNEL_HOSTNAME` in your config file.
 
 ### If the tunnel isn't working
 
@@ -136,71 +133,68 @@ The error manifests in OpenClaw as one of:
 
 If you see either, check:
 
-- `cloudflared` (or ngrok) is running
+- `cloudflared` is running (check its terminal tab/window)
 - `KILOCODE_API_BASE_URL` in `.dev.vars` matches the current tunnel URL
 - The KiloClaw worker was restarted after changing `.dev.vars`
 
 ## Environment Variables
 
-There are two env files to configure:
+### `kiloclaw/.dev.vars` (worker secrets)
 
-### 1. `kiloclaw/.dev.vars` (worker secrets)
+The dev-start script creates `.dev.vars` from `.dev.vars.example` on first run
+and automatically manages several values. The table below shows which variables
+are auto-managed and which require manual setup.
 
-Copy `.dev.vars.example` and fill in:
+**Auth:**
 
-**Auth** -- must match the Next.js app's values:
+| Variable               | Description                                                                 | Source  | Auto-managed |
+| ---------------------- | --------------------------------------------------------------------------- | ------- | ------------ |
+| `NEXTAUTH_SECRET`      | JWT signing key. Must match the Next.js app's `NEXTAUTH_SECRET`             | Vercel  | Yes          |
+| `INTERNAL_API_SECRET`  | Platform API key. Must match Next.js `KILOCLAW_INTERNAL_API_SECRET`         | Vercel  | Yes          |
+| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens. Can be any arbitrary value in dev. | Example | No           |
+| `WORKER_ENV`           | Set to `development`                                                        | Example | No           |
 
-| Variable               | Description                                                                 |
-| ---------------------- | --------------------------------------------------------------------------- |
-| `NEXTAUTH_SECRET`      | JWT signing key. Must match the Next.js app's `NEXTAUTH_SECRET`             |
-| `INTERNAL_API_SECRET`  | Platform API key. Must match Next.js `KILOCLAW_INTERNAL_API_SECRET`         |
-| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens. Can be any arbitrary value in dev. |
-| `WORKER_ENV`           | Set to `development`                                                        |
+**Fly.io:**
 
-`NEXTAUTH_SECRET` and `INTERNAL_API_SECRET` must match the Next.js app's
-values. Pull them from Vercel (`vercel env pull` from the monorepo root) or
-get them from a team member.
-
-**Fly.io** -- requires access to the Kilo (dev) org:
-
-| Variable           | Description                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| `FLY_API_TOKEN`    | Fly org token. Generate with `fly tokens create -o kilo-dev my-dev-token`               |
-| `FLY_ORG_SLUG`     | Fly org slug (run `fly orgs list` to find it)                                           |
-| `FLY_REGISTRY_APP` | Shared Fly app that holds Docker images (e.g., `kiloclaw-dev`)                          |
-| `FLY_APP_NAME`     | Legacy fallback app name for existing instances (may be removed in future)              |
-| `FLY_REGION`       | Region priority list, e.g. `us,eu`. Tries US first, falls back to EU, then gives up.    |
-| `FLY_IMAGE_TAG`    | Docker image tag. Set automatically by `scripts/push-dev.sh`, or use `latest` to start. |
-| `FLY_IMAGE_DIGEST` | Docker image digest. Set automatically by `scripts/push-dev.sh`.                        |
-| `OPENCLAW_VERSION` | OpenClaw version in the image. Set automatically by `scripts/push-dev.sh`.              |
+| Variable           | Description                                                                             | Source       | Auto-managed |
+| ------------------ | --------------------------------------------------------------------------------------- | ------------ | ------------ |
+| `FLY_API_TOKEN`    | Fly org token                                                                           | dev-start.sh | Yes          |
+| `FLY_ORG_SLUG`     | Fly org slug (read by script for token creation)                                        | Example      | No           |
+| `FLY_REGISTRY_APP` | Shared Fly app that holds Docker images (e.g., `kiloclaw-dev`)                          | Example      | No           |
+| `FLY_APP_NAME`     | Legacy fallback app name for existing instances (may be removed in future)              | Example      | No           |
+| `FLY_REGION`       | Region priority list, e.g. `us,eu`. Tries US first, falls back to EU, then gives up.    | Example      | No           |
+| `FLY_IMAGE_TAG`    | Docker image tag. Set automatically by `scripts/push-dev.sh`, or use `latest` to start. | push-dev.sh  | Yes          |
+| `FLY_IMAGE_DIGEST` | Docker image digest. Set automatically by `scripts/push-dev.sh`.                        | push-dev.sh  | Yes          |
+| `OPENCLAW_VERSION` | OpenClaw version in the image. Set automatically by `scripts/push-dev.sh`.              | push-dev.sh  | Yes          |
 
 `FLY_IMAGE_TAG`, `FLY_IMAGE_DIGEST`, and `OPENCLAW_VERSION` together control
 what version gets deployed by default for your dev instances. The build script
 auto-updates all three. For initial setup, ask a team member for known-working
 values or use `latest` (if a `latest` tag exists in the registry).
 
-**Tunnel / API** -- so Fly machines can reach your local Next.js:
+**Tunnel / API:**
 
-| Variable                | Description                                                |
-| ----------------------- | ---------------------------------------------------------- |
-| `KILOCODE_API_BASE_URL` | Your tunnel URL + `/api/gateway/` (see tunnel setup above) |
+| Variable                | Description                       | Source       | Auto-managed |
+| ----------------------- | --------------------------------- | ------------ | ------------ |
+| `KILOCODE_API_BASE_URL` | Your tunnel URL + `/api/gateway/` | dev-start.sh | Yes          |
 
-**Encryption** -- for decrypting user-provided secrets:
+**Encryption:**
 
-| Variable                     | Description                                                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). Get the **dev** version from 1Password (engineering vault). Quote the value in `.dev.vars`. |
+| Variable                     | Description                                                                                                        | Source    | Auto-managed |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------- | ------------ |
+| `AGENT_ENV_VARS_PRIVATE_KEY` | RSA private key (PEM). Get the **dev** version from 1Password (engineering vault). Quote the value in `.dev.vars`. | 1Password | No           |
 
 **Other:**
 
-| Variable                   | Description                                       |
-| -------------------------- | ------------------------------------------------- |
-| `OPENCLAW_ALLOWED_ORIGINS` | Comma-separated origins for WebSocket connections |
+| Variable                   | Description                                       | Source  | Auto-managed |
+| -------------------------- | ------------------------------------------------- | ------- | ------------ |
+| `OPENCLAW_ALLOWED_ORIGINS` | Comma-separated origins for WebSocket connections | Example | No           |
 
-### 2. `.env.local` (Next.js, monorepo root)
+### `.env.local` (Next.js, monorepo root)
 
 The Next.js app also needs these two variables to talk to the KiloClaw worker.
-Both are included in `vercel env pull` (see root `DEVELOPMENT.md`):
+Both are included in `vercel env pull` (run automatically by the dev-start
+script):
 
 | Variable                       | Description                                     |
 | ------------------------------ | ----------------------------------------------- |
@@ -211,18 +205,19 @@ Both are included in `vercel env pull` (see root `DEVELOPMENT.md`):
 
 Provisioning requires a Docker image in the Fly registry. For initial setup,
 existing images from a team member are usually sufficient. Run `push-dev.sh`
-only when changing the Docker image or OpenClaw startup behavior.
+when changing the Docker image, OpenClaw startup behavior, or the Node
+controller (e.g., adding new `/_kilo/` routes).
 
 ### Docker authentication
 
 ```bash
-# One-time setup
+# Run before each push — the token expires after 5 minutes
 fly auth docker
 ```
 
-The auth token from `fly auth docker` expires after 5 minutes. If the push
-takes longer (e.g., due to low upload bandwidth), Fly returns an error saying
-it "doesn't recognize the app." Workarounds:
+If the push takes longer than 5 minutes (e.g., due to low upload bandwidth),
+the token expires mid-push and Fly returns an error saying it "doesn't
+recognize the app." Workarounds:
 
 - Push from a machine with decent upload speed
 - Use an org token directly instead of `fly auth docker`
@@ -243,9 +238,82 @@ This will:
    This must match `FLY_REGISTRY_APP` or new instances won't find the image.
 3. Auto-update `FLY_IMAGE_TAG`, `FLY_IMAGE_DIGEST`, and `OPENCLAW_VERSION` in `.dev.vars`
 
+Each push creates a unique tag (`dev-<timestamp>`) and only updates your local
+`.dev.vars`. Other developers' machines are unaffected — they keep running
+whatever `FLY_IMAGE_TAG` is in their own `.dev.vars`.
+
 The image is large, so pushes are slow. After pushing, restart the worker
-(`pnpm run dev`) to pick up the new values, then destroy and re-provision your
-instance from the dashboard.
+(`pnpm run dev`) to pick up the new values, then restart your instance from the
+dashboard. A restart is sufficient to pick up the new image — you only need to
+destroy and re-provision if the volume or Fly app config changed.
+
+### When do I need to push a new image?
+
+The Docker image bundles the **Node controller** (`controller/src/`) and
+**OpenClaw**. The KiloClaw **worker** (`src/`) runs on Cloudflare and does NOT
+require an image push — `pnpm run dev` picks up worker changes immediately.
+
+Push a new image when you change:
+
+- Controller routes or logic (`controller/src/`)
+- The Dockerfile or startup scripts
+- OpenClaw version (pinned in the Dockerfile)
+
+**Symptom of a stale controller image:** the worker calls a new `/_kilo/` route
+that exists in your local controller code but not in the deployed image. The
+request falls through to the proxy, which returns a bare `401 Unauthorized`
+instead of the expected `controller_route_unavailable` code. This surfaces as a
+`GatewayControllerError: Unauthorized` in the worker logs.
+
+## Testing a Custom OpenClaw Build
+
+To test a local OpenClaw fork (e.g., a feature branch with embeddings support),
+use `Dockerfile.local` which installs OpenClaw from a tarball in `openclaw-build/`
+instead of npm.
+
+### 1. Build and pack your fork
+
+```bash
+cd /path/to/openclaw
+pnpm build && npm pack
+```
+
+This produces a file like `openclaw-2026.3.9.tgz` in the repo root.
+
+### 2. Copy the tarball
+
+```bash
+cp /path/to/openclaw/openclaw-*.tgz kiloclaw/openclaw-build/
+```
+
+The `openclaw-build/` directory is git-ignored for `.tgz` files, so tarballs
+won't be committed.
+
+### 3. Build and push with `--local`
+
+```bash
+# From kiloclaw/
+./scripts/push-dev.sh --local
+```
+
+This uses `Dockerfile.local` instead of the default `Dockerfile`. The script
+validates that a tarball exists in `openclaw-build/` before building. Everything
+else (tagging, pushing, `.dev.vars` updates) works the same as a normal push.
+
+### 4. Deploy
+
+1. Restart the KiloClaw worker: `pnpm run dev`
+2. From the dashboard (`localhost:3000`), destroy your existing instance
+   (Settings tab → Destroy), then create/provision a new one.
+3. The new instance will run your custom OpenClaw build.
+
+### Notes
+
+- `OPENCLAW_VERSION` in `.dev.vars` is extracted from the main `Dockerfile`'s
+  pinned npm version, so it won't reflect your fork's version. This is cosmetic.
+- Clean up old tarballs from `openclaw-build/` before copying a new one --
+  the `COPY openclaw-build/openclaw-*.tgz` glob must match exactly one file.
+- Remember to `fly auth docker` before pushing (token expires after 5 minutes).
 
 ## Provisioning and Using an Instance
 
@@ -395,9 +463,10 @@ All scripts support overrides via env vars (`IMAGE`, `PORT`, `TOKEN`).
 
 **Fly machine can't reach your Next.js / "models require auth":**
 Check that the tunnel is running and `KILOCODE_API_BASE_URL` in `.dev.vars`
-matches the current tunnel URL. Restart the worker after changing it. Symptoms
-are either silent failure (three dots, then nothing) or "models require
-authentication."
+matches the current tunnel URL. The dev-start script sets this automatically,
+but if the tunnel restarts you'll need to re-run the script or update the URL
+manually and restart the worker. Symptoms are either silent failure (three
+dots, then nothing) or "models require authentication."
 
 **"tag latest unknown manifest":**
 The image tag in `FLY_IMAGE_TAG` doesn't exist in the Fly registry. Get

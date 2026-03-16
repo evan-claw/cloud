@@ -277,13 +277,10 @@ export function completeReviewWithResult(
     const mergeTimestamp = now();
     closeBead(sql, entry.bead_id, entry.agent_id);
 
-    // Explicitly trigger convoy progress for the source bead after the MR closes.
-    // closeBead → updateBeadStatus → updateConvoyProgress, but only if the source
-    // bead's status actually changes. If the polecat already closed the source bead
-    // before submitting to the review queue, the guard in updateBeadStatus short-
-    // circuits and updateConvoyProgress is never called. Calling it here directly
-    // ensures the convoy recounts after the MR bead is now closed (not in-flight),
-    // so the source bead passes the NOT EXISTS guard and counts toward closedCount.
+    // closeBead → updateBeadStatus short-circuits when completeReview already
+    // set the status to 'closed' via direct SQL, so updateConvoyProgress is
+    // never reached transitively. Call it explicitly to ensure the convoy
+    // recounts after the MR bead is closed.
     updateConvoyProgress(sql, entry.bead_id, mergeTimestamp);
 
     // If this was a convoy landing MR, also set landed_at on the convoy metadata
@@ -313,6 +310,13 @@ export function completeReviewWithResult(
         conflict: true,
       },
     });
+    // Return source bead to in_progress so the polecat can be re-dispatched
+    // to resolve the conflict (in_review → in_progress rework flow).
+    updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+  } else if (input.status === 'failed') {
+    // Review failed (rework requested): return source bead to in_progress
+    // so it can be re-dispatched (in_review → in_progress rework flow).
+    updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
   }
 }
 
@@ -556,11 +560,13 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
     default_branch: rig?.default_branch,
   });
 
-  // Close the source bead (matches upstream gt done behavior). The polecat's
-  // work is done — the MR bead now tracks the merge lifecycle. The source
-  // bead retains its assignee so we know which agent worked on it.
+  // Transition the source bead to in_review — the polecat's work is done
+  // but the refinery hasn't reviewed it yet. The MR bead tracks the merge
+  // lifecycle. The source bead retains its assignee so we know which agent
+  // worked on it. It will be closed (or returned to in_progress) by the
+  // refinery after review.
   unhookBead(sql, agentId);
-  closeBead(sql, sourceBead, agentId);
+  updateBeadStatus(sql, sourceBead, 'in_review', agentId);
 }
 
 /**

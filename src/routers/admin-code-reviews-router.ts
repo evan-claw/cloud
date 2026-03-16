@@ -337,6 +337,65 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     };
   }),
 
+  // Get the 20 most recent sessions for a specific error message pattern (drill-down from error table)
+  getErrorSessions: adminProcedure
+    .input(FilterSchema.extend({ errorMessage: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const {
+        startDate,
+        endDate,
+        userId,
+        organizationId,
+        ownershipType,
+        agentVersion,
+        errorMessage,
+      } = input;
+      const ownershipFilter = buildOwnershipFilter(userId, organizationId, ownershipType);
+      const agentVersionFilter = buildAgentVersionFilter(agentVersion);
+
+      const conditions = [
+        eq(cloud_agent_code_reviews.status, 'failed'),
+        excludeInsufficientCreditsError,
+        gte(cloud_agent_code_reviews.created_at, startDate),
+        lt(cloud_agent_code_reviews.created_at, endDate),
+        eq(
+          sql`COALESCE(SUBSTRING(${cloud_agent_code_reviews.error_message} FROM 1 FOR 200), 'Unknown Error')`,
+          errorMessage
+        ),
+        ownershipFilter,
+        agentVersionFilter,
+      ].filter(Boolean) as SQL[];
+
+      const rows = await db
+        .select({
+          session_id: cloud_agent_code_reviews.session_id,
+          cli_session_id: cloud_agent_code_reviews.cli_session_id,
+          user_id: cloud_agent_code_reviews.owned_by_user_id,
+          org_id: cloud_agent_code_reviews.owned_by_organization_id,
+          error_message: cloud_agent_code_reviews.error_message,
+          created_at: cloud_agent_code_reviews.created_at,
+          repo_full_name: cloud_agent_code_reviews.repo_full_name,
+          pr_number: cloud_agent_code_reviews.pr_number,
+          agent_version: cloud_agent_code_reviews.agent_version,
+        })
+        .from(cloud_agent_code_reviews)
+        .where(and(...conditions))
+        .orderBy(desc(cloud_agent_code_reviews.created_at))
+        .limit(20);
+
+      return rows.map(row => ({
+        sessionId: row.session_id,
+        cliSessionId: row.cli_session_id,
+        userId: row.user_id,
+        orgId: row.org_id,
+        errorMessage: row.error_message,
+        createdAt: row.created_at,
+        repoFullName: row.repo_full_name,
+        prNumber: row.pr_number,
+        agentVersion: row.agent_version,
+      }));
+    }),
+
   // Get user segmentation (note: this doesn't use filters since it shows top users/orgs for selection)
   getUserSegmentation: adminProcedure.input(FilterSchema).query(async ({ input }) => {
     const { startDate, endDate, userId, organizationId, ownershipType, agentVersion } = input;

@@ -14,6 +14,7 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
+import * as Sentry from '@sentry/cloudflare';
 import { z } from 'zod';
 
 // Sub-modules (plain functions, not classes — per coding style)
@@ -44,6 +45,7 @@ import { query } from '../util/query.util';
 import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
 
+import { writeEvent, type GastownEventData } from '../util/analytics.util';
 import { BeadPriority } from '../types';
 import type {
   TownConfig,
@@ -51,6 +53,8 @@ import type {
   CreateBeadInput,
   BeadFilter,
   Bead,
+  BeadStatus,
+  BeadPriority as BeadPriorityType,
   RegisterAgentInput,
   AgentFilter,
   Agent,
@@ -64,6 +68,7 @@ import type {
   Molecule,
   BeadEventRecord,
   MergeStrategy,
+  ConvoyMergeMode,
 } from '../types';
 
 const TOWN_LOG = '[Town.do]';
@@ -166,6 +171,7 @@ type ConvoyEntry = {
   id: string;
   title: string;
   status: 'active' | 'landed';
+  staged: boolean;
   total_beads: number;
   closed_beads: number;
   created_by: string | null;
@@ -180,6 +186,7 @@ function toConvoy(row: ConvoyBeadRecord): ConvoyEntry {
     id: row.bead_id,
     title: row.title,
     status: row.status === 'closed' ? 'landed' : 'active',
+    staged: row.staged === 1,
     total_beads: row.total_beads,
     closed_beads: row.closed_beads,
     created_by: row.created_by,
@@ -194,7 +201,7 @@ const CONVOY_JOIN = /* sql */ `
   SELECT ${beads}.*,
          ${convoy_metadata.total_beads}, ${convoy_metadata.closed_beads},
          ${convoy_metadata.landed_at}, ${convoy_metadata.feature_branch},
-         ${convoy_metadata.merge_mode}
+         ${convoy_metadata.merge_mode}, ${convoy_metadata.staged}
   FROM ${beads}
   INNER JOIN ${convoy_metadata} ON ${beads.bead_id} = ${convoy_metadata.bead_id}
 `;
@@ -211,6 +218,7 @@ const ESCALATION_JOIN = /* sql */ `
 export class TownDO extends DurableObject<Env> {
   private sql: SqlStorage;
   private initPromise: Promise<void> | null = null;
+  private _ownerUserId: string | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -219,6 +227,10 @@ export class TownDO extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(async () => {
       await this.ensureInitialized();
     });
+  }
+
+  private emitEvent(data: Omit<GastownEventData, 'userId' | 'delivery'>): void {
+    writeEvent(this.env, { ...data, delivery: 'internal', userId: this._ownerUserId });
   }
 
   // ── WebSocket: status broadcast ──────────────────────────────────────
@@ -322,6 +334,53 @@ export class TownDO extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Broadcast an incremental bead lifecycle event to all connected status
+   * WebSocket clients. Called after bead create/update/close operations.
+   */
+  private broadcastBeadEvent(event: {
+    type: 'bead.created' | 'bead.status_changed' | 'bead.closed' | 'bead.failed';
+    beadId: string;
+    title?: string;
+    status?: string;
+    rigId?: string;
+    convoyId?: string;
+  }): void {
+    const sockets = this.ctx.getWebSockets('status');
+    if (sockets.length === 0) return;
+    const frame = JSON.stringify({ channel: 'bead', ...event, ts: now() });
+    for (const ws of sockets) {
+      try {
+        ws.send(frame);
+      } catch {
+        // Client disconnected — will be cleaned up by webSocketClose
+      }
+    }
+  }
+
+  /**
+   * Broadcast convoy progress to all connected status WebSocket clients.
+   * Called from onBeadClosed() after updating closed_beads count.
+   */
+  private broadcastConvoyProgress(convoyId: string, totalBeads: number, closedBeads: number): void {
+    const sockets = this.ctx.getWebSockets('status');
+    if (sockets.length === 0) return;
+    const frame = JSON.stringify({
+      channel: 'convoy',
+      convoyId,
+      totalBeads,
+      closedBeads,
+      ts: now(),
+    });
+    for (const ws of sockets) {
+      try {
+        ws.send(frame);
+      } catch {
+        // Client disconnected — will be cleaned up by webSocketClose
+      }
+    }
+  }
+
   // ── Initialization ──────────────────────────────────────────────────
 
   private async ensureInitialized(): Promise<void> {
@@ -335,6 +394,10 @@ export class TownDO extends DurableObject<Env> {
     // Load persisted town ID if available
     const storedId = await this.ctx.storage.get<string>('town:id');
     if (storedId) this._townId = storedId;
+
+    // Cache owner_user_id for analytics events
+    const townConfig = await config.getTownConfig(this.ctx.storage);
+    this._ownerUserId = townConfig.owner_user_id;
 
     // All tables are now initialized via beads.initBeadTables():
     // beads, bead_events, bead_dependencies, agent_metadata, review_metadata,
@@ -382,7 +445,27 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async updateTownConfig(update: TownConfigUpdate): Promise<TownConfig> {
-    return config.updateTownConfig(this.ctx.storage, update);
+    const result = await config.updateTownConfig(this.ctx.storage, update);
+    this._ownerUserId = result.owner_user_id;
+    return result;
+  }
+
+  /**
+   * Force-refresh the container token, bypassing the 1-hour throttle.
+   * Called from the user-facing tRPC mutation so operators can manually
+   * push a fresh JWT to the running container.
+   *
+   * Unlike the alarm-driven refreshContainerToken, this propagates ALL
+   * errors (including container-down) so the UI can show a real failure
+   * instead of a false success.
+   */
+  async forceRefreshContainerToken(): Promise<void> {
+    const townId = this.townId;
+    if (!townId) throw new Error('townId not set');
+    const townConfig = await this.getTownConfig();
+    const userId = townConfig.owner_user_id ?? townId;
+    await dispatch.forceRefreshContainerToken(this.env, townId, userId);
+    this.lastContainerTokenRefreshAt = Date.now();
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -535,7 +618,22 @@ export class TownDO extends DurableObject<Env> {
 
   async createBead(input: CreateBeadInput): Promise<Bead> {
     await this.ensureInitialized();
-    return beadOps.createBead(this.sql, input);
+    const bead = beadOps.createBead(this.sql, input);
+    this.emitEvent({
+      event: 'bead.created',
+      townId: this.townId,
+      rigId: input.rig_id,
+      beadId: bead.bead_id,
+      beadType: input.type,
+    });
+    this.broadcastBeadEvent({
+      type: 'bead.created',
+      beadId: bead.bead_id,
+      title: bead.title,
+      status: bead.status,
+      rigId: bead.rig_id ?? undefined,
+    });
+    return bead;
   }
 
   async getBeadAsync(beadId: string): Promise<Bead | null> {
@@ -554,9 +652,57 @@ export class TownDO extends DurableObject<Env> {
     // when the bead reaches a terminal status (closed/failed).
     const bead = beadOps.updateBeadStatus(this.sql, beadId, status, agentId);
 
-    // When a bead closes, check if any blocked beads are now unblocked and dispatch them.
-    if (status === 'closed' || status === 'failed') {
+    if (status === 'closed') {
+      const durationMs = Date.now() - new Date(bead.created_at).getTime();
+      this.emitEvent({
+        event: 'bead.closed',
+        townId: this.townId,
+        rigId: bead.rig_id ?? undefined,
+        beadId,
+        beadType: bead.type,
+        durationMs,
+      });
+      this.broadcastBeadEvent({
+        type: 'bead.closed',
+        beadId,
+        title: bead.title,
+        status: 'closed',
+        rigId: bead.rig_id ?? undefined,
+      });
+      // When a bead closes, check if any blocked beads are now unblocked and dispatch them.
       this.dispatchUnblockedBeads(beadId);
+    } else if (status === 'failed') {
+      this.emitEvent({
+        event: 'bead.failed',
+        townId: this.townId,
+        rigId: bead.rig_id ?? undefined,
+        beadId,
+        beadType: bead.type,
+      });
+      this.broadcastBeadEvent({
+        type: 'bead.failed',
+        beadId,
+        title: bead.title,
+        status: 'failed',
+        rigId: bead.rig_id ?? undefined,
+      });
+      this.dispatchUnblockedBeads(beadId);
+    } else {
+      this.emitEvent({
+        event: 'bead.status_changed',
+        townId: this.townId,
+        rigId: bead.rig_id ?? undefined,
+        beadId,
+        beadType: bead.type,
+        label: status,
+      });
+      this.broadcastBeadEvent({
+        type: 'bead.status_changed',
+        beadId,
+        title: bead.title,
+        status,
+        rigId: bead.rig_id ?? undefined,
+      });
     }
 
     return bead;
@@ -578,6 +724,121 @@ export class TownDO extends DurableObject<Env> {
   }): Promise<BeadEventRecord[]> {
     await this.ensureInitialized();
     return beadOps.listBeadEvents(this.sql, options);
+  }
+
+  /**
+   * Partially update a bead's editable fields.
+   * Only fields explicitly provided are updated (partial update semantics).
+   * Writes a `fields_updated` bead_event for auditability.
+   */
+  async updateBead(
+    beadId: string,
+    fields: Partial<{
+      title: string;
+      body: string | null;
+      priority: BeadPriorityType;
+      labels: string[];
+      status: BeadStatus;
+      metadata: Record<string, unknown>;
+    }>,
+    actorId: string
+  ): Promise<Bead> {
+    await this.ensureInitialized();
+    const bead = beadOps.updateBeadFields(this.sql, beadId, fields, actorId);
+
+    // When a bead closes via field update, check for newly unblocked beads
+    if (fields.status === 'closed' || fields.status === 'failed') {
+      this.dispatchUnblockedBeads(beadId);
+    }
+
+    return bead;
+  }
+
+  /**
+   * Force-reset an agent to idle, unhooking from its current bead if any.
+   * Sets the bead status back to 'open' so it can be re-dispatched.
+   * Writes a bead_event for auditability.
+   */
+  async resetAgent(agentId: string): Promise<void> {
+    await this.ensureInitialized();
+
+    const agent = agents.getAgent(this.sql, agentId);
+    if (!agent) throw new Error(`Agent ${agentId} not found`);
+
+    const hookedBeadId = agent.current_hook_bead_id;
+
+    if (hookedBeadId) {
+      // Return the bead to 'open' so the scheduler can re-assign it
+      const bead = beadOps.getBead(this.sql, hookedBeadId);
+      if (bead && bead.status !== 'closed' && bead.status !== 'failed') {
+        beadOps.updateBeadStatus(this.sql, hookedBeadId, 'open', agentId);
+      }
+
+      beadOps.logBeadEvent(this.sql, {
+        beadId: hookedBeadId,
+        agentId,
+        eventType: 'unhooked',
+        newValue: 'open',
+        metadata: { reason: 'agent_reset', actor: 'mayor' },
+      });
+
+      agents.unhookBead(this.sql, agentId);
+    }
+
+    agents.updateAgentStatus(this.sql, agentId, 'idle');
+
+    console.log(
+      `${TOWN_LOG} resetAgent: reset agent=${agentId} hookedBead=${hookedBeadId ?? 'none'}`
+    );
+  }
+
+  /**
+   * Edit convoy_metadata fields (merge_mode, feature_branch).
+   * Returns the updated convoy, or null if not found.
+   */
+  async updateConvoy(
+    convoyId: string,
+    fields: Partial<{ merge_mode: ConvoyMergeMode; feature_branch: string }>
+  ): Promise<ConvoyEntry | null> {
+    await this.ensureInitialized();
+
+    const convoy = this.getConvoy(convoyId);
+    if (!convoy) return null;
+
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    if (fields.merge_mode !== undefined) {
+      setClauses.push(`${convoy_metadata.columns.merge_mode} = ?`);
+      values.push(fields.merge_mode);
+    }
+    if (fields.feature_branch !== undefined) {
+      setClauses.push(`${convoy_metadata.columns.feature_branch} = ?`);
+      values.push(fields.feature_branch);
+    }
+
+    if (setClauses.length > 0) {
+      values.push(convoyId);
+      // Dynamic SET clause — query() can't statically verify param count here,
+      // so use sql.exec() directly. The guard above guarantees values is non-empty.
+      this.sql.exec(
+        /* sql */ `UPDATE ${convoy_metadata} SET ${setClauses.join(', ')} WHERE ${convoy_metadata.bead_id} = ?`,
+        ...values
+      );
+
+      // Also update the convoy bead's updated_at
+      query(
+        this.sql,
+        /* sql */ `
+          UPDATE ${beads}
+          SET ${beads.columns.updated_at} = ?
+          WHERE ${beads.bead_id} = ?
+        `,
+        [now(), convoyId]
+      );
+    }
+
+    return this.getConvoy(convoyId);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -722,6 +983,12 @@ export class TownDO extends DurableObject<Env> {
   async submitToReviewQueue(input: ReviewQueueInput): Promise<void> {
     await this.ensureInitialized();
     reviewQueue.submitToReviewQueue(this.sql, input);
+    this.emitEvent({
+      event: 'review.submitted',
+      townId: this.townId,
+      rigId: input.rig_id,
+      beadId: input.bead_id,
+    });
     await this.armAlarmIfNeeded();
   }
 
@@ -751,11 +1018,54 @@ export class TownDO extends DurableObject<Env> {
 
     reviewQueue.completeReviewWithResult(this.sql, input);
 
-    // When a review is merged, the source bead's pending MR is now resolved.
-    // Downstream beads that were blocked (because hasUnresolvedBlockers saw
-    // the open MR) should now be dispatched.
-    if (input.status === 'merged' && sourceBeadId) {
-      this.dispatchUnblockedBeads(sourceBeadId);
+    if (input.status === 'merged') {
+      this.emitEvent({
+        event: 'review.completed',
+        townId: this.townId,
+        beadId: input.entry_id,
+      });
+      // When a review is merged, the source bead's pending MR is now resolved.
+      // Downstream beads that were blocked (because hasUnresolvedBlockers saw
+      // the open MR) should now be dispatched.
+      if (sourceBeadId) {
+        this.dispatchUnblockedBeads(sourceBeadId);
+      }
+    } else if (input.status === 'failed' || input.status === 'conflict') {
+      this.emitEvent({
+        event: 'review.failed',
+        townId: this.townId,
+        beadId: input.entry_id,
+      });
+    }
+
+    // When a review fails or conflicts (rework), the source bead was
+    // returned to in_progress. Re-hook a polecat and re-dispatch so the
+    // rework starts automatically. The original polecat may already be
+    // working on something else, so fall back to getOrCreateAgent.
+    if ((input.status === 'failed' || input.status === 'conflict') && sourceBeadId) {
+      const sourceBead = beadOps.getBead(this.sql, sourceBeadId);
+      if (sourceBead?.rig_id) {
+        try {
+          const reworkAgent = agents.getOrCreateAgent(
+            this.sql,
+            'polecat',
+            sourceBead.rig_id,
+            this.townId
+          );
+          agents.hookBead(this.sql, reworkAgent.id, sourceBeadId);
+          this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
+            console.error(
+              `${TOWN_LOG} completeReviewWithResult: fire-and-forget rework dispatch failed for bead=${sourceBeadId}`,
+              err
+            )
+          );
+        } catch (err) {
+          console.warn(
+            `${TOWN_LOG} completeReviewWithResult: could not dispatch rework for bead=${sourceBeadId}:`,
+            err
+          );
+        }
+      }
     }
   }
 
@@ -777,6 +1087,13 @@ export class TownDO extends DurableObject<Env> {
     }
     if (resolvedAgentId) {
       reviewQueue.agentCompleted(this.sql, resolvedAgentId, input);
+      const agent = agents.getAgent(this.sql, resolvedAgentId);
+      this.emitEvent({
+        event: 'agent.exited',
+        townId: this.townId,
+        agentId: resolvedAgentId,
+        role: agent?.role,
+      });
     }
   }
 
@@ -886,6 +1203,12 @@ export class TownDO extends DurableObject<Env> {
                 input.resolution_notes ||
                 'The triage system has flagged you as potentially stuck. Please report your status.',
             });
+            this.emitEvent({
+              event: 'nudge.queued',
+              townId: this.townId,
+              agentId: targetAgentId,
+              label: 'triage_nudge',
+            });
           }
           break;
         }
@@ -965,6 +1288,24 @@ export class TownDO extends DurableObject<Env> {
         resolution_notes: input.resolution_notes,
       },
     });
+
+    // Log a triage_resolved event on the target bead so the action shows
+    // up in the activity feed for the bead that was actually affected.
+    const targetBeadId = snapshotHookedBeadId ?? targetAgentId;
+    if (targetBeadId && targetBeadId !== input.triage_request_bead_id) {
+      beadOps.logBeadEvent(this.sql, {
+        beadId: targetBeadId,
+        agentId: input.agent_id,
+        eventType: 'triage_resolved',
+        newValue: action,
+        metadata: {
+          action,
+          resolution_notes: input.resolution_notes,
+          triage_request_bead_id: input.triage_request_bead_id,
+          target_agent_id: targetAgentId,
+        },
+      });
+    }
 
     // If this triage request was created for an escalation, close the
     // linked escalation bead too so it doesn't sit open indefinitely.
@@ -1365,6 +1706,11 @@ export class TownDO extends DurableObject<Env> {
 
     const convoy = this.getConvoy(convoyId);
     if (!convoy) throw new Error('Failed to create convoy');
+    this.emitEvent({
+      event: 'convoy.created',
+      townId: this.townId,
+      convoyId,
+    });
     return convoy;
   }
 
@@ -1398,6 +1744,9 @@ export class TownDO extends DurableObject<Env> {
     );
 
     const convoy = this.getConvoy(input.convoyId);
+    if (convoy) {
+      this.broadcastConvoyProgress(input.convoyId, convoy.total_beads, convoy.closed_beads);
+    }
     if (convoy && convoy.status === 'active' && convoy.closed_beads >= convoy.total_beads) {
       const timestamp = now();
       query(
@@ -1418,6 +1767,11 @@ export class TownDO extends DurableObject<Env> {
         `,
         [timestamp, input.convoyId]
       );
+      this.emitEvent({
+        event: 'convoy.landed',
+        townId: this.townId,
+        convoyId: input.convoyId,
+      });
       return this.getConvoy(input.convoyId);
     }
     return convoy;
@@ -1515,8 +1869,13 @@ export class TownDO extends DurableObject<Env> {
     convoyTitle: string;
     tasks: Array<{ title: string; body?: string; depends_on?: number[] }>;
     merge_mode?: 'review-then-land' | 'review-and-merge';
-  }): Promise<{ convoy: ConvoyEntry; beads: Array<{ bead: Bead; agent: Agent }> }> {
+    staged?: boolean;
+  }): Promise<{ convoy: ConvoyEntry; beads: Array<{ bead: Bead; agent: Agent | null }> }> {
     await this.ensureInitialized();
+
+    // Resolve staged: explicit request wins, otherwise fall back to town config default.
+    const townConfig = await this.getTownConfig();
+    const isStaged = input.staged ?? townConfig.staged_convoys_default;
 
     const convoyId = generateId();
     const timestamp = now();
@@ -1607,21 +1966,24 @@ export class TownDO extends DurableObject<Env> {
 
     const mergeMode = input.merge_mode ?? 'review-then-land';
 
+    const stagedValue = isStaged ? 1 : 0;
+
     query(
       this.sql,
       /* sql */ `
         INSERT INTO ${convoy_metadata} (
           ${convoy_metadata.columns.bead_id}, ${convoy_metadata.columns.total_beads},
           ${convoy_metadata.columns.closed_beads}, ${convoy_metadata.columns.landed_at},
-          ${convoy_metadata.columns.feature_branch}, ${convoy_metadata.columns.merge_mode}
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          ${convoy_metadata.columns.feature_branch}, ${convoy_metadata.columns.merge_mode},
+          ${convoy_metadata.columns.staged}
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
-      [convoyId, input.tasks.length, 0, null, featureBranch, mergeMode]
+      [convoyId, input.tasks.length, 0, null, featureBranch, mergeMode, stagedValue]
     );
 
     // 2. Create all beads and track their IDs (needed for depends_on resolution)
     const beadIds: string[] = [];
-    const results: Array<{ bead: Bead; agent: Agent }> = [];
+    const results: Array<{ bead: Bead; agent: Agent | null }> = [];
 
     for (const task of input.tasks) {
       const createdBead = beadOps.createBead(this.sql, {
@@ -1668,35 +2030,147 @@ export class TownDO extends DurableObject<Env> {
       }
     }
 
-    // 4. For each bead: assign a polecat, but only dispatch if unblocked
-    for (let i = 0; i < beadIds.length; i++) {
-      const beadId = beadIds[i];
-      const agent = agents.getOrCreateAgent(this.sql, 'polecat', input.rigId, this.townId);
-      agents.hookBead(this.sql, agent.id, beadId);
+    if (isStaged) {
+      // Staged mode: collect beads without hooking agents or dispatching.
+      for (const beadId of beadIds) {
+        const bead = beadOps.getBead(this.sql, beadId);
+        if (!bead) continue;
+        results.push({ bead, agent: null });
+      }
+    } else {
+      // 4. For each bead: assign a polecat, but only dispatch if unblocked
+      for (let i = 0; i < beadIds.length; i++) {
+        const beadId = beadIds[i];
+        const agent = agents.getOrCreateAgent(this.sql, 'polecat', input.rigId, this.townId);
+        agents.hookBead(this.sql, agent.id, beadId);
 
-      const bead = beadOps.getBead(this.sql, beadId);
-      const hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
-      if (!bead) continue;
+        const bead = beadOps.getBead(this.sql, beadId);
+        const hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
+        if (!bead) continue;
 
-      // Only dispatch beads with no unresolved blockers
-      if (!beadOps.hasUnresolvedBlockers(this.sql, beadId)) {
-        this.dispatchAgent(hookedAgent, bead).catch(err =>
-          console.error(`${TOWN_LOG} slingConvoy: fire-and-forget dispatchAgent failed:`, err)
-        );
-      } else {
-        console.log(
-          `${TOWN_LOG} slingConvoy: bead=${beadId} blocked, deferring dispatch until deps close`
-        );
+        // Only dispatch beads with no unresolved blockers
+        if (!beadOps.hasUnresolvedBlockers(this.sql, beadId)) {
+          this.dispatchAgent(hookedAgent, bead).catch(err =>
+            console.error(`${TOWN_LOG} slingConvoy: fire-and-forget dispatchAgent failed:`, err)
+          );
+        } else {
+          console.log(
+            `${TOWN_LOG} slingConvoy: bead=${beadId} blocked, deferring dispatch until deps close`
+          );
+        }
+
+        results.push({ bead, agent: hookedAgent });
       }
 
-      results.push({ bead, agent: hookedAgent });
+      await this.armAlarmIfNeeded();
     }
-
-    await this.armAlarmIfNeeded();
 
     const convoy = this.getConvoy(convoyId);
     if (!convoy) throw new Error('Failed to create convoy');
+    this.emitEvent({
+      event: 'convoy.created',
+      townId: this.townId,
+      convoyId,
+    });
     return { convoy, beads: results };
+  }
+
+  /**
+   * Transition a staged convoy to active: hook agents and begin dispatch.
+   */
+  async startConvoy(
+    convoyId: string
+  ): Promise<{ convoy: ConvoyEntry; beads: Array<{ bead: Bead; agent: Agent }> }> {
+    await this.ensureInitialized();
+
+    const convoy = this.getConvoy(convoyId);
+    if (!convoy) throw new Error(`Convoy not found: ${convoyId}`);
+    if (!convoy.staged) throw new Error(`Convoy is not staged: ${convoyId}`);
+
+    // Find all beads tracked by this convoy
+    const trackedRows = [
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${bead_dependencies.bead_id}
+          FROM ${bead_dependencies}
+          WHERE ${bead_dependencies.depends_on_bead_id} = ?
+            AND ${bead_dependencies.dependency_type} = 'tracks'
+        `,
+        [convoyId]
+      ),
+    ];
+
+    const BeadIdRow = z.object({ bead_id: z.string() });
+    const trackedBeadIds = BeadIdRow.array()
+      .parse(trackedRows)
+      .map(r => r.bead_id);
+
+    const results: Array<{ bead: Bead; agent: Agent }> = [];
+
+    for (const beadId of trackedBeadIds) {
+      const bead = beadOps.getBead(this.sql, beadId);
+      if (!bead) continue;
+
+      const rigId = bead.rig_id;
+      if (!rigId) continue;
+
+      // Skip beads already hooked from a prior partial attempt (retry-safe).
+      let hookedAgent: Agent;
+      if (bead.assignee_agent_bead_id) {
+        const existing = agents.getAgent(this.sql, bead.assignee_agent_bead_id);
+        if (existing) {
+          hookedAgent = existing;
+        } else {
+          // Orphaned assignee reference — re-hook with a fresh agent
+          const agent = agents.getOrCreateAgent(this.sql, 'polecat', rigId, this.townId);
+          agents.hookBead(this.sql, agent.id, beadId);
+          hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
+        }
+      } else {
+        const agent = agents.getOrCreateAgent(this.sql, 'polecat', rigId, this.townId);
+        agents.hookBead(this.sql, agent.id, beadId);
+        hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
+      }
+
+      // Re-read bead after potential hookBead so assignee_agent_bead_id is up to date
+      const updatedBead = beadOps.getBead(this.sql, beadId) ?? bead;
+
+      if (!beadOps.hasUnresolvedBlockers(this.sql, beadId)) {
+        this.dispatchAgent(hookedAgent, updatedBead).catch(err =>
+          console.error(`${TOWN_LOG} startConvoy: fire-and-forget dispatchAgent failed:`, err)
+        );
+      } else {
+        console.log(
+          `${TOWN_LOG} startConvoy: bead=${beadId} blocked, deferring dispatch until deps close`
+        );
+      }
+
+      results.push({ bead: updatedBead, agent: hookedAgent });
+    }
+
+    // Clear the staged flag only after all agents are successfully hooked.
+    // If the loop above throws, the convoy stays staged so the caller can retry.
+    query(
+      this.sql,
+      /* sql */ `
+        UPDATE ${convoy_metadata}
+        SET ${convoy_metadata.columns.staged} = 0
+        WHERE ${convoy_metadata.bead_id} = ?
+      `,
+      [convoyId]
+    );
+
+    await this.armAlarmIfNeeded();
+
+    const updatedConvoy = this.getConvoy(convoyId);
+    if (!updatedConvoy) throw new Error(`Failed to re-fetch convoy after start: ${convoyId}`);
+    this.emitEvent({
+      event: 'convoy.started',
+      townId: this.townId,
+      convoyId,
+    });
+    return { convoy: updatedConvoy, beads: results };
   }
 
   /**
@@ -1834,6 +2308,11 @@ export class TownDO extends DurableObject<Env> {
       `,
       [now(), escalationId]
     );
+    this.emitEvent({
+      event: 'escalation.acknowledged',
+      townId: this.townId,
+      beadId: escalationId,
+    });
     return this.getEscalation(escalationId);
   }
 
@@ -1935,6 +2414,15 @@ export class TownDO extends DurableObject<Env> {
     const escalation = this.getEscalation(beadId);
     if (!escalation) throw new Error('Failed to create escalation');
 
+    this.emitEvent({
+      event: 'escalation.created',
+      townId: this.townId,
+      rigId: input.source_rig_id,
+      agentId: input.source_agent_id,
+      beadId,
+      convoyId: convoyId ?? undefined,
+    });
+
     // Create a triage request so the patrol→triage→resolve loop can
     // act on the escalation. Without this, escalation beads sit open
     // with no assignee and no automated follow-up.
@@ -2030,26 +2518,31 @@ export class TownDO extends DurableObject<Env> {
       await this.processReviewQueue();
     } catch (err) {
       console.error(`${TOWN_LOG} alarm: processReviewQueue failed`, err);
+      Sentry.captureException(err);
     }
     try {
       await this.processConvoyLandings();
     } catch (err) {
       console.error(`${TOWN_LOG} alarm: processConvoyLandings failed`, err);
+      Sentry.captureException(err);
     }
     try {
       await this.schedulePendingWork();
     } catch (err) {
       console.error(`${TOWN_LOG} alarm: schedulePendingWork failed`, err);
+      Sentry.captureException(err);
     }
     try {
       await this.witnessPatrol();
     } catch (err) {
       console.error(`${TOWN_LOG} alarm: witnessPatrol failed`, err);
+      Sentry.captureException(err);
     }
     try {
       this.deaconPatrol();
     } catch (err) {
       console.error(`${TOWN_LOG} alarm: deaconPatrol failed`, err);
+      Sentry.captureException(err);
     }
     try {
       await this.deliverPendingMail();
@@ -2066,7 +2559,6 @@ export class TownDO extends DurableObject<Env> {
     } catch (err) {
       console.warn(`${TOWN_LOG} alarm: maybeDispatchTriageAgent failed`, err);
     }
-
     // Re-arm: fast when active, slow when idle
     const active = this.hasActiveWork();
     const interval = active ? ACTIVE_ALARM_INTERVAL_MS : IDLE_ALARM_INTERVAL_MS;
@@ -2233,6 +2725,14 @@ export class TownDO extends DurableObject<Env> {
           [agent.id]
         );
         console.log(`${TOWN_LOG} dispatchAgent: started agent=${agent.name}(${agent.id})`);
+        this.emitEvent({
+          event: 'agent.spawned',
+          townId: this.townId,
+          rigId,
+          agentId: agent.id,
+          beadId: bead.bead_id,
+          role: agent.role,
+        });
       } else {
         // Container failed to start — roll back to idle
         query(
@@ -2244,10 +2744,19 @@ export class TownDO extends DurableObject<Env> {
           `,
           [agent.id]
         );
+        this.emitEvent({
+          event: 'agent.dispatch_failed',
+          townId: this.townId,
+          rigId,
+          agentId: agent.id,
+          beadId: bead.bead_id,
+          role: agent.role,
+        });
       }
       return started;
     } catch (err) {
       console.error(`${TOWN_LOG} dispatchAgent: failed for agent=${agent.id}:`, err);
+      Sentry.captureException(err, { extra: { agentId: agent.id, beadId: bead.bead_id } });
       // Roll back agent and bead to prevent them from being stuck in
       // working/in_progress state when the container call throws.
       try {
@@ -2266,6 +2775,13 @@ export class TownDO extends DurableObject<Env> {
       } catch (rollbackErr) {
         console.error(`${TOWN_LOG} dispatchAgent: rollback also failed:`, rollbackErr);
       }
+      this.emitEvent({
+        event: 'agent.dispatch_failed',
+        townId: this.townId,
+        agentId: agent.id,
+        beadId: bead.bead_id,
+        role: agent.role,
+      });
       return false;
     }
   }
@@ -2592,9 +3108,7 @@ export class TownDO extends DurableObject<Env> {
       userId: rigConfig.userId,
       agentId: triageAgent.id,
       agentName: triageAgent.name,
-      // Use 'triage' role so the container skips the git clone entirely.
-      // Triage work is purely reasoning — no code changes needed.
-      role: 'triage',
+      role: 'polecat',
       identity: triageAgent.identity,
       beadId: triageBead.bead_id,
       beadTitle: triageBead.title,
@@ -2606,6 +3120,7 @@ export class TownDO extends DurableObject<Env> {
       townConfig,
       systemPromptOverride: systemPrompt,
       platformIntegrationId: rigConfig.platformIntegrationId,
+      lightweight: true,
     });
 
     if (started) {
@@ -2646,6 +3161,20 @@ export class TownDO extends DurableObject<Env> {
       if (sent) {
         // Mark delivered only after the container accepted the message
         mail.readAndDeliverMail(this.sql, agentId);
+        if (
+          messages.some(
+            m =>
+              m.subject === 'TRIAGE_NUDGE' ||
+              m.subject === 'GUPP_ESCALATION' ||
+              m.subject === 'GUPP_CHECK'
+          )
+        ) {
+          this.emitEvent({
+            event: 'nudge.delivered',
+            townId: this.townId,
+            agentId,
+          });
+        }
         console.log(
           `${TOWN_LOG} deliverPendingMail: delivered ${messages.length} message(s) to agent=${agentId}`
         );
@@ -3245,7 +3774,7 @@ export class TownDO extends DurableObject<Env> {
       [
         ...query(
           this.sql,
-          /* sql */ `SELECT COUNT(*) AS cnt FROM ${beads} WHERE ${beads.status} IN ('open', 'in_progress') AND ${beads.type} NOT IN ('agent', 'message')`,
+          /* sql */ `SELECT COUNT(*) AS cnt FROM ${beads} WHERE ${beads.status} IN ('open', 'in_progress', 'in_review') AND ${beads.type} NOT IN ('agent', 'message')`,
           []
         ),
       ][0]?.cnt ?? 0
@@ -3274,6 +3803,7 @@ export class TownDO extends DurableObject<Env> {
     beads: {
       open: number;
       inProgress: number;
+      inReview: number;
       failed: number;
       triageRequests: number;
     };
@@ -3328,12 +3858,13 @@ export class TownDO extends DurableObject<Env> {
         []
       ),
     ];
-    const beadCounts = { open: 0, inProgress: 0, failed: 0, triageRequests: 0 };
+    const beadCounts = { open: 0, inProgress: 0, inReview: 0, failed: 0, triageRequests: 0 };
     for (const row of beadRows) {
       const s = `${row.status as string}`;
       const c = Number(row.cnt);
       if (s === 'open') beadCounts.open = c;
       else if (s === 'in_progress') beadCounts.inProgress = c;
+      else if (s === 'in_review') beadCounts.inReview = c;
       else if (s === 'failed') beadCounts.failed = c;
     }
 

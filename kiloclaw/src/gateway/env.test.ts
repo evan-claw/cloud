@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { generateKeyPairSync, publicEncrypt, randomBytes, createCipheriv, constants } from 'crypto';
 import { buildEnvVars, FEATURE_TO_ENV_VAR } from './env';
 import { DEFAULT_INSTANCE_FEATURES } from '../schemas/instance-config';
@@ -295,6 +295,77 @@ describe('buildEnvVars', () => {
 
     expect(result.env['MY-VAR']).toBeUndefined();
     expect(result.env.GOOD_VAR).toBe('good');
+  });
+
+  // ─── Google credentials (Layer 4b) ───────────────────────────────────
+
+  it('decrypts Google gog config tarball into sensitive bucket', async () => {
+    const env = createMockEnv({
+      AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey,
+    });
+    const tarballBase64 = Buffer.from('fake-tarball').toString('base64');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      googleCredentials: {
+        gogConfigTarball: encryptForTest(tarballBase64, testPublicKey),
+        email: 'user@gmail.com',
+      },
+    });
+
+    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBe('user@gmail.com');
+    // Should not leak into plaintext
+    expect(result.env.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+  });
+
+  it('decrypts Google gog config tarball without email', async () => {
+    const env = createMockEnv({
+      AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey,
+    });
+    const tarballBase64 = Buffer.from('fake-tarball').toString('base64');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      googleCredentials: {
+        gogConfigTarball: encryptForTest(tarballBase64, testPublicKey),
+      },
+    });
+
+    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBeUndefined();
+  });
+
+  it('continues without Google access when credential decryption fails', async () => {
+    const env = createMockEnv({
+      AGENT_ENV_VARS_PRIVATE_KEY: testPrivateKey,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      googleCredentials: {
+        gogConfigTarball: {
+          encryptedData: 'bad',
+          encryptedDEK: 'bad',
+          algorithm: 'rsa-aes-256-gcm' as const,
+          version: 1 as const,
+        },
+      },
+    });
+
+    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to decrypt Google credentials, starting without Google access:',
+      expect.any(Error)
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('skips Google credential decryption when no private key configured', async () => {
+    const env = createMockEnv(); // no AGENT_ENV_VARS_PRIVATE_KEY
+    const tarballBase64 = Buffer.from('fake-tarball').toString('base64');
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      googleCredentials: {
+        gogConfigTarball: encryptForTest(tarballBase64, testPublicKey),
+      },
+    });
+
+    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
   });
 
   // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────

@@ -439,8 +439,8 @@ export async function runAgent(originalRequest: StartAgentRequest): Promise<Mana
   let request = originalRequest;
   let workdir: string;
 
-  if (request.role === 'triage') {
-    // Triage agents are pure reasoning — no code changes, no git needed.
+  if (request.role === 'triage' || request.lightweight) {
+    // Triage/lightweight agents are pure reasoning — no code changes, no git needed.
     // Use a lightweight workspace to avoid clone failures feeding the loop.
     workdir = await createLightweightWorkspace('triage', request.rigId);
   } else if (request.role === 'mayor') {

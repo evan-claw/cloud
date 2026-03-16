@@ -127,6 +127,56 @@ export async function ensureContainerToken(
  */
 export const refreshContainerToken = ensureContainerToken;
 
+/**
+ * Force-refresh variant for manual user-triggered refreshes.
+ *
+ * Unlike ensureContainerToken (which tolerates a downed container
+ * because the token is persisted in envVars for next boot), this
+ * function throws on ANY failure to push the token to the running
+ * container — including network errors. This ensures the UI reports
+ * a real failure instead of a false success when the container
+ * never actually received the fresh JWT.
+ */
+export async function forceRefreshContainerToken(
+  env: Env,
+  townId: string,
+  userId: string
+): Promise<string> {
+  const jwtSecret = await resolveJWTSecret(env);
+  if (!jwtSecret) {
+    throw new Error('No JWT secret available — cannot mint container token');
+  }
+
+  const token = signContainerJWT({ townId, userId }, jwtSecret);
+  const container = getTownContainerStub(env, townId);
+
+  // Store for next boot (best-effort — the critical step is the live push below)
+  try {
+    await container.setEnvVar('GASTOWN_CONTAINER_TOKEN', token);
+  } catch (err) {
+    console.warn(
+      `${TOWN_LOG} forceRefreshContainerToken: setEnvVar failed:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // Push to running container — propagate ALL errors so the caller
+  // (and ultimately the UI) knows the refresh didn't land.
+  const resp = await container.fetch('http://container/refresh-token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(
+      `Container rejected token refresh (HTTP ${resp.status})${body ? `: ${body.slice(0, 200)}` : ''}`
+    );
+  }
+
+  return token;
+}
+
 /** Build the initial prompt for an agent from its bead. */
 export function buildPrompt(params: {
   beadTitle: string;
@@ -240,6 +290,8 @@ export async function startAgentInContainer(
     platformIntegrationId?: string;
     /** For convoy beads: the convoy's feature branch to branch from instead of defaultBranch. */
     convoyFeatureBranch?: string;
+    /** Skip repo clone — use a lightweight workspace (for reasoning-only agents like triage). */
+    lightweight?: boolean;
     /** All rigs in the town (mayor only) — used to set up browse worktrees on fresh containers. */
     rigs?: Array<{
       rigId: string;
@@ -346,6 +398,7 @@ export async function startAgentInContainer(
         // For convoy agents, start from the convoy's feature branch so the
         // worktree includes all previously merged convoy work.
         startPoint: params.convoyFeatureBranch ? `origin/${params.convoyFeatureBranch}` : undefined,
+        lightweight: params.lightweight,
         rigs: params.rigs,
       }),
     });

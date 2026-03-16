@@ -32,7 +32,14 @@ import {
   migrateConvoyMetadata,
 } from '../../db/tables/convoy-metadata.table';
 import { query } from '../../util/query.util';
-import type { CreateBeadInput, BeadFilter, Bead } from '../../types';
+import type {
+  CreateBeadInput,
+  BeadFilter,
+  Bead,
+  BeadStatus,
+  BeadPriority,
+  BeadType,
+} from '../../types';
 import type { BeadEventType } from '../../db/tables/bead-events.table';
 
 function generateId(): string {
@@ -44,23 +51,18 @@ function now(): string {
 }
 
 export function initBeadTables(sql: SqlStorage): void {
+  // Create all tables first (IF NOT EXISTS — safe for existing DOs)
   query(sql, createTableBeads(), []);
-  for (const idx of getIndexesBeads()) {
-    query(sql, idx, []);
-  }
   query(sql, createTableBeadEvents(), []);
-  for (const idx of getIndexesBeadEvents()) {
-    query(sql, idx, []);
-  }
   query(sql, createTableBeadDependencies(), []);
-  for (const idx of getIndexesBeadDependencies()) {
-    query(sql, idx, []);
-  }
-  // Satellite metadata tables
   query(sql, createTableAgentMetadata(), []);
   query(sql, createTableReviewMetadata(), []);
   query(sql, createTableEscalationMetadata(), []);
   query(sql, createTableConvoyMetadata(), []);
+
+  // Migration: drop CHECK constraints from existing tables.
+  // Must run BEFORE index creation — rebuilding a table drops its indexes.
+  dropCheckConstraints(sql);
 
   // Migrations: add columns to existing tables (idempotent)
   for (const stmt of [...migrateConvoyMetadata(), ...migrateAgentMetadata()]) {
@@ -68,6 +70,72 @@ export function initBeadTables(sql: SqlStorage): void {
       query(sql, stmt, []);
     } catch {
       // Column already exists — expected after first run
+    }
+  }
+
+  // Create indexes after migrations (IF NOT EXISTS — idempotent)
+  for (const idx of getIndexesBeads()) {
+    query(sql, idx, []);
+  }
+  for (const idx of getIndexesBeadEvents()) {
+    query(sql, idx, []);
+  }
+  for (const idx of getIndexesBeadDependencies()) {
+    query(sql, idx, []);
+  }
+}
+
+/**
+ * Detect tables with CHECK constraints and recreate them without.
+ * Uses SQLite's "CREATE TABLE ... AS SELECT" pattern to rebuild.
+ *
+ * Idempotent: if a table has no CHECK constraints, it's skipped.
+ */
+function dropCheckConstraints(sql: SqlStorage): void {
+  const rows = [
+    ...query(
+      sql,
+      /* sql */ `
+        SELECT name, sql as create_sql
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND sql LIKE '%check(%'
+      `,
+      []
+    ),
+  ];
+
+  for (const row of rows) {
+    if (typeof row.name !== 'string' || typeof row.create_sql !== 'string') continue;
+    const tableName = row.name;
+    const originalSql = row.create_sql;
+
+    // Strip all check(...) clauses from the CREATE TABLE statement.
+    // Handles nested parens like check(status in ('open', 'closed')).
+    const cleanedSql = originalSql.replace(
+      /,?\s*check\s*\((?:[^()]*|\((?:[^()]*|\([^()]*\))*\))*\)/gi,
+      ''
+    );
+
+    // Skip if nothing changed (shouldn't happen given the WHERE clause)
+    if (cleanedSql === originalSql) continue;
+
+    // Rebuild the table: rename → recreate → copy → drop old
+    const tmpName = `_${tableName}_migrate`;
+    try {
+      query(sql, /* sql */ `ALTER TABLE "${tableName}" RENAME TO "${tmpName}"`, []);
+      query(sql, cleanedSql, []);
+      query(sql, /* sql */ `INSERT INTO "${tableName}" SELECT * FROM "${tmpName}"`, []);
+      query(sql, /* sql */ `DROP TABLE "${tmpName}"`, []);
+    } catch (err) {
+      // If migration fails mid-way, try to restore the original table
+      try {
+        query(sql, /* sql */ `DROP TABLE IF EXISTS "${tableName}"`, []);
+        query(sql, /* sql */ `ALTER TABLE "${tmpName}" RENAME TO "${tableName}"`, []);
+      } catch {
+        // Best effort — the original table name should still be usable
+      }
+      console.warn(`[beads] CHECK constraint migration failed for ${tableName}:`, err);
     }
   }
 }
@@ -442,6 +510,112 @@ export function getNewlyUnblockedBeads(sql: SqlStorage, closedBeadId: string): s
   return dependentIds.filter(id => !hasUnresolvedBlockers(sql, id));
 }
 
+/**
+ * Partial update of a bead's editable fields.
+ * Only fields explicitly provided in `fields` are updated.
+ * Writes a `fields_updated` bead_event for auditability.
+ */
+export function updateBeadFields(
+  sql: SqlStorage,
+  beadId: string,
+  fields: Partial<{
+    title: string;
+    body: string | null;
+    priority: BeadPriority;
+    labels: string[];
+    status: BeadStatus;
+    metadata: Record<string, unknown>;
+    type: BeadType;
+    rig_id: string | null;
+    parent_bead_id: string | null;
+  }>,
+  actorId: string
+): Bead {
+  const bead = getBead(sql, beadId);
+  if (!bead) throw new Error(`Bead ${beadId} not found`);
+
+  const timestamp = now();
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+
+  if (fields.title !== undefined) {
+    setClauses.push(`${beads.columns.title} = ?`);
+    values.push(fields.title);
+  }
+  if (fields.body !== undefined) {
+    setClauses.push(`${beads.columns.body} = ?`);
+    values.push(fields.body);
+  }
+  if (fields.priority !== undefined) {
+    setClauses.push(`${beads.columns.priority} = ?`);
+    values.push(fields.priority);
+  }
+  if (fields.labels !== undefined) {
+    setClauses.push(`${beads.columns.labels} = ?`);
+    values.push(JSON.stringify(fields.labels));
+  }
+  if (fields.status !== undefined) {
+    setClauses.push(`${beads.columns.status} = ?`);
+    values.push(fields.status);
+    if (fields.status === 'closed') {
+      // Set closed_at when transitioning to closed (preserve existing if already set)
+      setClauses.push(`${beads.columns.closed_at} = ?`);
+      values.push(bead.closed_at ?? timestamp);
+    } else if (bead.closed_at) {
+      // Clear closed_at when reopening a previously-closed bead
+      setClauses.push(`${beads.columns.closed_at} = ?`);
+      values.push(null);
+    }
+  }
+  if (fields.metadata !== undefined) {
+    setClauses.push(`${beads.columns.metadata} = ?`);
+    values.push(JSON.stringify(fields.metadata));
+  }
+  if (fields.type !== undefined) {
+    setClauses.push(`${beads.columns.type} = ?`);
+    values.push(fields.type);
+  }
+  if (fields.rig_id !== undefined) {
+    setClauses.push(`${beads.columns.rig_id} = ?`);
+    values.push(fields.rig_id);
+  }
+  if (fields.parent_bead_id !== undefined) {
+    setClauses.push(`${beads.columns.parent_bead_id} = ?`);
+    values.push(fields.parent_bead_id);
+  }
+
+  if (setClauses.length === 0) return bead;
+
+  setClauses.push(`${beads.columns.updated_at} = ?`);
+  values.push(timestamp);
+  values.push(beadId);
+
+  // Dynamic SET clause — query() can't statically verify param count here,
+  // so use sql.exec() directly. The early return above guarantees values is non-empty.
+  sql.exec(
+    /* sql */ `UPDATE ${beads} SET ${setClauses.join(', ')} WHERE ${beads.bead_id} = ?`,
+    ...values
+  );
+
+  const changedFields = Object.keys(fields);
+  logBeadEvent(sql, {
+    beadId,
+    agentId: actorId,
+    eventType: 'fields_updated',
+    newValue: changedFields.join(','),
+    metadata: { changed: changedFields, actor: actorId },
+  });
+
+  // If status was updated to a terminal value, run convoy progress logic
+  if (fields.status === 'closed' || fields.status === 'failed') {
+    updateConvoyProgress(sql, beadId, timestamp);
+  }
+
+  const updated = getBead(sql, beadId);
+  if (!updated) throw new Error(`Bead ${beadId} not found after update`);
+  return updated;
+}
+
 export function closeBead(sql: SqlStorage, beadId: string, agentId: string): Bead {
   return updateBeadStatus(sql, beadId, 'closed', agentId);
 }
@@ -671,18 +845,11 @@ export function getConvoyDependencyEdges(
 }
 
 /**
- * Find the convoy a bead belongs to (if any).
- *
- * Two cases:
- * 1. Normal source bead: tracked by a convoy via bead_dependencies
- *    (bead_id = sourceBeadId, depends_on_bead_id = convoyId, type = 'tracks').
- *    Returns the convoy bead_id.
- * 2. The bead IS the convoy (e.g. for the final landing MR where processConvoyLandings
- *    passes the convoy bead_id as the source). Returns beadId itself.
+ * Find the convoy a bead belongs to (if any) via 'tracks' dependencies.
+ * Returns the convoy bead_id or null.
  */
 export function getConvoyForBead(sql: SqlStorage, beadId: string): string | null {
-  // Case 1: bead is tracked by a convoy
-  const trackRows = [
+  const rows = [
     ...query(
       sql,
       /* sql */ `
@@ -694,24 +861,8 @@ export function getConvoyForBead(sql: SqlStorage, beadId: string): string | null
       [beadId]
     ),
   ];
-  if (trackRows.length > 0) {
-    return z.object({ depends_on_bead_id: z.string() }).parse(trackRows[0]).depends_on_bead_id;
-  }
-
-  // Case 2: bead is itself a convoy (has convoy_metadata)
-  const metaRows = [
-    ...query(
-      sql,
-      /* sql */ `
-        SELECT 1 FROM ${convoy_metadata}
-        WHERE ${convoy_metadata.bead_id} = ?
-      `,
-      [beadId]
-    ),
-  ];
-  if (metaRows.length > 0) return beadId;
-
-  return null;
+  if (rows.length === 0) return null;
+  return z.object({ depends_on_bead_id: z.string() }).parse(rows[0]).depends_on_bead_id;
 }
 
 /**
