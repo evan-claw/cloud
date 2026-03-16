@@ -233,6 +233,32 @@ export async function createNewMachine(
       const match = err.body.match(/machine ID (\w+)/);
       if (match) {
         const existingId = match[1];
+
+        // Guard: if the caller expects a specific volume (e.g. after
+        // replaceStrandedVolume swapped to a new volume), verify the
+        // existing machine is actually attached to that volume.  If it
+        // isn't, it's a stale machine on the old host/volume — adopting
+        // it would undo the recovery.  Destroy it so the next alarm
+        // retry can create cleanly.
+        const expectedVolume = machineConfig.mounts?.[0]?.volume;
+        if (expectedVolume) {
+          const existing = await fly.getMachine(flyConfig, existingId);
+          const actualVolume = existing.config?.mounts?.[0]?.volume;
+          if (actualVolume !== expectedVolume) {
+            console.warn(
+              `[DO] 409 machine ${existingId} has volume ${actualVolume}, expected ${expectedVolume} — destroying stale machine`
+            );
+            try {
+              await fly.destroyMachine(flyConfig, existingId);
+            } catch (destroyErr) {
+              if (!fly.isFlyNotFound(destroyErr)) {
+                console.warn('[DO] Failed to destroy stale 409 machine:', destroyErr);
+              }
+            }
+            throw err;
+          }
+        }
+
         console.log('[DO] Machine already exists (409), adopting:', existingId);
         state.flyMachineId = existingId;
         await ctx.storage.put(storageUpdate({ flyMachineId: existingId }));

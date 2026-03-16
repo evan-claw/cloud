@@ -1238,12 +1238,12 @@ describe('createNewMachine 409 recovery', () => {
     (flyClient.createMachine as Mock).mockRejectedValue(
       new FlyApiError('conflict', 409, 'already_exists machine ID e82d3d7b44d987')
     );
-    // getMachine for startExistingMachine
+    // getMachine for volume guard + startExistingMachine
     (flyClient.getMachine as Mock).mockResolvedValue({
       id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
-      config: { env: {}, guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
     });
     (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     (flyClient.waitForState as Mock).mockResolvedValue(undefined);
@@ -1272,7 +1272,7 @@ describe('createNewMachine 409 recovery', () => {
       id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
-      config: { env: {}, guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
     });
     (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     // waitForState fails after adoption
@@ -1305,6 +1305,59 @@ describe('createNewMachine 409 recovery', () => {
       '[DO] 409 already_exists but could not extract machine ID from body:',
       'already_exists: conflict'
     );
+  });
+
+  it('destroys stale 409 machine when its volume does not match expected volume', async () => {
+    const { instance, storage } = createInstance();
+    // Volume was swapped (e.g. after replaceStrandedVolume) — DO expects vol-new
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null, flyVolumeId: 'vol-new' });
+
+    const conflictErr = new FlyApiError('conflict', 409, 'already_exists machine ID stale123');
+    (flyClient.createMachine as Mock).mockRejectedValue(conflictErr);
+    // The stale machine is attached to the OLD volume
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'stale123',
+      state: 'stopped',
+      region: 'iad',
+      config: { mounts: [{ volume: 'vol-old', path: '/root' }] },
+    });
+    (flyClient.destroyMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-new' });
+
+    await expect(instance.start('user-1')).rejects.toThrow('conflict');
+
+    // Should have destroyed the stale machine
+    expect(flyClient.destroyMachine).toHaveBeenCalledWith(expect.anything(), 'stale123');
+    // Should NOT have adopted it
+    expect(storage._store.get('flyMachineId')).toBeNull();
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('destroying stale machine')
+    );
+  });
+
+  it('adopts 409 machine when its volume matches expected volume', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null, flyVolumeId: 'vol-1' });
+
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('conflict', 409, 'already_exists machine ID e82d3d7b44d987')
+    );
+    // The existing machine has the SAME volume — safe to adopt
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'e82d3d7b44d987',
+      state: 'stopped',
+      region: 'iad',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+    (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.start('user-1');
+
+    expect(storage._store.get('flyMachineId')).toBe('e82d3d7b44d987');
+    expect(flyClient.destroyMachine).not.toHaveBeenCalled();
+    expect(storage._store.get('status')).toBe('running');
   });
 
   it('re-throws 409 without already_exists in body', async () => {
