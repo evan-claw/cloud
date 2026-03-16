@@ -18,6 +18,7 @@
 - AVOID mocks; they make tests complex and brittle, assert on the result instead or check the db to observe
   a side effect. Where necessary refactor a dependency that really can't be tested indirectly into an explicit argument instead, and then pass a fake implementation if needed.
 - Keep functions simple: if an argument is merely used to splat in a bunch of options in a return value an the caller can do that equally well, KISS and don't add an argument. Every function argument has a small cost; add them only where they meaningfully simplify the caller somehow.
+- When the linter flags an unused variable, do NOT just prefix it with `_` to silence the warning. Instead, investigate why it's unused and fix the root cause — remove dead parameters, delete dead code paths, or log/use the value if it was accidentally ignored. The `_` prefix is only appropriate for intentionally unused positional parameters (e.g. `(_req, res)` in middleware signatures).
 
 # Durable Object SQLite
 

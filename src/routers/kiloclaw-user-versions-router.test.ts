@@ -3,7 +3,11 @@ import { createCallerForUser } from '@/routers/test-utils';
 import { insertTestUser } from '@/tests/helpers/user.helper';
 import type { User } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
-import { kiloclaw_image_catalog, kiloclaw_version_pins } from '@kilocode/db/schema';
+import {
+  kiloclaw_image_catalog,
+  kiloclaw_version_pins,
+  kiloclaw_subscriptions,
+} from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 
 let userA: User;
@@ -42,12 +46,27 @@ beforeAll(async () => {
     is_admin: true,
   });
 
+  // Give test users active subscriptions so clawAccessProcedure doesn't block them
+  const trialEnd = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  await db.insert(kiloclaw_subscriptions).values(
+    [userA, userB, adminUser].map(u => ({
+      user_id: u.id,
+      plan: 'trial' as const,
+      status: 'trialing' as const,
+      trial_started_at: new Date().toISOString(),
+      trial_ends_at: trialEnd,
+    }))
+  );
+
   await db.insert(kiloclaw_image_catalog).values([availableVersion, disabledVersion]);
 });
 
 afterAll(async () => {
   try {
     await db.delete(kiloclaw_version_pins);
+    for (const u of [userA, userB, adminUser]) {
+      await db.delete(kiloclaw_subscriptions).where(eq(kiloclaw_subscriptions.user_id, u.id));
+    }
     await db
       .delete(kiloclaw_image_catalog)
       .where(eq(kiloclaw_image_catalog.image_tag, availableVersion.image_tag));

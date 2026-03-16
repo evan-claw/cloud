@@ -112,6 +112,42 @@ export enum SecurityAuditLogAction {
   AuditLogExported = 'security.audit_log.exported',
 }
 
+// --- KiloClaw enums ---
+
+export const KiloClawPlan = {
+  Trial: 'trial',
+  Commit: 'commit',
+  Standard: 'standard',
+} as const;
+
+export type KiloClawPlan = (typeof KiloClawPlan)[keyof typeof KiloClawPlan];
+
+export const KiloClawScheduledPlan = {
+  Commit: 'commit',
+  Standard: 'standard',
+} as const;
+
+export type KiloClawScheduledPlan =
+  (typeof KiloClawScheduledPlan)[keyof typeof KiloClawScheduledPlan];
+
+export const KiloClawScheduledBy = {
+  Auto: 'auto',
+  User: 'user',
+} as const;
+
+export type KiloClawScheduledBy = (typeof KiloClawScheduledBy)[keyof typeof KiloClawScheduledBy];
+
+export const KiloClawSubscriptionStatus = {
+  Trialing: 'trialing',
+  Active: 'active',
+  PastDue: 'past_due',
+  Canceled: 'canceled',
+  Unpaid: 'unpaid',
+} as const;
+
+export type KiloClawSubscriptionStatus =
+  (typeof KiloClawSubscriptionStatus)[keyof typeof KiloClawSubscriptionStatus];
+
 // =============================================================================
 // B. Type-Only Definitions (used in $type<T>())
 // =============================================================================

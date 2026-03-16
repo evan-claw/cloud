@@ -1,0 +1,123 @@
+// ── Shared utilities ─────────────────────────────────────────────────
+
+export function formatBillingDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+// ── Types ────────────────────────────────────────────────────────────
+
+export type ClawBillingStatus = {
+  hasAccess: boolean;
+  accessReason: 'trial' | 'subscription' | 'earlybird' | null;
+  trialEligible: boolean;
+
+  trial: {
+    startedAt: string;
+    endsAt: string;
+    daysRemaining: number;
+    expired: boolean;
+  } | null;
+
+  subscription: {
+    plan: 'commit' | 'standard';
+    status: 'active' | 'past_due' | 'canceled' | 'unpaid';
+    cancelAtPeriodEnd: boolean;
+    currentPeriodEnd: string;
+    commitEndsAt: string | null;
+    scheduledPlan: 'commit' | 'standard' | null;
+    scheduledBy: 'auto' | 'user' | null;
+  } | null;
+
+  earlybird: {
+    purchased: boolean;
+    expiresAt: string;
+    daysRemaining: number;
+  } | null;
+
+  instance: {
+    exists: boolean;
+    status: 'running' | 'stopped' | 'provisioned' | 'destroying' | null;
+    suspendedAt: string | null;
+    destructionDeadline: string | null;
+    destroyed: boolean;
+  } | null;
+};
+
+// ── Derived banner states ────────────────────────────────────────────
+
+export type ClawBannerState =
+  | 'trial_active'
+  | 'trial_ending_soon'
+  | 'trial_ending_very_soon'
+  | 'trial_expires_today'
+  | 'earlybird_active'
+  | 'earlybird_ending_soon'
+  | 'subscription_canceling'
+  | 'subscription_past_due'
+  | 'subscribed'
+  | 'none';
+
+export type ClawLockReason =
+  | 'trial_expired_instance_alive'
+  | 'trial_expired_instance_destroyed'
+  | 'earlybird_expired'
+  | 'subscription_expired_instance_alive'
+  | 'subscription_expired_instance_destroyed'
+  | 'past_due_grace_exceeded'
+  | null;
+
+export function deriveBannerState(billing: ClawBillingStatus): ClawBannerState {
+  // Subscription states take priority
+  if (billing.subscription) {
+    if (billing.subscription.status === 'past_due' || billing.subscription.status === 'unpaid')
+      return 'subscription_past_due';
+    if (billing.subscription.cancelAtPeriodEnd) return 'subscription_canceling';
+    if (billing.subscription.status === 'active') return 'subscribed';
+  }
+
+  // Trial states
+  if (billing.trial && !billing.trial.expired) {
+    const d = billing.trial.daysRemaining;
+    if (d === 0) return 'trial_expires_today';
+    if (d <= 3) return 'trial_ending_very_soon';
+    if (d <= 7) return 'trial_ending_soon';
+    return 'trial_active';
+  }
+
+  // Earlybird states
+  if (billing.earlybird) {
+    if (billing.earlybird.daysRemaining <= 0) return 'none'; // handled by lock dialog
+    if (billing.earlybird.daysRemaining <= 30) return 'earlybird_ending_soon';
+    return 'earlybird_active';
+  }
+
+  return 'none';
+}
+
+export function deriveLockReason(billing: ClawBillingStatus): ClawLockReason {
+  if (!billing.hasAccess) {
+    // Subscription states checked first — a paid subscription that was canceled
+    // or fell past-due must not be masked by historical trial data.
+    if (billing.subscription?.status === 'canceled') {
+      return billing.instance?.destroyed
+        ? 'subscription_expired_instance_destroyed'
+        : 'subscription_expired_instance_alive';
+    }
+    if (billing.subscription?.status === 'past_due' || billing.subscription?.status === 'unpaid') {
+      return 'past_due_grace_exceeded';
+    }
+    if (billing.trial?.expired) {
+      return billing.instance?.destroyed
+        ? 'trial_expired_instance_destroyed'
+        : 'trial_expired_instance_alive';
+    }
+    if (billing.earlybird && billing.earlybird.daysRemaining <= 0) {
+      return 'earlybird_expired';
+    }
+  }
+  return null;
+}

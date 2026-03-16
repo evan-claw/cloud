@@ -37,6 +37,10 @@ import {
   FeedbackSource,
   CliSessionSharedState,
   SecurityAuditLogAction,
+  KiloClawPlan,
+  KiloClawScheduledPlan,
+  KiloClawScheduledBy,
+  KiloClawSubscriptionStatus,
 } from './schema-types';
 import type {
   OrganizationModeConfig,
@@ -102,6 +106,10 @@ export const SCHEMA_CHECK_ENUMS = {
   KiloPassScheduledChangeStatus,
   CliSessionSharedState,
   SecurityAuditLogAction,
+  KiloClawPlan,
+  KiloClawScheduledPlan,
+  KiloClawScheduledBy,
+  KiloClawSubscriptionStatus,
 } as const;
 
 export const credit_transactions = pgTable(
@@ -3423,6 +3431,73 @@ export const kiloclaw_earlybird_purchases = pgTable('kiloclaw_earlybird_purchase
 });
 
 export type KiloClawEarlybirdPurchase = typeof kiloclaw_earlybird_purchases.$inferSelect;
+
+export const kiloclaw_subscriptions = pgTable(
+  'kiloclaw_subscriptions',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    user_id: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' })
+      .unique(),
+    stripe_subscription_id: text().unique(),
+    stripe_schedule_id: text(),
+    plan: text().notNull().$type<KiloClawPlan>(),
+    scheduled_plan: text().$type<KiloClawScheduledPlan>(),
+    scheduled_by: text().$type<KiloClawScheduledBy>(),
+    status: text().notNull().$type<KiloClawSubscriptionStatus>(),
+    cancel_at_period_end: boolean().notNull().default(false),
+    trial_started_at: timestamp({ withTimezone: true, mode: 'string' }),
+    trial_ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+    current_period_start: timestamp({ withTimezone: true, mode: 'string' }),
+    current_period_end: timestamp({ withTimezone: true, mode: 'string' }),
+    commit_ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+    past_due_since: timestamp({ withTimezone: true, mode: 'string' }),
+    suspended_at: timestamp({ withTimezone: true, mode: 'string' }),
+    destruction_deadline: timestamp({ withTimezone: true, mode: 'string' }),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => sql`now()`),
+  },
+  table => [
+    index('IDX_kiloclaw_subscriptions_status').on(table.status),
+    index('IDX_kiloclaw_subscriptions_stripe_schedule_id').on(table.stripe_schedule_id),
+    enumCheck('kiloclaw_subscriptions_plan_check', table.plan, KiloClawPlan),
+    enumCheck(
+      'kiloclaw_subscriptions_scheduled_plan_check',
+      table.scheduled_plan,
+      KiloClawScheduledPlan
+    ),
+    enumCheck('kiloclaw_subscriptions_scheduled_by_check', table.scheduled_by, KiloClawScheduledBy),
+    enumCheck('kiloclaw_subscriptions_status_check', table.status, KiloClawSubscriptionStatus),
+  ]
+);
+
+export type KiloClawSubscription = typeof kiloclaw_subscriptions.$inferSelect;
+export type NewKiloClawSubscription = typeof kiloclaw_subscriptions.$inferInsert;
+
+export const kiloclaw_email_log = pgTable(
+  'kiloclaw_email_log',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    user_id: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' }),
+    email_type: text().notNull(),
+    sent_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  table => [uniqueIndex('UQ_kiloclaw_email_log_user_type').on(table.user_id, table.email_type)]
+);
+
+export type KiloClawEmailLog = typeof kiloclaw_email_log.$inferSelect;
 
 // Bot Request Logs — tracks each message handled by the new bot (src/lib/bot.ts).
 // Rows are created as 'pending' on receipt and updated as processing progresses.
