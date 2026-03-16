@@ -360,6 +360,25 @@ platform.post('/gmail-history-id', async c => {
   }
 });
 
+// GET /api/platform/gmail-oidc-email?userId=...
+// Lightweight lookup for the push worker — no Fly live check.
+platform.get('/gmail-oidc-email', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getGmailOidcEmail(),
+      'getGmailOidcEmail'
+    );
+    return c.json(result);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-oidc-email');
+    return jsonError(message, status);
+  }
+});
+
 // PATCH /api/platform/secrets
 platform.patch('/secrets', async c => {
   const result = await parseBody(c, SecretsPatchSchema);
