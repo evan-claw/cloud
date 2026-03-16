@@ -280,7 +280,9 @@ export async function createNewMachine(
         }
 
         if (adopted.state === 'stopped' || adopted.state === 'created') {
-          await fly.updateMachine(flyConfig, existingId, adoptedMachineConfig, { minSecretsVersion });
+          await fly.updateMachine(flyConfig, existingId, adoptedMachineConfig, {
+            minSecretsVersion,
+          });
           await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
         } else if (adopted.state !== 'started') {
           await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
