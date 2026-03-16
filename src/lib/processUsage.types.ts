@@ -153,7 +153,7 @@ export type UsageMetaData = {
   streamed: boolean | null;
   cancelled: boolean | null;
   editor_name: string | null;
-  api_kind: string | null;
+  api_kind: GatewayApiKind | null;
   has_tools: boolean | null;
   machine_id: string | null;
   feature: string | null;
