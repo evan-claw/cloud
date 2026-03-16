@@ -92,14 +92,7 @@ For a full E2E smoke test, use the Local E2E Testing flow above — send an emai
 
 ### Tunnel URL changes
 
-If you restart `cloudflared`, update the Pub/Sub subscription to point to the new URL:
-
-```bash
-gcloud pubsub subscriptions update gog-gmail-push \
-  --push-endpoint="https://<new-tunnel>.trycloudflare.com/push/user/<userId>"
-```
-
-Use a named tunnel with a stable hostname to avoid this.
+If you restart `cloudflared`, rerun the setup container with the new tunnel URL.
 
 ## Deployment
 
