@@ -115,7 +115,10 @@ function createFakeStorage() {
   let alarmTime: number | null = null;
 
   return {
-    get(keys: string[]): Map<string, unknown> {
+    get(keys: string | string[]): unknown {
+      if (typeof keys === 'string') {
+        return store.get(keys);
+      }
       const result = new Map<string, unknown>();
       for (const k of keys) {
         if (store.has(k)) result.set(k, store.get(k));
@@ -3580,6 +3583,29 @@ describe("status guards: 'starting'", () => {
     await expect(instance.startAsync()).rejects.toThrow(
       'Cannot start: instance is being destroyed'
     );
+  });
+
+  it('background start() aborts if instance was destroyed while starting', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Simulate destroy happening while start() is in flight
+    storage._store.set('status', 'destroying');
+
+    // Let the background start() complete — it should see 'destroying' and bail
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('destroying');
   });
 });
 

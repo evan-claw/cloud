@@ -758,6 +758,15 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
     }
 
+    // Re-check status directly from storage: if the instance was destroyed while
+    // start() was running in the background (via startAsync/waitUntil), bail out
+    // so teardown wins. We bypass loadState() because it no-ops when already loaded.
+    const currentStatus = await this.ctx.storage.get('status');
+    if (currentStatus === 'destroying') {
+      console.warn('[DO] start: instance was destroyed while starting, aborting');
+      return;
+    }
+
     this.s.status = 'running';
     this.s.startingAt = null;
     this.s.lastStartedAt = Date.now();
