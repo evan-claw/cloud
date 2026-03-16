@@ -262,14 +262,18 @@ export async function createNewMachine(
         console.log('[DO] Machine already exists (409), adopting:', existingId);
         state.flyMachineId = existingId;
         await ctx.storage.put(storageUpdate({ flyMachineId: existingId }));
-        await startExistingMachine(
-          flyConfig,
-          ctx,
-          state,
-          machineConfig,
-          minSecretsVersion,
-          envFlyRegion
-        );
+        // Start the adopted machine inline. Don't use startExistingMachine
+        // here — its 404 fallback calls createNewMachine, which would
+        // loop back here if the adopted machine disappears while Fly's
+        // name registry still returns 409. If anything fails, we throw
+        // and let the alarm retry; flyMachineId is already persisted.
+        const adopted = await fly.getMachine(flyConfig, existingId);
+        if (adopted.state === 'stopped' || adopted.state === 'created') {
+          await fly.updateMachine(flyConfig, existingId, machineConfig, { minSecretsVersion });
+          await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
+        } else if (adopted.state !== 'started') {
+          await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
+        }
         return;
       } else {
         console.error(

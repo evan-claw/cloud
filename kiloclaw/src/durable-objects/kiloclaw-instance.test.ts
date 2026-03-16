@@ -1238,7 +1238,7 @@ describe('createNewMachine 409 recovery', () => {
     (flyClient.createMachine as Mock).mockRejectedValue(
       new FlyApiError('conflict', 409, 'already_exists machine ID e82d3d7b44d987')
     );
-    // getMachine for volume guard + startExistingMachine
+    // getMachine for volume guard + inline start
     (flyClient.getMachine as Mock).mockResolvedValue({
       id: 'e82d3d7b44d987',
       state: 'stopped',
@@ -1264,7 +1264,7 @@ describe('createNewMachine 409 recovery', () => {
     expect(storage._store.get('status')).toBe('running');
   });
 
-  it('persists flyMachineId even when startExistingMachine throws after adoption', async () => {
+  it('persists flyMachineId even when adopted machine start throws', async () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
 
@@ -1387,6 +1387,39 @@ describe('createNewMachine 409 recovery', () => {
       expect.stringContaining('could not extract machine ID'),
       expect.anything()
     );
+  });
+
+  it('throws on 404 during adopted machine start instead of recursing', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    const conflictErr = new FlyApiError(
+      'conflict',
+      409,
+      'already_exists machine ID ghost123'
+    );
+    (flyClient.createMachine as Mock).mockRejectedValue(conflictErr);
+    // First getMachine (volume guard) succeeds, second (inline start) returns 404
+    (flyClient.getMachine as Mock)
+      .mockResolvedValueOnce({
+        id: 'ghost123',
+        state: 'stopped',
+        region: 'iad',
+        config: {
+          mounts: [{ volume: 'vol-1', path: '/root' }],
+          guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' },
+        },
+      })
+      .mockRejectedValueOnce(new FlyApiError('not found', 404, 'not found'));
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    // Should throw (not loop) — alarm will retry
+    await expect(instance.start('user-1')).rejects.toThrow();
+
+    // createMachine should only have been called once (no recursion)
+    expect(flyClient.createMachine).toHaveBeenCalledTimes(1);
+    // flyMachineId was persisted before the start attempt
+    expect(storage._store.get('flyMachineId')).toBe('ghost123');
   });
 
   it('re-throws non-409 errors from createMachine', async () => {
