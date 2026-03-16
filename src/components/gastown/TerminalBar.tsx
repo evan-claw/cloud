@@ -622,6 +622,22 @@ function MayorTerminalPane({ townId, collapsed }: { townId: string; collapsed: b
       term.loadAddon(fitAddon);
       term.loadAddon(webLinksAddon);
       term.open(container);
+      term.attachCustomKeyEventHandler(ev => {
+        if (ev.type !== 'keydown') return true;
+        if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+          term.input('\x1b[13;2u');
+          return false;
+        }
+        if (ev.key === 'Enter' && ev.altKey && !ev.ctrlKey && !ev.shiftKey && !ev.metaKey) {
+          term.input('\x1b[13;3u');
+          return false;
+        }
+        if (ev.key === 'Enter' && ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey) {
+          term.input('\x1b[13;5u');
+          return false;
+        }
+        return true;
+      });
       fitAddon.fit();
 
       xtermRef.current = term;
@@ -807,6 +823,22 @@ function AgentTerminalPane({ townId, agentId }: { townId: string; agentId: strin
       term.loadAddon(fitAddon);
       term.loadAddon(webLinksAddon);
       term.open(container);
+      term.attachCustomKeyEventHandler(ev => {
+        if (ev.type !== 'keydown') return true;
+        if (ev.key === 'Enter' && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+          term.input('\x1b[13;2u');
+          return false;
+        }
+        if (ev.key === 'Enter' && ev.altKey && !ev.ctrlKey && !ev.shiftKey && !ev.metaKey) {
+          term.input('\x1b[13;3u');
+          return false;
+        }
+        if (ev.key === 'Enter' && ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey) {
+          term.input('\x1b[13;5u');
+          return false;
+        }
+        return true;
+      });
       fitAddon.fit();
 
       xtermRef.current = term;
