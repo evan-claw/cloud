@@ -119,7 +119,7 @@ export class GitLabLookupService {
     }
 
     const row = rows[0];
-    const metadata = GitLabMetadataSchema.parse(row.metadata);
+    const metadata = GitLabMetadataSchema.parse(row.metadata ?? {});
 
     return {
       success: true,
