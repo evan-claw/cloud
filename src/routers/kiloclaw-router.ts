@@ -826,14 +826,11 @@ export const kiloclawRouter = createTRPCRouter({
     return { success: true };
   }),
 
-  openclawConfig: baseProcedure.query(async ({ ctx }) => {
+  fileTree: baseProcedure.query(async ({ ctx }) => {
     try {
       const client = new KiloClawInternalClient();
-      const response = await client.getOpenclawConfig(ctx.user.id);
-      return {
-        ...response,
-        config: redactOpenclawConfig(response.config),
-      };
+      const result = await client.getFileTree(ctx.user.id);
+      return result.tree;
     } catch (err) {
       if (err instanceof KiloClawApiError && err.statusCode === 404) {
         const { code, message } = getKiloClawApiErrorPayload(err);
@@ -841,40 +838,32 @@ export const kiloclawRouter = createTRPCRouter({
           code: 'NOT_FOUND',
           message:
             code === 'controller_route_unavailable'
-              ? 'Instance needs redeploy to support fetching OpenClaw config'
-              : (message ?? 'Failed to fetch OpenClaw config'),
-        });
-      }
-      if (err instanceof KiloClawApiError && err.statusCode === 409) {
-        const { message, code } = getKiloClawApiErrorPayload(err);
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: message ?? 'Instance is not provisioned or not running',
-          cause: code ? new UpstreamApiError(code) : undefined,
+              ? 'Instance needs redeploy to support file browsing'
+              : (message ?? 'Failed to fetch file tree'),
         });
       }
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message:
           err instanceof KiloClawApiError
-            ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to fetch OpenClaw config')
-            : 'Failed to fetch OpenClaw config',
+            ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to fetch file tree')
+            : 'Failed to fetch file tree',
       });
     }
   }),
 
-  replaceOpenclawConfig: baseProcedure
-    .input(z.object({ config: z.record(z.string(), z.unknown()), etag: z.string().optional() }))
-    .mutation(async ({ ctx, input }) => {
+  readFile: baseProcedure
+    .input(z.object({ path: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
       try {
         const client = new KiloClawInternalClient();
-
-        // Fetch the current config so we can restore any redacted secrets
-        // that the user didn't change (they'll still have the placeholder).
-        const current = await client.getOpenclawConfig(ctx.user.id);
-        const mergedConfig = restoreRedactedSecrets(input.config, current.config);
-
-        return await client.replaceOpenclawConfig(ctx.user.id, mergedConfig, input.etag);
+        const result = await client.readFile(ctx.user.id, input.path);
+        if (input.path === 'openclaw.json') {
+          const parsed = JSON.parse(result.content) as Record<string, unknown>;
+          const redacted = redactOpenclawConfig(parsed);
+          return { content: JSON.stringify(redacted, null, 2), etag: result.etag };
+        }
+        return result;
       } catch (err) {
         if (err instanceof KiloClawApiError && err.statusCode === 404) {
           const { code, message } = getKiloClawApiErrorPayload(err);
@@ -882,8 +871,8 @@ export const kiloclawRouter = createTRPCRouter({
             code: 'NOT_FOUND',
             message:
               code === 'controller_route_unavailable'
-                ? 'Instance cannot update OpenClaw config until redeployed'
-                : (message ?? 'Failed to replace openclaw config'),
+                ? 'Instance needs redeploy to support file reading'
+                : (message ?? 'File not found'),
           });
         }
         if (err instanceof KiloClawApiError && err.statusCode === 409) {
@@ -898,8 +887,59 @@ export const kiloclawRouter = createTRPCRouter({
           code: 'INTERNAL_SERVER_ERROR',
           message:
             err instanceof KiloClawApiError
-              ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to replace openclaw config')
-              : 'Failed to replace openclaw config',
+              ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to read file')
+              : 'Failed to read file',
+        });
+      }
+    }),
+
+  writeFile: baseProcedure
+    .input(
+      z.object({
+        path: z.string().min(1),
+        content: z.string(),
+        etag: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+        let content = input.content;
+
+        if (input.path === 'openclaw.json') {
+          const currentResult = await client.readFile(ctx.user.id, 'openclaw.json');
+          const currentConfig = JSON.parse(currentResult.content) as Record<string, unknown>;
+          const userConfig = JSON.parse(content) as Record<string, unknown>;
+          const merged = restoreRedactedSecrets(userConfig, currentConfig);
+          content = JSON.stringify(merged, null, 2);
+        }
+
+        return await client.writeFile(ctx.user.id, input.path, content, input.etag);
+      } catch (err) {
+        if (err instanceof KiloClawApiError && err.statusCode === 404) {
+          const { code, message } = getKiloClawApiErrorPayload(err);
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message:
+              code === 'controller_route_unavailable'
+                ? 'Instance needs redeploy to support file writing'
+                : (message ?? 'File not found'),
+          });
+        }
+        if (err instanceof KiloClawApiError && err.statusCode === 409) {
+          const { message, code } = getKiloClawApiErrorPayload(err);
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: message ?? 'File was modified externally',
+            cause: code ? new UpstreamApiError(code) : undefined,
+          });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message:
+            err instanceof KiloClawApiError
+              ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to write file')
+              : 'Failed to write file',
         });
       }
     }),
