@@ -12,7 +12,7 @@
  * 6. Tarballs the gog config, encrypts, and POSTs to the worker
  *
  * Usage:
- *   docker run -it --network host kilocode/google-setup --token=<jwt>
+ *   docker run -it ghcr.io/kilo-org/google-setup --token=<jwt>
  */
 
 import { spawn, execSync, execFileSync } from 'node:child_process';
@@ -38,7 +38,7 @@ const gmailPushWorkerUrl = gmailPushWorkerUrlArg
   : 'https://kiloclaw-gmail.kiloapps.io';
 
 if (!token) {
-  console.error('Usage: docker run -it --network host kilocode/google-setup --token=<session-jwt>');
+  console.error('Usage: docker run -it ghcr.io/kilo-org/google-setup --token=<session-jwt>');
   process.exit(1);
 }
 
@@ -388,17 +388,19 @@ try {
 // Use the gcloud account email for gog auth add
 const userEmail = gcloudAccount;
 console.log(`\nAuthorizing ${userEmail} with gog...`);
-console.log('A browser window will open for you to authorize Google Workspace access.\n');
+console.log('You will need to open a URL in your browser to authorize Google Workspace access.\n');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-console.log('  When the browser opens:');
-console.log('  1. Google will warn "Google hasn\'t verified this app"');
+console.log('  gog will print an authorization URL.');
+console.log('  1. Open the URL in your browser');
+console.log('  2. Google will warn "Google hasn\'t verified this app"');
 console.log('     → Click "Continue"');
-console.log('  2. Select ALL permissions (check every box)');
-console.log('  3. Click "Continue"');
+console.log('  3. Select ALL permissions (check every box)');
+console.log('  4. Click "Continue"');
+console.log('  5. Copy the redirect URL from your browser and paste it here');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 try {
-  await runCommand('gog', ['auth', 'add', userEmail, '--services=all', '--force-consent'], {
+  await runCommand('gog', ['auth', 'add', userEmail, '--services=all', '--force-consent', '--manual'], {
     env: gogEnv,
   });
 } catch (err) {

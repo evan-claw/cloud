@@ -87,6 +87,7 @@ describe('User', () => {
         linkedin_url: 'https://linkedin.com/in/testuser',
         github_url: 'https://github.com/testuser',
         openrouter_upstream_safety_identifier: 'openrouter_upstream_safety_identifier',
+        customer_source: 'A YouTube video',
         is_admin: true,
       });
 
@@ -101,6 +102,7 @@ describe('User', () => {
       expect(softDeleted!.linkedin_url).toBeNull();
       expect(softDeleted!.github_url).toBeNull();
       expect(softDeleted!.openrouter_upstream_safety_identifier).toBeNull();
+      expect(softDeleted!.customer_source).toBeNull();
       expect(softDeleted!.api_token_pepper).toBeNull();
       expect(softDeleted!.default_model).toBeNull();
       expect(softDeleted!.blocked_reason).toMatch(/^soft-deleted at \d{4}-\d{2}-\d{2}T/);
