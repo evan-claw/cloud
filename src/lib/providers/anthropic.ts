@@ -76,11 +76,14 @@ export function addCacheBreakpoints(messages: OpenAI.Chat.ChatCompletionMessageP
   }
 }
 
+export const ANTHROPIC_1M_CONTEXT_LENGTH = 1_000_000;
+
 export function applyAnthropicModelSettings(
   requestToMutate: GatewayRequest,
   extraHeaders: Record<string, string>
 ) {
   appendAnthropicBetaHeader(extraHeaders, 'fine-grained-tool-streaming-2025-05-14');
+  appendAnthropicBetaHeader(extraHeaders, 'context-1m-2025-08-07');
 
   if (ENABLE_ANTHROPIC_AUTOMATIC_CACHING) {
     // kilo-auto/frontier doesn't get cache breakpoints, because clients don't know it's a Claude model

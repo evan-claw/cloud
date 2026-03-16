@@ -18,6 +18,11 @@ import {
   AUTO_MODELS,
   deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck,
 } from '@/lib/kilo-auto-model';
+import {
+  isAnthropicModel,
+  isHaikuModel,
+  ANTHROPIC_1M_CONTEXT_LENGTH,
+} from '@/lib/providers/anthropic';
 
 // Re-export from shared module for backwards compatibility
 export { normalizeModelId } from '@/lib/model-utils';
@@ -72,8 +77,15 @@ function enhancedModelList(models: OpenRouterModel[]) {
       const ageDays = (Date.now() / 1_000 - model.created) / (24 * 3600);
       const isNew = preferredIndex >= 0 && ageDays >= 0 && ageDays < 7;
       const skipSuffix = model.name.endsWith(')');
+      // Anthropic models (except Haiku) support 1M context via the context-1m beta header.
+      // OpenRouter reports 200K, but we override to reflect the actual capability.
+      const contextLength =
+        isAnthropicModel(model.id) && !isHaikuModel(model.id)
+          ? ANTHROPIC_1M_CONTEXT_LENGTH
+          : model.context_length;
       return {
         ...model,
+        context_length: contextLength,
         name: skipSuffix ? model.name : isNew ? model.name + ' (new)' : model.name,
         preferredIndex: preferredIndex >= 0 ? preferredIndex : undefined,
         isFree: isFreeModel(model.id),
