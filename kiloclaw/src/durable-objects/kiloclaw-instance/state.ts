@@ -60,6 +60,9 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.lastDestroyErrorAt = d.lastDestroyErrorAt;
     s.lastBoundMachineRecoveryAt = d.lastBoundMachineRecoveryAt;
     s.instanceFeatures = d.instanceFeatures;
+    s.gmailNotificationsEnabled = d.gmailNotificationsEnabled;
+    s.gmailLastHistoryId = d.gmailLastHistoryId;
+    s.gmailPushOidcEmail = d.gmailPushOidcEmail;
   } else {
     const hasAnyData = entries.size > 0;
     if (hasAnyData) {
@@ -110,6 +113,9 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.lastDestroyErrorAt = null;
   s.lastBoundMachineRecoveryAt = null;
   s.instanceFeatures = [];
+  s.gmailNotificationsEnabled = false;
+  s.gmailLastHistoryId = null;
+  s.gmailPushOidcEmail = null;
   s.lastLiveCheckAt = null;
   s.loaded = false;
 }
@@ -153,6 +159,9 @@ export function createMutableState(): InstanceMutableState {
     lastDestroyErrorAt: null,
     lastBoundMachineRecoveryAt: null,
     instanceFeatures: [],
+    gmailNotificationsEnabled: false,
+    gmailLastHistoryId: null,
+    gmailPushOidcEmail: null,
     lastLiveCheckAt: null,
   };
 }

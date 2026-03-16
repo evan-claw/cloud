@@ -3,7 +3,12 @@ import type { FlyClientConfig } from '../../fly/client';
 import type { FlyMachineConfig } from '../../fly/types';
 import type { PersistedState } from '../../schemas/instance-config';
 import * as fly from '../../fly/client';
-import { SELF_HEAL_THRESHOLD, STARTUP_TIMEOUT_SECONDS } from '../../config';
+import {
+  SELF_HEAL_THRESHOLD,
+  STARTUP_TIMEOUT_SECONDS,
+  getProactiveRefreshThresholdMs,
+} from '../../config';
+import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../../utils/env-encryption';
 import {
   METADATA_RECOVERY_COOLDOWN_MS,
   BOUND_MACHINE_RECOVERY_COOLDOWN_MS,
@@ -16,6 +21,8 @@ import type { InstanceMutableState, DestroyResult } from './types';
 import { storageUpdate, resetMutableState } from './state';
 import { reconcileLog } from './log';
 import { ensureVolume, staleProvisionAgeMs } from './fly-machines';
+import { mintFreshApiKey } from './config';
+import * as gateway from './gateway';
 
 /**
  * Check actual Fly state against DO state and fix drift.
@@ -54,6 +61,154 @@ export async function reconcileWithFly(
   }
 
   await reconcileVolume(flyConfig, ctx, state, env, reason);
+  await reconcileApiKeyExpiry(flyConfig, ctx, state, env, reason);
+}
+
+// ---- API key proactive refresh ----
+
+const MINT_TIMEOUT_MS = 15_000;
+
+async function reconcileApiKeyExpiry(
+  flyConfig: FlyClientConfig,
+  ctx: DurableObjectState,
+  state: InstanceMutableState,
+  env: KiloClawEnv,
+  reason: string
+): Promise<void> {
+  if (state.status !== 'running' || !state.flyMachineId) return;
+  if (!state.kilocodeApiKeyExpiresAt || !state.userId) return;
+
+  // Capture after guards so narrowing is explicit across awaits.
+  const machineId = state.flyMachineId;
+  const userId = state.userId;
+
+  const expiresAtMs = Date.parse(state.kilocodeApiKeyExpiresAt);
+  if (Number.isNaN(expiresAtMs)) return;
+
+  const timeUntilExpiry = expiresAtMs - Date.now();
+  const thresholdMs = getProactiveRefreshThresholdMs(env.PROACTIVE_REFRESH_THRESHOLD_HOURS);
+  if (timeUntilExpiry > thresholdMs) return;
+
+  // Fetch controller version for observability (best-effort, not used for gating).
+  let controllerVersion: string | null = null;
+  try {
+    const info = await gateway.getControllerVersion(state, env);
+    controllerVersion = info?.version ?? null;
+  } catch {
+    // Version check failed — log null, don't block refresh.
+  }
+
+  reconcileLog(reason, 'api_key_expiry_approaching', {
+    user_id: userId,
+    expires_at: state.kilocodeApiKeyExpiresAt,
+    hours_remaining: Math.round(timeUntilExpiry / 3600000),
+    controller_version: controllerVersion,
+  });
+
+  // 1. Mint fresh key.
+  let mintTimeout: ReturnType<typeof setTimeout>;
+  let freshKey: { token: string; expiresAt: string } | null;
+  try {
+    freshKey = await Promise.race([
+      mintFreshApiKey(env, userId).finally(() => clearTimeout(mintTimeout)),
+      new Promise<never>((_, reject) => {
+        mintTimeout = setTimeout(() => reject(new Error('mint timeout')), MINT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (err) {
+    reconcileLog(reason, 'api_key_mint_error', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  if (!freshKey) {
+    reconcileLog(reason, 'api_key_mint_failed', { user_id: userId });
+    return;
+  }
+
+  // 2. Update Fly machine config with the fresh encrypted key.
+  //    Always skipLaunch — no forced restart. The key is persisted durably
+  //    so the next natural restart (user-initiated, crash, deploy) picks it up.
+  //    Pass minSecretsVersion from ensureEnvKey() so Fly waits for the env key
+  //    secret to propagate before any subsequent launch.
+  let flyConfigUpdated = false;
+  try {
+    const machine = await fly.getMachine(flyConfig, machineId);
+    const updatedEnv = { ...machine.config.env };
+
+    const appStub = env.KILOCLAW_APP.get(env.KILOCLAW_APP.idFromName(userId));
+    const { key: envKey, secretsVersion } = await appStub.ensureEnvKey(userId);
+    updatedEnv[`${ENCRYPTED_ENV_PREFIX}KILOCODE_API_KEY`] = encryptEnvValue(envKey, freshKey.token);
+
+    await fly.updateMachine(
+      flyConfig,
+      machineId,
+      { ...machine.config, env: updatedEnv },
+      { skipLaunch: true, minSecretsVersion: secretsVersion }
+    );
+
+    flyConfigUpdated = true;
+  } catch (err) {
+    reconcileLog(reason, 'api_key_fly_config_update_failed', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 3. Try to push the key to the running controller's process.env and
+  //    signal the gateway (graceful in-process restart via SIGUSR1).
+  //    If the controller doesn't support /_kilo/env/patch (404), the catch
+  //    block handles it — the Fly config already has the new key for the
+  //    next natural restart.
+  let pushed = false;
+  try {
+    const result = await gateway.patchEnvOnMachine(state, env, {
+      KILOCODE_API_KEY: freshKey.token,
+    });
+    pushed = result?.signaled ?? false;
+    if (!pushed) {
+      reconcileLog(reason, 'api_key_push_not_signaled', {
+        user_id: userId,
+        result: result ? `ok=${result.ok} signaled=${result.signaled}` : 'null',
+      });
+    }
+  } catch (err) {
+    reconcileLog(reason, 'api_key_push_error', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+      controller_version: controllerVersion,
+    });
+  }
+
+  // 4. Persist new expiry to DO state — but only if the fresh key was
+  //    actually delivered via at least one path. If both the Fly config
+  //    update and push failed, the running gateway still has the old key.
+  //    Persisting the new expiry would cause future alarms to skip refresh,
+  //    letting the old key expire silently.
+  if (!pushed && !flyConfigUpdated) {
+    reconcileLog(reason, 'api_key_refresh_failed_all_paths', {
+      user_id: userId,
+    });
+    return;
+  }
+
+  state.kilocodeApiKey = freshKey.token;
+  state.kilocodeApiKeyExpiresAt = freshKey.expiresAt;
+  await ctx.storage.put(
+    storageUpdate({
+      kilocodeApiKey: freshKey.token,
+      kilocodeApiKeyExpiresAt: freshKey.expiresAt,
+    })
+  );
+
+  reconcileLog(reason, 'api_key_refreshed', {
+    user_id: userId,
+    new_expires_at: freshKey.expiresAt,
+    pushed,
+    flyConfigUpdated,
+    controller_version: controllerVersion,
+  });
 }
 
 // ---- Volume reconciliation ----

@@ -45,6 +45,11 @@ export const ControllerVersionResponseSchema = z.object({
   openclawCommit: z.string().nullable().optional(),
 });
 
+export const EnvPatchResponseSchema = z.object({
+  ok: z.boolean(),
+  signaled: z.boolean(),
+});
+
 export class GatewayControllerError extends Error {
   readonly status: number;
   readonly code: string | null;

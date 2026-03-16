@@ -4,6 +4,7 @@ import {
   isFlyNotFound,
   isFlyInsufficientResources,
   createMachine,
+  updateMachine,
   createVolumeWithFallback,
   listVolumeSnapshots,
 } from './client';
@@ -427,6 +428,79 @@ describe('listVolumeSnapshots', () => {
       .mockResolvedValueOnce(mockFetchResponse(404, { error: 'volume not found' }));
 
     await expect(listVolumeSnapshots(fakeConfig, 'vol-gone')).rejects.toThrow('volume not found');
+    fetchSpy.mockRestore();
+  });
+});
+
+// ============================================================================
+// updateMachine — skipLaunch
+// ============================================================================
+
+describe('updateMachine', () => {
+  const machineResponse = {
+    id: 'machine-1',
+    name: 'm',
+    state: 'stopped',
+    region: 'iad',
+    instance_id: 'inst',
+    config: { image: 'registry.fly.io/test:latest' },
+    created_at: '2026-03-01T00:00:00.000Z',
+    updated_at: '2026-03-01T00:00:00.000Z',
+  };
+
+  it('sends skip_launch when specified', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockFetchResponse(200, machineResponse));
+
+    await updateMachine(
+      fakeConfig,
+      'machine-1',
+      { image: 'registry.fly.io/test:latest' },
+      { skipLaunch: true }
+    );
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as {
+      skip_launch?: boolean;
+    };
+    expect(body.skip_launch).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it('does not send skip_launch when not specified', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockFetchResponse(200, machineResponse));
+
+    await updateMachine(fakeConfig, 'machine-1', {
+      image: 'registry.fly.io/test:latest',
+    });
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as {
+      skip_launch?: boolean;
+    };
+    expect(body.skip_launch).toBeUndefined();
+    fetchSpy.mockRestore();
+  });
+
+  it('sends min_secrets_version alongside skip_launch', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockFetchResponse(200, machineResponse));
+
+    await updateMachine(
+      fakeConfig,
+      'machine-1',
+      { image: 'registry.fly.io/test:latest' },
+      { minSecretsVersion: 3, skipLaunch: true }
+    );
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string) as {
+      skip_launch?: boolean;
+      min_secrets_version?: number;
+    };
+    expect(body.skip_launch).toBe(true);
+    expect(body.min_secrets_version).toBe(3);
     fetchSpy.mockRestore();
   });
 });

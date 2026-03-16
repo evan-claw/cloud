@@ -88,21 +88,31 @@ export type SlingResult = {
 };
 
 // Sling batch result (convoy + beads + agents)
+// agent is null for staged convoys (agents aren't assigned until gt_convoy_start)
 export type SlingBatchResult = {
   convoy: Convoy;
-  beads: Array<{ bead: Bead; agent: Agent }>;
+  beads: Array<{ bead: Bead; agent: Agent | null }>;
 };
 
 // Convoy summary (returned by list and status endpoints)
+// Staging is tracked by the `staged` boolean, not the status field.
+// status tracks the convoy lifecycle: active (in progress) or landed (complete).
 export type Convoy = {
   id: string;
   title: string;
   status: 'active' | 'landed';
+  staged: boolean;
   total_beads: number;
   closed_beads: number;
   created_by: string | null;
   created_at: string;
   landed_at: string | null;
+};
+
+// Result returned by POST /convoys/:id/start
+export type ConvoyStartResult = {
+  convoy: Convoy;
+  beads: Array<{ bead: Bead; agent: Agent }>;
 };
 
 // Detailed convoy status with per-bead breakdown

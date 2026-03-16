@@ -40,6 +40,10 @@ export type KiloClawEnv = {
   // OpenClaw gateway configuration
   OPENCLAW_ALLOWED_ORIGINS?: string;
   REQUIRE_PROXY_TOKEN?: string;
+
+  // Tuning overrides (wrangler vars)
+  /** Override proactive API key refresh threshold (hours). Default: 72 (3 days). */
+  PROACTIVE_REFRESH_THRESHOLD_HOURS?: string;
 };
 
 /**

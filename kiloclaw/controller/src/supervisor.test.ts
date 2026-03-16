@@ -47,7 +47,7 @@ describe('createSupervisor', () => {
   it('escalates backoff on repeated crashes and caps at max', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
       backoffInitialMs: 1_000,
       backoffMaxMs: 4_000,
@@ -81,7 +81,7 @@ describe('createSupervisor', () => {
   it('resets backoff after a healthy run', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
       backoffInitialMs: 1_000,
       backoffMaxMs: 8_000,
@@ -113,7 +113,7 @@ describe('createSupervisor', () => {
   it('cancels pending restart when stopped during crash loop', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
       backoffInitialMs: 1_000,
       backoffMaxMs: 4_000,
@@ -134,7 +134,7 @@ describe('createSupervisor', () => {
   it('stops a running child with SIGTERM and transitions to stopped', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 
@@ -153,7 +153,7 @@ describe('createSupervisor', () => {
   it('restarts by stopping then starting a new child', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 
@@ -174,7 +174,7 @@ describe('createSupervisor', () => {
   it('treats start as idempotent when already running', async () => {
     const { spawnImpl } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 
@@ -190,7 +190,7 @@ describe('createSupervisor', () => {
   it('respawns immediately without backoff or crash counter on clean exit (code 0)', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
       backoffInitialMs: 5_000,
       backoffMaxMs: 60_000,
@@ -222,7 +222,7 @@ describe('createSupervisor', () => {
   it('treats signal-killed exit (code 0 + signal) as a crash', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
       backoffInitialMs: 1_000,
     });
@@ -239,7 +239,7 @@ describe('createSupervisor', () => {
   it('signal() sends signal to running child and returns true', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 
@@ -257,7 +257,7 @@ describe('createSupervisor', () => {
   it('forwards SIGTERM on shutdown and suppresses restarts', async () => {
     const { spawnImpl, children } = createSpawnHarness();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['gateway', '--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 
@@ -307,7 +307,7 @@ describe('onStdoutLine callback', () => {
     const { spawnImpl, children } = createSpawnHarnessWithStdout();
     const lines: string[] = [];
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
       onStdoutLine: line => lines.push(line),
     });
@@ -323,7 +323,7 @@ describe('onStdoutLine callback', () => {
     const { spawnImpl, children } = createSpawnHarnessWithStdout();
     const lines: string[] = [];
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
       onStdoutLine: line => lines.push(line),
     });
@@ -342,7 +342,7 @@ describe('onStdoutLine callback', () => {
     const { spawnImpl, children } = createSpawnHarnessWithStdout();
     const lines: string[] = [];
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
       onStdoutLine: line => lines.push(line),
     });
@@ -358,7 +358,7 @@ describe('onStdoutLine callback', () => {
     const { spawnImpl, children } = createSpawnHarnessWithStdout();
     const lines: string[] = [];
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
       onStdoutLine: line => lines.push(line),
     });
@@ -380,7 +380,7 @@ describe('onStdoutLine callback', () => {
       'pipe'
     );
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
       onStdoutLine: () => {},
     });
@@ -397,7 +397,7 @@ describe('onStdoutLine callback', () => {
   it('works without onStdoutLine callback (backward compat)', async () => {
     const { spawnImpl, children } = createSpawnHarnessWithStdout();
     const supervisor = createSupervisor({
-      gatewayArgs: ['--port', '3001'],
+      args: ['--port', '3001'],
       spawnImpl: spawnImpl as never,
     });
 

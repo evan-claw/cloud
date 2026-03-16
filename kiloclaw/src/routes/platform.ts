@@ -27,6 +27,11 @@ import { z } from 'zod';
 import { withDORetry } from '@kilocode/worker-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
 
+const GmailHistoryIdSchema = z.object({
+  userId: z.string().min(1),
+  historyId: z.string().min(1),
+});
+
 const KiloCodeConfigPatchSchema = z.object({
   userId: z.string().min(1),
   kilocodeApiKey: z.string().nullable().optional(),
@@ -83,6 +88,7 @@ const SAFE_ERROR_PREFIXES = [
   'Gateway controller ', // already sanitized at DO level
   'Config was modified ', // etag mismatch on config replace
   'Invalid secret patch: ', // catalog validation (allFieldsRequired, etc.)
+  'Cannot enable Gmail ', // no Google account connected
 ];
 
 function sanitizeError(err: unknown, operation: string): { message: string; status: number } {
@@ -292,6 +298,83 @@ platform.delete('/google-credentials', async c => {
     return c.json(updated, 200);
   } catch (err) {
     const { message, status } = sanitizeError(err, 'google-credentials delete');
+    return jsonError(message, status);
+  }
+});
+
+// POST /api/platform/gmail-notifications
+platform.post('/gmail-notifications', async c => {
+  const result = await parseBody(c, UserIdRequestSchema);
+  if ('error' in result) return result.error;
+
+  const { userId } = result.data;
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailNotifications(true),
+      'enableGmailNotifications'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-notifications enable');
+    return jsonError(message, status);
+  }
+});
+
+// DELETE /api/platform/gmail-notifications?userId=...
+platform.delete('/gmail-notifications', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailNotifications(false),
+      'disableGmailNotifications'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-notifications disable');
+    return jsonError(message, status);
+  }
+});
+
+// POST /api/platform/gmail-history-id — best-effort historyId tracking from queue consumer
+platform.post('/gmail-history-id', async c => {
+  const result = await parseBody(c, GmailHistoryIdSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, historyId } = result.data;
+
+  try {
+    await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateGmailHistoryId(historyId),
+      'updateGmailHistoryId'
+    );
+    return c.json({ ok: true }, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-history-id update');
+    return jsonError(message, status);
+  }
+});
+
+// GET /api/platform/gmail-oidc-email?userId=...
+// Lightweight lookup for the push worker — no Fly live check.
+platform.get('/gmail-oidc-email', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getGmailOidcEmail(),
+      'getGmailOidcEmail'
+    );
+    return c.json(result);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'gmail-oidc-email');
     return jsonError(message, status);
   }
 });

@@ -22,6 +22,7 @@ on:
           - cloudflare-deploy-infra/dispatcher
           - cloudflare-gastown
           - cloudflare-git-token-service
+          - cloudflare-gmail-push
           - cloudflare-images-mcp
           - cloudflare-o11y
           - cloudflare-security-auto-analysis
@@ -100,6 +101,7 @@ jobs:
             cloudflare-deploy-infra/dispatcher
             cloudflare-gastown
             cloudflare-git-token-service
+            cloudflare-gmail-push
             cloudflare-images-mcp
             cloudflare-o11y
             cloudflare-security-auto-analysis

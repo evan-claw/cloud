@@ -212,6 +212,9 @@ export function useKiloClawMutations() {
     disconnectGoogle: useMutation(
       trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus })
     ),
+    setGmailNotifications: useMutation(
+      trpc.kiloclaw.setGmailNotifications.mutationOptions({ onSuccess: invalidateStatus })
+    ),
   };
 }
 

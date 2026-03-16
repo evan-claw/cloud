@@ -89,6 +89,7 @@ run-milvus-test.sh
 
 # Git worktrees
 .worktrees/
+.gw.yml
 
 supabase/.temp
 

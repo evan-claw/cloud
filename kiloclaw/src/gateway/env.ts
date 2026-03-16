@@ -173,9 +173,9 @@ export async function buildEnvVars(
           userConfig.googleCredentials.gogConfigTarball,
           env.AGENT_ENV_VARS_PRIVATE_KEY
         );
-        sensitive.GOOGLE_GOG_CONFIG_TARBALL = tarballBase64;
+        sensitive.KILOCLAW_GOG_CONFIG_TARBALL = tarballBase64;
         if (userConfig.googleCredentials.email) {
-          plainEnv.GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
+          plainEnv.KILOCLAW_GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
         }
       } catch (err) {
         console.warn('Failed to decrypt Google credentials, starting without Google access:', err);

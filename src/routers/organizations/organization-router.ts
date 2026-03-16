@@ -3,7 +3,8 @@ import {
   organization_seats_purchases,
   organizations,
 } from '@kilocode/db/schema';
-import { db } from '@/lib/drizzle';
+import { db, readDb } from '@/lib/drizzle';
+import { timedUsageQuery } from '@/lib/usage-query';
 import { successResult } from '@/lib/maybe-result';
 import { captureMessage } from '@sentry/nextjs';
 import type { OrganizationWithMembers } from '@/lib/organizations/organization-types';
@@ -279,20 +280,30 @@ export const organizationsRouter = createTRPCRouter({
   usageStats: organizationMemberProcedure.output(UsageStatsSchema).query(async opts => {
     // Fetch and return usage stats for the organization (last 30 days)
     // Get usage statistics
-    const rows = await db
-      .select({
-        totalCost: sql<number>`COALESCE(SUM(${microdollar_usage.cost})::float, 0)`,
-        totalRequestCount: count(microdollar_usage.id),
-        totalInputTokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens})::float, 0)`,
-        totalOutputTokens: sql<number>`COALESCE(SUM(${microdollar_usage.output_tokens})::float, 0)`,
-      })
-      .from(microdollar_usage)
-      .where(
-        and(
-          eq(microdollar_usage.organization_id, opts.input.organizationId),
-          sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '30 days'`
-        )
-      );
+    const rows = await timedUsageQuery(
+      {
+        db: readDb,
+        route: 'organizations.usageStats',
+        queryLabel: 'org_30d_summary',
+        scope: 'org',
+        period: '30d',
+      },
+      tx =>
+        tx
+          .select({
+            totalCost: sql<number>`COALESCE(SUM(${microdollar_usage.cost})::float, 0)`,
+            totalRequestCount: count(microdollar_usage.id),
+            totalInputTokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens})::float, 0)`,
+            totalOutputTokens: sql<number>`COALESCE(SUM(${microdollar_usage.output_tokens})::float, 0)`,
+          })
+          .from(microdollar_usage)
+          .where(
+            and(
+              eq(microdollar_usage.organization_id, opts.input.organizationId),
+              sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '30 days'`
+            )
+          )
+    );
 
     return rows[0];
   }),

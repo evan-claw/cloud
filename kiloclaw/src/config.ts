@@ -67,3 +67,20 @@ export const HEALTH_PROBE_INTERVAL_MS = 3_000;
 
 /** Auto-destroy provisioned instances that never started after this duration */
 export const STALE_PROVISION_THRESHOLD_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/** Proactive API key refresh: default trigger when key expires within this window. */
+export const PROACTIVE_REFRESH_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+
+/**
+ * Read the proactive refresh threshold from an env override, falling back to
+ * the hardcoded default. The env var is in hours for ease of use in wrangler vars.
+ */
+export function getProactiveRefreshThresholdMs(envOverrideHours?: string): number {
+  if (envOverrideHours) {
+    const hours = Number(envOverrideHours);
+    if (!Number.isNaN(hours) && hours > 0) {
+      return hours * 60 * 60 * 1000;
+    }
+  }
+  return PROACTIVE_REFRESH_THRESHOLD_MS;
+}

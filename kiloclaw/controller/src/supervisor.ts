@@ -44,7 +44,7 @@ type SpawnLike = typeof spawn;
 type TimerLike = ReturnType<typeof setTimeout>;
 
 type SupervisorOptions = {
-  gatewayArgs: string[];
+  args: string[];
   command?: string;
   backoffInitialMs?: number;
   backoffMaxMs?: number;
@@ -60,7 +60,7 @@ type SupervisorOptions = {
 
 export function createSupervisor(options: SupervisorOptions): Supervisor {
   const {
-    gatewayArgs,
+    args,
     command = 'openclaw',
     backoffInitialMs = BACKOFF_INITIAL_MS,
     backoffMaxMs = BACKOFF_MAX_MS,
@@ -119,7 +119,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
       if (shuttingDown || manualStop) {
         return;
       }
-      void spawnGateway();
+      void spawnProcess();
     }, delay);
     backoffMs = Math.min(backoffMaxMs, Math.floor(backoffMs * backoffMultiplier));
   };
@@ -168,7 +168,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     // immediately without backoff.
     if (code === 0 && signal === null) {
       resetBackoff();
-      void spawnGateway();
+      void spawnProcess();
       return;
     }
 
@@ -176,7 +176,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     scheduleRestart();
   };
 
-  const spawnGateway = async (): Promise<void> => {
+  const spawnProcess = async (): Promise<void> => {
     if (child || shuttingDown || manualStop) {
       return;
     }
@@ -184,7 +184,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     state = 'starting';
     stopRequested = false;
 
-    const spawned = spawnImpl(command, ['gateway', ...gatewayArgs], {
+    const spawned = spawnImpl(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: process.env,
     });
@@ -219,7 +219,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     });
 
     spawned.once('error', err => {
-      console.error('[controller] Failed to spawn openclaw gateway:', err);
+      console.error('[controller] Failed to spawn process:', err);
       handleChildExit(spawned, 1, null);
     });
 
@@ -266,7 +266,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     manualStop = false;
     clearRestartTimer();
     resetBackoff();
-    await spawnGateway();
+    await spawnProcess();
     return true;
   };
 
@@ -278,7 +278,7 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     clearRestartTimer();
     resetBackoff();
     await stopInternal(false);
-    await spawnGateway();
+    await spawnProcess();
     return true;
   };
 
@@ -304,8 +304,9 @@ export function createSupervisor(options: SupervisorOptions): Supervisor {
     ]);
 
     if (child === currentChild) {
+      const exitWaiter = childExitPromise ?? Promise.resolve();
       currentChild.kill('SIGKILL');
-      await (childExitPromise ?? Promise.resolve());
+      await exitWaiter;
     }
   };
 

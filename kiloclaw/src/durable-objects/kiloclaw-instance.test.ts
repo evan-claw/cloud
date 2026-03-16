@@ -1856,6 +1856,253 @@ describe('updateSecrets', () => {
 });
 
 // ============================================================================
+// updateGoogleCredentials
+// ============================================================================
+
+describe('updateGoogleCredentials', () => {
+  it('persists gmailPushOidcEmail from credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGoogleCredentials({
+      gogConfigTarball: {
+        encryptedData: 'enc-data',
+        encryptedDEK: 'enc-dek',
+        algorithm: 'rsa-aes-256-gcm' as const,
+        version: 1 as const,
+      },
+      email: 'user@example.com',
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+      })
+    );
+    expect(storage._store.get('gmailPushOidcEmail')).toBe(
+      'gmail-push@my-project.iam.gserviceaccount.com'
+    );
+  });
+
+  it('sets gmailPushOidcEmail to null when not provided in credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      gmailPushOidcEmail: 'old@project.iam.gserviceaccount.com',
+    });
+
+    await instance.updateGoogleCredentials({
+      gogConfigTarball: {
+        encryptedData: 'enc-data',
+        encryptedDEK: 'enc-dek',
+        algorithm: 'rsa-aes-256-gcm' as const,
+        version: 1 as const,
+      },
+      email: 'user@example.com',
+    });
+
+    expect(storage._store.get('gmailPushOidcEmail')).toBeNull();
+  });
+});
+
+// ============================================================================
+// clearGoogleCredentials
+// ============================================================================
+
+describe('clearGoogleCredentials', () => {
+  it('sets googleCredentials to null and gmailNotificationsEnabled to false in storage', async () => {
+    const { instance, storage } = createInstance();
+    const fakeCredentials = {
+      clientSecretJson: 'secret',
+      oauthTokensJson: 'tokens',
+    };
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: true,
+      gmailPushOidcEmail: 'gmail-push@project.iam.gserviceaccount.com',
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.clearGoogleCredentials();
+
+    expect(result.googleConnected).toBe(false);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        googleCredentials: null,
+        gmailNotificationsEnabled: false,
+        gmailPushOidcEmail: null,
+      })
+    );
+    expect(storage._store.get('googleCredentials')).toBeNull();
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(false);
+    expect(storage._store.get('gmailPushOidcEmail')).toBeNull();
+  });
+});
+
+// ============================================================================
+// updateGmailNotifications
+// ============================================================================
+
+describe('updateGmailNotifications', () => {
+  const fakeCredentials = {
+    gogConfigTarball: {
+      encryptedData: 'enc-data',
+      encryptedDEK: 'enc-dek',
+      algorithm: 'rsa-aes-256-gcm' as const,
+      version: 1 as const,
+    },
+    email: 'user@example.com',
+  };
+
+  it('enables notifications when Google credentials exist', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: false,
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.updateGmailNotifications(true);
+
+    expect(result.gmailNotificationsEnabled).toBe(true);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailNotificationsEnabled: true,
+      })
+    );
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(true);
+  });
+
+  it('throws when enabling without a connected Google account', async () => {
+    const { instance, storage } = createInstance();
+    // Seed without googleCredentials so it defaults to null
+    await seedProvisioned(storage, { gmailNotificationsEnabled: false });
+
+    await expect(instance.updateGmailNotifications(true)).rejects.toThrow(
+      'Cannot enable Gmail notifications without a connected Google account'
+    );
+  });
+
+  it('disables notifications regardless of credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: true,
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.updateGmailNotifications(false);
+
+    expect(result.gmailNotificationsEnabled).toBe(false);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailNotificationsEnabled: false,
+      })
+    );
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(false);
+  });
+});
+
+// ============================================================================
+// updateGmailHistoryId
+// ============================================================================
+
+describe('updateGmailHistoryId', () => {
+  it('stores historyId when none exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: null });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '100' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('updates when new value is greater', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('200');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '200' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores when new value is equal', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('ignores when new value is lower', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '200' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores invalid (non-numeric) input', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('not-a-number');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+});
+
+// ============================================================================
+// getGmailOidcEmail
+// ============================================================================
+
+describe('getGmailOidcEmail', () => {
+  it('returns stored gmailPushOidcEmail', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+
+    const result = await instance.getGmailOidcEmail();
+
+    expect(result).toEqual({
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+  });
+
+  it('returns null when no email stored', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.getGmailOidcEmail();
+
+    expect(result).toEqual({ gmailPushOidcEmail: null });
+  });
+});
+
+// ============================================================================
 // parseRegions + deprioritizeRegion (pure functions)
 // ============================================================================
 
@@ -3546,5 +3793,246 @@ describe('restartMachine image tag override', () => {
     expect(storage._store.get('trackedImageTag')).toBe('2026.2.25-abc123');
     expect(storage._store.get('openclawVersion')).toBeNull();
     expect(storage._store.get('imageVariant')).toBeNull();
+  });
+});
+
+// ============================================================================
+// Proactive API key refresh via reconciliation
+// ============================================================================
+
+describe('reconcileApiKeyExpiry', () => {
+  /** Set up fetch mock to handle env patch RPCs alongside default health-probe responses. */
+  function mockControllerFetch(opts: {
+    envPatchResponse?: { ok: boolean; signaled: boolean };
+    envPatchStatus?: number;
+    envPatchError?: boolean;
+  }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, _init?: RequestInit) => {
+        if (typeof url === 'string' && url.includes('/_kilo/env/patch')) {
+          if (opts.envPatchError) {
+            return Promise.reject(new Error('push failed'));
+          }
+          return Promise.resolve({
+            ok: (opts.envPatchStatus ?? 200) >= 200 && (opts.envPatchStatus ?? 200) < 300,
+            status: opts.envPatchStatus ?? 200,
+            text: () =>
+              Promise.resolve(
+                JSON.stringify(opts.envPatchResponse ?? { ok: true, signaled: true })
+              ),
+          });
+        }
+        // Default: health probe
+        if (typeof url === 'string' && url.includes('/_kilo/gateway/status')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ state: 'running' }),
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200 });
+      })
+    );
+  }
+
+  /** Helper: seed a running instance with an API key that expires soon */
+  function nearExpiryOverrides(hoursUntilExpiry = 24) {
+    return {
+      flyMachineId: 'machine-1',
+      flyAppName: 'acct-test',
+      kilocodeApiKey: 'old-jwt',
+      kilocodeApiKeyExpiresAt: new Date(Date.now() + hoursUntilExpiry * 3600000).toISOString(),
+    };
+  }
+
+  it('refreshes key via push when controller supports env patch', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: true } });
+
+    await instance.alarm();
+
+    // Should have persisted new expiry
+    const newExpiresAt = storage._store.get('kilocodeApiKeyExpiresAt') as string;
+    expect(newExpiresAt).toBeDefined();
+    expect(newExpiresAt).not.toBe(nearExpiryOverrides(24).kilocodeApiKeyExpiresAt);
+
+    // Fly config persisted with skipLaunch + minSecretsVersion
+    expect(flyClient.updateMachine).toHaveBeenCalledWith(
+      expect.any(Object),
+      'machine-1',
+      expect.objectContaining({ env: expect.any(Object) as unknown }),
+      expect.objectContaining({
+        skipLaunch: true,
+        minSecretsVersion: expect.any(Number) as unknown,
+      })
+    );
+
+    // Push succeeded → only one updateMachine call (persist), no restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips refresh when key is far from expiry', async () => {
+    const { instance, storage } = createInstance();
+    // 5 days away — beyond the 3-day threshold
+    await seedRunning(storage, nearExpiryOverrides(5 * 24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    mockControllerFetch({});
+
+    await instance.alarm();
+
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+
+  it('persists Fly config when push returns 404 (old controller)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchStatus: 404 });
+
+    await instance.alarm();
+
+    // Key persisted — Fly config has the new key for next natural restart
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only one updateMachine call (persist with skipLaunch), no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+    expect(flyClient.updateMachine).toHaveBeenCalledWith(
+      expect.any(Object),
+      'machine-1',
+      expect.objectContaining({ env: expect.any(Object) as unknown }),
+      expect.objectContaining({ skipLaunch: true })
+    );
+  });
+
+  it('persists Fly config when push fails with network error', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchError: true });
+
+    await instance.alarm();
+
+    // Key persisted despite push failure (Fly config was updated)
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only persist call, no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists Fly config when signaled is false', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: false } });
+
+    await instance.alarm();
+
+    // Key persisted
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only persist call, no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists key even when Fly config update fails (push succeeded)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockRejectedValue(new Error('fly api down'));
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: true } });
+
+    await instance.alarm();
+
+    // Key persisted because push succeeded (gateway has new key in process.env)
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+    expect(storage._store.get('kilocodeApiKeyExpiresAt')).toBeDefined();
+  });
+
+  it('does not persist key when both push and Fly config update fail', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockRejectedValue(new Error('fly api down'));
+
+    mockControllerFetch({ envPatchError: true });
+
+    await instance.alarm();
+
+    // Key must NOT be persisted — gateway still has old key
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+
+  it('skips entirely when instance is not running', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, {
+      ...nearExpiryOverrides(24),
+      status: 'stopped',
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'stopped',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
   });
 });

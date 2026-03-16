@@ -169,11 +169,12 @@ export async function updateMachine(
   config: FlyClientConfig,
   machineId: string,
   machineConfig: FlyMachineConfig,
-  options?: { minSecretsVersion?: number }
+  options?: { minSecretsVersion?: number; skipLaunch?: boolean }
 ): Promise<FlyMachine> {
-  const body: { config: FlyMachineConfig; min_secrets_version?: number } = {
+  const body: { config: FlyMachineConfig; min_secrets_version?: number; skip_launch?: boolean } = {
     config: machineConfig,
     min_secrets_version: options?.minSecretsVersion,
+    skip_launch: options?.skipLaunch,
   };
   const resp = await flyFetch(config, `/machines/${machineId}`, {
     method: 'POST',

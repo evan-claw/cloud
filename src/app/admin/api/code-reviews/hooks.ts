@@ -60,6 +60,18 @@ export function useCodeReviewUserSegmentation(params: FilterParams) {
   });
 }
 
+export function useCodeReviewErrorSessions(params: FilterParams & { errorMessage: string | null }) {
+  const trpc = useTRPC();
+  const { errorMessage, ...filterParams } = params;
+  return useQuery({
+    ...trpc.admin.codeReviews.getErrorSessions.queryOptions({
+      ...filterParams,
+      errorMessage: errorMessage ?? '',
+    }),
+    enabled: Boolean(params.startDate && params.endDate && errorMessage),
+  });
+}
+
 export function useSearchUsers(query: string, enabled: boolean = true) {
   const trpc = useTRPC();
   return useQuery({

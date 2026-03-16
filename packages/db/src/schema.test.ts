@@ -19,12 +19,13 @@ describe('database schema', () => {
       'meta',
       `${latestEntry.idx.toString().padStart(4, '0')}_snapshot.json`
     );
-    const latestSnapshot = JSON.parse(fs.readFileSync(latestSnapshotPath, 'utf-8')) as {
-      id: string;
-    };
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-redundant-type-constituents -- drizzle-kit API types
+    const latestSnapshot: Parameters<typeof generateMigration>[0] & { id: string } = JSON.parse(
+      fs.readFileSync(latestSnapshotPath, 'utf-8')
+    );
 
     // Generate current schema state
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- generateDrizzleJson's return type contains `any` fields
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- drizzle-kit API types
     const currentSchema = generateDrizzleJson(schema, latestSnapshot.id);
 
     // Generate migration diff

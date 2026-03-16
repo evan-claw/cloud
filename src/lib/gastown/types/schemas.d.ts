@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 export declare const TownOutput: z.ZodObject<
   {
     id: z.ZodString;
@@ -173,6 +173,7 @@ export declare const ConvoyOutput: z.ZodObject<
       active: 'active';
       landed: 'landed';
     }>;
+    staged: z.ZodBoolean;
     total_beads: z.ZodNumber;
     closed_beads: z.ZodNumber;
     created_by: z.ZodNullable<z.ZodString>;
@@ -191,6 +192,7 @@ export declare const ConvoyDetailOutput: z.ZodObject<
       active: 'active';
       landed: 'landed';
     }>;
+    staged: z.ZodBoolean;
     total_beads: z.ZodNumber;
     closed_beads: z.ZodNumber;
     created_by: z.ZodNullable<z.ZodString>;
@@ -599,6 +601,7 @@ export declare const RpcConvoyOutput: z.ZodPipe<
         active: 'active';
         landed: 'landed';
       }>;
+      staged: z.ZodBoolean;
       total_beads: z.ZodNumber;
       closed_beads: z.ZodNumber;
       created_by: z.ZodNullable<z.ZodString>;
@@ -620,6 +623,7 @@ export declare const RpcConvoyDetailOutput: z.ZodPipe<
         active: 'active';
         landed: 'landed';
       }>;
+      staged: z.ZodBoolean;
       total_beads: z.ZodNumber;
       closed_beads: z.ZodNumber;
       created_by: z.ZodNullable<z.ZodString>;

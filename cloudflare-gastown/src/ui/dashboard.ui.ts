@@ -58,6 +58,7 @@ export function dashboardHtml(): string {
                        padding: 4px 8px; border-radius: 4px; font-family: inherit; font-size: 12px;
                        width: 100%; min-height: 80px; resize: vertical; }
   textarea.body-edit:focus { border-color: #58a6ff; outline: none; }
+  .badge.staged { background: #21262d; color: #8b949e; border: 1px dashed #30363d; }
   .empty { color: #484f58; font-style: italic; }
   #toast { position: fixed; bottom: 16px; right: 16px; background: #1f6feb;
            color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 12px;
@@ -361,6 +362,19 @@ export function dashboardHtml(): string {
     <button class="primary" onclick="containerSendMessage()">Send Message</button>
   </div>
   <div id="containerResult"></div>
+</div>
+
+<!-- Convoys -->
+<div class="panel">
+  <h2>Convoys</h2>
+  <div class="row">
+    <label>Town ID</label>
+    <input type="text" id="convoyTownId" placeholder="town-abc" style="min-width:160px" />
+    <label style="margin-left:8px">Mayor Token</label>
+    <input type="text" id="convoyMayorToken" placeholder="mayor token" style="min-width:200px" />
+    <button class="primary" onclick="loadConvoys()">Load Convoys</button>
+  </div>
+  <div id="convoysList"></div>
 </div>
 
 <!-- Log -->
@@ -1058,16 +1072,161 @@ async function containerSendMessage() {
   if (r.ok) { el('cMessage').value = ''; toast('Message sent'); }
 }
 
+// ── Convoys ──────────────────────────────────────────────────────────
+
+async function loadConvoys() {
+  const convoyTownId = el('convoyTownId').value.trim();
+  if (!convoyTownId) { toast('Set a Town ID first', true); return; }
+  const token = el('convoyMayorToken').value.trim();
+  const log = el('apiLog');
+  const path = '/api/mayor/' + convoyTownId + '/tools/convoys';
+  log.innerHTML += '<span class="info">GET ' + esc(path) + '</span>\\n';
+  try {
+    const res = await fetch(path, {
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    });
+    const data = await res.json();
+    const cls = res.ok ? 'ok' : 'err';
+    log.innerHTML += '<span class="' + cls + '">' + res.status + '</span> '
+      + esc(JSON.stringify(data, null, 2)) + '\\n\\n';
+    log.scrollTop = log.scrollHeight;
+    if (!res.ok) { toast(data.error || res.status, true); return; }
+    renderConvoys(data.data || [], convoyTownId);
+  } catch (e) {
+    log.innerHTML += '<span class="err">FETCH ERROR: ' + esc(e.message) + '</span>\\n\\n';
+    toast(e.message, true);
+  }
+}
+
+function renderConvoys(convoys, convoyTownId) {
+  if (!convoys.length) { el('convoysList').innerHTML = '<p class="empty">No convoys</p>'; return; }
+  let h = '<table><tr><th>ID</th><th>Title</th><th>Status</th><th>Beads</th><th></th></tr>';
+  for (const c of convoys) {
+    const isStaged = c.staged === true;
+    const statusBadge = isStaged
+      ? '<span class="badge staged">STAGED</span>'
+      : '<span class="badge ' + (c.status || 'open') + '">' + (c.status || 'open') + '</span>';
+    const progress = (c.closed_beads != null && c.total_beads != null)
+      ? c.closed_beads + '/' + c.total_beads
+      : '—';
+    h += '<tr>'
+      + '<td class="id" onclick="copyId(\\'' + c.id + '\\')">' + short(c.id) + '</td>'
+      + '<td>' + esc(c.title || '—') + '</td>'
+      + '<td>' + statusBadge + '</td>'
+      + '<td>' + progress + '</td>'
+      + '<td>'
+      + (isStaged ? '<button class="primary" onclick="startConvoy(\\'' + c.id + '\\', \\'' + convoyTownId + '\\')">Start Convoy</button>' : '')
+      + '</td>'
+      + '</tr>';
+  }
+  h += '</table>';
+  el('convoysList').innerHTML = h;
+}
+
+async function startConvoy(convoyId, convoyTownId) {
+  const token = el('convoyMayorToken').value.trim();
+  const log = el('apiLog');
+  const path = '/api/mayor/' + convoyTownId + '/tools/convoys/' + convoyId + '/start';
+  log.innerHTML += '<span class="info">POST ' + esc(path) + '</span>\\n';
+  try {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json();
+    const cls = res.ok ? 'ok' : 'err';
+    log.innerHTML += '<span class="' + cls + '">' + res.status + '</span> '
+      + esc(JSON.stringify(data, null, 2)) + '\\n\\n';
+    log.scrollTop = log.scrollHeight;
+    if (data.success) {
+      toast('Convoy ' + convoyId.slice(0, 8) + ' started');
+      loadConvoys();
+    } else {
+      toast('Error: ' + (data.error || 'unknown'), true);
+    }
+  } catch (e) {
+    log.innerHTML += '<span class="err">FETCH ERROR: ' + esc(e.message) + '</span>\\n\\n';
+    toast(e.message, true);
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 function copyId(id) {
   navigator.clipboard.writeText(id).then(() => toast('Copied: ' + id));
 }
 
+function log(msg, cls) {
+  const logEl = el('apiLog');
+  logEl.innerHTML += '<span class="' + (cls || 'info') + '">' + esc(msg) + '</span>\\n';
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 async function refreshAll() {
   if (!rigId()) { toast('Enter a Rig ID', true); return; }
   saveRigToHistory(rigId());
   await Promise.all([loadAgents(), loadBeads()]);
+}
+
+// ── Status WebSocket ─────────────────────────────────────────────────
+
+let statusWs = null;
+let statusWsReconnectTimer = null;
+let statusWsTownId = null;
+
+function disconnectStatusWs() {
+  if (statusWsReconnectTimer) { clearTimeout(statusWsReconnectTimer); statusWsReconnectTimer = null; }
+  if (statusWs) { try { statusWs.close(); } catch {} statusWs = null; }
+  statusWsTownId = null;
+}
+
+function connectStatusWs() {
+  const tid = townId();
+  if (!tid) return;
+
+  // If the town changed, tear down the old socket first
+  if (statusWsTownId && statusWsTownId !== tid) {
+    disconnectStatusWs();
+  }
+
+  if (statusWs && (statusWs.readyState === WebSocket.OPEN || statusWs.readyState === WebSocket.CONNECTING)) return;
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url = proto + '//' + location.host + '/api/towns/' + tid + '/status/ws';
+  log('[ws] connecting to ' + url, 'info');
+
+  const ws = new WebSocket(url);
+  statusWs = ws;
+  statusWsTownId = tid;
+
+  ws.onopen = () => {
+    log('[ws] status connected', 'ok');
+  };
+
+  ws.onmessage = (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.channel === 'bead') {
+      log('[bead] ' + msg.type + ': ' + (msg.title ?? msg.beadId) + ' → ' + (msg.status ?? ''), 'info');
+    } else if (msg.channel === 'convoy') {
+      log('[convoy] ' + msg.convoyId.slice(0, 8) + ' progress: ' + msg.closedBeads + '/' + msg.totalBeads, 'info');
+    } else {
+      // Existing alarm status snapshot — no-op, handled by alarm loop display
+    }
+  };
+
+  ws.onclose = () => {
+    log('[ws] status disconnected', 'err');
+    statusWs = null;
+    // Reconnect after 5s (only if still targeting the same town)
+    if (statusWsReconnectTimer) clearTimeout(statusWsReconnectTimer);
+    statusWsReconnectTimer = setTimeout(connectStatusWs, 5000);
+  };
+
+  ws.onerror = () => {
+    // onclose fires after onerror; let it handle reconnect
+  };
 }
 
 // ── Init ────────────────────────────────────────────────────────────
@@ -1086,6 +1245,10 @@ renderRigHistory();
 if (lastRig) {
   refreshAll();
 }
+
+// Connect the status WebSocket on load and reconnect when the town ID changes
+connectStatusWs();
+el('townId').addEventListener('change', connectStatusWs);
 </script>
 </body>
 </html>`;

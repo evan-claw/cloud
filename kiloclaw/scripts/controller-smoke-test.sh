@@ -45,5 +45,38 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 echo "user traffic without proxy token (REQUIRE_PROXY_TOKEN=true) -> expect 401:"
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${PORT}/"
 
+echo
+echo "--- env patch endpoint ---"
+
+echo "env patch (no auth) -> expect 401:"
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -X POST -H "Content-Type: application/json" \
+  -d '{"KILOCODE_API_KEY":"fresh-key"}' \
+  "http://127.0.0.1:${PORT}/_kilo/env/patch"
+
+echo "env patch (valid auth, patchable key) -> expect 200:"
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"KILOCODE_API_KEY":"fresh-key"}' \
+  "http://127.0.0.1:${PORT}/_kilo/env/patch"
+echo
+
+echo "env patch (non-patchable key) -> expect 400:"
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"PATH":"/usr/bin"}' \
+  "http://127.0.0.1:${PORT}/_kilo/env/patch"
+echo
+
+echo "env patch (empty body) -> expect 400:"
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}' \
+  "http://127.0.0.1:${PORT}/_kilo/env/patch"
+echo
+
 echo "container logs:"
 docker logs --tail 80 "$CID"

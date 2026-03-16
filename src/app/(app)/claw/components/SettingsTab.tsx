@@ -48,9 +48,11 @@ type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
 function GoogleAccountSection({
   connected,
+  gmailNotificationsEnabled,
   mutations,
 }: {
   connected: boolean;
+  gmailNotificationsEnabled: boolean;
   mutations: ClawMutations;
 }) {
   const trpc = useTRPC();
@@ -101,7 +103,7 @@ function GoogleAccountSection({
         {!connected && command && (
           <div className="space-y-2">
             <p className="text-muted-foreground text-xs">
-              Run this command in your terminal to connect your Google account:
+              Run this command in a terminal on your local machine to connect your Google account:
             </p>
             <div className="relative">
               <pre className="bg-muted overflow-x-auto rounded-md p-3 pr-10 text-xs">
@@ -143,6 +145,45 @@ function GoogleAccountSection({
           });
         }}
       />
+
+      {connected && (
+        <div className="mt-4 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-foreground text-sm font-medium">Gmail Notifications</h4>
+              <p className="text-muted-foreground text-xs">
+                Notify your bot when new emails arrive
+              </p>
+            </div>
+            <Button
+              variant={gmailNotificationsEnabled ? 'default' : 'outline'}
+              size="sm"
+              disabled={mutations.setGmailNotifications.isPending}
+              onClick={() => {
+                mutations.setGmailNotifications.mutate(
+                  { enabled: !gmailNotificationsEnabled },
+                  {
+                    onSuccess: data => {
+                      toast.success(
+                        data.gmailNotificationsEnabled
+                          ? 'Gmail notifications enabled'
+                          : 'Gmail notifications disabled'
+                      );
+                    },
+                    onError: err => toast.error(`Failed: ${err.message}`),
+                  }
+                );
+              }}
+            >
+              {mutations.setGmailNotifications.isPending
+                ? 'Saving...'
+                : gmailNotificationsEnabled
+                  ? 'Enabled'
+                  : 'Disabled'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -508,7 +549,11 @@ export function SettingsTab({
 
       <Separator />
 
-      <GoogleAccountSection connected={status.googleConnected} mutations={mutations} />
+      <GoogleAccountSection
+        connected={status.googleConnected}
+        gmailNotificationsEnabled={status.gmailNotificationsEnabled}
+        mutations={mutations}
+      />
 
       <Separator />
 

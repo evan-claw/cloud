@@ -2,7 +2,7 @@
  * Cloudflare Worker entry point for AI Attributions Tracking
  */
 
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { useWorkersLogger } from 'workers-tagged-logger';
 import { AttributionTrackerDO, getAttributionTrackerDO } from './dos/AttributionTracker.do';
 import { logger } from './util/logger';
@@ -30,7 +30,11 @@ export type HonoContext = {
 
 const app = new Hono<HonoContext>();
 
-app.use('*', useWorkersLogger('ai-attribution'));
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+// workers-tagged-logger@1.0.0 was compiled against an older hono whose Handler
+// type is structurally incompatible with hono >=4.12.7 (missing [GET_MATCH_RESULT]).
+// The runtime middleware is fully compatible; only the .d.ts is stale.
+app.use('*', useWorkersLogger('ai-attribution') as unknown as MiddlewareHandler);
 
 // Health check endpoint (no auth required)
 app.get('/health', c => {

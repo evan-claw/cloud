@@ -1,4 +1,5 @@
 import type { FeatureValue } from '@/lib/feature-detection';
+import type { GatewayApiKind } from '@/lib/providers/openrouter/types';
 import type { ProviderId } from '@/lib/providers/provider-id';
 import type { FraudDetectionHeaders } from '@/lib/utils';
 import type { MicrodollarUsage, Organization } from '@kilocode/db';
@@ -15,7 +16,9 @@ export type OpenRouterUsage = {
   total_tokens: number;
 }; //ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
 
-export type VercelProviderMetaData = { gateway?: { routing?: { finalProvider?: string } } };
+export type VercelProviderMetaData = {
+  gateway?: { routing?: { finalProvider?: string }; cost?: string; marketCost?: string };
+};
 
 export type MaybeHasVercelProviderMetaData = {
   choices?: {
@@ -82,6 +85,7 @@ export type PromptInfo = {
 };
 
 export type MicrodollarUsageContext = {
+  api_kind: GatewayApiKind;
   kiloUserId: string;
   fraudHeaders: FraudDetectionHeaders;
   organizationId?: Organization['id'];

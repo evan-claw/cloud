@@ -2,8 +2,8 @@ import { after } from 'next/server';
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { z } from 'zod';
 import { O11Y_KILO_GATEWAY_CLIENT_SECRET, O11Y_SERVICE_URL } from '@/lib/config.server';
-import type OpenAI from 'openai';
 import type { CompletionUsage } from 'openai/resources/completions';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 
 export type ApiMetricsTokens = {
   inputTokens?: number;
@@ -57,12 +57,31 @@ export function getTokensFromCompletionUsage(
   return hasAny ? tokens : undefined;
 }
 
-export function getToolsAvailable(
-  tools: Array<OpenAI.Chat.Completions.ChatCompletionTool> | undefined
-): string[] {
-  if (!tools) return [];
+export function getToolsAvailable(request: GatewayRequest): string[] {
+  if (!request.body.tools) return [];
 
-  return tools.map((tool): string => {
+  if (request.kind === 'responses') {
+    return request.body.tools.map((tool): string => {
+      if (tool.type === 'function') {
+        const name = typeof tool.name === 'string' ? tool.name.trim() : '';
+        return name ? `function:${name}` : 'function:unknown';
+      }
+
+      if (tool.type === 'custom') {
+        const name = typeof tool.name === 'string' ? tool.name.trim() : '';
+        return name ? `custom:${name}` : 'custom:unknown';
+      }
+
+      if (tool.type === 'mcp') {
+        const label = tool.server_label.trim();
+        return label ? `mcp:${label}` : 'mcp:unknown';
+      }
+
+      return tool.type;
+    });
+  }
+
+  return request.body.tools.map((tool): string => {
     if (tool.type === 'function') {
       const toolName = typeof tool.function?.name === 'string' ? tool.function.name.trim() : '';
       return toolName ? `function:${toolName}` : 'function:unknown';
@@ -77,14 +96,31 @@ export function getToolsAvailable(
   });
 }
 
-export function getToolsUsed(
-  messages: Array<OpenAI.Chat.Completions.ChatCompletionMessageParam> | undefined
-): string[] {
-  if (!Array.isArray(messages)) return [];
+export function getToolsUsed(request: GatewayRequest): string[] {
+  if (request.kind === 'responses') {
+    const { input } = request.body;
+    if (!Array.isArray(input)) return [];
+
+    const used = new Array<string>();
+
+    for (const item of input) {
+      if (item.type === 'function_call') {
+        const name = item.name.trim();
+        used.push(name ? `function:${name}` : 'function:unknown');
+      } else if (item.type === 'custom_tool_call') {
+        const name = item.name.trim();
+        used.push(name ? `custom:${name}` : 'custom:unknown');
+      }
+    }
+
+    return used;
+  }
+
+  if (!Array.isArray(request.body.messages)) return [];
 
   const used = new Array<string>();
 
-  for (const message of messages) {
+  for (const message of request.body.messages) {
     if (message.role !== 'assistant') continue;
 
     for (const toolCall of message.tool_calls ?? []) {

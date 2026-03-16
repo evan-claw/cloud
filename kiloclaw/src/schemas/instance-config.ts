@@ -33,6 +33,7 @@ const envVarNameSchema = z
 export const GoogleCredentialsSchema = z.object({
   gogConfigTarball: EncryptedEnvelopeSchema, // base64 tar.gz of ~/.config/gogcli/
   email: z.string().optional(), // for display ("Connected as user@...")
+  gmailPushOidcEmail: z.string().optional(), // SA email for OIDC push validation
 });
 
 export type GoogleCredentials = z.infer<typeof GoogleCredentialsSchema>;
@@ -167,6 +168,9 @@ export const PersistedStateSchema = z.object({
   // Each entry is a feature name (e.g. "npm-global-prefix") that gates runtime behavior.
   // New instances get the current feature set; legacy instances have an empty array.
   instanceFeatures: z.array(z.string()).default([]),
+  gmailNotificationsEnabled: z.boolean().default(false),
+  gmailLastHistoryId: z.string().nullable().default(null),
+  gmailPushOidcEmail: z.string().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

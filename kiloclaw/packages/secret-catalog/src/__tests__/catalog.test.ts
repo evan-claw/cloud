@@ -424,7 +424,7 @@ describe('Secret Catalog', () => {
 
   describe('INTERNAL_SENSITIVE_ENV_VARS', () => {
     it('contains Google credential env vars', () => {
-      expect(INTERNAL_SENSITIVE_ENV_VARS.has('GOOGLE_GOG_CONFIG_TARBALL')).toBe(true);
+      expect(INTERNAL_SENSITIVE_ENV_VARS.has('KILOCLAW_GOG_CONFIG_TARBALL')).toBe(true);
     });
 
     it('does not overlap with catalog-derived ALL_SECRET_ENV_VARS', () => {

@@ -1,9 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { getUserFromAuth } from '@/lib/user.server';
-import { db } from '@/lib/drizzle';
+import { readDb } from '@/lib/drizzle';
 import { microdollar_usage } from '@kilocode/db/schema';
 import { sql } from 'drizzle-orm';
+import { timedUsageQuery } from '@/lib/usage-query';
 
 type DailyData = {
   day: string;
@@ -33,16 +34,26 @@ export async function GET(_request: NextRequest): Promise<
   }
 
   // Query to get daily abuse statistics for the last 7 days
-  const result = await db
-    .select({
-      day: sql<string>`DATE_TRUNC('day', ${microdollar_usage.created_at})::text`,
-      abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
-      total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
-    })
-    .from(microdollar_usage)
-    .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '7 days'`)
-    .groupBy(sql`DATE_TRUNC('day', ${microdollar_usage.created_at})`)
-    .orderBy(sql`DATE_TRUNC('day', ${microdollar_usage.created_at})`);
+  const result = await timedUsageQuery(
+    {
+      db: readDb,
+      route: 'admin/abuse/daily-stats',
+      queryLabel: 'admin_abuse_daily',
+      scope: 'admin',
+      period: '7d',
+    },
+    tx =>
+      tx
+        .select({
+          day: sql<string>`DATE_TRUNC('day', ${microdollar_usage.created_at})::text`,
+          abuse_cost_microdollars: sql<number>`SUM(CASE WHEN ${microdollar_usage.abuse_classification} > 0 THEN ${microdollar_usage.cost} ELSE 0 END)`,
+          total_cost_microdollars: sql<number>`SUM(${microdollar_usage.cost})`,
+        })
+        .from(microdollar_usage)
+        .where(sql`${microdollar_usage.created_at} >= NOW() - INTERVAL '7 days'`)
+        .groupBy(sql`DATE_TRUNC('day', ${microdollar_usage.created_at})`)
+        .orderBy(sql`DATE_TRUNC('day', ${microdollar_usage.created_at})`)
+  );
 
   // Helper function to safely convert BigInt to number
   const bigIntToNumber = (value: unknown): number => {

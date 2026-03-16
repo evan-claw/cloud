@@ -152,6 +152,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   const promptInfo = extractEmbeddingPromptInfo(requestBodyParsed);
 
   const usageContext: MicrodollarUsageContext = {
+    api_kind: 'embeddings',
     kiloUserId: user.id,
     provider: provider.id,
     requested_model: requestedModelLowerCased,

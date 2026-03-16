@@ -7,6 +7,7 @@ import {
   GatewayCommandResponseSchema,
   ConfigRestoreResponseSchema,
   ControllerVersionResponseSchema,
+  EnvPatchResponseSchema,
   OpenclawConfigResponseSchema,
   GatewayControllerError,
 } from '../gateway-controller-types';
@@ -286,6 +287,26 @@ export async function replaceConfigOnMachine(
     }
     throw error;
   }
+}
+
+/**
+ * Push env var updates to the running controller and signal the gateway.
+ * Returns null if the instance isn't running.
+ */
+export async function patchEnvOnMachine(
+  state: InstanceMutableState,
+  env: KiloClawEnv,
+  patch: Record<string, string>
+): Promise<{ ok: boolean; signaled: boolean } | null> {
+  if (state.status !== 'running' || !state.flyMachineId) return null;
+  return callGatewayController(
+    state,
+    env,
+    '/_kilo/env/patch',
+    'POST',
+    EnvPatchResponseSchema,
+    patch
+  );
 }
 
 /**

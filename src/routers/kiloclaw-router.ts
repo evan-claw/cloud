@@ -510,9 +510,12 @@ export const kiloclawRouter = createTRPCRouter({
       expiresIn: TOKEN_EXPIRY.oneHour,
     });
     const isDev = process.env.NODE_ENV === 'development';
+    const imageTag = isDev ? ':dev' : ':latest';
     const workerFlag = isDev ? ' --worker-url=http://localhost:8795' : '';
+    const gmailPushFlag = isDev ? ' --gmail-push-worker-url=${GMAIL_PUSH_WORKER_URL}' : '';
+    const imageUrl = `ghcr.io/kilo-org/google-setup${imageTag}`;
     return {
-      command: `docker run -it --network host ghcr.io/kilo-org/google-setup --token="${token}"${workerFlag}`,
+      command: `docker pull ${imageUrl} && docker run -it --network host ${imageUrl} --token="${token}"${workerFlag}${gmailPushFlag}`,
     };
   }),
 
@@ -520,6 +523,31 @@ export const kiloclawRouter = createTRPCRouter({
     const client = new KiloClawInternalClient();
     return client.clearGoogleCredentials(ctx.user.id);
   }),
+
+  setGmailNotifications: baseProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      try {
+        if (input.enabled) {
+          return await client.enableGmailNotifications(ctx.user.id);
+        }
+        return await client.disableGmailNotifications(ctx.user.id);
+      } catch (err) {
+        if (err instanceof KiloClawApiError && err.statusCode >= 400 && err.statusCode < 500) {
+          let message = `Failed to update Gmail notifications (${err.statusCode})`;
+          try {
+            const parsed = JSON.parse(err.responseBody);
+            if (typeof parsed.error === 'string') message = parsed.error;
+            else if (typeof parsed.message === 'string') message = parsed.message;
+          } catch {
+            if (err.responseBody) message = err.responseBody;
+          }
+          throw new TRPCError({ code: 'BAD_REQUEST', message });
+        }
+        throw err;
+      }
+    }),
 
   getEarlybirdStatus: baseProcedure
     .output(z.object({ purchased: z.boolean() }))
