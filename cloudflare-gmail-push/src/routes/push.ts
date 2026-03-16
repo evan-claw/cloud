@@ -24,6 +24,31 @@ pushRoute.post('/user/:userId', async c => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
 
+  // Validate that the OIDC token's SA email matches the one stored for this user.
+  // This prevents cross-project forgery: an attacker with their own GCP project
+  // can get Google-signed tokens with a matching audience, but not with the
+  // victim's service account email.
+  const internalSecret = await c.env.INTERNAL_API_SECRET.get();
+  const emailRes = await c.env.KILOCLAW.fetch(
+    new Request(
+      `https://kiloclaw/api/platform/gmail-oidc-email?userId=${encodeURIComponent(userId)}`,
+      { headers: { 'x-internal-api-key': internalSecret } }
+    )
+  );
+
+  if (!emailRes.ok) {
+    console.error(`[gmail-push] OIDC email lookup failed for user ${userId}: ${emailRes.status}`);
+    return c.json({ error: 'Service unavailable' }, 503);
+  }
+
+  const { gmailPushOidcEmail }: { gmailPushOidcEmail: string | null } = await emailRes.json();
+  if (!gmailPushOidcEmail || oidcResult.email !== gmailPushOidcEmail) {
+    console.warn(
+      `[gmail-push] OIDC email mismatch for user ${userId}: got ${oidcResult.email}, expected ${gmailPushOidcEmail ?? '(not configured)'}`
+    );
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
   const pubSubBody = await c.req.text();
   if (pubSubBody.length > 65_536) {
     return c.json({ error: 'Payload too large' }, 413);
