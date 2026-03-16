@@ -60,10 +60,12 @@ function enhancedModelList(models: OpenRouterModel[]) {
   const enhancedModels = models
     .filter(
       (model: OpenRouterModel) =>
-        !kiloFreeModels.some(m => m.public_id === model.id && m.is_enabled) &&
+        !kiloFreeModels.some(m => m.public_id === model.id && m.status === 'public') &&
         !isRateLimitedToDeath(model.id)
     )
-    .concat(kiloFreeModels.filter(m => m.is_enabled).map(model => convertFromKiloModel(model)))
+    .concat(
+      kiloFreeModels.filter(m => m.status === 'public').map(model => convertFromKiloModel(model))
+    )
     .concat(autoModels)
     .map((model: OpenRouterModel) => {
       const preferredIndex = preferredModels.indexOf(model.id);

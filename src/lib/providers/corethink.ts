@@ -8,7 +8,7 @@ export const corethink_free_model: KiloFreeModel = {
     'CoreThink - AI that reasons through problems instead of guessing. Available free of charge in Kilo for a limited time.',
   context_length: 78_000,
   max_completion_tokens: 8192,
-  is_enabled: true,
+  status: 'public',
   flags: [],
   gateway: 'corethink',
   internal_id: 'corethink',

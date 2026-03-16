@@ -16,8 +16,9 @@ export function mapModelIdToVercel(modelId: string) {
   }
 
   const internalId =
-    kiloFreeModels.find(m => m.public_id === modelId && m.is_enabled && m.gateway === 'openrouter')
-      ?.internal_id ?? modelId;
+    kiloFreeModels.find(
+      m => m.public_id === modelId && m.status !== 'disabled' && m.gateway === 'openrouter'
+    )?.internal_id ?? modelId;
 
   const slashIndex = internalId.indexOf('/');
   if (slashIndex < 0) {

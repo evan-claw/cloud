@@ -48,7 +48,7 @@ async function getVercelRoutingPercentage() {
 function isLikelyAvailableOnAllGateways(requestedModel: string) {
   return (
     !requestedModel.startsWith('openrouter/') &&
-    (kiloFreeModels.find(m => m.public_id === requestedModel && m.is_enabled)?.gateway ??
+    (kiloFreeModels.find(m => m.public_id === requestedModel && m.status !== 'disabled')?.gateway ??
       'openrouter') === 'openrouter'
   );
 }
