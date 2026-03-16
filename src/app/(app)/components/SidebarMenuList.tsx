@@ -21,10 +21,16 @@ type MenuItem = {
 type SidebarMenuListProps = {
   items: MenuItem[];
   label?: string;
+  allUrls?: string[];
 };
 
-export default function SidebarMenuList({ items, label = 'Dashboard' }: SidebarMenuListProps) {
+export default function SidebarMenuList({
+  items,
+  label = 'Dashboard',
+  allUrls,
+}: SidebarMenuListProps) {
   const pathname = usePathname();
+  const urlsToCheck = allUrls ?? items.map(i => i.url);
 
   return (
     <SidebarGroup>
@@ -32,7 +38,16 @@ export default function SidebarMenuList({ items, label = 'Dashboard' }: SidebarM
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map(item => {
-            const isActive = pathname === item.url || pathname.startsWith(item.url + '/');
+            const matchesPrefix = pathname === item.url || pathname.startsWith(item.url + '/');
+            const hasMoreSpecificMatch =
+              matchesPrefix &&
+              urlsToCheck.some(
+                url =>
+                  url !== item.url &&
+                  url.length > item.url.length &&
+                  (pathname === url || pathname.startsWith(url + '/'))
+              );
+            const isActive = matchesPrefix && !hasMoreSpecificMatch;
             return (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild>

@@ -246,6 +246,11 @@ export default function OrganizationAppSidebar({
       : []),
   ];
 
+  const allUrls = useMemo(
+    () => [...dashboardItems, ...cloudItems, ...accountItems].map(i => i.url),
+    [dashboardItems, cloudItems, accountItems]
+  );
+
   // Determine if we should show the OrganizationSwitcher
   // Hide it when an admin user is viewing an organization they're not a member of
   const shouldShowOrganizationSwitcher = !user?.is_admin || currentOrg;
@@ -266,9 +271,13 @@ export default function OrganizationAppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarMenuList label="Dashboard" items={dashboardItems} />
-        {cloudItems.length > 0 && <SidebarMenuList label="Cloud" items={cloudItems} />}
-        {accountItems.length > 0 && <SidebarMenuList label="Account" items={accountItems} />}
+        <SidebarMenuList label="Dashboard" items={dashboardItems} allUrls={allUrls} />
+        {cloudItems.length > 0 && (
+          <SidebarMenuList label="Cloud" items={cloudItems} allUrls={allUrls} />
+        )}
+        {accountItems.length > 0 && (
+          <SidebarMenuList label="Account" items={accountItems} allUrls={allUrls} />
+        )}
       </SidebarContent>
 
       <SidebarUserFooter user={user} isLoading={isLoading} />

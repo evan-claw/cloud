@@ -25,6 +25,7 @@ import {
   Webhook,
   Factory,
 } from 'lucide-react';
+import { useMemo } from 'react';
 import HeaderLogo from '@/components/HeaderLogo';
 import OrganizationSwitcher from './OrganizationSwitcher';
 import SidebarMenuList from './SidebarMenuList';
@@ -202,6 +203,11 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
     },
   ];
 
+  const allUrls = useMemo(
+    () => [...dashboardItems, ...cloudItems, ...accountItems, ...startItems].map(i => i.url),
+    [dashboardItems, cloudItems, accountItems, startItems]
+  );
+
   return (
     <Sidebar {...props}>
       <SidebarHeader className="p-4">
@@ -216,10 +222,12 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarMenuList label="Dashboard" items={dashboardItems} />
-        {cloudItems.length > 0 && <SidebarMenuList label="Cloud" items={cloudItems} />}
-        <SidebarMenuList label="Account" items={accountItems} />
-        <SidebarMenuList label="Start" items={startItems} />
+        <SidebarMenuList label="Dashboard" items={dashboardItems} allUrls={allUrls} />
+        {cloudItems.length > 0 && (
+          <SidebarMenuList label="Cloud" items={cloudItems} allUrls={allUrls} />
+        )}
+        <SidebarMenuList label="Account" items={accountItems} allUrls={allUrls} />
+        <SidebarMenuList label="Start" items={startItems} allUrls={allUrls} />
       </SidebarContent>
 
       <SidebarUserFooter user={user} isLoading={isLoading} />
