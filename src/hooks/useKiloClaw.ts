@@ -280,6 +280,7 @@ export function useReadFile(path: string | null, enabled: boolean) {
   const trpc = useTRPC();
   return useQuery(
     trpc.kiloclaw.readFile.queryOptions(
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by `enabled: enabled && path !== null`
       { path: path! },
       {
         enabled: enabled && path !== null,

@@ -42,7 +42,7 @@ import { getEntriesByCategory } from '@kilocode/kiloclaw-secret-catalog';
 import { SecretEntrySection } from './SecretEntrySection';
 import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { VersionPinCard } from './VersionPinCard';
-import { OpenclawConfigEditor } from './OpenclawConfigEditor';
+import { WorkspaceFileEditor } from './WorkspaceFileEditor';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -608,7 +608,7 @@ export function SettingsTab({
                 onClick={() => setEditConfigOpen(prev => !prev)}
               >
                 <FileCode className="h-4 w-4" />
-                Edit Config
+                Edit Files
               </Button>
 
               <Button
@@ -681,7 +681,7 @@ export function SettingsTab({
 
             {editConfigOpen && (
               <div className="mt-4">
-                <OpenclawConfigEditor
+                <WorkspaceFileEditor
                   enabled={isRunning}
                   mutations={mutations}
                   onOpenChange={setEditConfigOpen}
