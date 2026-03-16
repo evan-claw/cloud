@@ -9,7 +9,8 @@ function setDevVar(content: string, key: string, value: string): string {
   if (pattern.test(content)) {
     return content.replace(pattern, `${key}=${value}`);
   }
-  return content + `\n${key}=${value}`;
+  const sep = content.endsWith("\n") ? "" : "\n";
+  return content + `${sep}${key}=${value}\n`;
 }
 
 export const kiloclaw: ProjectDef = {
@@ -19,9 +20,9 @@ export const kiloclaw: ProjectDef = {
     setup: {
       description: "Initialize KiloClaw dev environment (secrets, Vercel env, Fly token)",
       async run(_args: string[], root: string): Promise<void> {
-        const kilocawDir = join(root, "kiloclaw");
-        const devVarsPath = join(kilocawDir, ".dev.vars");
-        const devVarsExamplePath = join(kilocawDir, ".dev.vars.example");
+        const kiloclawDir = join(root, "kiloclaw");
+        const devVarsPath = join(kiloclawDir, ".dev.vars");
+        const devVarsExamplePath = join(kiloclawDir, ".dev.vars.example");
 
         // 1. Create .dev.vars from example if it doesn't exist
         const devVarsFile = Bun.file(devVarsPath);
@@ -172,8 +173,8 @@ export const kiloclaw: ProjectDef = {
     "push-dev": {
       description: "Build and push controller Docker image to Fly registry",
       async run(args: string[], root: string): Promise<void> {
-        const kilocawDir = join(root, "kiloclaw");
-        const devVarsPath = join(kilocawDir, ".dev.vars");
+        const kiloclawDir = join(root, "kiloclaw");
+        const devVarsPath = join(kiloclawDir, ".dev.vars");
 
         // 1. Authenticate with Fly registry
         ui.header("Authenticating with Fly registry...");
@@ -189,6 +190,10 @@ export const kiloclaw: ProjectDef = {
 
         // 2. Read config from .dev.vars
         const devVarsFile = Bun.file(devVarsPath);
+        if (!(await devVarsFile.exists())) {
+          ui.error(".dev.vars not found. Run 'pnpm kilo kiloclaw setup' first.");
+          process.exit(1);
+        }
         let devVarsContent = await devVarsFile.text();
         const devVars = parseEnvFile(devVarsContent);
 
@@ -200,10 +205,10 @@ export const kiloclaw: ProjectDef = {
         // 4. Select Dockerfile
         let dockerfile: string;
         if (useLocal) {
-          dockerfile = join(kilocawDir, "Dockerfile.local");
+          dockerfile = join(kiloclawDir, "Dockerfile.local");
           // Validate tarball exists
           const proc = Bun.spawn(
-            ["sh", "-c", `ls "${kilocawDir}"/openclaw-build/openclaw-*.tgz 2>/dev/null`],
+            ["sh", "-c", `ls "${kiloclawDir}"/openclaw-build/openclaw-*.tgz 2>/dev/null`],
             { cwd: root, stdout: "pipe", stderr: "pipe" },
           );
           await proc.exited;
@@ -212,12 +217,12 @@ export const kiloclaw: ProjectDef = {
             ui.error("No openclaw-*.tgz found in openclaw-build/.");
             ui.error("Build your fork first:");
             ui.error("  cd /path/to/openclaw && pnpm build && npm pack");
-            ui.error(`  cp openclaw-*.tgz ${kilocawDir}/openclaw-build/`);
+            ui.error(`  cp openclaw-*.tgz ${kiloclawDir}/openclaw-build/`);
             process.exit(1);
           }
           ui.success("Using Dockerfile.local (local OpenClaw tarball)");
         } else {
-          dockerfile = join(kilocawDir, "Dockerfile");
+          dockerfile = join(kiloclawDir, "Dockerfile");
         }
 
         // 5. Generate timestamped tag
@@ -226,7 +231,7 @@ export const kiloclaw: ProjectDef = {
         const image = `registry.fly.io/${appName}:${tag}`;
 
         // Get git SHA
-        const gitProc = Bun.spawn(["git", "-C", kilocawDir, "rev-parse", "HEAD"], {
+        const gitProc = Bun.spawn(["git", "-C", kiloclawDir, "rev-parse", "HEAD"], {
           stdout: "pipe",
           stderr: "pipe",
         });
@@ -252,7 +257,7 @@ export const kiloclaw: ProjectDef = {
           "-t",
           image,
           "--push",
-          kilocawDir,
+          kiloclawDir,
         ].join(" ");
 
         const buildOk = await run({

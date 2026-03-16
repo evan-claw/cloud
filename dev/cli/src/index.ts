@@ -36,14 +36,10 @@ async function main() {
         return;
       }
 
-      // No subcommand or unknown subcommand — show project help
-      if (subcommand && !project.commands[subcommand]) {
-        // Maybe they just want `up <project>` — check if it's a service name
-        if (getServiceNames().includes(command)) {
-          await up([command, ...commandArgs], ROOT);
-          return;
-        }
+      // Unknown subcommand — show error + project help
+      if (subcommand) {
         ui.error(`Unknown command "${subcommand}" for project "${command}"`);
+        console.log();
       }
 
       printProjectHelp(project);

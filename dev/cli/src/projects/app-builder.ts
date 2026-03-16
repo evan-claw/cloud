@@ -143,7 +143,7 @@ async function upCommand(args: string[], root: string): Promise<void> {
     tmux(["select-pane", "-t", paneTarget, "-T", svc.title]);
 
     const dir = svc.dir === "." ? root : join(root, svc.dir);
-    tmux(["send-keys", "-t", paneTarget, `cd ${dir} && ${svc.cmd}`, "C-m"]);
+    tmux(["send-keys", "-t", paneTarget, `cd "${dir}" && ${svc.cmd}`, "C-m"]);
   }
 
   // Select the ngrok pane by default
