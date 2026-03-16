@@ -67,6 +67,27 @@ import { getSandbox } from '@cloudflare/sandbox';
 import { stopKiloServer } from '../kilo/server-manager.js';
 
 // ---------------------------------------------------------------------------
+// Sandbox Infrastructure Error Detection
+// ---------------------------------------------------------------------------
+
+/** Error messages that indicate transient sandbox/container connectivity issues.
+ *  These are expected when the container is sleeping, recycling, or experiencing
+ *  version mismatches — logging at warn level instead of error avoids noisy alerts. */
+const SANDBOX_INFRA_ERROR_PATTERNS = [
+  'Network connection lost',
+  'disconnected prematurely',
+  'Container service disconnected',
+  'The Durable Object is overloaded',
+  'Durable Object reset',
+  'Internal error in Durable Object storage',
+] as const;
+
+function isSandboxInfraError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return SANDBOX_INFRA_ERROR_PATTERNS.some(pattern => msg.includes(pattern));
+}
+
+// ---------------------------------------------------------------------------
 // Alarm Constants
 // ---------------------------------------------------------------------------
 
@@ -900,11 +921,20 @@ export class CloudAgentSession extends DurableObject {
       .withFields({ doId: this.ctx.id.toString(), sessionId: this.sessionId })
       .info('Alarm fired');
 
+    // Each step is wrapped individually so that a failure in one (e.g. a
+    // sandbox "Network connection lost" RPC error during cleanupIdleKiloServer)
+    // never prevents subsequent steps from running or the alarm from being
+    // rescheduled.  Without this, a single sandbox connectivity blip would
+    // surface as EventType=alarm, Outcome=exception in Cloudflare analytics.
     try {
       // Check disconnect grace period first — this alarm may have been
       // rescheduled specifically for the grace deadline.
       await this.checkDisconnectGrace();
+    } catch (error) {
+      this.logAlarmStepError('checkDisconnectGrace', error, now);
+    }
 
+    try {
       // Check if session should be deleted due to inactivity (90 days)
       const lastActivity = await this.ctx.storage.get<number>(LAST_ACTIVITY_KEY);
       if (lastActivity && now - lastActivity > Limits.SESSION_TTL_MS) {
@@ -920,46 +950,71 @@ export class CloudAgentSession extends DurableObject {
       logger
         .withFields({ sessionId: this.sessionId, lastActivity, elapsedMs: Date.now() - now })
         .debug('TTL check passed');
-
-      // Run cleanup tasks
-      logger
-        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
-        .debug('Starting cleanupStaleExecutions');
-      await this.cleanupStaleExecutions(now);
-
-      logger
-        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
-        .debug('Starting cleanupOldEvents');
-      this.cleanupOldEvents(now);
-
-      logger
-        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
-        .debug('Starting cleanupExpiredLeases');
-      this.cleanupExpiredLeases(now);
-
-      // Check if kilo server should be stopped due to inactivity
-      logger
-        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
-        .debug('Starting cleanupIdleKiloServer');
-      await this.cleanupIdleKiloServer(now);
-
-      logger
-        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
-        .debug('All cleanup steps completed');
     } catch (error) {
-      logger
-        .withFields({
-          doId: this.ctx.id.toString(),
-          sessionId: this.sessionId,
-          elapsedMs: Date.now() - now,
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        })
-        .error('Error during alarm reaper');
+      this.logAlarmStepError('TTL check', error, now);
     }
 
+    // Run cleanup tasks — each is independent, so failures are isolated.
+    try {
+      await this.cleanupStaleExecutions(now);
+    } catch (error) {
+      this.logAlarmStepError('cleanupStaleExecutions', error, now);
+    }
+
+    try {
+      this.cleanupOldEvents(now);
+    } catch (error) {
+      this.logAlarmStepError('cleanupOldEvents', error, now);
+    }
+
+    try {
+      this.cleanupExpiredLeases(now);
+    } catch (error) {
+      this.logAlarmStepError('cleanupExpiredLeases', error, now);
+    }
+
+    try {
+      await this.cleanupIdleKiloServer(now);
+    } catch (error) {
+      this.logAlarmStepError('cleanupIdleKiloServer', error, now);
+    }
+
+    logger
+      .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
+      .debug('All cleanup steps completed');
+
     // Schedule next alarm run — use shorter interval while an execution is active.
-    // Wrapped in try/catch so a failure here never prevents rescheduling the alarm.
+    // This MUST succeed to keep the reaper alive, so it runs in a finally-style
+    // block with its own error handling.
+    await this.rescheduleAlarm(now);
+  }
+
+  /**
+   * Log a non-fatal error from an individual alarm cleanup step.
+   * Keeps the alarm handler from throwing while preserving observability.
+   */
+  private logAlarmStepError(step: string, error: unknown, alarmStartTime: number): void {
+    const isSandboxError = isSandboxInfraError(error);
+    const level = isSandboxError ? 'warn' : 'error';
+    logger
+      .withFields({
+        doId: this.ctx.id.toString(),
+        sessionId: this.sessionId,
+        step,
+        elapsedMs: Date.now() - alarmStartTime,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        isSandboxError,
+      })
+      [level](`Alarm step "${step}" failed`);
+  }
+
+  /**
+   * Reschedule the alarm after processing.
+   * Uses shorter interval while an execution is active.
+   * Handles its own errors to guarantee the alarm is always re-armed.
+   */
+  private async rescheduleAlarm(alarmStartTime: number): Promise<void> {
     let nextInterval = this.getReaperIntervalMs();
     try {
       const activeExecutionId = await this.executionQueries.getActiveExecutionId();
@@ -969,10 +1024,26 @@ export class CloudAgentSession extends DurableObject {
     } catch {
       // Fall through with default interval
     }
-    logger
-      .withFields({ sessionId: this.sessionId, nextInterval, elapsedMs: Date.now() - now })
-      .info('Rescheduling alarm');
-    await this.ctx.storage.setAlarm(now + nextInterval);
+
+    try {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          nextInterval,
+          elapsedMs: Date.now() - alarmStartTime,
+        })
+        .info('Rescheduling alarm');
+      await this.ctx.storage.setAlarm(Date.now() + nextInterval);
+    } catch (error) {
+      // Last-resort: if even setAlarm fails, log it.  The ensureAlarmScheduled
+      // call in the constructor and the GastownUser watchdog will re-arm us.
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .error('Failed to reschedule alarm');
+    }
   }
 
   /**
@@ -1183,13 +1254,30 @@ export class CloudAgentSession extends DurableObject {
         .withFields({ sessionId: this.sessionId, sandboxId })
         .info('Idle kilo server stopped successfully');
     } catch (error) {
-      // Log but don't fail - server may already be stopped or sandbox recycled
+      // Log but don't fail — server may already be stopped or sandbox recycled.
+      // If the container itself is unreachable (sandbox infra error), clear the
+      // activity timestamp so we don't retry on every subsequent alarm tick.
+      const infra = isSandboxInfraError(error);
       logger
         .withFields({
           sessionId: this.sessionId,
           error: error instanceof Error ? error.message : String(error),
+          isSandboxError: infra,
         })
         .warn('Failed to stop idle kilo server (may already be stopped)');
+
+      if (infra) {
+        try {
+          const updated = {
+            ...metadata,
+            kiloServerLastActivity: undefined,
+            version: Date.now(),
+          };
+          await this.updateMetadata(updated);
+        } catch {
+          // Best-effort — don't propagate metadata update failures
+        }
+      }
     }
   }
 
