@@ -468,7 +468,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await this.loadState();
 
     this.s.googleCredentials = credentials;
-    await this.ctx.storage.put({ googleCredentials: this.s.googleCredentials });
+    this.s.gmailPushOidcEmail = credentials.gmailPushOidcEmail ?? null;
+    await this.ctx.storage.put({
+      googleCredentials: this.s.googleCredentials,
+      gmailPushOidcEmail: this.s.gmailPushOidcEmail,
+    });
 
     return { googleConnected: true };
   }
@@ -484,10 +488,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.s.googleCredentials = null;
     this.s.gmailNotificationsEnabled = false;
     this.s.gmailLastHistoryId = null;
+    this.s.gmailPushOidcEmail = null;
     await this.ctx.storage.put({
       googleCredentials: null,
       gmailNotificationsEnabled: false,
       gmailLastHistoryId: null,
+      gmailPushOidcEmail: null,
     });
 
     return { googleConnected: false };
@@ -516,6 +522,15 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     this.s.gmailLastHistoryId = historyId;
     await this.persist({ gmailLastHistoryId: historyId });
+  }
+
+  /**
+   * Return the stored OIDC service account email for Gmail push validation.
+   * Lightweight — no side effects, no Fly checks.
+   */
+  async getGmailOidcEmail(): Promise<{ gmailPushOidcEmail: string | null }> {
+    await this.loadState();
+    return { gmailPushOidcEmail: this.s.gmailPushOidcEmail };
   }
 
   /**
