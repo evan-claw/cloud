@@ -58,7 +58,7 @@ export async function GET(_request: NextRequest): Promise<
     {
       db: readDb,
       route: 'admin/abuse/stats',
-      queryLabel: 'admin_abuse_daily',
+      queryLabel: 'admin_abuse_24h_aggregate',
       scope: 'admin',
       period: '24h',
     },
