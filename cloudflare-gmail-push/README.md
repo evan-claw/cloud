@@ -133,7 +133,6 @@ Deploys to: `cloudflare-gmail-push`
 
 ## Service Bindings
 
-| Binding    | Target Worker  | Environment |
-| ---------- | -------------- | ----------- |
-| `KILOCLAW` | `kiloclaw`     | Production  |
-| `KILOCLAW` | `kiloclaw-dev` | Development |
+| Binding    | Target Worker | Environment |
+| ---------- | ------------- | ----------- |
+| `KILOCLAW` | `kiloclaw`    | Production  |
