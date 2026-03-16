@@ -1243,7 +1243,10 @@ describe('createNewMachine 409 recovery', () => {
       id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
-      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+      config: {
+        mounts: [{ volume: 'vol-1', path: '/root' }],
+        guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' },
+      },
     });
     (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     (flyClient.waitForState as Mock).mockResolvedValue(undefined);
@@ -1272,7 +1275,10 @@ describe('createNewMachine 409 recovery', () => {
       id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
-      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+      config: {
+        mounts: [{ volume: 'vol-1', path: '/root' }],
+        guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' },
+      },
     });
     (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     // waitForState fails after adoption
@@ -1310,7 +1316,11 @@ describe('createNewMachine 409 recovery', () => {
   it('destroys stale 409 machine when its volume does not match expected volume', async () => {
     const { instance, storage } = createInstance();
     // Volume was swapped (e.g. after replaceStrandedVolume) — DO expects vol-new
-    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null, flyVolumeId: 'vol-new' });
+    await seedProvisioned(storage, {
+      status: 'stopped',
+      flyMachineId: null,
+      flyVolumeId: 'vol-new',
+    });
 
     const conflictErr = new FlyApiError('conflict', 409, 'already_exists machine ID stale123');
     (flyClient.createMachine as Mock).mockRejectedValue(conflictErr);
@@ -1330,9 +1340,7 @@ describe('createNewMachine 409 recovery', () => {
     expect(flyClient.destroyMachine).toHaveBeenCalledWith(expect.anything(), 'stale123');
     // Should NOT have adopted it
     expect(storage._store.get('flyMachineId')).toBeNull();
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('destroying stale machine')
-    );
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('destroying stale machine'));
   });
 
   it('adopts 409 machine when its volume matches expected volume', async () => {
@@ -1347,7 +1355,10 @@ describe('createNewMachine 409 recovery', () => {
       id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
-      config: { mounts: [{ volume: 'vol-1', path: '/root' }], guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+      config: {
+        mounts: [{ volume: 'vol-1', path: '/root' }],
+        guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' },
+      },
     });
     (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     (flyClient.waitForState as Mock).mockResolvedValue(undefined);
