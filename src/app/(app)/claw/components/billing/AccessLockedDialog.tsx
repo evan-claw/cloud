@@ -71,6 +71,15 @@ function getLockContent(reason: ClawLockReason) {
         action: 'update_payment' as const,
         icon: CreditCard,
       };
+    case 'no_access':
+      return {
+        title: 'Subscription Required',
+        description:
+          'A KiloClaw subscription is required to continue. Subscribe to keep your instance running.',
+        cta: 'Subscribe',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
     default:
       return null;
   }
@@ -85,6 +94,9 @@ function getInfoBoxMessage(reason: ClawLockReason): string {
   }
   if (reason === 'past_due_grace_exceeded') {
     return 'Your KiloClaw will resume automatically once payment is resolved.';
+  }
+  if (reason === 'no_access') {
+    return 'Subscribe to unlock full access to KiloClaw.';
   }
   return 'Your KiloClaw will resume automatically once you subscribe.';
 }
@@ -112,7 +124,7 @@ export function AccessLockedDialog({
   }
 
   function handleDismiss() {
-    router.push('/claw');
+    router.push('/');
   }
 
   return (

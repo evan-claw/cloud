@@ -68,6 +68,7 @@ export type ClawLockReason =
   | 'subscription_expired_instance_alive'
   | 'subscription_expired_instance_destroyed'
   | 'past_due_grace_exceeded'
+  | 'no_access'
   | null;
 
 export function deriveBannerState(billing: ClawBillingStatus): ClawBannerState {
@@ -117,6 +118,13 @@ export function deriveLockReason(billing: ClawBillingStatus): ClawLockReason {
     }
     if (billing.earlybird && billing.earlybird.daysRemaining <= 0) {
       return 'earlybird_expired';
+    }
+    // Fallback: access is revoked but no specific expired state was matched.
+    // This covers cases like an account with an instance but no trial/subscription/earlybird row.
+    // Only lock if the user has an instance — new trial-eligible users with no instance
+    // should see CreateInstanceCard, not a lock dialog.
+    if (billing.instance) {
+      return 'no_access';
     }
   }
   return null;

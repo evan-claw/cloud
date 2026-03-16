@@ -84,7 +84,9 @@ export function InstanceControls({
           }
           onClick={() => {
             posthog?.capture('claw_start_instance_clicked', { instance_status: status.status });
-            mutations.start.mutate();
+            mutations.start.mutate(undefined, {
+              onError: err => toast.error(err.message, { duration: 10000 }),
+            });
           }}
         >
           <Play className="h-4 w-4" />
@@ -162,7 +164,7 @@ export function InstanceControls({
               toast.success('OpenClaw restarting');
               setConfirmRestart(false);
             },
-            onError: err => toast.error(err.message),
+            onError: err => toast.error(err.message, { duration: 10000 }),
           });
         }}
       />
@@ -233,7 +235,7 @@ export function InstanceControls({
                     setConfirmRedeploy(false);
                     onRedeploySuccess?.();
                   },
-                  onError: err => toast.error(err.message),
+                  onError: err => toast.error(err.message, { duration: 10000 }),
                 });
               }}
               disabled={mutations.restartMachine.isPending}

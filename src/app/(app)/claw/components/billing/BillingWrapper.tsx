@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
+import { Button } from '@/components/ui/button';
 import { BillingBanner } from './BillingBanner';
 import { AccessLockedDialog } from './AccessLockedDialog';
 import { PlanSelectionDialog } from './PlanSelectionDialog';
@@ -10,7 +11,13 @@ import { SubscriptionCard } from './SubscriptionCard';
 import { CancelDialog } from './CancelDialog';
 import { deriveBannerState, deriveLockReason, formatBillingDate } from './billing-types';
 
-function EarlybirdActiveCard({ expiresAt }: { expiresAt: string }) {
+function EarlybirdActiveCard({
+  expiresAt,
+  onSubscribeClick,
+}: {
+  expiresAt: string;
+  onSubscribeClick: () => void;
+}) {
   return (
     <div className="border-brand-primary/30 bg-brand-primary/5 flex items-center gap-3 rounded-xl border p-4">
       <span className="text-xl">🦀</span>
@@ -22,6 +29,9 @@ function EarlybirdActiveCard({ expiresAt }: { expiresAt: string }) {
           Your earlybird hosting expires {formatBillingDate(expiresAt)}.
         </span>
       </div>
+      <Button variant="outline" size="sm" onClick={onSubscribeClick} className="shrink-0">
+        Subscribe
+      </Button>
     </div>
   );
 }
@@ -74,7 +84,10 @@ export function BillingWrapper({ children }: BillingWrapperProps) {
     <>
       {/* Banner — or earlybird card in the banner position */}
       {bannerState === 'earlybird_active' && billing.earlybird ? (
-        <EarlybirdActiveCard expiresAt={billing.earlybird.expiresAt} />
+        <EarlybirdActiveCard
+          expiresAt={billing.earlybird.expiresAt}
+          onSubscribeClick={handleSubscribe}
+        />
       ) : (
         <BillingBanner
           billing={billing}

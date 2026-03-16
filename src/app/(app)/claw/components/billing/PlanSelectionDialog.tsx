@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -91,9 +92,15 @@ export function PlanSelectionDialog({ open, onOpenChange }: PlanSelectionDialogP
   const planName = selectedPlan === 'commit' ? 'Commit' : 'Standard';
 
   async function handlePurchase() {
-    const result = await checkout.mutateAsync({ plan: selectedPlan });
-    if (result.url) {
-      window.location.href = result.url;
+    try {
+      const result = await checkout.mutateAsync({ plan: selectedPlan });
+      if (result.url) {
+        window.location.href = result.url;
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to start checkout. Please try again.';
+      toast.error(message, { duration: 10000 });
     }
   }
 
