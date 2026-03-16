@@ -114,6 +114,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       requestBodyParsed = { kind: 'chat_completions', body };
     } else {
       const body: GatewayResponsesRequest = JSON.parse(requestBodyText);
+      body.store = false;
       requestBodyParsed = { kind: 'responses', body };
     }
   } catch (e) {
