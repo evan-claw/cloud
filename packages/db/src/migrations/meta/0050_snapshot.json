@@ -1,6 +1,6 @@
 {
   "id": "3624a27b-6224-455f-9268-bd28d61da6d0",
-  "prevId": "c9e70970-c9d5-4882-8afa-e8e761b2e48b",
+  "prevId": "3ba718a0-4488-47ca-9a21-d5cb689646ac",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -8018,6 +8018,12 @@
         },
         "openrouter_upstream_safety_identifier": {
           "name": "openrouter_upstream_safety_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_source": {
+          "name": "customer_source",
           "type": "text",
           "primaryKey": false,
           "notNull": false
