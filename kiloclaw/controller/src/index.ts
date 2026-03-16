@@ -223,7 +223,7 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   });
 
   await supervisor.start();
-  await pairingCache.start();
+  pairingCache.start();
   if (gmailWatchSupervisor && googleAccountEmail) {
     await gmailWatchSupervisor.start();
     startWatchRenewal(googleAccountEmail);

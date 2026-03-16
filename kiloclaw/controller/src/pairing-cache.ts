@@ -38,7 +38,7 @@ export type PairingCache = {
   approveChannel: (channel: string, code: string) => Promise<ApproveResult>;
   approveDevice: (requestId: string) => Promise<ApproveResult>;
   onPairingLogLine: (line: string) => void;
-  start: () => Promise<void>;
+  start: () => void;
   cleanup: () => void;
 };
 
@@ -271,13 +271,17 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
     }, DEBOUNCE_DELAY_MS);
   };
 
-  const start = async (): Promise<void> => {
+  const start = (): void => {
     if (started) return;
     started = true;
 
-    // Await the initial refresh so callers can ensure the cache is populated before
-    // serving requests (addresses empty-cache window on fresh startup).
-    await refreshAll();
+    // Fire-and-forget: do not await the initial refresh.  Awaiting here blocks
+    // server.listen(), which can delay the health endpoint past the DO's 60s
+    // startup probe when the CLI is slow or wedged (each path has a 45s timeout).
+    // An empty cache during the brief warmup window is acceptable — the DO-side
+    // fallback chain (controller → KV → fly exec) handles it, and the cache
+    // self-heals within seconds via the periodic timer and log-triggered debounce.
+    void refreshAll();
 
     periodicTimer = setInterval(() => {
       void refreshAll();

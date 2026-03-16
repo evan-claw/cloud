@@ -26,7 +26,7 @@ function createMockCache(): PairingCache {
       statusHint: 200 as const,
     })),
     onPairingLogLine: vi.fn(),
-    start: vi.fn(async () => undefined),
+    start: vi.fn(() => undefined),
     cleanup: vi.fn(),
   };
 }
