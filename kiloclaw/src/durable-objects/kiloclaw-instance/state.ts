@@ -38,6 +38,7 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.channels = d.channels;
     s.googleCredentials = d.googleCredentials;
     s.provisionedAt = d.provisionedAt;
+    s.startingAt = d.startingAt;
     s.lastStartedAt = d.lastStartedAt;
     s.lastStoppedAt = d.lastStoppedAt;
     s.flyAppName = d.flyAppName;
@@ -91,6 +92,7 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.channels = null;
   s.googleCredentials = null;
   s.provisionedAt = null;
+  s.startingAt = null;
   s.lastStartedAt = null;
   s.lastStoppedAt = null;
   s.flyAppName = null;
@@ -137,6 +139,7 @@ export function createMutableState(): InstanceMutableState {
     channels: null,
     googleCredentials: null,
     provisionedAt: null,
+    startingAt: null,
     lastStartedAt: null,
     lastStoppedAt: null,
     flyAppName: null,

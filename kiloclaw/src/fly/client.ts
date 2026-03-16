@@ -14,6 +14,7 @@ import type {
   FlyVolume,
   FlyVolumeSnapshot,
   CreateVolumeRequest,
+  CreateVolumeRequestWithoutRegion,
   CreateMachineRequest,
   FlyWaitableState,
   MachineExecRequest,
@@ -210,7 +211,7 @@ export async function createVolume(
  */
 export async function createVolumeWithFallback(
   config: FlyClientConfig,
-  request: Omit<CreateVolumeRequest, 'region'>,
+  request: CreateVolumeRequestWithoutRegion,
   regions: string[]
 ): Promise<FlyVolume> {
   if (regions.length === 0) {

@@ -119,7 +119,7 @@ export type MachineSize = {
 export type PlatformStatusResponse = {
   userId: string | null;
   sandboxId: string | null;
-  status: 'provisioned' | 'running' | 'stopped' | 'destroying' | null;
+  status: 'provisioned' | 'starting' | 'running' | 'stopped' | 'destroying' | null;
   provisionedAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;

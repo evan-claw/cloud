@@ -100,14 +100,15 @@ src/
 
 ## Instance Statuses
 
-| Status        | Meaning                                                  |
-| ------------- | -------------------------------------------------------- |
-| `provisioned` | Config stored, volume created, no machine yet            |
-| `running`     | Machine is started and healthy                           |
-| `stopped`     | Machine is stopped, volume persists                      |
-| `destroying`  | Two-phase destroy in progress, pending resource deletion |
+| Status        | Meaning                                                         |
+| ------------- | --------------------------------------------------------------- |
+| `provisioned` | Config stored, volume created, no machine yet                   |
+| `starting`    | startAsync() fired; start() running in background via waitUntil |
+| `running`     | Machine is started and healthy                                  |
+| `stopped`     | Machine is stopped, volume persists                             |
+| `destroying`  | Two-phase destroy in progress, pending resource deletion        |
 
-The alarm runs for ALL statuses (not just `running`). `destroying` short-circuits reconciliation -- only retries pending deletes, never recreates resources.
+The alarm runs for ALL statuses (not just `running`). `destroying` short-circuits reconciliation -- only retries pending deletes, never recreates resources. `starting` uses a 1-min alarm cadence; reconcileStarting() checks Fly machine state and transitions to `running` or `stopped`. If `startingAt` is set and more than 5 minutes have elapsed, it falls back to `stopped` automatically.
 
 ## Environment Variables
 

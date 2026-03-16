@@ -6,6 +6,7 @@ import * as fly from '../../fly/client';
 import {
   SELF_HEAL_THRESHOLD,
   STARTUP_TIMEOUT_SECONDS,
+  STARTING_TIMEOUT_MS,
   getProactiveRefreshThresholdMs,
 } from '../../config';
 import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../../utils/env-encryption';
@@ -41,6 +42,11 @@ export async function reconcileWithFly(
 ): Promise<void> {
   if (state.status === 'destroying') {
     await retryPendingDestroy(flyConfig, ctx, state, reason, markDestroyedInPostgres);
+    return;
+  }
+
+  if (state.status === 'starting') {
+    await reconcileStarting(flyConfig, ctx, state, env, reason);
     return;
   }
 
@@ -211,6 +217,118 @@ async function reconcileApiKeyExpiry(
   });
 }
 
+// ---- Starting reconciliation ----
+
+/**
+ * Reconcile a 'starting' instance.
+ *
+ * startAsync() fires start() via waitUntil, so start() may still be in
+ * progress when the alarm fires. We check Fly to decide what to do:
+ *
+ * - Machine started  → transition to 'running' (backfilling lastStartedAt).
+ * - Machine in a terminal stopped state → fall back to 'stopped'
+ *   (start() failed; the next alarm / user action will retry).
+ * - No machine yet (no flyMachineId, or Fly 404) → start() hasn't finished
+ *   or didn't create a machine; leave in 'starting' for the next alarm.
+ */
+async function reconcileStarting(
+  flyConfig: FlyClientConfig,
+  ctx: DurableObjectState,
+  state: InstanceMutableState,
+  env: KiloClawEnv,
+  reason: string
+): Promise<void> {
+  const startingAt = state.startingAt;
+  const isTimedOut = startingAt !== null && Date.now() - startingAt > STARTING_TIMEOUT_MS;
+
+  if (!state.flyMachineId) {
+    if (isTimedOut) {
+      // No machine after STARTING_TIMEOUT_MS — start() never created one. Give up.
+      reconcileLog(reason, 'starting_timeout', {
+        user_id: state.userId,
+        starting_at: state.startingAt,
+        elapsed_ms: Date.now() - startingAt,
+        new_state: 'stopped',
+      });
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+      return;
+    }
+    // start() hasn't persisted a machine ID yet — still in progress, wait.
+    reconcileLog(reason, 'starting_no_machine_yet', { user_id: state.userId });
+    return;
+  }
+
+  // We have a flyMachineId — always check Fly state, even if timed out.
+  // The machine may have started successfully despite the timeout.
+  try {
+    const machine = await fly.getMachine(flyConfig, state.flyMachineId);
+    await syncStatusWithFly(ctx, state, machine.state, reason);
+    // Ensure volume reconciliation doesn't get skipped while starting.
+    await reconcileVolume(flyConfig, ctx, state, env, reason);
+
+    // If syncStatusWithFly transitioned us out of 'starting', we're done.
+    // If still 'starting' after the timeout, the machine exists but isn't
+    // started yet — fall back to 'stopped' so the user can retry.
+    if (isTimedOut && state.status === 'starting') {
+      reconcileLog(reason, 'starting_timeout_with_machine', {
+        machine_id: state.flyMachineId,
+        fly_state: machine.state,
+        elapsed_ms: Date.now() - startingAt,
+        new_state: 'stopped',
+      });
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+    }
+  } catch (err) {
+    if (fly.isFlyNotFound(err)) {
+      // Machine was never created or was cleaned up externally.
+      reconcileLog(reason, 'starting_machine_gone', {
+        machine_id: state.flyMachineId,
+        new_state: 'stopped',
+      });
+      state.flyMachineId = null;
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          flyMachineId: null,
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+    } else {
+      // Transient Fly API error — leave in 'starting', alarm will retry.
+      // If timed out, still give the next alarm a chance to reach Fly.
+      console.error('[DO] reconcileStarting: transient error checking machine:', err);
+    }
+  }
+}
+
 // ---- Volume reconciliation ----
 
 async function reconcileVolume(
@@ -370,8 +488,23 @@ export async function syncStatusWithFly(
   if (flyState === 'started' && state.status !== 'running') {
     reconcileLog(reason, 'sync_status', { old_state: state.status, new_state: 'running' });
     state.status = 'running';
+    state.startingAt = null;
     state.healthCheckFailCount = 0;
-    await ctx.storage.put(storageUpdate({ status: 'running', healthCheckFailCount: 0 }));
+    // Backfill lastStartedAt whenever a transition to 'running' is observed and
+    // it hasn't been set yet. This covers both the async-start path (starting →
+    // running) and DO-wipe + metadata recovery (stopped → running with null
+    // lastStartedAt). Intentionally broader than just the 'starting' case.
+    if (state.lastStartedAt === null) {
+      state.lastStartedAt = Date.now();
+    }
+    await ctx.storage.put(
+      storageUpdate({
+        status: 'running',
+        startingAt: null,
+        healthCheckFailCount: 0,
+        lastStartedAt: state.lastStartedAt,
+      })
+    );
     return;
   }
 

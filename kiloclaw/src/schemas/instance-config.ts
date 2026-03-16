@@ -116,7 +116,9 @@ export const DestroyRequestSchema = z.object({
 export const PersistedStateSchema = z.object({
   userId: z.string().default(''),
   sandboxId: z.string().default(''),
-  status: z.enum(['provisioned', 'running', 'stopped', 'destroying']).default('stopped'),
+  status: z
+    .enum(['provisioned', 'starting', 'running', 'stopped', 'destroying'])
+    .default('stopped'),
   envVars: z.record(z.string(), z.string()).nullable().default(null),
   encryptedSecrets: z.record(z.string(), EncryptedEnvelopeSchema).nullable().default(null),
   kilocodeApiKey: z.string().nullable().default(null),
@@ -133,6 +135,7 @@ export const PersistedStateSchema = z.object({
     .default(null),
   googleCredentials: GoogleCredentialsSchema.nullable().default(null),
   provisionedAt: z.number().nullable().default(null),
+  startingAt: z.number().nullable().default(null),
   lastStartedAt: z.number().nullable().default(null),
   lastStoppedAt: z.number().nullable().default(null),
   // Fly.io app/machine/volume identifiers

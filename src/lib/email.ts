@@ -19,6 +19,15 @@ export const templates = {
   ossInviteExistingUser: '19',
   ossExistingOrgProvisioned: '20',
   deployFailed: '21',
+  clawTrialEndingSoon: '22',
+  clawTrialExpiresTomorrow: '23',
+  clawSuspendedTrial: '24',
+  clawSuspendedSubscription: '25',
+  clawSuspendedPayment: '26',
+  clawDestructionWarning: '27',
+  clawInstanceDestroyed: '28',
+  clawEarlybirdEndingSoon: '29',
+  clawEarlybirdExpiresTomorrow: '30',
 } as const;
 
 export type TemplateName = keyof typeof templates;
@@ -37,6 +46,15 @@ export const subjects: Record<TemplateName, string> = {
   ossInviteExistingUser: 'Kilo: OSS Sponsorship Offer',
   ossExistingOrgProvisioned: 'Kilo: OSS Sponsorship Offer',
   deployFailed: 'Kilo: Your Deployment Failed',
+  clawTrialEndingSoon: 'Your KiloClaw Trial Ends in 5 Days',
+  clawTrialExpiresTomorrow: 'Your KiloClaw Trial Expires Tomorrow',
+  clawSuspendedTrial: 'Your KiloClaw Trial Has Ended',
+  clawSuspendedSubscription: 'Your KiloClaw Subscription Has Ended',
+  clawSuspendedPayment: 'Action Required: KiloClaw Payment Overdue',
+  clawDestructionWarning: 'Your KiloClaw Instance Will Be Deleted in 2 Days',
+  clawInstanceDestroyed: 'Your KiloClaw Instance Has Been Deleted',
+  clawEarlybirdEndingSoon: 'Your KiloClaw Earlybird Access Ends Soon',
+  clawEarlybirdExpiresTomorrow: 'Your KiloClaw Earlybird Access Expires Tomorrow',
 };
 
 function escapeHtml(str: string): string {
@@ -93,7 +111,7 @@ type SendParams = {
   templateVars: TemplateVars;
 };
 
-async function send(params: SendParams) {
+export async function send(params: SendParams) {
   if (EMAIL_PROVIDER === 'mailgun') {
     const subject = subjects[params.templateName];
     const html = renderTemplate(params.templateName, {

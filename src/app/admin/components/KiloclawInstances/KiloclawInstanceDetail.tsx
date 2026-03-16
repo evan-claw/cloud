@@ -113,6 +113,8 @@ function StatusBadge({ status }: { status: string | null }) {
   switch (status) {
     case 'running':
       return <Badge className="bg-green-600">Running</Badge>;
+    case 'starting':
+      return <Badge className="bg-blue-500">Starting</Badge>;
     case 'stopped':
       return <Badge variant="secondary">Stopped</Badge>;
     case 'provisioned':

@@ -97,10 +97,12 @@ import { resolveLatestVersion } from '../lib/image-version';
 import { verifyKiloToken } from '@kilocode/worker-utils';
 import {
   ALARM_INTERVAL_RUNNING_MS,
+  ALARM_INTERVAL_STARTING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
   ALARM_INTERVAL_IDLE_MS,
   ALARM_JITTER_MS,
   SELF_HEAL_THRESHOLD,
+  STARTING_TIMEOUT_MS,
   STALE_PROVISION_THRESHOLD_MS,
 } from '../config';
 
@@ -113,7 +115,10 @@ function createFakeStorage() {
   let alarmTime: number | null = null;
 
   return {
-    get(keys: string[]): Map<string, unknown> {
+    get(keys: string | string[]): unknown {
+      if (typeof keys === 'string') {
+        return store.get(keys);
+      }
       const result = new Map<string, unknown>();
       for (const k of keys) {
         if (store.has(k)) result.set(k, store.get(k));
@@ -225,6 +230,18 @@ async function seedRunning(
     status: 'running',
     flyMachineId: 'machine-1',
     lastStartedAt: Date.now(),
+    ...overrides,
+  });
+}
+
+async function seedStarting(
+  storage: ReturnType<typeof createFakeStorage>,
+  overrides: Record<string, unknown> = {}
+) {
+  await seedProvisioned(storage, {
+    status: 'starting',
+    startingAt: Date.now(),
+    lastStartedAt: null,
     ...overrides,
   });
 }
@@ -2459,6 +2476,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const forkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(forkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled — check the set
     expect((regionsForkCall[2] as string[]).sort()).toEqual([
       'dfw',
@@ -2531,6 +2551,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const updateForkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(updateForkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled then deprioritized — check the set
     expect((regionsUpdateCall[2] as string[]).sort()).toEqual([
       'dfw',
@@ -2862,8 +2885,8 @@ describe('approveDevicePairingRequest', () => {
 // ============================================================================
 
 describe('provision: auto-start after fresh provision', () => {
-  it('calls start() on fresh provision and ends in running state', async () => {
-    const { instance, storage } = createInstance();
+  it('calls startAsync() on fresh provision; status is starting then running after background start', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
 
     (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
       id: 'vol-1',
@@ -2876,6 +2899,13 @@ describe('provision: auto-start after fresh provision', () => {
     const result = await instance.provision('user-1', {});
 
     expect(result.sandboxId).toBeDefined();
+    // provision() returns before start() runs: waitUntil defers the promise,
+    // so status must be 'starting' here — not 'running'.
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Await background tasks to let start() complete
+    await Promise.all(waitUntilPromises);
+
     expect(flyClient.createMachine).toHaveBeenCalled();
     expect(storage._store.get('status')).toBe('running');
     expect(storage._store.get('flyMachineId')).toBe('machine-1');
@@ -3496,5 +3526,251 @@ describe('reconcileApiKeyExpiry', () => {
     await instance.alarm();
 
     expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+});
+
+// ============================================================================
+// 'starting' status
+// ============================================================================
+
+describe("provision: async start sets status to 'starting'", () => {
+  it("sets status='starting' immediately and fires start() via waitUntil", async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+
+    // provision() returned; waitUntil defers the background start() promise,
+    // so status must be 'starting' at this point — not yet 'running'.
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Await all background tasks to let start() complete.
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('flyMachineId')).toBe('machine-1');
+  });
+
+  it('skips async start on re-provision of existing instance', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage);
+
+    (flyClient.createMachine as Mock).mockClear();
+
+    await instance.provision('user-1', { kilocodeApiKey: 'new-key' });
+
+    expect(flyClient.createMachine).not.toHaveBeenCalled();
+    expect(storage._store.get('status')).toBe('running');
+  });
+});
+
+describe("status guards: 'starting'", () => {
+  it('stop() is a no-op when starting', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    await instance.stop();
+
+    expect(storage._store.get('status')).toBe('starting');
+    expect(flyClient.stopMachineAndWait).not.toHaveBeenCalled();
+  });
+
+  it('startAsync() rejects when destroying', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'destroying' });
+
+    await expect(instance.startAsync()).rejects.toThrow(
+      'Cannot start: instance is being destroyed'
+    );
+  });
+
+  it('background start() aborts if instance was destroyed while starting', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Simulate destroy happening while start() is in flight
+    storage._store.set('status', 'destroying');
+
+    // Let the background start() complete — it should see 'destroying' and bail
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('destroying');
+  });
+});
+
+describe("alarm cadence: 'starting'", () => {
+  it('schedules fast alarm for starting instances', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'starting',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    const alarm = storage._getAlarm();
+    expect(alarm).not.toBeNull();
+    const delta = alarm! - Date.now();
+    expect(delta).toBeGreaterThanOrEqual(ALARM_INTERVAL_STARTING_MS);
+    expect(delta).toBeLessThanOrEqual(ALARM_INTERVAL_STARTING_MS + ALARM_JITTER_MS + 100);
+  });
+});
+
+describe('reconcileStarting: Fly-driven status transitions', () => {
+  it("transitions to 'running' when Fly machine is started", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1', lastStartedAt: null });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('healthCheckFailCount')).toBe(0);
+    // lastStartedAt should be backfilled since it was null
+    expect(storage._store.get('lastStartedAt')).not.toBeNull();
+  });
+
+  it("transitions to 'stopped' when Fly machine is 404", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    (flyClient.getMachine as Mock).mockRejectedValue(
+      new FlyApiError('not found', 404, 'machine not found')
+    );
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('flyMachineId')).toBeNull();
+  });
+
+  it("stays 'starting' when flyMachineId is not yet set (start in progress)", async () => {
+    const { instance, storage } = createInstance();
+    // No flyMachineId — start() hasn't created the machine yet
+    await seedStarting(storage);
+
+    await instance.alarm();
+
+    // Status remains starting; getMachine was NOT called
+    expect(storage._store.get('status')).toBe('starting');
+    expect(flyClient.getMachine).not.toHaveBeenCalled();
+  });
+
+  it("falls back to 'stopped' when startingAt exceeds STARTING_TIMEOUT_MS (no machine)", async () => {
+    const { instance, storage } = createInstance();
+    // Seed with a startingAt older than the timeout — no machine ID (start() never completed)
+    await seedStarting(storage, {
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('startingAt')).toBeNull();
+    // getMachine should NOT have been called — no flyMachineId to check
+    expect(flyClient.getMachine).not.toHaveBeenCalled();
+  });
+
+  it('checks Fly before timing out when flyMachineId is set and machine is started', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, {
+      flyMachineId: 'machine-1',
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    // Machine actually started on Fly — timeout should NOT force 'stopped'
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // syncStatusWithFly should have transitioned to 'running' despite the timeout
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('startingAt')).toBeNull();
+    expect(storage._store.get('lastStartedAt')).not.toBeNull();
+  });
+
+  it("falls back to 'stopped' on timeout when flyMachineId is set but machine not started", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, {
+      flyMachineId: 'machine-1',
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    // Machine exists but still in 'created' state after 5 min
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'created',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // Checked Fly first, but machine wasn't started — timeout kicks in
+    expect(flyClient.getMachine).toHaveBeenCalledWith(expect.anything(), 'machine-1');
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('startingAt')).toBeNull();
+  });
+});
+
+describe("syncStatusWithFly: backfill lastStartedAt on 'starting' → 'running'", () => {
+  it("sets lastStartedAt when transitioning from 'starting' to 'running'", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1', lastStartedAt: null });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('lastStartedAt')).toBeGreaterThan(0);
+  });
+
+  it('does not overwrite existing lastStartedAt when already running', async () => {
+    const existingStartedAt = Date.now() - 10_000;
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { lastStartedAt: existingStartedAt });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // lastStartedAt should be unchanged (already running, no sync_status transition)
+    expect(storage._store.get('lastStartedAt')).toBe(existingStartedAt);
   });
 });

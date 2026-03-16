@@ -296,7 +296,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
 
     if (isNew) {
-      await this.start(userId);
+      await this.startAsync(userId);
     }
 
     return { sandboxId };
@@ -591,6 +591,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (this.s.status === 'destroying') {
       throw new Error('Cannot start: instance is being destroyed');
     }
+    // NOTE: status may be 'starting' here when called from startAsync() via
+    // waitUntil. That is intentional — 'starting' is the expected in-flight
+    // state and must not be treated as an error or early-return condition.
+    // Do not add a guard that rejects non-stopped/provisioned statuses without
+    // also explicitly allowing 'starting'.
 
     if (!this.s.userId || !this.s.sandboxId) {
       const restoreUserId = userId ?? this.s.userId;
@@ -753,17 +758,57 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
     }
 
+    // Re-check status directly from storage: if the instance was destroyed while
+    // start() was running in the background (via startAsync/waitUntil), bail out
+    // so teardown wins. We bypass loadState() because it no-ops when already loaded.
+    const currentStatus = await this.ctx.storage.get('status');
+    if (currentStatus === 'destroying') {
+      console.warn('[DO] start: instance was destroyed while starting, aborting');
+      return;
+    }
+
     this.s.status = 'running';
+    this.s.startingAt = null;
     this.s.lastStartedAt = Date.now();
     this.s.healthCheckFailCount = 0;
     await this.persist({
       status: 'running',
+      startingAt: null,
       lastStartedAt: this.s.lastStartedAt,
       healthCheckFailCount: 0,
       flyMachineId: this.s.flyMachineId,
     });
 
     await this.scheduleAlarm();
+  }
+
+  /**
+   * Non-blocking start: immediately persists status='starting', schedules a fast
+   * alarm, then fires start() in the background via waitUntil.
+   * Used by provision() so the RPC call returns quickly instead of waiting for
+   * the full Fly startup sequence (which can take up to ~60 s).
+   */
+  async startAsync(userId?: string): Promise<void> {
+    await this.loadState();
+
+    if (this.s.status === 'destroying') {
+      throw new Error('Cannot start: instance is being destroyed');
+    }
+
+    // Mark as starting so the UI can show a polling state immediately.
+    // Record startingAt so reconcileStarting() can time out after STARTING_TIMEOUT_MS.
+    this.s.status = 'starting';
+    this.s.startingAt = Date.now();
+    await this.persist({ status: 'starting', startingAt: this.s.startingAt });
+    await this.scheduleAlarm();
+
+    // Run the actual start in the background; the reconcile alarm will
+    // pick up the result and transition to 'running' (or fall back on error).
+    this.ctx.waitUntil(
+      this.start(userId).catch(err => {
+        console.error('[DO] startAsync: background start failed:', err);
+      })
+    );
   }
 
   async stop(): Promise<void> {
@@ -775,6 +820,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (
       this.s.status === 'stopped' ||
       this.s.status === 'provisioned' ||
+      this.s.status === 'starting' ||
       this.s.status === 'destroying'
     ) {
       console.log('[DO] Instance not running (status:', this.s.status, '), no-op');

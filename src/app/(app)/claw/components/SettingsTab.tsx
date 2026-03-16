@@ -248,6 +248,7 @@ export function SettingsTab({
   );
 
   const isSaving = mutations.patchConfig.isPending;
+  const isStarting = status.status === 'starting';
   const isDestroying = status.status === 'destroying';
   const supportsConfigRestore = calverAtLeast(
     cleanVersion(controllerVersion?.version),
@@ -614,7 +615,7 @@ export function SettingsTab({
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!isRunning || mutations.stop.isPending || isDestroying}
+                disabled={!isRunning || mutations.stop.isPending || isDestroying || isStarting}
                 onClick={() => {
                   posthog?.capture('claw_stop_instance_clicked', {
                     instance_status: status.status,

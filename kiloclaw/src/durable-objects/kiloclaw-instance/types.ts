@@ -50,6 +50,7 @@ export type InstanceMutableState = {
   channels: PersistedState['channels'];
   googleCredentials: GoogleCredentials | null;
   provisionedAt: number | null;
+  startingAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;
   flyAppName: string | null;

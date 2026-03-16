@@ -37,6 +37,7 @@ const mockUser: User = {
   linkedin_url: null,
   github_url: null,
   openrouter_upstream_safety_identifier: null,
+  customer_source: null,
 };
 
 describe('Token Functions', () => {

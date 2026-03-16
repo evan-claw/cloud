@@ -1,6 +1,7 @@
 import type { InstanceStatus } from './types';
 import {
   ALARM_INTERVAL_RUNNING_MS,
+  ALARM_INTERVAL_STARTING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
   ALARM_INTERVAL_IDLE_MS,
   ALARM_JITTER_MS,
@@ -32,6 +33,8 @@ export function alarmIntervalForStatus(status: InstanceStatus): number {
   switch (status) {
     case 'running':
       return ALARM_INTERVAL_RUNNING_MS;
+    case 'starting':
+      return ALARM_INTERVAL_STARTING_MS;
     case 'destroying':
       return ALARM_INTERVAL_DESTROYING_MS;
     case 'provisioned':

@@ -45,6 +45,10 @@ export const DEFAULT_FLY_REGION = 'dfw,ewr,iad,lax,sjc,eu';
 // Alarm cadence by instance status
 /** Running machines: fast health checks */
 export const ALARM_INTERVAL_RUNNING_MS = 5 * 60 * 1000; // 5 min
+/** Starting: wait for start() to complete and reconcile quickly */
+export const ALARM_INTERVAL_STARTING_MS = 60 * 1000; // 1 min
+/** Maximum time to stay in 'starting' before falling back to 'stopped' */
+export const STARTING_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 /** Destroying: retry pending deletes quickly */
 export const ALARM_INTERVAL_DESTROYING_MS = 60 * 1000; // 1 min
 /** Provisioned/stopped: slow drift detection */

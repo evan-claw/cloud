@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
 import type { db } from '@/lib/drizzle';
+import { getEnvVariable } from '@/lib/dotenvx';
 
 type DbInstance = typeof db;
 
@@ -12,11 +14,18 @@ type UsageQueryParams = {
   timeoutMs?: number;
 };
 
-const DEFAULT_INTERACTIVE_TIMEOUT_MS = 5_000;
-const DEFAULT_ADMIN_TIMEOUT_MS = 20_000;
+function parseTimeoutEnv(envKey: string, fallback: number): number {
+  const raw = getEnvVariable(envKey);
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
 
 function defaultTimeoutForScope(scope: 'user' | 'org' | 'admin'): number {
-  return scope === 'admin' ? DEFAULT_ADMIN_TIMEOUT_MS : DEFAULT_INTERACTIVE_TIMEOUT_MS;
+  if (scope === 'admin') return parseTimeoutEnv('USAGE_QUERY_TIMEOUT_ADMIN_MS', 20_000);
+  if (scope === 'org') return parseTimeoutEnv('USAGE_QUERY_TIMEOUT_ORG_MS', 10_000);
+  return parseTimeoutEnv('USAGE_QUERY_TIMEOUT_USER_MS', 5_000);
 }
 
 export async function timedUsageQuery<T>(
@@ -41,6 +50,21 @@ export async function timedUsageQuery<T>(
 
     rowCount = Array.isArray(result) ? result.length : 1;
     return result;
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        type: 'usage_query_error',
+        route: params.route,
+        queryLabel: params.queryLabel,
+        scope: params.scope,
+        period: params.period,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    );
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Usage data temporarily unavailable',
+    });
   } finally {
     const durationMs = Math.round((performance.now() - start) * 100) / 100;
     console.log(
