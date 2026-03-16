@@ -1444,6 +1444,12 @@ importers:
         specifier: 'catalog:'
         version: 4.69.0(@cloudflare/workers-types@4.20260305.0)
 
+  dev/cli:
+    devDependencies:
+      bun-types:
+        specifier: ^1.3.10
+        version: 1.3.10
+
   kiloclaw:
     dependencies:
       '@kilocode/db':

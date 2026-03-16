@@ -28,6 +28,7 @@ packages:
   - cloudflare-gastown
   - cloudflare-gastown/container
   - cloudflare-gmail-push
+  - dev/cli
 
 catalog:
   '@cloudflare/workers-types': ^4.20260305.0

@@ -176,6 +176,22 @@ All tests should pass against the local PostgreSQL database.
 | `pnpm stripe`           | Start Stripe webhook forwarding to localhost                                   |
 | `pnpm test:e2e`         | Run Playwright end-to-end tests                                                |
 
+## Dev CLI
+
+The repo includes a Bun-based dev CLI that manages service dependencies and selectively starts what you need:
+
+```bash
+pnpm kilo up                    # Start Next.js + Postgres + Redis + migrations
+pnpm kilo up kiloclaw           # Start KiloClaw + all its dependencies
+pnpm kilo up cloud-agent        # Start Cloud Agent + dependencies
+pnpm kilo status                # Check what's running
+pnpm kilo env check             # Validate all .dev.vars files
+pnpm kilo down                  # Stop Docker infrastructure
+pnpm kilo logs                  # List all available services
+```
+
+The CLI resolves service dependencies automatically — `pnpm kilo up kiloclaw` will start Postgres, Redis, run migrations, start Next.js, then start the KiloClaw worker.
+
 ## Git Workflow
 
 - Direct commits to `main` are blocked by a pre-commit hook. Always work on a feature branch.
