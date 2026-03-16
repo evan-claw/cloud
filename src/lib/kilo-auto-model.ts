@@ -167,16 +167,17 @@ const BALANCED_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   ['code', BALANCED_CODE_MODEL],
 ]);
 
-const legacyMapping: Record<string, string | undefined> = {
-  'kilo/auto': KILO_AUTO_FRONTIER_MODEL.id,
-  'kilo/auto-free': KILO_AUTO_FREE_MODEL.id,
-  'kilo/auto-small': KILO_AUTO_SMALL_MODEL.id,
+export const KILO_AUTO_FREE_MODEL_DEPRECATED = 'kilo/auto-free';
+
+const legacyMapping: Record<string, AutoModel | undefined> = {
+  'kilo/auto': KILO_AUTO_FRONTIER_MODEL,
+  [KILO_AUTO_FREE_MODEL_DEPRECATED]: KILO_AUTO_FREE_MODEL,
+  'kilo/auto-small': KILO_AUTO_SMALL_MODEL,
 };
 
 export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck(): AutoModel[] {
   return Object.entries(legacyMapping)
-    .map(([legacyId, currentId]) => {
-      const model = AUTO_MODELS.find(m => m.id === currentId);
+    .map(([legacyId, model]) => {
       if (!model) return null;
       return {
         ...model,
@@ -189,7 +190,7 @@ export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingS
 }
 
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
-  const mappedModel = legacyMapping[model] ?? model;
+  const mappedModel = legacyMapping[model]?.id ?? model;
   if (mappedModel === KILO_AUTO_FREE_MODEL.id) {
     return { model: minimax_m25_free_model.public_id };
   }

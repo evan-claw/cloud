@@ -183,6 +183,7 @@ export const OpenRouterProvidersResponseSchema = z.object({
 const OpenRouterModelSchema = z.object({
   // kilocode additions:
   preferredIndex: z.number().optional(),
+  isFree: z.boolean().optional(),
   settings: ModelSettingsSchema.optional(),
   versioned_settings: VersionedSettingsSchema.optional(),
   opencode: OpenCodeSettingsSchema.optional(),

@@ -1,4 +1,4 @@
-import { kiloFreeModels, preferredModels } from '@/lib/models';
+import { isFreeModel, kiloFreeModels, preferredModels } from '@/lib/models';
 import { PROVIDERS } from '@/lib/providers';
 import type { OpenRouterModel } from '@/lib/organizations/organization-types';
 import {
@@ -74,6 +74,7 @@ function enhancedModelList(models: OpenRouterModel[]) {
         ...model,
         name: skipSuffix ? model.name : isNew ? model.name + ' (new)' : model.name,
         preferredIndex: preferredIndex >= 0 ? preferredIndex : undefined,
+        isFree: isFreeModel(model.id),
         settings: model.settings ?? getModelSettings(model.id),
         versioned_settings: model.versioned_settings ?? getVersionedModelSettings(model.id),
         opencode: model.opencode ?? getOpenCodeSettings(model.id),
