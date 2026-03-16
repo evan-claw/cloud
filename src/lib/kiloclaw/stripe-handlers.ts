@@ -174,8 +174,6 @@ export async function handleKiloClawSubscriptionCreated(params: {
       .where(eq(kiloclaw_subscriptions.user_id, kiloUserId))
       .limit(1);
 
-    wasSuspended = !!existingRow?.suspended_at;
-
     if (
       existingRow &&
       existingRow.stripe_subscription_id !== null &&
@@ -192,6 +190,10 @@ export async function handleKiloClawSubscriptionCreated(params: {
       );
       return;
     }
+
+    // Set wasSuspended only after passing the stale guard — stale events
+    // must not trigger auto-resume for the current subscription.
+    wasSuspended = !!existingRow?.suspended_at;
 
     // Upsert: if trial row exists, upgrade it; otherwise insert new row.
     // For commit plans, commit_ends_at is computed after schedule creation
