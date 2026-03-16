@@ -394,10 +394,12 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   if (requestBodyParsed.kind === 'chat_completions') {
     if (ENABLE_TOOL_REPAIR) {
+      // Mostly a workaround for bugs in the old extension.
       repairTools(requestBodyParsed.body);
     }
 
     if (isOpenCodeBasedClient(fraudHeaders)) {
+      // Workaround for bugs in the chat completions client.
       fixOpenCodeDuplicateReasoning(originalModelIdLowerCased, requestBodyParsed.body, taskId);
     }
   }

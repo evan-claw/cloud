@@ -27,6 +27,7 @@ type ReadFileParametersSchema = {
 
 export function applyGoogleModelSettings(provider: ProviderId, requestToMutate: GatewayRequest) {
   if (provider !== 'vercel' || requestToMutate.kind !== 'chat_completions') {
+    // these are workarounds for the old extension, which won't support the responses api
     return;
   }
 

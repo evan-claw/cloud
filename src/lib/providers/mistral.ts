@@ -39,6 +39,7 @@ export function applyMistralProviderSettings(
   extraHeaders: Record<string, string>
 ) {
   if (requestToMutate.kind !== 'chat_completions') {
+    // mistral probably doesn't support the responses api (yet)
     return;
   }
 

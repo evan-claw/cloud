@@ -94,6 +94,7 @@ export function applyAnthropicModelSettings(
 
   // anthropic doesn't allow '.' in tool call ids
   if (requestToMutate.kind === 'chat_completions') {
+    // we can fix this later for the responses api if it's still a problem
     normalizeToolCallIds(requestToMutate.body, toolCallId => toolCallId.includes('.'), undefined);
   }
 }

@@ -6,6 +6,7 @@ export function isQwenModel(requestedModelId: string) {
 
 export function applyQwenModelSettings(requestToMutate: GatewayRequest) {
   if (requestToMutate.kind !== 'chat_completions') {
+    // this workaround seems to be outdated and was mostly relevant for the old extension only
     return;
   }
   // Max Output listed on OpenRouter is wrong

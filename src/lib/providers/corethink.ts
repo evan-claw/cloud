@@ -17,6 +17,7 @@ export const corethink_free_model: KiloFreeModel = {
 
 export function applyCoreThinkProviderSettings(requestToMutate: GatewayRequest) {
   if (requestToMutate.kind !== 'chat_completions') {
+    // responses api is likely not supported
     return;
   }
   delete requestToMutate.body.transforms;
