@@ -1393,11 +1393,7 @@ describe('createNewMachine 409 recovery', () => {
     const { instance, storage } = createInstance();
     await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
 
-    const conflictErr = new FlyApiError(
-      'conflict',
-      409,
-      'already_exists machine ID ghost123'
-    );
+    const conflictErr = new FlyApiError('conflict', 409, 'already_exists machine ID ghost123');
     (flyClient.createMachine as Mock).mockRejectedValue(conflictErr);
     // First getMachine (volume guard) succeeds, second (inline start) returns 404
     (flyClient.getMachine as Mock)
