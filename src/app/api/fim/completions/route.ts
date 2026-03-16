@@ -128,6 +128,7 @@ export async function POST(request: NextRequest) {
     : await getBYOKforUser(readDb, user.id, ['codestral']);
 
   const usageContext: MicrodollarUsageContext = {
+    api_kind: 'fim_completions',
     kiloUserId: user.id,
     provider: 'mistral',
     requested_model: fimModel_withOpenRouterStyleProviderPrefix,

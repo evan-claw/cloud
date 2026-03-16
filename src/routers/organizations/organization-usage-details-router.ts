@@ -5,7 +5,8 @@ import {
   OrganizationIdInputSchema,
   organizationMemberProcedure,
 } from '@/routers/organizations/utils';
-import { db } from '@/lib/drizzle';
+import { readDb } from '@/lib/drizzle';
+import { timedUsageQuery } from '@/lib/usage-query';
 import { microdollar_usage, kilocode_users } from '@kilocode/db/schema';
 import { eq, sum, count, sql, and, gte, lte } from 'drizzle-orm';
 import * as z from 'zod';
@@ -155,37 +156,47 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
         : sql<string>`DATE_TRUNC('hour', ${microdollar_usage.created_at})`;
 
       // First, get the aggregated usage data
-      const usageData = await db
-        .select({
-          datetime: timeBucket.as('datetime'),
-          userName: kilocode_users.google_user_name,
-          userEmail: kilocode_users.google_user_email,
-          model: microdollar_usage.model,
-          provider: microdollar_usage.provider,
-          projectId: microdollar_usage.project_id,
-          costMicrodollars: sum(microdollar_usage.cost),
-          inputTokenCount: sum(microdollar_usage.input_tokens),
-          outputTokenCount: sum(microdollar_usage.output_tokens),
-          requestCount: count(microdollar_usage.id),
-        })
-        .from(microdollar_usage)
-        .innerJoin(kilocode_users, eq(kilocode_users.id, microdollar_usage.kilo_user_id))
-        .where(
-          and(
-            eq(microdollar_usage.organization_id, organizationId),
-            gte(microdollar_usage.created_at, startDate),
-            lte(microdollar_usage.created_at, endDate)
-          )
-        )
-        .groupBy(
-          timeBucket,
-          kilocode_users.google_user_name,
-          kilocode_users.google_user_email,
-          microdollar_usage.model,
-          microdollar_usage.provider,
-          microdollar_usage.project_id
-        )
-        .orderBy(timeBucket);
+      const usageData = await timedUsageQuery(
+        {
+          db: readDb,
+          route: 'organizations.usageDetails.getTimeSeries',
+          queryLabel: 'org_usage_timeseries',
+          scope: 'org',
+          period: `${startDate}/${endDate}`,
+        },
+        tx =>
+          tx
+            .select({
+              datetime: timeBucket.as('datetime'),
+              userName: kilocode_users.google_user_name,
+              userEmail: kilocode_users.google_user_email,
+              model: microdollar_usage.model,
+              provider: microdollar_usage.provider,
+              projectId: microdollar_usage.project_id,
+              costMicrodollars: sum(microdollar_usage.cost),
+              inputTokenCount: sum(microdollar_usage.input_tokens),
+              outputTokenCount: sum(microdollar_usage.output_tokens),
+              requestCount: count(microdollar_usage.id),
+            })
+            .from(microdollar_usage)
+            .innerJoin(kilocode_users, eq(kilocode_users.id, microdollar_usage.kilo_user_id))
+            .where(
+              and(
+                eq(microdollar_usage.organization_id, organizationId),
+                gte(microdollar_usage.created_at, startDate),
+                lte(microdollar_usage.created_at, endDate)
+              )
+            )
+            .groupBy(
+              timeBucket,
+              kilocode_users.google_user_name,
+              kilocode_users.google_user_email,
+              microdollar_usage.model,
+              microdollar_usage.provider,
+              microdollar_usage.project_id
+            )
+            .orderBy(timeBucket)
+      );
 
       // Fill in 0's for missing data
       // TODO surely there's a better way to do this
@@ -293,30 +304,40 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
         whereConditions.push(eq(microdollar_usage.kilo_user_id, ctx.user.id));
       }
 
-      const usageDetails = await db
-        .select({
-          date: sql<string>`DATE(${microdollar_usage.created_at})`.as('date'),
-          userName: kilocode_users.google_user_name,
-          userEmail: kilocode_users.google_user_email,
-          ...(groupByModel && { model: microdollar_usage.model }),
-          microdollarCost: sum(microdollar_usage.cost),
-          tokenCount: sum(
-            sql`${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens} + ${microdollar_usage.cache_write_tokens} + ${microdollar_usage.cache_hit_tokens}`
-          ),
-          inputTokens: sum(microdollar_usage.input_tokens),
-          outputTokens: sum(microdollar_usage.output_tokens),
-          requestCount: count(microdollar_usage.id),
-        })
-        .from(microdollar_usage)
-        .innerJoin(kilocode_users, eq(kilocode_users.id, microdollar_usage.kilo_user_id))
-        .where(and(...whereConditions))
-        .groupBy(
-          sql`DATE(${microdollar_usage.created_at})`,
-          kilocode_users.google_user_name,
-          kilocode_users.google_user_email,
-          ...(groupByModel ? [microdollar_usage.model] : [])
-        )
-        .orderBy(sql`DATE(${microdollar_usage.created_at}) DESC`);
+      const usageDetails = await timedUsageQuery(
+        {
+          db: readDb,
+          route: 'organizations.usageDetails.get',
+          queryLabel: 'org_usage_daily',
+          scope: 'org',
+          period,
+        },
+        tx =>
+          tx
+            .select({
+              date: sql<string>`DATE(${microdollar_usage.created_at})`.as('date'),
+              userName: kilocode_users.google_user_name,
+              userEmail: kilocode_users.google_user_email,
+              ...(groupByModel && { model: microdollar_usage.model }),
+              microdollarCost: sum(microdollar_usage.cost),
+              tokenCount: sum(
+                sql`${microdollar_usage.input_tokens} + ${microdollar_usage.output_tokens} + ${microdollar_usage.cache_write_tokens} + ${microdollar_usage.cache_hit_tokens}`
+              ),
+              inputTokens: sum(microdollar_usage.input_tokens),
+              outputTokens: sum(microdollar_usage.output_tokens),
+              requestCount: count(microdollar_usage.id),
+            })
+            .from(microdollar_usage)
+            .innerJoin(kilocode_users, eq(kilocode_users.id, microdollar_usage.kilo_user_id))
+            .where(and(...whereConditions))
+            .groupBy(
+              sql`DATE(${microdollar_usage.created_at})`,
+              kilocode_users.google_user_name,
+              kilocode_users.google_user_email,
+              ...(groupByModel ? [microdollar_usage.model] : [])
+            )
+            .orderBy(sql`DATE(${microdollar_usage.created_at}) DESC`)
+      );
 
       const daily = usageDetails.map(row => ({
         date: row.date,
@@ -342,19 +363,29 @@ export const organizationsUsageDetailsRouter = createTRPCRouter({
     .query(async ({ input }) => {
       const { organizationId } = input;
 
-      const result = await db
-        .select({
-          total_cost: sql<number>`COALESCE(SUM(${microdollar_usage.cost}), 0)::float`,
-          request_count: sql<number>`COUNT(*)::float`,
-          total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
-        })
-        .from(microdollar_usage)
-        .where(
-          and(
-            eq(microdollar_usage.organization_id, organizationId),
-            eq(microdollar_usage.model, AUTOCOMPLETE_MODEL)
-          )
-        );
+      const result = await timedUsageQuery(
+        {
+          db: readDb,
+          route: 'organizations.usageDetails.getAutocomplete',
+          queryLabel: 'org_autocomplete_aggregate',
+          scope: 'org',
+          period: null,
+        },
+        tx =>
+          tx
+            .select({
+              total_cost: sql<number>`COALESCE(SUM(${microdollar_usage.cost}), 0)::float`,
+              request_count: sql<number>`COUNT(*)::float`,
+              total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
+            })
+            .from(microdollar_usage)
+            .where(
+              and(
+                eq(microdollar_usage.organization_id, organizationId),
+                eq(microdollar_usage.model, AUTOCOMPLETE_MODEL)
+              )
+            )
+      );
 
       const metrics = result[0] || { total_cost: 0, request_count: 0, total_tokens: 0 };
 

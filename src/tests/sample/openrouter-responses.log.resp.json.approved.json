@@ -1,0 +1,20 @@
+{
+  "messageId": "gen-1773311576-PB4ZvaTZ8wXSaF6SHpT6",
+  "hasError": false,
+  "model": "openai/gpt-5.4-20260305",
+  "responseContent": "hi",
+  "inference_provider": null,
+  "upstream_id": null,
+  "finish_reason": "completed",
+  "latency": null,
+  "moderation_latency": null,
+  "generation_time": null,
+  "streamed": false,
+  "cancelled": null,
+  "inputTokens": 2425,
+  "outputTokens": 5,
+  "cacheHitTokens": 0,
+  "cacheWriteTokens": 0,
+  "cost_mUsd": 6138,
+  "is_byok": true
+}

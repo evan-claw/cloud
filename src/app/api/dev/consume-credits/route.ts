@@ -65,6 +65,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // Create usage context with extracted properties
     const usageContext: MicrodollarUsageContext = {
+      api_kind: 'chat_completions',
       kiloUserId,
       fraudHeaders: getFraudDetectionHeaders(
         new Headers({

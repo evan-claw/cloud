@@ -3,8 +3,13 @@ import {
   CLAUDE_SONNET_CURRENT_MODEL_ID,
 } from '@/lib/providers/anthropic';
 import { minimax_m25_free_model } from '@/lib/providers/minimax';
-import type { OpenRouterReasoningConfig } from '@/lib/providers/openrouter/types';
+import type {
+  GatewayRequest,
+  OpenRouterChatCompletionRequest,
+  OpenRouterReasoningConfig,
+} from '@/lib/providers/openrouter/types';
 import type { ModelSettings, OpenCodeSettings, Verbosity } from '@kilocode/db/schema-types';
+import type OpenAI from 'openai';
 
 type AutoModel = {
   id: string;
@@ -145,9 +150,7 @@ const FRONTIER_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
 
 const KIMI_K25_MODEL_ID = 'moonshotai/kimi-k2.5';
 
-const MINIMAX_M25_MODEL_ID = minimax_m25_free_model.is_enabled
-  ? minimax_m25_free_model.public_id
-  : 'minimax/minimax-m2.5';
+const MINIMAX_M25_MODEL_ID = 'minimax/minimax-m2.5';
 
 const BALANCED_CODE_MODEL: ResolvedAutoModel = {
   model: MINIMAX_M25_MODEL_ID,
@@ -202,4 +205,24 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
     return BALANCED_MODE_TO_MODEL.get(mode) ?? BALANCED_CODE_MODEL;
   }
   return FRONTIER_MODE_TO_MODEL.get(mode) ?? FRONTIER_CODE_MODEL;
+}
+
+export function applyResolvedAutoModel(
+  model: string,
+  request: GatewayRequest,
+  modeHeader: string | null
+) {
+  const resolved = resolveAutoModel(model, modeHeader);
+  request.body.model = resolved.model;
+  if (resolved.reasoning) request.body.reasoning = resolved.reasoning;
+  if (resolved.verbosity) {
+    if (request.kind === 'chat_completions') {
+      request.body.verbosity = resolved.verbosity as OpenRouterChatCompletionRequest['verbosity'];
+    } else {
+      request.body.text = {
+        ...request.body.text,
+        verbosity: resolved.verbosity as OpenAI.Responses.ResponseTextConfig['verbosity'],
+      };
+    }
+  }
 }

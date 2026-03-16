@@ -12,10 +12,12 @@ import {
   VercelUserByokInferenceProviderIdSchema,
 } from '@/lib/providers/openrouter/inference-provider-id';
 import type {
-  OpenRouterChatCompletionRequest,
   OpenRouterProviderConfig,
+  GatewayRequest,
   VercelInferenceProviderConfig,
   VercelProviderConfig,
+  OpenRouterChatCompletionRequest,
+  GatewayResponsesRequest,
 } from '@/lib/providers/openrouter/types';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
 import { isZaiModel } from '@/lib/providers/zai';
@@ -48,14 +50,14 @@ async function getVercelRoutingPercentage() {
 function isLikelyAvailableOnAllGateways(requestedModel: string) {
   return (
     !requestedModel.startsWith('openrouter/') &&
-    (kiloFreeModels.find(m => m.public_id === requestedModel && m.is_enabled)?.gateway ??
+    (kiloFreeModels.find(m => m.public_id === requestedModel && m.status !== 'disabled')?.gateway ??
       'openrouter') === 'openrouter'
   );
 }
 
 export async function shouldRouteToVercel(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest,
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
   randomSeed: string
 ) {
   if (request.provider?.data_collection === 'deny') {
@@ -147,11 +149,10 @@ export function getVercelInferenceProviderConfigForUserByok(
 
 export function applyVercelSettings(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest,
-  extraHeaders: Record<string, string>,
+  requestToMutate: GatewayRequest,
   userByok: BYOKResult[] | null
 ) {
-  requestToMutate.model = mapModelIdToVercel(requestedModel);
+  requestToMutate.body.model = mapModelIdToVercel(requestedModel);
 
   if (userByok) {
     if (userByok.length === 0) {
@@ -165,21 +166,28 @@ export function applyVercelSettings(
 
     // this is vercel specific BYOK configuration to force vercel gateway to use the BYOK API key
     // for the user/org. If the key is invalid the request will faill - it will not fall back to bill our API key.
-    requestToMutate.providerOptions = {
+    requestToMutate.body.providerOptions = {
       gateway: {
         only: Object.keys(byokProviders),
         byok: byokProviders,
       },
     };
   } else {
-    requestToMutate.providerOptions = convertProviderOptions(requestToMutate.provider);
+    requestToMutate.body.providerOptions = convertProviderOptions(requestToMutate.body.provider);
   }
 
-  if (requestToMutate.providerOptions && requestToMutate.verbosity) {
-    requestToMutate.providerOptions.anthropic = {
-      effort: requestToMutate.verbosity,
-    };
+  if (requestToMutate.body.providerOptions) {
+    if (requestToMutate.kind === 'chat_completions' && requestToMutate.body.verbosity) {
+      requestToMutate.body.providerOptions.anthropic = {
+        effort: requestToMutate.body.verbosity,
+      };
+    }
+    if (requestToMutate.kind === 'responses' && requestToMutate.body.text?.verbosity) {
+      requestToMutate.body.providerOptions.anthropic = {
+        effort: requestToMutate.body.text.verbosity,
+      };
+    }
   }
 
-  delete requestToMutate.provider;
+  delete requestToMutate.body.provider;
 }

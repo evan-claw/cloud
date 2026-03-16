@@ -314,6 +314,7 @@ describe('logMicrodollarUsage', () => {
     google_user_email: string | null;
   }) =>
     ({
+      api_kind: 'chat_completions',
       kiloUserId: user.id,
       prior_microdollar_usage: user.microdollars_used,
       posthog_distinct_id: user.google_user_email!,
