@@ -1871,11 +1871,13 @@ describe('updateGoogleCredentials', () => {
     expect(putSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+        gmailNotificationsEnabled: true,
       })
     );
     expect(storage._store.get('gmailPushOidcEmail')).toBe(
       'gmail-push@my-project.iam.gserviceaccount.com'
     );
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(true);
   });
 
   it('sets gmailPushOidcEmail to null when not provided in credentials', async () => {
@@ -1895,6 +1897,23 @@ describe('updateGoogleCredentials', () => {
     });
 
     expect(storage._store.get('gmailPushOidcEmail')).toBeNull();
+  });
+
+  it('enables gmailNotificationsEnabled by default when connecting a Google account', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailNotificationsEnabled: false });
+
+    await instance.updateGoogleCredentials({
+      gogConfigTarball: {
+        encryptedData: 'enc-data',
+        encryptedDEK: 'enc-dek',
+        algorithm: 'rsa-aes-256-gcm' as const,
+        version: 1 as const,
+      },
+      email: 'user@example.com',
+    });
+
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(true);
   });
 });
 
