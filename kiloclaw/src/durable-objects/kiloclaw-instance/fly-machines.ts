@@ -94,7 +94,6 @@ export async function replaceStrandedVolume(
       flyConfig,
       {
         name: volumeNameFromSandboxId(state.sandboxId),
-        size_gb: DEFAULT_VOLUME_SIZE_GB,
         source_volume_id: oldVolumeId,
         compute,
       },
