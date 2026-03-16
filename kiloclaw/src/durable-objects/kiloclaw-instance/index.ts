@@ -296,7 +296,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
 
     if (isNew) {
-      await this.start(userId);
+      await this.startAsync(userId);
     }
 
     return { sandboxId };
@@ -468,7 +468,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     await this.loadState();
 
     this.s.googleCredentials = credentials;
-    await this.ctx.storage.put({ googleCredentials: this.s.googleCredentials });
+    this.s.gmailPushOidcEmail = credentials.gmailPushOidcEmail ?? null;
+    await this.ctx.storage.put({
+      googleCredentials: this.s.googleCredentials,
+      gmailPushOidcEmail: this.s.gmailPushOidcEmail,
+    });
 
     return { googleConnected: true };
   }
@@ -476,14 +480,80 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   /**
    * Clear stored Google credentials.
    * Does NOT restart the machine; the caller should prompt the user to restart.
+   * Also disables Gmail notifications to prevent stale state.
    */
   async clearGoogleCredentials(): Promise<{ googleConnected: boolean }> {
     await this.loadState();
 
     this.s.googleCredentials = null;
-    await this.ctx.storage.put({ googleCredentials: null });
+    this.s.gmailNotificationsEnabled = false;
+    this.s.gmailLastHistoryId = null;
+    this.s.gmailPushOidcEmail = null;
+    await this.ctx.storage.put({
+      googleCredentials: null,
+      gmailNotificationsEnabled: false,
+      gmailLastHistoryId: null,
+      gmailPushOidcEmail: null,
+    });
 
     return { googleConnected: false };
+  }
+
+  /**
+   * Update the last-seen Gmail history ID.
+   * Only writes if the new value is numerically greater than the stored one,
+   * preventing out-of-order updates from overwriting newer state.
+   */
+  async updateGmailHistoryId(historyId: string): Promise<void> {
+    await this.loadState();
+
+    const current = this.s.gmailLastHistoryId;
+    try {
+      const newNum = BigInt(historyId);
+      if (current !== null) {
+        const currentNum = BigInt(current);
+        if (newNum <= currentNum) {
+          return;
+        }
+      }
+    } catch {
+      return; // invalid input (BigInt throws on non-numeric strings)
+    }
+
+    this.s.gmailLastHistoryId = historyId;
+    await this.persist({ gmailLastHistoryId: historyId });
+  }
+
+  /**
+   * Return the stored OIDC service account email for Gmail push validation.
+   * Lightweight — no side effects, no Fly checks.
+   */
+  async getGmailOidcEmail(): Promise<{ gmailPushOidcEmail: string | null }> {
+    await this.loadState();
+    return { gmailPushOidcEmail: this.s.gmailPushOidcEmail };
+  }
+
+  /**
+   * Enable or disable Gmail push notifications.
+   * Persists the flag — takes effect immediately at the queue consumer level, no restart needed.
+   */
+  async updateGmailNotifications(
+    enabled: boolean
+  ): Promise<{ gmailNotificationsEnabled: boolean }> {
+    await this.loadState();
+
+    if (!this.s.userId || !this.s.sandboxId) {
+      throw new Error('Instance is not provisioned');
+    }
+
+    if (enabled && !this.s.googleCredentials) {
+      throw new Error('Cannot enable Gmail notifications without a connected Google account');
+    }
+
+    this.s.gmailNotificationsEnabled = enabled;
+    await this.persist({ gmailNotificationsEnabled: enabled });
+
+    return { gmailNotificationsEnabled: enabled };
   }
 
   // ── Pairing ─────────────────────────────────────────────────────────
@@ -521,6 +591,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (this.s.status === 'destroying') {
       throw new Error('Cannot start: instance is being destroyed');
     }
+    // NOTE: status may be 'starting' here when called from startAsync() via
+    // waitUntil. That is intentional — 'starting' is the expected in-flight
+    // state and must not be treated as an error or early-return condition.
+    // Do not add a guard that rejects non-stopped/provisioned statuses without
+    // also explicitly allowing 'starting'.
 
     if (!this.s.userId || !this.s.sandboxId) {
       const restoreUserId = userId ?? this.s.userId;
@@ -683,17 +758,57 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
     }
 
+    // Re-check status directly from storage: if the instance was destroyed while
+    // start() was running in the background (via startAsync/waitUntil), bail out
+    // so teardown wins. We bypass loadState() because it no-ops when already loaded.
+    const currentStatus = await this.ctx.storage.get('status');
+    if (currentStatus === 'destroying') {
+      console.warn('[DO] start: instance was destroyed while starting, aborting');
+      return;
+    }
+
     this.s.status = 'running';
+    this.s.startingAt = null;
     this.s.lastStartedAt = Date.now();
     this.s.healthCheckFailCount = 0;
     await this.persist({
       status: 'running',
+      startingAt: null,
       lastStartedAt: this.s.lastStartedAt,
       healthCheckFailCount: 0,
       flyMachineId: this.s.flyMachineId,
     });
 
     await this.scheduleAlarm();
+  }
+
+  /**
+   * Non-blocking start: immediately persists status='starting', schedules a fast
+   * alarm, then fires start() in the background via waitUntil.
+   * Used by provision() so the RPC call returns quickly instead of waiting for
+   * the full Fly startup sequence (which can take up to ~60 s).
+   */
+  async startAsync(userId?: string): Promise<void> {
+    await this.loadState();
+
+    if (this.s.status === 'destroying') {
+      throw new Error('Cannot start: instance is being destroyed');
+    }
+
+    // Mark as starting so the UI can show a polling state immediately.
+    // Record startingAt so reconcileStarting() can time out after STARTING_TIMEOUT_MS.
+    this.s.status = 'starting';
+    this.s.startingAt = Date.now();
+    await this.persist({ status: 'starting', startingAt: this.s.startingAt });
+    await this.scheduleAlarm();
+
+    // Run the actual start in the background; the reconcile alarm will
+    // pick up the result and transition to 'running' (or fall back on error).
+    this.ctx.waitUntil(
+      this.start(userId).catch(err => {
+        console.error('[DO] startAsync: background start failed:', err);
+      })
+    );
   }
 
   async stop(): Promise<void> {
@@ -705,6 +820,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (
       this.s.status === 'stopped' ||
       this.s.status === 'provisioned' ||
+      this.s.status === 'starting' ||
       this.s.status === 'destroying'
     ) {
       console.log('[DO] Instance not running (status:', this.s.status, '), no-op');
@@ -794,6 +910,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
     googleConnected: boolean;
+    gmailNotificationsEnabled: boolean;
   }> {
     await this.loadState();
 
@@ -829,6 +946,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
       googleConnected: this.s.googleCredentials !== null,
+      gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
     };
   }
 
@@ -852,6 +970,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     trackedImageTag: string | null;
     trackedImageDigest: string | null;
     googleConnected: boolean;
+    gmailNotificationsEnabled: boolean;
     pendingDestroyMachineId: string | null;
     pendingDestroyVolumeId: string | null;
     pendingPostgresMarkOnFinalize: boolean;
@@ -888,6 +1007,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageTag: this.s.trackedImageTag,
       trackedImageDigest: this.s.trackedImageDigest,
       googleConnected: this.s.googleCredentials !== null,
+      gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
       pendingDestroyMachineId: this.s.pendingDestroyMachineId,
       pendingDestroyVolumeId: this.s.pendingDestroyVolumeId,
       pendingPostgresMarkOnFinalize: this.s.pendingPostgresMarkOnFinalize,

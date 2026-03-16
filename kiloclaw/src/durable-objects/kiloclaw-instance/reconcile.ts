@@ -3,7 +3,13 @@ import type { FlyClientConfig } from '../../fly/client';
 import type { FlyMachineConfig } from '../../fly/types';
 import type { PersistedState } from '../../schemas/instance-config';
 import * as fly from '../../fly/client';
-import { SELF_HEAL_THRESHOLD, STARTUP_TIMEOUT_SECONDS } from '../../config';
+import {
+  SELF_HEAL_THRESHOLD,
+  STARTUP_TIMEOUT_SECONDS,
+  STARTING_TIMEOUT_MS,
+  getProactiveRefreshThresholdMs,
+} from '../../config';
+import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../../utils/env-encryption';
 import {
   METADATA_RECOVERY_COOLDOWN_MS,
   BOUND_MACHINE_RECOVERY_COOLDOWN_MS,
@@ -16,6 +22,8 @@ import type { InstanceMutableState, DestroyResult } from './types';
 import { storageUpdate, resetMutableState } from './state';
 import { reconcileLog } from './log';
 import { ensureVolume, staleProvisionAgeMs } from './fly-machines';
+import { mintFreshApiKey } from './config';
+import * as gateway from './gateway';
 
 /**
  * Check actual Fly state against DO state and fix drift.
@@ -37,6 +45,11 @@ export async function reconcileWithFly(
     return;
   }
 
+  if (state.status === 'starting') {
+    await reconcileStarting(flyConfig, ctx, state, env, reason);
+    return;
+  }
+
   const machineReconciled = await reconcileMachine(flyConfig, ctx, state, reason);
 
   // Auto-destroy stale provisioned instances
@@ -54,6 +67,266 @@ export async function reconcileWithFly(
   }
 
   await reconcileVolume(flyConfig, ctx, state, env, reason);
+  await reconcileApiKeyExpiry(flyConfig, ctx, state, env, reason);
+}
+
+// ---- API key proactive refresh ----
+
+const MINT_TIMEOUT_MS = 15_000;
+
+async function reconcileApiKeyExpiry(
+  flyConfig: FlyClientConfig,
+  ctx: DurableObjectState,
+  state: InstanceMutableState,
+  env: KiloClawEnv,
+  reason: string
+): Promise<void> {
+  if (state.status !== 'running' || !state.flyMachineId) return;
+  if (!state.kilocodeApiKeyExpiresAt || !state.userId) return;
+
+  // Capture after guards so narrowing is explicit across awaits.
+  const machineId = state.flyMachineId;
+  const userId = state.userId;
+
+  const expiresAtMs = Date.parse(state.kilocodeApiKeyExpiresAt);
+  if (Number.isNaN(expiresAtMs)) return;
+
+  const timeUntilExpiry = expiresAtMs - Date.now();
+  const thresholdMs = getProactiveRefreshThresholdMs(env.PROACTIVE_REFRESH_THRESHOLD_HOURS);
+  if (timeUntilExpiry > thresholdMs) return;
+
+  // Fetch controller version for observability (best-effort, not used for gating).
+  let controllerVersion: string | null = null;
+  try {
+    const info = await gateway.getControllerVersion(state, env);
+    controllerVersion = info?.version ?? null;
+  } catch {
+    // Version check failed — log null, don't block refresh.
+  }
+
+  reconcileLog(reason, 'api_key_expiry_approaching', {
+    user_id: userId,
+    expires_at: state.kilocodeApiKeyExpiresAt,
+    hours_remaining: Math.round(timeUntilExpiry / 3600000),
+    controller_version: controllerVersion,
+  });
+
+  // 1. Mint fresh key.
+  let mintTimeout: ReturnType<typeof setTimeout>;
+  let freshKey: { token: string; expiresAt: string } | null;
+  try {
+    freshKey = await Promise.race([
+      mintFreshApiKey(env, userId).finally(() => clearTimeout(mintTimeout)),
+      new Promise<never>((_, reject) => {
+        mintTimeout = setTimeout(() => reject(new Error('mint timeout')), MINT_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (err) {
+    reconcileLog(reason, 'api_key_mint_error', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+  if (!freshKey) {
+    reconcileLog(reason, 'api_key_mint_failed', { user_id: userId });
+    return;
+  }
+
+  // 2. Update Fly machine config with the fresh encrypted key.
+  //    Always skipLaunch — no forced restart. The key is persisted durably
+  //    so the next natural restart (user-initiated, crash, deploy) picks it up.
+  //    Pass minSecretsVersion from ensureEnvKey() so Fly waits for the env key
+  //    secret to propagate before any subsequent launch.
+  let flyConfigUpdated = false;
+  try {
+    const machine = await fly.getMachine(flyConfig, machineId);
+    const updatedEnv = { ...machine.config.env };
+
+    const appStub = env.KILOCLAW_APP.get(env.KILOCLAW_APP.idFromName(userId));
+    const { key: envKey, secretsVersion } = await appStub.ensureEnvKey(userId);
+    updatedEnv[`${ENCRYPTED_ENV_PREFIX}KILOCODE_API_KEY`] = encryptEnvValue(envKey, freshKey.token);
+
+    await fly.updateMachine(
+      flyConfig,
+      machineId,
+      { ...machine.config, env: updatedEnv },
+      { skipLaunch: true, minSecretsVersion: secretsVersion }
+    );
+
+    flyConfigUpdated = true;
+  } catch (err) {
+    reconcileLog(reason, 'api_key_fly_config_update_failed', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 3. Try to push the key to the running controller's process.env and
+  //    signal the gateway (graceful in-process restart via SIGUSR1).
+  //    If the controller doesn't support /_kilo/env/patch (404), the catch
+  //    block handles it — the Fly config already has the new key for the
+  //    next natural restart.
+  let pushed = false;
+  try {
+    const result = await gateway.patchEnvOnMachine(state, env, {
+      KILOCODE_API_KEY: freshKey.token,
+    });
+    pushed = result?.signaled ?? false;
+    if (!pushed) {
+      reconcileLog(reason, 'api_key_push_not_signaled', {
+        user_id: userId,
+        result: result ? `ok=${result.ok} signaled=${result.signaled}` : 'null',
+      });
+    }
+  } catch (err) {
+    reconcileLog(reason, 'api_key_push_error', {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+      controller_version: controllerVersion,
+    });
+  }
+
+  // 4. Persist new expiry to DO state — but only if the fresh key was
+  //    actually delivered via at least one path. If both the Fly config
+  //    update and push failed, the running gateway still has the old key.
+  //    Persisting the new expiry would cause future alarms to skip refresh,
+  //    letting the old key expire silently.
+  if (!pushed && !flyConfigUpdated) {
+    reconcileLog(reason, 'api_key_refresh_failed_all_paths', {
+      user_id: userId,
+    });
+    return;
+  }
+
+  state.kilocodeApiKey = freshKey.token;
+  state.kilocodeApiKeyExpiresAt = freshKey.expiresAt;
+  await ctx.storage.put(
+    storageUpdate({
+      kilocodeApiKey: freshKey.token,
+      kilocodeApiKeyExpiresAt: freshKey.expiresAt,
+    })
+  );
+
+  reconcileLog(reason, 'api_key_refreshed', {
+    user_id: userId,
+    new_expires_at: freshKey.expiresAt,
+    pushed,
+    flyConfigUpdated,
+    controller_version: controllerVersion,
+  });
+}
+
+// ---- Starting reconciliation ----
+
+/**
+ * Reconcile a 'starting' instance.
+ *
+ * startAsync() fires start() via waitUntil, so start() may still be in
+ * progress when the alarm fires. We check Fly to decide what to do:
+ *
+ * - Machine started  → transition to 'running' (backfilling lastStartedAt).
+ * - Machine in a terminal stopped state → fall back to 'stopped'
+ *   (start() failed; the next alarm / user action will retry).
+ * - No machine yet (no flyMachineId, or Fly 404) → start() hasn't finished
+ *   or didn't create a machine; leave in 'starting' for the next alarm.
+ */
+async function reconcileStarting(
+  flyConfig: FlyClientConfig,
+  ctx: DurableObjectState,
+  state: InstanceMutableState,
+  env: KiloClawEnv,
+  reason: string
+): Promise<void> {
+  const startingAt = state.startingAt;
+  const isTimedOut = startingAt !== null && Date.now() - startingAt > STARTING_TIMEOUT_MS;
+
+  if (!state.flyMachineId) {
+    if (isTimedOut) {
+      // No machine after STARTING_TIMEOUT_MS — start() never created one. Give up.
+      reconcileLog(reason, 'starting_timeout', {
+        user_id: state.userId,
+        starting_at: state.startingAt,
+        elapsed_ms: Date.now() - startingAt,
+        new_state: 'stopped',
+      });
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+      return;
+    }
+    // start() hasn't persisted a machine ID yet — still in progress, wait.
+    reconcileLog(reason, 'starting_no_machine_yet', { user_id: state.userId });
+    return;
+  }
+
+  // We have a flyMachineId — always check Fly state, even if timed out.
+  // The machine may have started successfully despite the timeout.
+  try {
+    const machine = await fly.getMachine(flyConfig, state.flyMachineId);
+    await syncStatusWithFly(ctx, state, machine.state, reason);
+    // Ensure volume reconciliation doesn't get skipped while starting.
+    await reconcileVolume(flyConfig, ctx, state, env, reason);
+
+    // If syncStatusWithFly transitioned us out of 'starting', we're done.
+    // If still 'starting' after the timeout, the machine exists but isn't
+    // started yet — fall back to 'stopped' so the user can retry.
+    if (isTimedOut && state.status === 'starting') {
+      reconcileLog(reason, 'starting_timeout_with_machine', {
+        machine_id: state.flyMachineId,
+        fly_state: machine.state,
+        elapsed_ms: Date.now() - startingAt,
+        new_state: 'stopped',
+      });
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+    }
+  } catch (err) {
+    if (fly.isFlyNotFound(err)) {
+      // Machine was never created or was cleaned up externally.
+      reconcileLog(reason, 'starting_machine_gone', {
+        machine_id: state.flyMachineId,
+        new_state: 'stopped',
+      });
+      state.flyMachineId = null;
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          flyMachineId: null,
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
+    } else {
+      // Transient Fly API error — leave in 'starting', alarm will retry.
+      // If timed out, still give the next alarm a chance to reach Fly.
+      console.error('[DO] reconcileStarting: transient error checking machine:', err);
+    }
+  }
 }
 
 // ---- Volume reconciliation ----
@@ -215,8 +488,23 @@ export async function syncStatusWithFly(
   if (flyState === 'started' && state.status !== 'running') {
     reconcileLog(reason, 'sync_status', { old_state: state.status, new_state: 'running' });
     state.status = 'running';
+    state.startingAt = null;
     state.healthCheckFailCount = 0;
-    await ctx.storage.put(storageUpdate({ status: 'running', healthCheckFailCount: 0 }));
+    // Backfill lastStartedAt whenever a transition to 'running' is observed and
+    // it hasn't been set yet. This covers both the async-start path (starting →
+    // running) and DO-wipe + metadata recovery (stopped → running with null
+    // lastStartedAt). Intentionally broader than just the 'starting' case.
+    if (state.lastStartedAt === null) {
+      state.lastStartedAt = Date.now();
+    }
+    await ctx.storage.put(
+      storageUpdate({
+        status: 'running',
+        startingAt: null,
+        healthCheckFailCount: 0,
+        lastStartedAt: state.lastStartedAt,
+      })
+    );
     return;
   }
 

@@ -14,7 +14,7 @@ Docker image that guides users through connecting their Google account to KiloCl
 ## Usage
 
 ```bash
-docker run -it --network host ghcr.io/kilo-org/google-setup --token="YOUR_SESSION_JWT"
+docker run -it ghcr.io/kilo-org/google-setup --token="YOUR_SESSION_JWT"
 ```
 
 For local development against a local worker:
@@ -24,6 +24,9 @@ docker run -it --network host ghcr.io/kilo-org/google-setup \
   --token="YOUR_SESSION_JWT" \
   --worker-url=http://localhost:8795
 ```
+
+> **Note:** `--network host` is only needed when using `--worker-url` pointing to localhost.
+> The OAuth flow uses a manual code-paste flow, so no port mapping is required.
 
 ## Publishing
 

@@ -97,6 +97,7 @@ function createMockUser(overrides: Partial<User> = {}): User {
     linkedin_url: null,
     github_url: null,
     openrouter_upstream_safety_identifier: null,
+    customer_source: null,
     ...overrides,
   };
 }

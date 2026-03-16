@@ -3,11 +3,13 @@
 import { useMemo, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { usePostHog } from 'posthog-js/react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { getEntriesByCategory, type SecretCatalogEntry } from '@kilocode/kiloclaw-secret-catalog';
 import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
 import { useKiloClawLatestVersion, useKiloClawMyPin } from '@/hooks/useKiloClaw';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
+import { useTRPC } from '@/lib/trpc/utils';
 import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +22,8 @@ type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
 export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) {
   const posthog = usePostHog();
+  const trpc = useTRPC();
+  const { data: billingStatus } = useQuery(trpc.kiloclaw.getBillingStatus.queryOptions());
   const { data: modelsData, isLoading: isLoadingModels } = useOpenRouterModels();
   const { data: myPin, isLoading: isLoadingPin, isError: isPinLookupError } = useKiloClawMyPin();
   const { data: latestVersion, isLoading: isLoadingLatestVersion } = useKiloClawLatestVersion();
@@ -43,6 +47,14 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
     () => new Map(channelEntries.map(e => [e.id, e])),
     [channelEntries]
   );
+
+  const canStartTrial = Boolean(billingStatus?.trialEligible);
+  const provisionButtonLabel = canStartTrial
+    ? 'Start Free Trial & Provision'
+    : 'Provision New Instance';
+  const provisionSubtitle = canStartTrial
+    ? '30-day free trial, no credit card required'
+    : undefined;
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
@@ -163,6 +175,12 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
         <CardTitle>Create Instance</CardTitle>
         <CardDescription>
           Choose a default model to provision your first KiloClaw instance.
+          {provisionSubtitle && (
+            <>
+              <br />
+              {provisionSubtitle}
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -265,7 +283,7 @@ export function CreateInstanceCard({ mutations }: { mutations: ClawMutations }) 
         <div className="flex justify-end">
           <Button onClick={handleCreate} disabled={mutations.provision.isPending || !selectedModel}>
             <Plus className="mr-2 h-4 w-4" />
-            {mutations.provision.isPending ? 'Creating...' : 'Create & Provision'}
+            {mutations.provision.isPending ? 'Creating...' : provisionButtonLabel}
           </Button>
         </div>
       </CardContent>

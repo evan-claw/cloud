@@ -13,12 +13,15 @@ import type {
   OrganizationSettings,
   OrganizationPlan,
 } from '@/lib/organizations/organization-types';
-import type { OpenRouterProviderConfig } from '@/lib/providers/openrouter/types';
+import type {
+  OpenRouterChatCompletionRequest,
+  OpenRouterProviderConfig,
+  GatewayRequest,
+} from '@/lib/providers/openrouter/types';
 import { getFraudDetectionHeaders, toMicrodollars } from '@/lib/utils';
 import { normalizeProjectId } from '@/lib/normalizeProjectId';
 import { getXKiloCodeVersionNumber } from '@/lib/userAgent';
 import { normalizeModelId } from '@/lib/providers/openrouter';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { sentryRootSpan } from './getRootSpan';
 import { isKiloStealthModel, kiloFreeModels } from '@/lib/models';
@@ -27,6 +30,7 @@ import type {
   MicrodollarUsageStats,
   PromptInfo,
 } from '@/lib/processUsage.types';
+import { getMaxTokens } from '@/lib/providers/openrouter/request-helpers';
 
 // FIM suffix markers for tracking purposes - used to wrap suffix in a fake system prompt format
 // This allows FIM requests to be tracked consistently with chat requests
@@ -120,10 +124,8 @@ function byokErrorMessage(status: number): string | undefined {
   return byokErrorMessages[status];
 }
 
-function estimateTokenCount(request: OpenRouterChatCompletionRequest) {
-  return Math.round(
-    JSON.stringify(request).length / 4 + (request.max_completion_tokens ?? request.max_tokens ?? 0)
-  );
+function estimateTokenCount(request: GatewayRequest) {
+  return Math.round(JSON.stringify(request).length / 4 + (getMaxTokens(request) ?? 0));
 }
 
 export async function makeErrorReadable({
@@ -133,7 +135,7 @@ export async function makeErrorReadable({
   isUserByok,
 }: {
   requestedModel: string;
-  request: OpenRouterChatCompletionRequest;
+  request: GatewayRequest;
   response: Response;
   isUserByok: boolean;
 }) {

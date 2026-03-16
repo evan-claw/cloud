@@ -213,6 +213,16 @@ if [ "${KILOCLAW_KILO_CLI:-}" = "true" ]; then
 fi
 
 # ============================================================
+# GENERATE HOOKS TOKEN (for Gmail push via gog)
+# ============================================================
+# OpenClaw requires hooks.token != gateway.auth.token.
+# Generate a per-boot random token shared between openclaw config and the
+# controller (which passes it to gog's --hook-token).
+if [ -n "${KILOCLAW_GOG_CONFIG_TARBALL:-}" ]; then
+    export KILOCLAW_HOOKS_TOKEN="$(openssl rand -hex 32)"
+fi
+
+# ============================================================
 # GITHUB CONFIGURATION
 # ============================================================
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -431,6 +441,20 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     config.plugins.entries = config.plugins.entries || {};
     config.plugins.entries.slack = config.plugins.entries.slack || {};
     config.plugins.entries.slack.enabled = true;
+}
+
+// Webhook hooks configuration (required for Gmail push notifications via gog).
+// hooks.token authenticates incoming hook requests from gog's --hook-token.
+// The gmail preset maps gog's gmailHookPayload into OpenClaw's expected format.
+if (process.env.KILOCLAW_HOOKS_TOKEN) {
+    config.hooks = config.hooks || {};
+    config.hooks.enabled = true;
+    config.hooks.token = process.env.KILOCLAW_HOOKS_TOKEN;
+    config.hooks.presets = config.hooks.presets || [];
+    if (!config.hooks.presets.includes('gmail')) {
+        config.hooks.presets.push('gmail');
+    }
+    console.log('Hooks enabled with gmail preset (dedicated token)');
 }
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));

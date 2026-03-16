@@ -180,6 +180,7 @@ app.post('/deploy-archive', async (c: Context<HonoEnv>) => {
 // Route: GET /deploy/:buildId/status
 app.get('/deploy/:buildId/status', async (c: Context<HonoEnv>) => {
   const buildId = c.req.param('buildId');
+  if (!buildId) return c.json({ error: 'Missing buildId' }, 400);
 
   // Get Durable Object stub
   const id = c.env.DeploymentOrchestrator.idFromName(buildId);
@@ -201,6 +202,7 @@ app.get('/deploy/:buildId/status', async (c: Context<HonoEnv>) => {
 // Route: GET /deploy/:buildId/events
 app.get('/deploy/:buildId/events', async (c: Context<HonoEnv>) => {
   const buildId = c.req.param('buildId');
+  if (!buildId) return c.json({ error: 'Missing buildId' }, 400);
 
   // Get Durable Object stub
   const id = c.env.DeploymentOrchestrator.idFromName(buildId);
@@ -222,6 +224,7 @@ app.get('/deploy/:buildId/events', async (c: Context<HonoEnv>) => {
 // Route: DELETE /deploy/:buildId
 app.delete('/deploy/:buildId', async (c: Context<HonoEnv>) => {
   const buildId = c.req.param('buildId');
+  if (!buildId) return c.json({ error: 'Missing buildId' }, 400);
 
   // Get Durable Object stub
   const id = c.env.DeploymentOrchestrator.idFromName(buildId);
@@ -246,6 +249,7 @@ app.delete('/deploy/:buildId', async (c: Context<HonoEnv>) => {
  */
 app.delete('/worker/:slug', async (c: Context<HonoEnv>) => {
   const slug = c.req.param('slug');
+  if (!slug) return c.json({ error: 'Missing slug' }, 400);
 
   // Validate slug format
   try {

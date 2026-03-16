@@ -14,6 +14,7 @@ import type {
   FlyVolume,
   FlyVolumeSnapshot,
   CreateVolumeRequest,
+  CreateVolumeRequestWithoutRegion,
   CreateMachineRequest,
   FlyWaitableState,
   MachineExecRequest,
@@ -169,11 +170,12 @@ export async function updateMachine(
   config: FlyClientConfig,
   machineId: string,
   machineConfig: FlyMachineConfig,
-  options?: { minSecretsVersion?: number }
+  options?: { minSecretsVersion?: number; skipLaunch?: boolean }
 ): Promise<FlyMachine> {
-  const body: { config: FlyMachineConfig; min_secrets_version?: number } = {
+  const body: { config: FlyMachineConfig; min_secrets_version?: number; skip_launch?: boolean } = {
     config: machineConfig,
     min_secrets_version: options?.minSecretsVersion,
+    skip_launch: options?.skipLaunch,
   };
   const resp = await flyFetch(config, `/machines/${machineId}`, {
     method: 'POST',
@@ -209,7 +211,7 @@ export async function createVolume(
  */
 export async function createVolumeWithFallback(
   config: FlyClientConfig,
-  request: Omit<CreateVolumeRequest, 'region'>,
+  request: CreateVolumeRequestWithoutRegion,
   regions: string[]
 ): Promise<FlyVolume> {
   if (regions.length === 0) {

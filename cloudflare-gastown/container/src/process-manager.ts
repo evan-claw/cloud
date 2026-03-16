@@ -10,6 +10,7 @@ import { createKilo, type KiloClient } from '@kilocode/sdk';
 import { z } from 'zod';
 import type { ManagedAgent, StartAgentRequest } from './types';
 import { reportAgentCompleted } from './completion-reporter';
+import { log } from './logger';
 
 const MANAGER_LOG = '[process-manager]';
 
@@ -272,24 +273,50 @@ async function subscribeToEvents(
       const isTerminal = event.type === 'session.idle' && request.role !== 'mayor';
 
       if (isTerminal) {
-        console.log(
-          `${MANAGER_LOG} Completion detected for agent ${agent.agentId} (${agent.name}) event=${event.type}`
-        );
+        log.info('agent.exit', {
+          agentId: agent.agentId,
+          name: agent.name,
+          reason: 'completed',
+          exitReason: 'completed',
+        });
         agent.status = 'exited';
         agent.exitReason = 'completed';
         broadcastEvent(agent.agentId, 'agent.exited', { reason: 'completed' });
         void reportAgentCompleted(agent, 'completed');
+
+        // Release SDK session so the server can shut down when idle
+        const inst = sdkInstances.get(agent.workdir);
+        if (inst) {
+          inst.sessionCount--;
+          if (inst.sessionCount <= 0) {
+            inst.server.close();
+            sdkInstances.delete(agent.workdir);
+          }
+        }
         break;
       }
     }
   } catch (err) {
     if (!controller.signal.aborted) {
-      console.error(`${MANAGER_LOG} Event stream error for agent ${agent.agentId}:`, err);
+      log.error('agent.stream_error', {
+        agentId: agent.agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       if (agent.status === 'running') {
         agent.status = 'failed';
         agent.exitReason = 'Event stream error';
         broadcastEvent(agent.agentId, 'agent.exited', { reason: 'stream error' });
         void reportAgentCompleted(agent, 'failed', 'Event stream error');
+
+        // Release SDK session on stream error (same cleanup as normal completion)
+        const inst = sdkInstances.get(agent.workdir);
+        if (inst) {
+          inst.sessionCount--;
+          if (inst.sessionCount <= 0) {
+            inst.server.close();
+            sdkInstances.delete(agent.workdir);
+          }
+        }
       }
     }
   } finally {
@@ -390,9 +417,13 @@ export async function startAgent(
     }
     agent.messageCount = 1;
 
-    console.log(
-      `${MANAGER_LOG} Started agent ${request.name} (${request.agentId}) session=${sessionId} port=${port}`
-    );
+    log.info('agent.start', {
+      agentId: request.agentId,
+      role: request.role,
+      name: request.name,
+      sessionId,
+      port,
+    });
 
     return agent;
   } catch (err) {
@@ -433,11 +464,15 @@ export async function stopAgent(agentId: string): Promise<void> {
       }
     }
   } catch (err) {
-    console.warn(`${MANAGER_LOG} Failed to abort session for agent ${agentId}:`, err);
+    log.warn('agent.stop_failed', {
+      agentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   agent.status = 'exited';
   agent.exitReason = 'stopped';
+  log.info('agent.exit', { agentId, reason: 'stopped', exitReason: 'stopped' });
   broadcastEvent(agentId, 'agent.exited', { reason: 'stopped' });
 }
 
@@ -454,13 +489,21 @@ export async function sendMessage(agentId: string, prompt: string): Promise<void
   const instance = sdkInstances.get(agent.workdir);
   if (!instance) throw new Error(`No SDK instance for agent ${agentId}`);
 
-  await instance.client.session.prompt({
-    path: { id: agent.sessionId },
-    body: {
-      parts: [{ type: 'text', text: prompt }],
-      ...(agent.model ? { model: { providerID: 'kilo', modelID: agent.model } } : {}),
-    },
-  });
+  try {
+    await instance.client.session.prompt({
+      path: { id: agent.sessionId },
+      body: {
+        parts: [{ type: 'text', text: prompt }],
+        ...(agent.model ? { model: { providerID: 'kilo', modelID: agent.model } } : {}),
+      },
+    });
+  } catch (err) {
+    log.error('agent.send_failed', {
+      agentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   agent.messageCount++;
   agent.lastActivityAt = new Date().toISOString();

@@ -311,10 +311,10 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
-    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBe('user@gmail.com');
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL).toBe('user@gmail.com');
     // Should not leak into plaintext
-    expect(result.env.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.env.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
   });
 
   it('decrypts Google gog config tarball without email', async () => {
@@ -328,8 +328,8 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBe(tarballBase64);
-    expect(result.env.GOOGLE_ACCOUNT_EMAIL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBe(tarballBase64);
+    expect(result.env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL).toBeUndefined();
   });
 
   it('continues without Google access when credential decryption fails', async () => {
@@ -348,7 +348,7 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
     expect(warnSpy).toHaveBeenCalledWith(
       'Failed to decrypt Google credentials, starting without Google access:',
       expect.any(Error)
@@ -365,7 +365,7 @@ describe('buildEnvVars', () => {
       },
     });
 
-    expect(result.sensitive.GOOGLE_GOG_CONFIG_TARBALL).toBeUndefined();
+    expect(result.sensitive.KILOCLAW_GOG_CONFIG_TARBALL).toBeUndefined();
   });
 
   // ─── Catalog-derived SENSITIVE_KEYS equivalence ───────────────────────

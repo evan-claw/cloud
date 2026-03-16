@@ -9,16 +9,50 @@ import {
   ABUSE_SERVICE_URL,
 } from '@/lib/config.server';
 import { getFraudDetectionHeaders } from '@/lib/utils';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
+import type {
+  GatewayRequest,
+  GatewayResponsesRequest,
+  OpenRouterChatCompletionRequest,
+} from '@/lib/providers/openrouter/types';
+import { extractInputItemTextContent } from '@/lib/processUsage.responses';
 import type { AuthProviderId } from '@/lib/auth/provider-metadata';
 import type { FeatureValue } from '@/lib/feature-detection';
 import 'server-only';
+import { getMaxTokens, hasMiddleOutTransform } from '@/lib/providers/openrouter/request-helpers';
 
 /**
- * Extract full prompts from an OpenRouter chat completion request.
+ * Extract full prompts from a GatewayRequest (chat completions or responses API).
  * Unlike extractPromptInfo (which truncates to 100 chars), this returns full content for abuse analysis.
  */
-function extractFullPrompts(body: OpenRouterChatCompletionRequest): {
+function extractFullPrompts(request: GatewayRequest): {
+  systemPrompt: string | null;
+  userPrompt: string | null;
+} {
+  if (request.kind === 'responses') {
+    return extractFullPromptsFromResponses(request.body);
+  }
+  return extractFullPromptsFromChatCompletions(request.body);
+}
+
+type Message = {
+  role: string;
+  content?: string | { type?: string; text?: string }[];
+};
+
+function extractMessageTextContent(m: Message): string {
+  if (typeof m.content === 'string') {
+    return m.content;
+  }
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter(c => c.type === 'text')
+      .map(c => c.text ?? '')
+      .join('\n');
+  }
+  return '';
+}
+
+function extractFullPromptsFromChatCompletions(body: OpenRouterChatCompletionRequest): {
   systemPrompt: string | null;
   userPrompt: string | null;
 } {
@@ -39,22 +73,24 @@ function extractFullPrompts(body: OpenRouterChatCompletionRequest): {
   return { systemPrompt, userPrompt };
 }
 
-type Message = {
-  role: string;
-  content?: string | { type?: string; text?: string }[];
-};
+function extractFullPromptsFromResponses(body: GatewayResponsesRequest): {
+  systemPrompt: string | null;
+  userPrompt: string | null;
+} {
+  const systemPrompt = body.instructions ?? null;
 
-function extractMessageTextContent(m: Message): string {
-  if (typeof m.content === 'string') {
-    return m.content;
+  let userPrompt: string | null = null;
+  if (typeof body.input === 'string') {
+    userPrompt = body.input || null;
+  } else if (Array.isArray(body.input)) {
+    userPrompt =
+      body.input
+        .map(extractInputItemTextContent)
+        .filter((t): t is string => t !== null)
+        .at(-1) ?? null;
   }
-  if (Array.isArray(m.content)) {
-    return m.content
-      .filter(c => c.type === 'text')
-      .map(c => c.text ?? '')
-      .join('\n');
-  }
-  return '';
+
+  return { systemPrompt, userPrompt };
 }
 
 /**
@@ -348,11 +384,11 @@ export type AbuseClassificationContext = {
  */
 export async function classifyAbuse(
   request: NextRequest,
-  body: OpenRouterChatCompletionRequest,
+  requestBodyParsed: GatewayRequest,
   context?: AbuseClassificationContext
 ): Promise<AbuseClassificationResponse | null> {
   const fraudHeaders = getFraudDetectionHeaders(request.headers);
-  const { systemPrompt, userPrompt } = extractFullPrompts(body);
+  const { systemPrompt, userPrompt } = extractFullPrompts(requestBodyParsed);
 
   const payload: UsagePayload = {
     kilo_user_id: context?.kiloUserId ?? null,
@@ -366,13 +402,13 @@ export async function classifyAbuse(
     ja4_digest: fraudHeaders.http_x_vercel_ja4_digest,
     user_agent: fraudHeaders.http_user_agent,
     provider: context?.provider ?? null,
-    requested_model: body.model?.toLowerCase() ?? null,
+    requested_model: requestBodyParsed.body.model?.toLowerCase() ?? null,
     user_prompt: userPrompt,
     system_prompt: systemPrompt,
-    max_tokens: body.max_tokens ?? null,
-    has_middle_out_transform: body.transforms?.includes('middle-out') ?? false,
-    has_tools: (body.tools?.length ?? 0) > 0,
-    streamed: body.stream === true,
+    max_tokens: getMaxTokens(requestBodyParsed),
+    has_middle_out_transform: hasMiddleOutTransform(requestBodyParsed),
+    has_tools: (requestBodyParsed.body.tools?.length ?? 0) > 0,
+    streamed: requestBodyParsed.body.stream === true,
     is_user_byok: context?.isByok ?? null,
     editor_name: request.headers.get('x-kilocode-editorname') ?? null,
     feature: context?.feature ?? null,

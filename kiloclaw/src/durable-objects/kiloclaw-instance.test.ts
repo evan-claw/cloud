@@ -97,10 +97,12 @@ import { resolveLatestVersion } from '../lib/image-version';
 import { verifyKiloToken } from '@kilocode/worker-utils';
 import {
   ALARM_INTERVAL_RUNNING_MS,
+  ALARM_INTERVAL_STARTING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
   ALARM_INTERVAL_IDLE_MS,
   ALARM_JITTER_MS,
   SELF_HEAL_THRESHOLD,
+  STARTING_TIMEOUT_MS,
   STALE_PROVISION_THRESHOLD_MS,
 } from '../config';
 
@@ -113,7 +115,10 @@ function createFakeStorage() {
   let alarmTime: number | null = null;
 
   return {
-    get(keys: string[]): Map<string, unknown> {
+    get(keys: string | string[]): unknown {
+      if (typeof keys === 'string') {
+        return store.get(keys);
+      }
       const result = new Map<string, unknown>();
       for (const k of keys) {
         if (store.has(k)) result.set(k, store.get(k));
@@ -225,6 +230,18 @@ async function seedRunning(
     status: 'running',
     flyMachineId: 'machine-1',
     lastStartedAt: Date.now(),
+    ...overrides,
+  });
+}
+
+async function seedStarting(
+  storage: ReturnType<typeof createFakeStorage>,
+  overrides: Record<string, unknown> = {}
+) {
+  await seedProvisioned(storage, {
+    status: 'starting',
+    startingAt: Date.now(),
+    lastStartedAt: null,
     ...overrides,
   });
 }
@@ -1847,6 +1864,253 @@ describe('updateSecrets', () => {
 });
 
 // ============================================================================
+// updateGoogleCredentials
+// ============================================================================
+
+describe('updateGoogleCredentials', () => {
+  it('persists gmailPushOidcEmail from credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGoogleCredentials({
+      gogConfigTarball: {
+        encryptedData: 'enc-data',
+        encryptedDEK: 'enc-dek',
+        algorithm: 'rsa-aes-256-gcm' as const,
+        version: 1 as const,
+      },
+      email: 'user@example.com',
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+      })
+    );
+    expect(storage._store.get('gmailPushOidcEmail')).toBe(
+      'gmail-push@my-project.iam.gserviceaccount.com'
+    );
+  });
+
+  it('sets gmailPushOidcEmail to null when not provided in credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      gmailPushOidcEmail: 'old@project.iam.gserviceaccount.com',
+    });
+
+    await instance.updateGoogleCredentials({
+      gogConfigTarball: {
+        encryptedData: 'enc-data',
+        encryptedDEK: 'enc-dek',
+        algorithm: 'rsa-aes-256-gcm' as const,
+        version: 1 as const,
+      },
+      email: 'user@example.com',
+    });
+
+    expect(storage._store.get('gmailPushOidcEmail')).toBeNull();
+  });
+});
+
+// ============================================================================
+// clearGoogleCredentials
+// ============================================================================
+
+describe('clearGoogleCredentials', () => {
+  it('sets googleCredentials to null and gmailNotificationsEnabled to false in storage', async () => {
+    const { instance, storage } = createInstance();
+    const fakeCredentials = {
+      clientSecretJson: 'secret',
+      oauthTokensJson: 'tokens',
+    };
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: true,
+      gmailPushOidcEmail: 'gmail-push@project.iam.gserviceaccount.com',
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.clearGoogleCredentials();
+
+    expect(result.googleConnected).toBe(false);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        googleCredentials: null,
+        gmailNotificationsEnabled: false,
+        gmailPushOidcEmail: null,
+      })
+    );
+    expect(storage._store.get('googleCredentials')).toBeNull();
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(false);
+    expect(storage._store.get('gmailPushOidcEmail')).toBeNull();
+  });
+});
+
+// ============================================================================
+// updateGmailNotifications
+// ============================================================================
+
+describe('updateGmailNotifications', () => {
+  const fakeCredentials = {
+    gogConfigTarball: {
+      encryptedData: 'enc-data',
+      encryptedDEK: 'enc-dek',
+      algorithm: 'rsa-aes-256-gcm' as const,
+      version: 1 as const,
+    },
+    email: 'user@example.com',
+  };
+
+  it('enables notifications when Google credentials exist', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: false,
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.updateGmailNotifications(true);
+
+    expect(result.gmailNotificationsEnabled).toBe(true);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailNotificationsEnabled: true,
+      })
+    );
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(true);
+  });
+
+  it('throws when enabling without a connected Google account', async () => {
+    const { instance, storage } = createInstance();
+    // Seed without googleCredentials so it defaults to null
+    await seedProvisioned(storage, { gmailNotificationsEnabled: false });
+
+    await expect(instance.updateGmailNotifications(true)).rejects.toThrow(
+      'Cannot enable Gmail notifications without a connected Google account'
+    );
+  });
+
+  it('disables notifications regardless of credentials', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      googleCredentials: fakeCredentials,
+      gmailNotificationsEnabled: true,
+    });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    const result = await instance.updateGmailNotifications(false);
+
+    expect(result.gmailNotificationsEnabled).toBe(false);
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gmailNotificationsEnabled: false,
+      })
+    );
+    expect(storage._store.get('gmailNotificationsEnabled')).toBe(false);
+  });
+});
+
+// ============================================================================
+// updateGmailHistoryId
+// ============================================================================
+
+describe('updateGmailHistoryId', () => {
+  it('stores historyId when none exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: null });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '100' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('updates when new value is greater', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('200');
+
+    expect(putSpy).toHaveBeenCalledWith(expect.objectContaining({ gmailLastHistoryId: '200' }));
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores when new value is equal', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+
+  it('ignores when new value is lower', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '200' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('100');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('200');
+  });
+
+  it('ignores invalid (non-numeric) input', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { gmailLastHistoryId: '100' });
+
+    const putSpy = vi.spyOn(storage, 'put');
+
+    await instance.updateGmailHistoryId('not-a-number');
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(storage._store.get('gmailLastHistoryId')).toBe('100');
+  });
+});
+
+// ============================================================================
+// getGmailOidcEmail
+// ============================================================================
+
+describe('getGmailOidcEmail', () => {
+  it('returns stored gmailPushOidcEmail', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, {
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+
+    const result = await instance.getGmailOidcEmail();
+
+    expect(result).toEqual({
+      gmailPushOidcEmail: 'gmail-push@my-project.iam.gserviceaccount.com',
+    });
+  });
+
+  it('returns null when no email stored', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage);
+
+    const result = await instance.getGmailOidcEmail();
+
+    expect(result).toEqual({ gmailPushOidcEmail: null });
+  });
+});
+
+// ============================================================================
 // parseRegions + deprioritizeRegion (pure functions)
 // ============================================================================
 
@@ -2212,6 +2476,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const forkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(forkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled — check the set
     expect((regionsForkCall[2] as string[]).sort()).toEqual([
       'dfw',
@@ -2284,6 +2551,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const updateForkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(updateForkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled then deprioritized — check the set
     expect((regionsUpdateCall[2] as string[]).sort()).toEqual([
       'dfw',
@@ -2615,8 +2885,8 @@ describe('approveDevicePairingRequest', () => {
 // ============================================================================
 
 describe('provision: auto-start after fresh provision', () => {
-  it('calls start() on fresh provision and ends in running state', async () => {
-    const { instance, storage } = createInstance();
+  it('calls startAsync() on fresh provision; status is starting then running after background start', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
 
     (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
       id: 'vol-1',
@@ -2629,6 +2899,13 @@ describe('provision: auto-start after fresh provision', () => {
     const result = await instance.provision('user-1', {});
 
     expect(result.sandboxId).toBeDefined();
+    // provision() returns before start() runs: waitUntil defers the promise,
+    // so status must be 'starting' here — not 'running'.
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Await background tasks to let start() complete
+    await Promise.all(waitUntilPromises);
+
     expect(flyClient.createMachine).toHaveBeenCalled();
     expect(storage._store.get('status')).toBe('running');
     expect(storage._store.get('flyMachineId')).toBe('machine-1');
@@ -3008,5 +3285,492 @@ describe('restartMachine image tag override', () => {
     expect(storage._store.get('trackedImageTag')).toBe('2026.2.25-abc123');
     expect(storage._store.get('openclawVersion')).toBeNull();
     expect(storage._store.get('imageVariant')).toBeNull();
+  });
+});
+
+// ============================================================================
+// Proactive API key refresh via reconciliation
+// ============================================================================
+
+describe('reconcileApiKeyExpiry', () => {
+  /** Set up fetch mock to handle env patch RPCs alongside default health-probe responses. */
+  function mockControllerFetch(opts: {
+    envPatchResponse?: { ok: boolean; signaled: boolean };
+    envPatchStatus?: number;
+    envPatchError?: boolean;
+  }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, _init?: RequestInit) => {
+        if (typeof url === 'string' && url.includes('/_kilo/env/patch')) {
+          if (opts.envPatchError) {
+            return Promise.reject(new Error('push failed'));
+          }
+          return Promise.resolve({
+            ok: (opts.envPatchStatus ?? 200) >= 200 && (opts.envPatchStatus ?? 200) < 300,
+            status: opts.envPatchStatus ?? 200,
+            text: () =>
+              Promise.resolve(
+                JSON.stringify(opts.envPatchResponse ?? { ok: true, signaled: true })
+              ),
+          });
+        }
+        // Default: health probe
+        if (typeof url === 'string' && url.includes('/_kilo/gateway/status')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ state: 'running' }),
+          });
+        }
+        return Promise.resolve({ ok: true, status: 200 });
+      })
+    );
+  }
+
+  /** Helper: seed a running instance with an API key that expires soon */
+  function nearExpiryOverrides(hoursUntilExpiry = 24) {
+    return {
+      flyMachineId: 'machine-1',
+      flyAppName: 'acct-test',
+      kilocodeApiKey: 'old-jwt',
+      kilocodeApiKeyExpiresAt: new Date(Date.now() + hoursUntilExpiry * 3600000).toISOString(),
+    };
+  }
+
+  it('refreshes key via push when controller supports env patch', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: true } });
+
+    await instance.alarm();
+
+    // Should have persisted new expiry
+    const newExpiresAt = storage._store.get('kilocodeApiKeyExpiresAt') as string;
+    expect(newExpiresAt).toBeDefined();
+    expect(newExpiresAt).not.toBe(nearExpiryOverrides(24).kilocodeApiKeyExpiresAt);
+
+    // Fly config persisted with skipLaunch + minSecretsVersion
+    expect(flyClient.updateMachine).toHaveBeenCalledWith(
+      expect.any(Object),
+      'machine-1',
+      expect.objectContaining({ env: expect.any(Object) as unknown }),
+      expect.objectContaining({
+        skipLaunch: true,
+        minSecretsVersion: expect.any(Number) as unknown,
+      })
+    );
+
+    // Push succeeded → only one updateMachine call (persist), no restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips refresh when key is far from expiry', async () => {
+    const { instance, storage } = createInstance();
+    // 5 days away — beyond the 3-day threshold
+    await seedRunning(storage, nearExpiryOverrides(5 * 24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    mockControllerFetch({});
+
+    await instance.alarm();
+
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+
+  it('persists Fly config when push returns 404 (old controller)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchStatus: 404 });
+
+    await instance.alarm();
+
+    // Key persisted — Fly config has the new key for next natural restart
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only one updateMachine call (persist with skipLaunch), no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+    expect(flyClient.updateMachine).toHaveBeenCalledWith(
+      expect.any(Object),
+      'machine-1',
+      expect.objectContaining({ env: expect.any(Object) as unknown }),
+      expect.objectContaining({ skipLaunch: true })
+    );
+  });
+
+  it('persists Fly config when push fails with network error', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchError: true });
+
+    await instance.alarm();
+
+    // Key persisted despite push failure (Fly config was updated)
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only persist call, no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists Fly config when signaled is false', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({});
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: false } });
+
+    await instance.alarm();
+
+    // Key persisted
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+
+    // Only persist call, no forced restart
+    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists key even when Fly config update fails (push succeeded)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockRejectedValue(new Error('fly api down'));
+
+    mockControllerFetch({ envPatchResponse: { ok: true, signaled: true } });
+
+    await instance.alarm();
+
+    // Key persisted because push succeeded (gateway has new key in process.env)
+    const newKey = storage._store.get('kilocodeApiKey') as string;
+    expect(newKey).toBeDefined();
+    expect(newKey).not.toBe('old-jwt');
+    expect(storage._store.get('kilocodeApiKeyExpiresAt')).toBeDefined();
+  });
+
+  it('does not persist key when both push and Fly config update fail', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, nearExpiryOverrides(24));
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+    (flyClient.updateMachine as Mock).mockRejectedValue(new Error('fly api down'));
+
+    mockControllerFetch({ envPatchError: true });
+
+    await instance.alarm();
+
+    // Key must NOT be persisted — gateway still has old key
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+
+  it('skips entirely when instance is not running', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, {
+      ...nearExpiryOverrides(24),
+      status: 'stopped',
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'stopped',
+      config: { env: {}, mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('kilocodeApiKey')).toBe('old-jwt');
+  });
+});
+
+// ============================================================================
+// 'starting' status
+// ============================================================================
+
+describe("provision: async start sets status to 'starting'", () => {
+  it("sets status='starting' immediately and fires start() via waitUntil", async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+
+    // provision() returned; waitUntil defers the background start() promise,
+    // so status must be 'starting' at this point — not yet 'running'.
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Await all background tasks to let start() complete.
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('flyMachineId')).toBe('machine-1');
+  });
+
+  it('skips async start on re-provision of existing instance', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage);
+
+    (flyClient.createMachine as Mock).mockClear();
+
+    await instance.provision('user-1', { kilocodeApiKey: 'new-key' });
+
+    expect(flyClient.createMachine).not.toHaveBeenCalled();
+    expect(storage._store.get('status')).toBe('running');
+  });
+});
+
+describe("status guards: 'starting'", () => {
+  it('stop() is a no-op when starting', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    await instance.stop();
+
+    expect(storage._store.get('status')).toBe('starting');
+    expect(flyClient.stopMachineAndWait).not.toHaveBeenCalled();
+  });
+
+  it('startAsync() rejects when destroying', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'destroying' });
+
+    await expect(instance.startAsync()).rejects.toThrow(
+      'Cannot start: instance is being destroyed'
+    );
+  });
+
+  it('background start() aborts if instance was destroyed while starting', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Simulate destroy happening while start() is in flight
+    storage._store.set('status', 'destroying');
+
+    // Let the background start() complete — it should see 'destroying' and bail
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('destroying');
+  });
+});
+
+describe("alarm cadence: 'starting'", () => {
+  it('schedules fast alarm for starting instances', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'starting',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    const alarm = storage._getAlarm();
+    expect(alarm).not.toBeNull();
+    const delta = alarm! - Date.now();
+    expect(delta).toBeGreaterThanOrEqual(ALARM_INTERVAL_STARTING_MS);
+    expect(delta).toBeLessThanOrEqual(ALARM_INTERVAL_STARTING_MS + ALARM_JITTER_MS + 100);
+  });
+});
+
+describe('reconcileStarting: Fly-driven status transitions', () => {
+  it("transitions to 'running' when Fly machine is started", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1', lastStartedAt: null });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('healthCheckFailCount')).toBe(0);
+    // lastStartedAt should be backfilled since it was null
+    expect(storage._store.get('lastStartedAt')).not.toBeNull();
+  });
+
+  it("transitions to 'stopped' when Fly machine is 404", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1' });
+
+    (flyClient.getMachine as Mock).mockRejectedValue(
+      new FlyApiError('not found', 404, 'machine not found')
+    );
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('flyMachineId')).toBeNull();
+  });
+
+  it("stays 'starting' when flyMachineId is not yet set (start in progress)", async () => {
+    const { instance, storage } = createInstance();
+    // No flyMachineId — start() hasn't created the machine yet
+    await seedStarting(storage);
+
+    await instance.alarm();
+
+    // Status remains starting; getMachine was NOT called
+    expect(storage._store.get('status')).toBe('starting');
+    expect(flyClient.getMachine).not.toHaveBeenCalled();
+  });
+
+  it("falls back to 'stopped' when startingAt exceeds STARTING_TIMEOUT_MS (no machine)", async () => {
+    const { instance, storage } = createInstance();
+    // Seed with a startingAt older than the timeout — no machine ID (start() never completed)
+    await seedStarting(storage, {
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('startingAt')).toBeNull();
+    // getMachine should NOT have been called — no flyMachineId to check
+    expect(flyClient.getMachine).not.toHaveBeenCalled();
+  });
+
+  it('checks Fly before timing out when flyMachineId is set and machine is started', async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, {
+      flyMachineId: 'machine-1',
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    // Machine actually started on Fly — timeout should NOT force 'stopped'
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // syncStatusWithFly should have transitioned to 'running' despite the timeout
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('startingAt')).toBeNull();
+    expect(storage._store.get('lastStartedAt')).not.toBeNull();
+  });
+
+  it("falls back to 'stopped' on timeout when flyMachineId is set but machine not started", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, {
+      flyMachineId: 'machine-1',
+      startingAt: Date.now() - STARTING_TIMEOUT_MS - 1000,
+    });
+
+    // Machine exists but still in 'created' state after 5 min
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'created',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // Checked Fly first, but machine wasn't started — timeout kicks in
+    expect(flyClient.getMachine).toHaveBeenCalledWith(expect.anything(), 'machine-1');
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('startingAt')).toBeNull();
+  });
+});
+
+describe("syncStatusWithFly: backfill lastStartedAt on 'starting' → 'running'", () => {
+  it("sets lastStartedAt when transitioning from 'starting' to 'running'", async () => {
+    const { instance, storage } = createInstance();
+    await seedStarting(storage, { flyMachineId: 'machine-1', lastStartedAt: null });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    expect(storage._store.get('lastStartedAt')).toBeGreaterThan(0);
+  });
+
+  it('does not overwrite existing lastStartedAt when already running', async () => {
+    const existingStartedAt = Date.now() - 10_000;
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { lastStartedAt: existingStartedAt });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await instance.alarm();
+
+    // lastStartedAt should be unchanged (already running, no sync_status transition)
+    expect(storage._store.get('lastStartedAt')).toBe(existingStartedAt);
   });
 });

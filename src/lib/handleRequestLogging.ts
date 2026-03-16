@@ -1,9 +1,9 @@
 import { api_request_log, type User } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
 import { KILO_ORGANIZATION_ID } from '@/lib/organizations/constants';
-import type { OpenRouterChatCompletionRequest } from '@/lib/providers/openrouter/types';
 import { logExceptInTest } from '@/lib/utils.server';
 import { after } from 'next/server';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 
 export function handleRequestLogging(params: {
   clonedResponse: Response;
@@ -11,7 +11,7 @@ export function handleRequestLogging(params: {
   organization_id: string | null;
   provider: string;
   model: string;
-  request: OpenRouterChatCompletionRequest;
+  request: GatewayRequest;
 }) {
   const { clonedResponse, user, organization_id, provider, model, request } = params;
   const isKiloEmployee =
@@ -31,7 +31,7 @@ export function handleRequestLogging(params: {
           status_code: clonedResponse.status,
           model,
           provider,
-          request,
+          request: request.body,
           response: await clonedResponse.text(),
         })
         .returning({ id: api_request_log.id });

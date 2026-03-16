@@ -24,7 +24,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 1000000,
-      "preferredIndex": 0
+      "preferredIndex": 0,
+      "isFree": false
     },
     {
       "id": "anthropic/claude-sonnet-4",
@@ -50,7 +51,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 200000,
-      "preferredIndex": 2
+      "preferredIndex": 2,
+      "isFree": false
     },
     {
       "id": "anthropic/claude-3.7-sonnet",
@@ -76,7 +78,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 200000,
-      "preferredIndex": 3
+      "preferredIndex": 3,
+      "isFree": false
     },
     {
       "id": "openai/gpt-4.1",
@@ -102,7 +105,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 128000,
-      "preferredIndex": 5
+      "preferredIndex": 5,
+      "isFree": false
     },
     {
       "id": "some-other-model",
@@ -127,7 +131,8 @@
         "web_search": "0",
         "internal_reasoning": "0"
       },
-      "context_length": 32000
+      "context_length": 32000,
+      "isFree": false
     }
   ]
 }

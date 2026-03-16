@@ -89,6 +89,7 @@ run-milvus-test.sh
 
 # Git worktrees
 .worktrees/
+.gw.yml
 
 supabase/.temp
 
@@ -96,3 +97,5 @@ supabase/.temp
 .husky/_/
 
 .dev-logs/
+
+.kilo/plans

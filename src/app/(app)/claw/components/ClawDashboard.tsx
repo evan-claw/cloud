@@ -17,11 +17,9 @@ import { CreateInstanceCard } from './CreateInstanceCard';
 import { InstanceControls } from './InstanceControls';
 import { InstanceTab } from './InstanceTab';
 import { SettingsTab } from './SettingsTab';
-import { useTRPC } from '@/lib/trpc/utils';
-import { useQuery } from '@tanstack/react-query';
 import { ChangelogCard } from './ChangelogCard';
-import { EarlybirdBanner } from './EarlybirdBanner';
 import { PairingCard } from './PairingCard';
+import { BillingWrapper } from './billing/BillingWrapper';
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
   status: NonNullable<KiloClawDashboardStatus['status']>;
@@ -34,7 +32,6 @@ function hasPopulatedStatus(
 }
 
 export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | undefined }) {
-  const trpc = useTRPC();
   const mutations = useKiloClawMutations();
   const gatewayUrl = useGatewayUrl(status);
   const instanceStatus = hasPopulatedStatus(status) ? status : null;
@@ -46,7 +43,6 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
   } = useKiloClawGatewayStatus(isRunning);
 
   const { data: isServiceDegraded } = useKiloClawServiceDegraded();
-  const { data: earlybirdStatus } = useQuery(trpc.kiloclaw.getEarlybirdStatus.queryOptions());
 
   const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
   const instanceYoung =
@@ -63,6 +59,10 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
   const onRedeploySuccess = useCallback(() => {
     setDirtySecrets(new Set());
   }, []);
+
+  // Billing gating (welcome page for new users, loading spinner) is handled
+  // by page.tsx before this component mounts. ClawDashboard always renders
+  // the full dashboard with BillingWrapper handling lock dialogs and banners.
 
   return (
     <div className="container m-auto flex w-full max-w-[1140px] flex-col gap-6 p-4 md:p-6">
@@ -122,63 +122,64 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         </div>
       )}
 
-      <Card className="mt-6">
-        {!instanceStatus ? (
-          <CardContent className="p-5">
-            <CreateInstanceCard mutations={mutations} />
-          </CardContent>
-        ) : (
-          <>
-            <CardContent className="border-b p-5">
-              <InstanceControls
-                status={instanceStatus}
-                mutations={mutations}
-                onRedeploySuccess={onRedeploySuccess}
-              />
+      <BillingWrapper>
+        <Card className="mt-6">
+          {!instanceStatus ? (
+            <CardContent className="p-5">
+              <CreateInstanceCard mutations={mutations} />
             </CardContent>
-            <Tabs defaultValue="instance">
-              <div className="px-5">
-                <TabsList className="h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0">
-                  <TabsTrigger
-                    value="instance"
-                    className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
-                    Gateway Process
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="settings"
-                    className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
-                    Settings
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-              <CardContent className="p-5">
-                <TabsContent value="instance" className="mt-0">
-                  <InstanceTab
-                    status={instanceStatus}
-                    gatewayStatus={gatewayStatus}
-                    gatewayLoading={gatewayLoading}
-                    gatewayError={gatewayError}
-                  />
-                </TabsContent>
-                <TabsContent value="settings" className="mt-0">
-                  <SettingsTab
-                    status={instanceStatus}
-                    mutations={mutations}
-                    onSecretsChanged={onSecretsChanged}
-                    dirtySecrets={dirtySecrets}
-                  />
-                </TabsContent>
+          ) : (
+            <>
+              <CardContent className="border-b p-5">
+                <InstanceControls
+                  status={instanceStatus}
+                  mutations={mutations}
+                  onRedeploySuccess={onRedeploySuccess}
+                />
               </CardContent>
-            </Tabs>
-          </>
-        )}
-      </Card>
+              <Tabs defaultValue="instance">
+                <div className="px-5">
+                  <TabsList className="h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0">
+                    <TabsTrigger
+                      value="instance"
+                      className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                    >
+                      Gateway Process
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="settings"
+                      className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                    >
+                      Settings
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <CardContent className="p-5">
+                  <TabsContent value="instance" className="mt-0">
+                    <InstanceTab
+                      status={instanceStatus}
+                      gatewayStatus={gatewayStatus}
+                      gatewayLoading={gatewayLoading}
+                      gatewayError={gatewayError}
+                    />
+                  </TabsContent>
+                  <TabsContent value="settings" className="mt-0">
+                    <SettingsTab
+                      status={instanceStatus}
+                      mutations={mutations}
+                      onSecretsChanged={onSecretsChanged}
+                      dirtySecrets={dirtySecrets}
+                    />
+                  </TabsContent>
+                </CardContent>
+              </Tabs>
+            </>
+          )}
+        </Card>
 
-      {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
+        {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
+      </BillingWrapper>
 
-      {earlybirdStatus?.purchased && <EarlybirdBanner />}
       <ChangelogCard />
     </div>
   );

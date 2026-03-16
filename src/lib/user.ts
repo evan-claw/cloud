@@ -51,6 +51,8 @@ import {
   free_model_usage,
   kilo_pass_scheduled_changes,
   security_analysis_owner_state,
+  kiloclaw_subscriptions,
+  kiloclaw_email_log,
 } from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
@@ -410,6 +412,7 @@ export class SoftDeletePreconditionError extends Error {
  *
  * Preconditions (will throw SoftDeletePreconditionError if violated):
  * - User must not have an active, non-cancelling Kilo Pass subscription
+ * - User must not have a live KiloClaw subscription (active, past_due, unpaid, or trialing)
  *
  * What is kept:
  * - The kilocode_users row (anonymized)
@@ -441,7 +444,7 @@ export class SoftDeletePreconditionError extends Error {
  *   security_analysis_queue (via cascade when security_findings are deleted),
  *   auto_triage/fix_tickets, slack_bot_requests, bot_requests,
  *   cloud_agent_code_reviews, device_auth_requests, auto_top_up_configs,
- *   kiloclaw_instances/access_codes, user_period_cache,
+ *   kiloclaw_instances/access_codes, kiloclaw_subscriptions, user_period_cache,
  *   kilo_pass_scheduled_changes)
  */
 export async function softDeleteUser(userId: string) {
@@ -471,6 +474,25 @@ export async function softDeleteUser(userId: string) {
       );
     }
 
+    // Block soft-delete for any live KiloClaw subscription. This includes
+    // trialing — the user may have a running Fly instance, and deleting the
+    // row without destroying the instance would orphan it.
+    const liveClawSubscriptions = await tx
+      .select({ id: kiloclaw_subscriptions.id, status: kiloclaw_subscriptions.status })
+      .from(kiloclaw_subscriptions)
+      .where(
+        and(
+          eq(kiloclaw_subscriptions.user_id, userId),
+          inArray(kiloclaw_subscriptions.status, ['active', 'past_due', 'unpaid', 'trialing'])
+        )
+      );
+
+    if (liveClawSubscriptions.length > 0) {
+      throw new SoftDeletePreconditionError(
+        `User ${userId} has a live KiloClaw subscription (${liveClawSubscriptions[0].status}). Cancel the subscription before deleting the account.`
+      );
+    }
+
     // ── 1. Anonymize the user row ────────────────────────────────────────
     await tx
       .update(kilocode_users)
@@ -489,6 +511,7 @@ export async function softDeleteUser(userId: string) {
         cohorts: {},
         is_admin: false,
         openrouter_upstream_safety_identifier: null,
+        customer_source: null,
       })
       .where(eq(kilocode_users.id, userId));
 
@@ -554,6 +577,8 @@ export async function softDeleteUser(userId: string) {
     await tx
       .delete(kiloclaw_earlybird_purchases)
       .where(eq(kiloclaw_earlybird_purchases.user_id, userId));
+    await tx.delete(kiloclaw_email_log).where(eq(kiloclaw_email_log.user_id, userId));
+    await tx.delete(kiloclaw_subscriptions).where(eq(kiloclaw_subscriptions.user_id, userId));
     await tx.delete(user_period_cache).where(eq(user_period_cache.kilo_user_id, userId));
     await tx
       .delete(kilo_pass_scheduled_changes)

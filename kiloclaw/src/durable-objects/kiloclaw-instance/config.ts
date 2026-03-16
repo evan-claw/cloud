@@ -144,6 +144,11 @@ export async function buildUserEnvVars(
     }
   );
 
+  // Inject latest Gmail historyId for controller to patch gog state on startup.
+  if (state.gmailLastHistoryId) {
+    plainEnv.KILOCLAW_GMAIL_LAST_HISTORY_ID = state.gmailLastHistoryId;
+  }
+
   // Get the env encryption key from the App DO, creating it if needed.
   const appStub = env.KILOCLAW_APP.get(env.KILOCLAW_APP.idFromName(state.userId));
   const { key: envKey, secretsVersion } = await appStub.ensureEnvKey(state.userId);

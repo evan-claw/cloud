@@ -41,8 +41,13 @@ import type {
   NotYetCostedUsageStats,
   OpenRouterError,
   OpenRouterUsage,
+  PromptInfo,
   UsageMetaData,
 } from '@/lib/processUsage.types';
+import {
+  parseResponsesMicrodollarUsageFromStream,
+  parseResponsesMicrodollarUsageFromString,
+} from '@/lib/processUsage.responses';
 
 const posthogClient = PostHogClient();
 
@@ -50,7 +55,7 @@ const posthogClient = PostHogClient();
 // because that's what they charge for the BYOK feature. Although we now use upstream_inference_cost, we still do some sanity checks.
 const OPENROUTER_BYOK_COST_MULTIPLIER = 20.0;
 
-export function extractPromptInfo(body: OpenRouterChatCompletionRequest) {
+export function extractPromptInfo(body: OpenRouterChatCompletionRequest): PromptInfo {
   try {
     const messages = body.messages ?? [];
 
@@ -106,6 +111,7 @@ export function extractUsageContextInfo(usageContext: MicrodollarUsageContext) {
     requested_model: usageContext.requested_model,
     status_code: usageContext.status_code,
     editor_name: usageContext.editor_name,
+    api_kind: usageContext.api_kind,
     machine_id: usageContext.machine_id,
     is_user_byok: usageContext.user_byok,
     has_tools: usageContext.has_tools,
@@ -393,6 +399,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
           , ${createUpsertCTE(sql`system_prompt_prefix`, metadataFields.system_prompt_prefix)}
           , ${createUpsertCTE(sql`finish_reason`, metadataFields.finish_reason)}
           , ${createUpsertCTE(sql`editor_name`, metadataFields.editor_name)}
+          , ${createUpsertCTE(sql`api_kind`, metadataFields.api_kind)}
           , ${createUpsertCTE(sql`feature`, metadataFields.feature)}
           , ${createUpsertCTE(sql`mode`, metadataFields.mode)}
           , ${createUpsertCTE(sql`auto_model`, metadataFields.auto_model)}
@@ -429,6 +436,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               system_prompt_prefix_id,
               finish_reason_id,
               editor_name_id,
+              api_kind_id,
               feature_id,
               mode_id,
               auto_model_id
@@ -465,6 +473,7 @@ async function insertUsageAndMetadataWithBalanceUpdate(
               (SELECT system_prompt_prefix_id FROM system_prompt_prefix_cte),
               (SELECT finish_reason_id FROM finish_reason_cte),
               (SELECT editor_name_id FROM editor_name_cte),
+              (SELECT api_kind_id FROM api_kind_cte),
               (SELECT feature_id FROM feature_cte),
               (SELECT mode_id FROM mode_cte),
               (SELECT auto_model_id FROM auto_model_cte)
@@ -525,21 +534,44 @@ export function countAndStoreUsage(
   usageContext: MicrodollarUsageContext,
   openrouterRequestSpan: Span | undefined
 ) {
-  const usageStatsPromise = !clonedReponse.body
-    ? Promise.resolve(null)
-    : usageContext.isStreaming
-      ? parseMicrodollarUsageFromStream(
-          clonedReponse.body,
-          usageContext.kiloUserId,
-          openrouterRequestSpan,
-          usageContext.provider,
-          clonedReponse.status
-        )
-      : clonedReponse
-          .text()
-          .then(content =>
-            parseMicrodollarUsageFromString(content, usageContext.kiloUserId, clonedReponse.status)
-          );
+  let usageStatsPromise: Promise<MicrodollarUsageStats | null> = Promise.resolve(null);
+
+  if (clonedReponse.body) {
+    if (usageContext.api_kind === 'responses') {
+      usageStatsPromise = usageContext.isStreaming
+        ? parseResponsesMicrodollarUsageFromStream(
+            clonedReponse.body,
+            usageContext.kiloUserId,
+            openrouterRequestSpan,
+            usageContext.provider,
+            clonedReponse.status
+          )
+        : clonedReponse
+            .text()
+            .then(content =>
+              parseResponsesMicrodollarUsageFromString(content, clonedReponse.status)
+            );
+    }
+    if (usageContext.api_kind === 'chat_completions') {
+      usageStatsPromise = usageContext.isStreaming
+        ? parseMicrodollarUsageFromStream(
+            clonedReponse.body,
+            usageContext.kiloUserId,
+            openrouterRequestSpan,
+            usageContext.provider,
+            clonedReponse.status
+          )
+        : clonedReponse
+            .text()
+            .then(content =>
+              parseMicrodollarUsageFromString(
+                content,
+                usageContext.kiloUserId,
+                clonedReponse.status
+              )
+            );
+    }
+  }
 
   return usageStatsPromise.then(usageStats => processTokenData(usageStats, usageContext));
 }

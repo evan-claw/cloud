@@ -575,6 +575,15 @@ export const gastownRouter = router({
       return townStub.updateTownConfig(input.config);
     }),
 
+  refreshContainerToken: gastownProcedure
+    .input(z.object({ townId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      await townStub.setTownId(input.townId);
+      await townStub.forceRefreshContainerToken();
+    }),
+
   // ── Events ──────────────────────────────────────────────────────────
 
   getBeadEvents: gastownProcedure
@@ -628,6 +637,20 @@ export const gastownRouter = router({
       return townStub.listConvoysDetailed();
     }),
 
+  getConvoy: gastownProcedure
+    .input(
+      z.object({
+        townId: z.string().uuid(),
+        convoyId: z.string().uuid(),
+      })
+    )
+    .output(RpcConvoyDetailOutput.nullable())
+    .query(async ({ ctx, input }) => {
+      await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      return townStub.getConvoyStatus(input.convoyId);
+    }),
+
   closeConvoy: gastownProcedure
     .input(
       z.object({
@@ -643,6 +666,22 @@ export const gastownRouter = router({
       if (!convoy) return null;
       const status = await townStub.getConvoyStatus(input.convoyId);
       return status ?? { ...convoy, beads: [] };
+    }),
+
+  startConvoy: gastownProcedure
+    .input(
+      z.object({
+        townId: z.string().uuid(),
+        convoyId: z.string().uuid(),
+      })
+    )
+    .output(RpcConvoyDetailOutput.nullable())
+    .mutation(async ({ ctx, input }) => {
+      await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      await townStub.startConvoy(input.convoyId);
+      const status = await townStub.getConvoyStatus(input.convoyId);
+      return status ?? null;
     }),
 
   // ── Admin-only routes (bypass ownership checks) ──────────────────────

@@ -182,7 +182,7 @@ export const ALL_SECRET_ENV_VARS: ReadonlySet<string> = new Set(
  * not entered by users through the secret management UI.
  */
 export const INTERNAL_SENSITIVE_ENV_VARS: ReadonlySet<string> = new Set([
-  'GOOGLE_GOG_CONFIG_TARBALL',
+  'KILOCLAW_GOG_CONFIG_TARBALL',
 ]);
 
 /**

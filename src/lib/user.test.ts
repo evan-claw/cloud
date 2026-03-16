@@ -30,6 +30,7 @@ import {
   security_analysis_queue,
   security_analysis_owner_state,
   kiloclaw_earlybird_purchases,
+  kiloclaw_subscriptions,
   bot_requests,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
@@ -87,6 +88,7 @@ describe('User', () => {
         linkedin_url: 'https://linkedin.com/in/testuser',
         github_url: 'https://github.com/testuser',
         openrouter_upstream_safety_identifier: 'openrouter_upstream_safety_identifier',
+        customer_source: 'A YouTube video',
         is_admin: true,
       });
 
@@ -101,6 +103,7 @@ describe('User', () => {
       expect(softDeleted!.linkedin_url).toBeNull();
       expect(softDeleted!.github_url).toBeNull();
       expect(softDeleted!.openrouter_upstream_safety_identifier).toBeNull();
+      expect(softDeleted!.customer_source).toBeNull();
       expect(softDeleted!.api_token_pepper).toBeNull();
       expect(softDeleted!.default_model).toBeNull();
       expect(softDeleted!.blocked_reason).toMatch(/^soft-deleted at \d{4}-\d{2}-\d{2}T/);
@@ -848,6 +851,71 @@ describe('User', () => {
           .where(eq(kiloclaw_earlybird_purchases.user_id, user.id))
           .then(r => r[0].count)
       ).toBe(0);
+    });
+
+    it('should delete kiloclaw_subscriptions for the user', async () => {
+      const user = await insertTestUser();
+
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'canceled',
+      });
+
+      await softDeleteUser(user.id);
+
+      expect(
+        await db
+          .select({ count: count() })
+          .from(kiloclaw_subscriptions)
+          .where(eq(kiloclaw_subscriptions.user_id, user.id))
+          .then(r => r[0].count)
+      ).toBe(0);
+    });
+
+    it('should throw SoftDeletePreconditionError for active KiloClaw subscription', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'active',
+        cancel_at_period_end: false,
+      });
+
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      // User should not be modified
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
+    });
+
+    it('should throw SoftDeletePreconditionError for KiloClaw subscription pending cancellation', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'standard',
+        status: 'active',
+        cancel_at_period_end: true,
+      });
+
+      // Active subscriptions with cancel_at_period_end are still live in Stripe
+      // until period end and can emit lifecycle webhooks, so deletion is blocked.
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
+    });
+
+    it('should throw SoftDeletePreconditionError for trialing KiloClaw subscription', async () => {
+      const user = await insertTestUser();
+      await db.insert(kiloclaw_subscriptions).values({
+        user_id: user.id,
+        plan: 'trial',
+        status: 'trialing',
+        trial_ends_at: new Date(Date.now() + 86_400_000).toISOString(),
+      });
+
+      await expect(softDeleteUser(user.id)).rejects.toThrow(SoftDeletePreconditionError);
+      const userAfter = await findUserById(user.id);
+      expect(userAfter!.google_user_email).toBe(user.google_user_email);
     });
   });
 

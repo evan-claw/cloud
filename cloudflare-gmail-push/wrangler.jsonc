@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-gmail-push",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-10",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "placement": { "mode": "smart" },
+  "routes": [
+    {
+      "pattern": "kiloclaw-gmail.kiloapps.io",
+      "zone_name": "kiloapps.io",
+      "custom_domain": true,
+    },
+  ],
+  "vars": {
+    // Base URL for OIDC audience construction — the worker appends /push/user/<userId>
+    "OIDC_AUDIENCE_BASE": "https://kiloclaw-gmail.kiloapps.io",
+  },
+  "services": [
+    {
+      "binding": "KILOCLAW",
+      "service": "kiloclaw",
+    },
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "INTERNAL_API_SECRET",
+      "store_id": "342a86d9e3a94da698e82d0c6e2a36f0",
+      "secret_name": "INTERNAL_API_SECRET_PROD",
+    },
+  ],
+  "queues": {
+    "producers": [{ "binding": "GMAIL_PUSH_QUEUE", "queue": "gmail-push-notifications" }],
+    "consumers": [{ "queue": "gmail-push-notifications", "max_retries": 0 }],
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "IDEMPOTENCY", "class_name": "GmailPushIdempotency" }],
+  },
+  "migrations": [{ "tag": "v1", "new_classes": ["GmailPushIdempotency"] }],
+}

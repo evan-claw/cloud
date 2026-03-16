@@ -37,6 +37,10 @@ import {
   FeedbackSource,
   CliSessionSharedState,
   SecurityAuditLogAction,
+  KiloClawPlan,
+  KiloClawScheduledPlan,
+  KiloClawScheduledBy,
+  KiloClawSubscriptionStatus,
 } from './schema-types';
 import type {
   OrganizationModeConfig,
@@ -102,6 +106,10 @@ export const SCHEMA_CHECK_ENUMS = {
   KiloPassScheduledChangeStatus,
   CliSessionSharedState,
   SecurityAuditLogAction,
+  KiloClawPlan,
+  KiloClawScheduledPlan,
+  KiloClawScheduledBy,
+  KiloClawSubscriptionStatus,
 } as const;
 
 export const credit_transactions = pgTable(
@@ -147,6 +155,11 @@ export const credit_transactions = pgTable(
 
 export type CreditTransaction = typeof credit_transactions.$inferSelect;
 
+/**
+ * When adding or removing PII/account-linked columns, update
+ * softDeleteUser() in src/lib/user.ts (and src/lib/user.test.ts) to
+ * null or reset the field.
+ */
 export const kilocode_users = pgTable(
   'kilocode_users',
   {
@@ -192,6 +205,7 @@ export const kilocode_users = pgTable(
     linkedin_url: text(),
     github_url: text(),
     openrouter_upstream_safety_identifier: text(),
+    customer_source: text(),
   },
   table => [
     unique('UQ_b1afacbcf43f2c7c4cb9f7e7faa').on(table.google_user_email),
@@ -630,6 +644,7 @@ export const microdollar_usage_metadata = pgTable(
     streamed: boolean(),
     cancelled: boolean(),
     editor_name_id: integer(),
+    api_kind_id: integer(),
     has_tools: boolean(),
     machine_id: text(),
     feature_id: integer(),
@@ -739,6 +754,15 @@ export const editor_name = pgTable(
   table => [uniqueIndex('UQ_editor_name').on(table.editor_name)]
 );
 
+export const api_kind = pgTable(
+  'api_kind',
+  {
+    api_kind_id: serial().notNull().primaryKey(),
+    api_kind: text().notNull(),
+  },
+  table => [uniqueIndex('UQ_api_kind').on(table.api_kind)]
+);
+
 export const feature = pgTable(
   'feature',
   {
@@ -808,6 +832,7 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
   streamed: boolean(),
   cancelled: boolean(),
   editor_name: text(),
+  api_kind: text(),
   has_tools: boolean(),
   machine_id: text(),
   feature: text(),
@@ -858,6 +883,7 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
     meta.streamed,
     meta.cancelled,
     edit.editor_name,
+    ak.api_kind,
     meta.has_tools,
     meta.machine_id,
     feat.feature,
@@ -875,6 +901,7 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
   LEFT JOIN ${http_user_agent} ua ON meta.http_user_agent_id = ua.http_user_agent_id
   LEFT JOIN ${finish_reason} frfr ON meta.finish_reason_id = frfr.finish_reason_id
   LEFT JOIN ${editor_name} edit ON meta.editor_name_id = edit.editor_name_id
+  LEFT JOIN ${api_kind} ak ON meta.api_kind_id = ak.api_kind_id
   LEFT JOIN ${feature} feat ON meta.feature_id = feat.feature_id
   LEFT JOIN ${mode} md ON meta.mode_id = md.mode_id
   LEFT JOIN ${auto_model} am ON meta.auto_model_id = am.auto_model_id
@@ -3417,6 +3444,73 @@ export const kiloclaw_earlybird_purchases = pgTable('kiloclaw_earlybird_purchase
 });
 
 export type KiloClawEarlybirdPurchase = typeof kiloclaw_earlybird_purchases.$inferSelect;
+
+export const kiloclaw_subscriptions = pgTable(
+  'kiloclaw_subscriptions',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    user_id: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' })
+      .unique(),
+    stripe_subscription_id: text().unique(),
+    stripe_schedule_id: text(),
+    plan: text().notNull().$type<KiloClawPlan>(),
+    scheduled_plan: text().$type<KiloClawScheduledPlan>(),
+    scheduled_by: text().$type<KiloClawScheduledBy>(),
+    status: text().notNull().$type<KiloClawSubscriptionStatus>(),
+    cancel_at_period_end: boolean().notNull().default(false),
+    trial_started_at: timestamp({ withTimezone: true, mode: 'string' }),
+    trial_ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+    current_period_start: timestamp({ withTimezone: true, mode: 'string' }),
+    current_period_end: timestamp({ withTimezone: true, mode: 'string' }),
+    commit_ends_at: timestamp({ withTimezone: true, mode: 'string' }),
+    past_due_since: timestamp({ withTimezone: true, mode: 'string' }),
+    suspended_at: timestamp({ withTimezone: true, mode: 'string' }),
+    destruction_deadline: timestamp({ withTimezone: true, mode: 'string' }),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+    updated_at: timestamp({ withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull()
+      .$onUpdateFn(() => sql`now()`),
+  },
+  table => [
+    index('IDX_kiloclaw_subscriptions_status').on(table.status),
+    index('IDX_kiloclaw_subscriptions_stripe_schedule_id').on(table.stripe_schedule_id),
+    enumCheck('kiloclaw_subscriptions_plan_check', table.plan, KiloClawPlan),
+    enumCheck(
+      'kiloclaw_subscriptions_scheduled_plan_check',
+      table.scheduled_plan,
+      KiloClawScheduledPlan
+    ),
+    enumCheck('kiloclaw_subscriptions_scheduled_by_check', table.scheduled_by, KiloClawScheduledBy),
+    enumCheck('kiloclaw_subscriptions_status_check', table.status, KiloClawSubscriptionStatus),
+  ]
+);
+
+export type KiloClawSubscription = typeof kiloclaw_subscriptions.$inferSelect;
+export type NewKiloClawSubscription = typeof kiloclaw_subscriptions.$inferInsert;
+
+export const kiloclaw_email_log = pgTable(
+  'kiloclaw_email_log',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    user_id: text()
+      .notNull()
+      .references(() => kilocode_users.id, { onDelete: 'cascade' }),
+    email_type: text().notNull(),
+    sent_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  table => [uniqueIndex('UQ_kiloclaw_email_log_user_type').on(table.user_id, table.email_type)]
+);
+
+export type KiloClawEmailLog = typeof kiloclaw_email_log.$inferSelect;
 
 // Bot Request Logs — tracks each message handled by the new bot (src/lib/bot.ts).
 // Rows are created as 'pending' on receipt and updated as processing progresses.

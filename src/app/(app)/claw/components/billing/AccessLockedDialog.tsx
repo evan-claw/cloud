@@ -1,0 +1,160 @@
+'use client';
+
+import { useRouter } from 'next/navigation';
+import { Lock, CreditCard } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import type { ClawLockReason } from './billing-types';
+
+type AccessLockedDialogProps = {
+  reason: ClawLockReason;
+  onSubscribeClick: () => void;
+  onUpdatePaymentClick: () => void;
+};
+
+function getLockContent(reason: ClawLockReason) {
+  switch (reason) {
+    case 'trial_expired_instance_alive':
+      return {
+        title: 'Your Trial Has Ended',
+        description: 'Your KiloClaw has been stopped. Subscribe to resume.',
+        cta: 'Subscribe to Resume',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
+    case 'trial_expired_instance_destroyed':
+      return {
+        title: 'Your Trial Has Ended',
+        description: 'Your KiloClaw has been destroyed. Subscribe to start fresh with a new one.',
+        cta: 'Subscribe',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
+    case 'earlybird_expired':
+      return {
+        title: 'Earlybird Hosting Expired',
+        description:
+          'Your earlybird hosting period has ended. Subscribe to continue using KiloClaw.',
+        cta: 'Subscribe to Continue',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
+    case 'subscription_expired_instance_alive':
+      return {
+        title: 'Subscription Ended',
+        description: 'Your KiloClaw has been stopped. Subscribe to resume.',
+        cta: 'Subscribe to Resume',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
+    case 'subscription_expired_instance_destroyed':
+      return {
+        title: 'Subscription Ended',
+        description: 'Your KiloClaw has been destroyed. Subscribe to provision a new one.',
+        cta: 'Subscribe',
+        action: 'subscribe' as const,
+        icon: Lock,
+      };
+    case 'past_due_grace_exceeded':
+      return {
+        title: 'Payment Issue',
+        description:
+          'Your subscription is suspended due to a payment failure. Update your payment method to continue.',
+        cta: 'Update Payment Method',
+        action: 'update_payment' as const,
+        icon: CreditCard,
+      };
+    default:
+      return null;
+  }
+}
+
+function getInfoBoxMessage(reason: ClawLockReason): string {
+  if (
+    reason === 'trial_expired_instance_destroyed' ||
+    reason === 'subscription_expired_instance_destroyed'
+  ) {
+    return "You'll need to provision a new KiloClaw after subscribing.";
+  }
+  if (reason === 'past_due_grace_exceeded') {
+    return 'Your KiloClaw will resume automatically once payment is resolved.';
+  }
+  return 'Your KiloClaw will resume automatically once you subscribe.';
+}
+
+export function AccessLockedDialog({
+  reason,
+  onSubscribeClick,
+  onUpdatePaymentClick,
+}: AccessLockedDialogProps) {
+  const router = useRouter();
+
+  if (!reason) return null;
+
+  const content = getLockContent(reason);
+  if (!content) return null;
+
+  const Icon = content.icon;
+
+  function handleCta() {
+    if (content?.action === 'update_payment') {
+      onUpdatePaymentClick();
+    } else {
+      onSubscribeClick();
+    }
+  }
+
+  function handleDismiss() {
+    router.push('/claw');
+  }
+
+  return (
+    <Dialog open={true} onOpenChange={() => handleDismiss()} modal={true}>
+      <DialogContent showCloseButton={true} className="sm:max-w-md">
+        <DialogHeader>
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg bg-red-500/15">
+            <div className="relative">
+              <Icon className="h-8 w-8 text-red-400" />
+              <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-red-500/30 bg-red-500/60" />
+            </div>
+          </div>
+          <DialogTitle className="text-center text-2xl font-bold text-red-400">
+            {content.title}
+          </DialogTitle>
+          <DialogDescription className="text-center text-base">
+            {content.description}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="my-4 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+          <p className="text-muted-foreground text-center text-sm">{getInfoBoxMessage(reason)}</p>
+        </div>
+
+        <DialogFooter className="flex-col gap-3 sm:flex-col">
+          <Button onClick={handleCta} variant="primary" className="w-full py-3 font-semibold">
+            {content.cta}
+          </Button>
+          <p className="text-muted-foreground text-center text-xs">
+            {reason === 'past_due_grace_exceeded'
+              ? "You'll be redirected to Stripe to update your payment method"
+              : "You'll be redirected to Stripe to complete your purchase"}
+          </p>
+          <Button
+            variant="link"
+            onClick={handleDismiss}
+            className="text-muted-foreground hover:text-foreground w-full"
+          >
+            Go to Dashboard
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

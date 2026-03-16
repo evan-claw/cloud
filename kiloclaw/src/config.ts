@@ -45,6 +45,10 @@ export const DEFAULT_FLY_REGION = 'dfw,ewr,iad,lax,sjc,eu';
 // Alarm cadence by instance status
 /** Running machines: fast health checks */
 export const ALARM_INTERVAL_RUNNING_MS = 5 * 60 * 1000; // 5 min
+/** Starting: wait for start() to complete and reconcile quickly */
+export const ALARM_INTERVAL_STARTING_MS = 60 * 1000; // 1 min
+/** Maximum time to stay in 'starting' before falling back to 'stopped' */
+export const STARTING_TIMEOUT_MS = 5 * 60 * 1000; // 5 min
 /** Destroying: retry pending deletes quickly */
 export const ALARM_INTERVAL_DESTROYING_MS = 60 * 1000; // 1 min
 /** Provisioned/stopped: slow drift detection */
@@ -67,3 +71,20 @@ export const HEALTH_PROBE_INTERVAL_MS = 3_000;
 
 /** Auto-destroy provisioned instances that never started after this duration */
 export const STALE_PROVISION_THRESHOLD_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/** Proactive API key refresh: default trigger when key expires within this window. */
+export const PROACTIVE_REFRESH_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+
+/**
+ * Read the proactive refresh threshold from an env override, falling back to
+ * the hardcoded default. The env var is in hours for ease of use in wrangler vars.
+ */
+export function getProactiveRefreshThresholdMs(envOverrideHours?: string): number {
+  if (envOverrideHours) {
+    const hours = Number(envOverrideHours);
+    if (!Number.isNaN(hours) && hours > 0) {
+      return hours * 60 * 60 * 1000;
+    }
+  }
+  return PROACTIVE_REFRESH_THRESHOLD_MS;
+}

@@ -119,7 +119,7 @@ export type MachineSize = {
 export type PlatformStatusResponse = {
   userId: string | null;
   sandboxId: string | null;
-  status: 'provisioned' | 'running' | 'stopped' | 'destroying' | null;
+  status: 'provisioned' | 'starting' | 'running' | 'stopped' | 'destroying' | null;
   provisionedAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;
@@ -136,6 +136,7 @@ export type PlatformStatusResponse = {
   trackedImageTag: string | null;
   trackedImageDigest: string | null;
   googleConnected: boolean;
+  gmailNotificationsEnabled: boolean;
 };
 
 /** Response from GET /api/platform/debug-status (internal/admin only). */
@@ -241,6 +242,11 @@ export type GoogleCredentialsInput = {
 /** Response from POST/DELETE /api/platform/google-credentials */
 export type GoogleCredentialsResponse = {
   googleConnected: boolean;
+};
+
+/** Response from POST/DELETE /api/platform/gmail-notifications */
+export type GmailNotificationsResponse = {
+  gmailNotificationsEnabled: boolean;
 };
 
 /** Combined status + gateway token returned by tRPC getStatus */

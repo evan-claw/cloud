@@ -9,12 +9,16 @@ import {
   handleWebSocketUpgrade,
 } from './proxy';
 import { createSupervisor } from './supervisor';
+import type { Supervisor } from './supervisor';
 import { registerHealthRoute } from './routes/health';
 import { registerGatewayRoutes } from './routes/gateway';
 import { registerConfigRoutes } from './routes/config';
+import { registerEnvRoutes } from './routes/env';
+import { registerGmailPushRoute } from './routes/gmail-push';
 import { CONTROLLER_COMMIT, CONTROLLER_VERSION } from './version';
 import { writeKiloCliConfig } from './kilo-cli-config';
 import { writeGogCredentials } from './gog-credentials';
+import { startWatchRenewal, stopWatchRenewal } from './gmail-watch-renewal';
 
 export type RuntimeConfig = {
   port: number;
@@ -131,13 +135,56 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   }
 
   const supervisor = createSupervisor({
-    gatewayArgs: config.gatewayArgs,
+    args: ['gateway', ...config.gatewayArgs],
   });
+
+  let gmailWatchSupervisor: Supervisor | null = null;
+  let googleAccountEmail: string | null = null;
+  const hasGogCredentials = Boolean(env.KILOCLAW_GOG_CONFIG_TARBALL);
+
+  if (hasGogCredentials) {
+    const email = env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL;
+    const hooksToken = env.KILOCLAW_HOOKS_TOKEN;
+    if (!email || !hooksToken) {
+      console.warn(
+        `[controller] KILOCLAW_GOG_CONFIG_TARBALL present but missing: ${!email ? 'KILOCLAW_GOOGLE_ACCOUNT_EMAIL' : ''} ${!hooksToken ? 'KILOCLAW_HOOKS_TOKEN' : ''}, skipping gmail watch`
+      );
+    } else {
+      googleAccountEmail = email;
+      gmailWatchSupervisor = createSupervisor({
+        command: 'gog',
+        args: [
+          'gmail',
+          'watch',
+          'serve',
+          '--account',
+          googleAccountEmail,
+          '--bind',
+          '127.0.0.1',
+          '--port',
+          '3002',
+          '--path',
+          '/gmail-pubsub',
+          '--token',
+          config.expectedToken,
+          '--hook-url',
+          `http://127.0.0.1:3001/hooks/gmail`,
+          '--hook-token',
+          hooksToken,
+          '--include-body',
+          '--max-bytes',
+          '20000',
+        ],
+      });
+    }
+  }
 
   const app = new Hono();
   registerHealthRoute(app, supervisor, config.expectedToken);
   registerGatewayRoutes(app, supervisor, config.expectedToken);
   registerConfigRoutes(app, supervisor, config.expectedToken);
+  registerEnvRoutes(app, supervisor, config.expectedToken);
+  registerGmailPushRoute(app, gmailWatchSupervisor, config.expectedToken);
   app.all(
     '*',
     createHttpProxy({
@@ -170,6 +217,11 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
   });
 
   await supervisor.start();
+  if (gmailWatchSupervisor && googleAccountEmail) {
+    await gmailWatchSupervisor.start();
+    startWatchRenewal(googleAccountEmail);
+    console.log('[controller] Gmail watch process started');
+  }
 
   await new Promise<void>(resolve => {
     server.listen(config.port, '0.0.0.0', () => {
@@ -188,7 +240,10 @@ export async function startController(env: NodeJS.ProcessEnv = process.env): Pro
     shuttingDown = true;
     console.log(`[controller] Received ${signal}, shutting down`);
 
-    await supervisor.shutdown(signal);
+    stopWatchRenewal();
+    await Promise.all(
+      [supervisor.shutdown(signal), gmailWatchSupervisor?.shutdown(signal)].filter(Boolean)
+    );
     await new Promise<void>(resolve => {
       server.close(() => resolve());
     });

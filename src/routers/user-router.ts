@@ -4,7 +4,8 @@ import { createAccountLinkingSession } from '@/lib/account-linking-session';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { assertNoTrpcError, successResult } from '@/lib/maybe-result';
-import { db } from '@/lib/drizzle';
+import { db, readDb } from '@/lib/drizzle';
+import { timedUsageQuery } from '@/lib/usage-query';
 import {
   kilocode_users,
   microdollar_usage,
@@ -158,15 +159,24 @@ export const userRouter = createTRPCRouter({
         );
       }
 
-      // Query aggregated autocomplete usage
-      const result = await db
-        .select({
-          total_cost: sql<number>`COALESCE(SUM(${microdollar_usage.cost}), 0)::float`,
-          request_count: sql<number>`COUNT(*)::float`,
-          total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
-        })
-        .from(microdollar_usage)
-        .where(whereClause);
+      const result = await timedUsageQuery(
+        {
+          db: readDb,
+          route: 'user.getAutocompleteMetrics',
+          queryLabel: 'user_autocomplete_aggregate',
+          scope: 'user',
+          period: null,
+        },
+        tx =>
+          tx
+            .select({
+              total_cost: sql<number>`COALESCE(SUM(${microdollar_usage.cost}), 0)::float`,
+              request_count: sql<number>`COUNT(*)::float`,
+              total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
+            })
+            .from(microdollar_usage)
+            .where(whereClause)
+      );
 
       const metrics = result[0] || { total_cost: 0, request_count: 0, total_tokens: 0 };
 
@@ -285,6 +295,24 @@ export const userRouter = createTRPCRouter({
       .update(kilocode_users)
       .set({ completed_welcome_form: true })
       .where(eq(kilocode_users.id, ctx.user.id));
+    return successResult();
+  }),
+
+  submitCustomerSource: baseProcedure
+    .input(z.object({ source: z.string().trim().min(1).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      await db
+        .update(kilocode_users)
+        .set({ customer_source: input.source })
+        .where(eq(kilocode_users.id, ctx.user.id));
+      return successResult();
+    }),
+
+  skipCustomerSource: baseProcedure.mutation(async ({ ctx }) => {
+    await db
+      .update(kilocode_users)
+      .set({ customer_source: '' })
+      .where(and(eq(kilocode_users.id, ctx.user.id), isNull(kilocode_users.customer_source)));
     return successResult();
   }),
 

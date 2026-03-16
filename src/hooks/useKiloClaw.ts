@@ -91,12 +91,19 @@ export function useKiloClawMutations() {
     });
   };
 
+  const invalidateStatusAndBilling = async () => {
+    await invalidateStatus();
+    await queryClient.invalidateQueries({
+      queryKey: trpc.kiloclaw.getBillingStatus.queryKey(),
+    });
+  };
+
   return {
     start: useMutation(trpc.kiloclaw.start.mutationOptions({ onSuccess: invalidateStatus })),
     stop: useMutation(trpc.kiloclaw.stop.mutationOptions({ onSuccess: invalidateStatus })),
     destroy: useMutation(trpc.kiloclaw.destroy.mutationOptions({ onSuccess: invalidateStatus })),
     provision: useMutation(
-      trpc.kiloclaw.provision.mutationOptions({ onSuccess: invalidateStatus })
+      trpc.kiloclaw.provision.mutationOptions({ onSuccess: invalidateStatusAndBilling })
     ),
     patchConfig: useMutation(
       trpc.kiloclaw.patchConfig.mutationOptions({ onSuccess: invalidateStatus })
@@ -211,6 +218,9 @@ export function useKiloClawMutations() {
     ),
     disconnectGoogle: useMutation(
       trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus })
+    ),
+    setGmailNotifications: useMutation(
+      trpc.kiloclaw.setGmailNotifications.mutationOptions({ onSuccess: invalidateStatus })
     ),
   };
 }

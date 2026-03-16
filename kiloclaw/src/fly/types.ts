@@ -109,16 +109,35 @@ export type VolumeComputeHint = {
   memory_mb?: number;
 };
 
-export type CreateVolumeRequest = {
+type CreateVolumeBaseRequest = {
   name: string;
   region: string;
-  size_gb: number;
   snapshot_retention?: number;
-  /** Fork an existing volume. Creates a copy on a different host/region. */
-  source_volume_id?: string;
   /** Expected machine spec — helps Fly pick a host with capacity. */
   compute?: VolumeComputeHint;
 };
+
+type CreateFreshVolumeRequest = {
+  size_gb: number;
+  source_volume_id?: never;
+};
+
+type CreateForkedVolumeRequest = {
+  /** Fork an existing volume. Creates a copy on a different host/region. */
+  source_volume_id: string;
+  /**
+   * Fly rejects size_gb when source_volume_id is set.
+   * Forked volume size is inherited from the source volume.
+   */
+  size_gb?: never;
+};
+
+export type CreateVolumeRequest =
+  | (CreateVolumeBaseRequest & CreateFreshVolumeRequest)
+  | (CreateVolumeBaseRequest & CreateForkedVolumeRequest);
+
+export type CreateVolumeRequestWithoutRegion = Omit<CreateVolumeBaseRequest, 'region'> &
+  (CreateFreshVolumeRequest | CreateForkedVolumeRequest);
 
 // -- Volume snapshot types --
 

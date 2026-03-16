@@ -5,6 +5,7 @@
 import {
   KILO_AUTO_BALANCED_MODEL,
   KILO_AUTO_FREE_MODEL,
+  KILO_AUTO_FREE_MODEL_DEPRECATED,
   KILO_AUTO_FRONTIER_MODEL,
 } from '@/lib/kilo-auto-model';
 import {
@@ -27,9 +28,11 @@ export const preferredModels = [
   KILO_AUTO_BALANCED_MODEL.id,
   KILO_AUTO_FREE_MODEL.id,
   'nvidia/nemotron-3-super-120b-a12b:free',
-  minimax_m25_free_model.is_enabled ? minimax_m25_free_model.public_id : 'minimax/minimax-m2.5',
-  kimi_k25_free_model.is_enabled ? kimi_k25_free_model.public_id : 'moonshotai/kimi-k2.5',
-  giga_potato_thinking_model.is_enabled ? giga_potato_thinking_model.public_id : null,
+  minimax_m25_free_model.status === 'public'
+    ? minimax_m25_free_model.public_id
+    : 'minimax/minimax-m2.5',
+  kimi_k25_free_model.status === 'public' ? kimi_k25_free_model.public_id : 'moonshotai/kimi-k2.5',
+  giga_potato_thinking_model.status === 'public' ? giga_potato_thinking_model.public_id : null,
   'arcee-ai/trinity-large-preview:free',
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -41,8 +44,9 @@ export const preferredModels = [
 
 export function isFreeModel(model: string): boolean {
   return (
-    kiloFreeModels.some(m => m.public_id === model && m.is_enabled) ||
+    isKiloFreeModel(model) ||
     model === KILO_AUTO_FREE_MODEL.id ||
+    model === KILO_AUTO_FREE_MODEL_DEPRECATED ||
     (model ?? '').endsWith(':free') ||
     model === 'openrouter/free' ||
     isOpenRouterStealthModel(model ?? '')
@@ -50,16 +54,16 @@ export function isFreeModel(model: string): boolean {
 }
 
 export function isKiloFreeModel(model: string): boolean {
-  return kiloFreeModels.some(m => m.public_id === model && m.is_enabled);
+  return kiloFreeModels.some(m => m.public_id === model && m.status !== 'disabled');
 }
 
 export function isDataCollectionRequiredOnKiloCodeOnly(model: string): boolean {
-  return kiloFreeModels.some(m => m.public_id === model && m.is_enabled);
+  return kiloFreeModels.some(m => m.public_id === model && m.status !== 'disabled');
 }
 
 export const kiloFreeModels = [
   // Please do not remove models from this list immediately.
-  // Instead, set is_enabled to false first
+  // Instead, set status to 'disabled' first
   // and only remove when very few users are requesting it.
   corethink_free_model,
   giga_potato_model,
@@ -81,5 +85,5 @@ function isOpenRouterStealthModel(model: string): boolean {
 }
 
 export function isDeadFreeModel(model: string): boolean {
-  return !!kiloFreeModels.find(m => m.public_id === model && !m.is_enabled);
+  return !!kiloFreeModels.find(m => m.public_id === model && m.status === 'disabled');
 }

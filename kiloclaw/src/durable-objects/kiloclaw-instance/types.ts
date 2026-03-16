@@ -50,6 +50,7 @@ export type InstanceMutableState = {
   channels: PersistedState['channels'];
   googleCredentials: GoogleCredentials | null;
   provisionedAt: number | null;
+  startingAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;
   flyAppName: string | null;
@@ -72,6 +73,9 @@ export type InstanceMutableState = {
   lastDestroyErrorAt: number | null;
   lastBoundMachineRecoveryAt: number | null;
   instanceFeatures: string[];
+  gmailNotificationsEnabled: boolean;
+  gmailLastHistoryId: string | null;
+  gmailPushOidcEmail: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };
