@@ -1236,27 +1236,57 @@ describe('createNewMachine 409 recovery', () => {
 
     // createMachine throws 409 with machine ID in the body
     (flyClient.createMachine as Mock).mockRejectedValue(
-      new FlyApiError('conflict', 409, 'already_exists machine ID abc123def')
+      new FlyApiError('conflict', 409, 'already_exists machine ID e82d3d7b44d987')
     );
     // getMachine for startExistingMachine
     (flyClient.getMachine as Mock).mockResolvedValue({
-      id: 'abc123def',
+      id: 'e82d3d7b44d987',
       state: 'stopped',
       region: 'iad',
       config: { env: {}, guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
     });
-    (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'abc123def' });
+    (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
     (flyClient.waitForState as Mock).mockResolvedValue(undefined);
     (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
 
     await instance.start('user-1');
 
     // Should have adopted the machine ID from the 409 body
-    expect(storage._store.get('flyMachineId')).toBe('abc123def');
+    expect(storage._store.get('flyMachineId')).toBe('e82d3d7b44d987');
     // Should NOT have called createMachine a second time
     expect(flyClient.createMachine).toHaveBeenCalledTimes(1);
     // Should have started the existing machine
-    expect(flyClient.getMachine).toHaveBeenCalledWith(expect.anything(), 'abc123def');
+    expect(flyClient.getMachine).toHaveBeenCalledWith(expect.anything(), 'e82d3d7b44d987');
+    // Full state transition should complete
+    expect(storage._store.get('status')).toBe('running');
+  });
+
+  it('persists flyMachineId even when startExistingMachine throws after adoption', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyMachineId: null });
+
+    (flyClient.createMachine as Mock).mockRejectedValue(
+      new FlyApiError('conflict', 409, 'already_exists machine ID e82d3d7b44d987')
+    );
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'e82d3d7b44d987',
+      state: 'stopped',
+      region: 'iad',
+      config: { env: {}, guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+    (flyClient.updateMachine as Mock).mockResolvedValue({ id: 'e82d3d7b44d987' });
+    // waitForState fails after adoption
+    (flyClient.waitForState as Mock).mockRejectedValue(new Error('timeout waiting for started'));
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1' });
+
+    await expect(instance.start('user-1')).rejects.toThrow('timeout waiting for started');
+
+    // flyMachineId is durably written before startExistingMachine runs (per the
+    // "Machine ID persisted before waiting" invariant), so the reconciliation alarm
+    // can retry on the next cycle.
+    expect(storage._store.get('flyMachineId')).toBe('e82d3d7b44d987');
+    // status should not have advanced to 'running'
+    expect(storage._store.get('status')).toBe('stopped');
   });
 
   it('logs and re-throws when 409 body has already_exists but no machine ID', async () => {
@@ -1308,6 +1338,7 @@ describe('createNewMachine 409 recovery', () => {
 
     // Machine ID should not have been set (stays null from seed)
     expect(storage._store.get('flyMachineId')).toBeNull();
+    expect(storage._store.get('status')).toBe('stopped');
   });
 });
 

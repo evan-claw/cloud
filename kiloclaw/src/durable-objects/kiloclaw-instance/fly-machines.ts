@@ -249,7 +249,7 @@ export async function createNewMachine(
       } else {
         console.error(
           '[DO] 409 already_exists but could not extract machine ID from body:',
-          err.body.slice(0, 500)
+          err.body
         );
       }
     }
