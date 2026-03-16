@@ -100,9 +100,9 @@ export function createConnectionManager(
   callbacks: ConnectionCallbacks
 ): ConnectionManager {
   let ingestWs: WebSocket | null = null;
-  let eventSubscriptionAborted = false;
   let eventSubscriptionActive = false;
   let eventSubscriptionGeneration = 0;
+  let eventSubscriptionAbort: AbortController | null = null;
 
   let closedByUs = false;
   let reconnecting = false;
@@ -278,10 +278,15 @@ export function createConnectionManager(
    * Replaces the old SSE consumer with a typed event stream from the SDK.
    */
   function startEventSubscription(): void {
+    // Abort the previous subscription's HTTP stream (if any) before starting
+    // a new one.  This ensures the old `for await` loop unblocks immediately
+    // instead of lingering until the next server-sent event arrives.
+    eventSubscriptionAbort?.abort();
+
     const myGeneration = ++eventSubscriptionGeneration;
-    eventSubscriptionAborted = false;
     eventSubscriptionActive = true;
     const abortController = new AbortController();
+    eventSubscriptionAbort = abortController;
 
     // Store connections in state for external reference
     if (ingestWs) {
@@ -291,7 +296,9 @@ export function createConnectionManager(
 
     void (async () => {
       try {
-        const result = await config.kiloClient.sdkClient.event.subscribe();
+        const result = await config.kiloClient.sdkClient.event.subscribe({
+          signal: abortController.signal,
+        });
         if (!result.stream) {
           logToFile('No event stream returned from SDK');
           eventSubscriptionActive = false;
@@ -302,7 +309,7 @@ export function createConnectionManager(
         logToFile('SDK event subscription started');
 
         for await (const event of result.stream) {
-          if (eventSubscriptionAborted || myGeneration !== eventSubscriptionGeneration) break;
+          if (abortController.signal.aborted || myGeneration !== eventSubscriptionGeneration) break;
 
           // eventType is `string` so we can match untyped events like server.heartbeat
           const eventType: string = event.type ?? '';
@@ -404,11 +411,11 @@ export function createConnectionManager(
         }
 
         logToFile('SDK event stream ended');
-        if (!eventSubscriptionAborted && myGeneration === eventSubscriptionGeneration) {
+        if (!abortController.signal.aborted && myGeneration === eventSubscriptionGeneration) {
           callbacks.onDisconnect('SDK event stream ended');
         }
       } catch (err) {
-        if (!eventSubscriptionAborted && myGeneration === eventSubscriptionGeneration) {
+        if (!abortController.signal.aborted && myGeneration === eventSubscriptionGeneration) {
           const msg = err instanceof Error ? err.message : String(err);
           logToFile(`SDK event stream error: ${msg}`);
           callbacks.onDisconnect(`SDK event stream error: ${msg}`);
@@ -513,8 +520,10 @@ export function createConnectionManager(
       generation++;
       cancelReconnect();
 
-      // Stop event subscription
-      eventSubscriptionAborted = true;
+      // Stop event subscription — abort the HTTP stream so the for-await
+      // loop unblocks immediately instead of waiting for the next SSE event.
+      eventSubscriptionAbort?.abort();
+      eventSubscriptionAbort = null;
 
       // Close ingest WS
       if (ingestWs) {
@@ -543,7 +552,8 @@ export function createConnectionManager(
 
     reconnectEventSubscription: () => {
       logToFile('reconnecting SDK event subscription');
-      eventSubscriptionAborted = true;
+      // startEventSubscription() aborts the previous controller internally,
+      // so no separate abort call is needed here.
       startEventSubscription();
     },
   };
