@@ -2459,6 +2459,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const forkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(forkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled — check the set
     expect((regionsForkCall[2] as string[]).sort()).toEqual([
       'dfw',
@@ -2531,6 +2534,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
+    const updateForkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
+      .calls[0][1] as Record<string, unknown>;
+    expect(updateForkCreateVolumeCall.size_gb).toBeUndefined();
     // Regions are shuffled then deprioritized — check the set
     expect((regionsUpdateCall[2] as string[]).sort()).toEqual([
       'dfw',
