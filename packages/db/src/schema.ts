@@ -147,6 +147,11 @@ export const credit_transactions = pgTable(
 
 export type CreditTransaction = typeof credit_transactions.$inferSelect;
 
+/**
+ * When adding or removing PII/account-linked columns, update
+ * softDeleteUser() in src/lib/user.ts (and src/lib/user.test.ts) to
+ * null or reset the field.
+ */
 export const kilocode_users = pgTable(
   'kilocode_users',
   {
