@@ -268,8 +268,19 @@ export async function createNewMachine(
         // name registry still returns 409. If anything fails, we throw
         // and let the alarm retry; flyMachineId is already persisted.
         const adopted = await fly.getMachine(flyConfig, existingId);
+
+        // Backfill machineSize from live config for legacy instances
+        // (mirrors startExistingMachine to avoid silent resize on start)
+        let adoptedMachineConfig = machineConfig;
+        if (state.machineSize === null && adopted.config?.guest) {
+          const { cpus, memory_mb, cpu_kind } = adopted.config.guest;
+          state.machineSize = { cpus, memory_mb, cpu_kind };
+          await ctx.storage.put(storageUpdate({ machineSize: state.machineSize }));
+          adoptedMachineConfig = { ...machineConfig, guest: guestFromSize(state.machineSize) };
+        }
+
         if (adopted.state === 'stopped' || adopted.state === 'created') {
-          await fly.updateMachine(flyConfig, existingId, machineConfig, { minSecretsVersion });
+          await fly.updateMachine(flyConfig, existingId, adoptedMachineConfig, { minSecretsVersion });
           await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
         } else if (adopted.state !== 'started') {
           await fly.waitForState(flyConfig, existingId, 'started', STARTUP_TIMEOUT_SECONDS);
