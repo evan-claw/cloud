@@ -121,7 +121,11 @@ export function deriveLockReason(billing: ClawBillingStatus): ClawLockReason {
     }
     // Fallback: access is revoked but no specific expired state was matched.
     // This covers cases like an account with an instance but no trial/subscription/earlybird row.
-    return 'no_access';
+    // Only lock if the user has an instance — new trial-eligible users with no instance
+    // should see CreateInstanceCard, not a lock dialog.
+    if (billing.instance) {
+      return 'no_access';
+    }
   }
   return null;
 }
