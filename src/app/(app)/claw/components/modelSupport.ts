@@ -51,7 +51,11 @@ export function getSettingsModelOptions({
   isLoadingRunningVersion: boolean;
   hasRunningVersionError: boolean;
 }): ModelOption[] {
-  if (isRunning && (hasRunningVersionError || isLoadingRunningVersion)) {
+  if (isRunning && hasRunningVersionError) {
+    return [];
+  }
+
+  if (isRunning && isLoadingRunningVersion) {
     return [];
   }
 
@@ -78,12 +82,19 @@ export function getCreateModelOptions({
   isLoadingPin: boolean;
   isLoadingLatestVersion: boolean;
 }): ModelOption[] {
-  if (
-    hasPinLookupError ||
-    isLoadingPin ||
-    (hasPin && !pinnedOpenClawVersion) ||
-    (!hasPin && isLoadingLatestVersion)
-  ) {
+  if (hasPinLookupError) {
+    return [];
+  }
+
+  if (isLoadingPin) {
+    return [];
+  }
+
+  if (hasPin && !pinnedOpenClawVersion) {
+    return [];
+  }
+
+  if (!hasPin && isLoadingLatestVersion) {
     return [];
   }
 
