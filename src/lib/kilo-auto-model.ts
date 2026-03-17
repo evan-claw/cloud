@@ -43,7 +43,7 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
 export const KILO_AUTO_FREE_MODEL: AutoModel = {
   id: 'kilo-auto/free',
   name: 'Kilo Auto Free',
-  description: 'Automatically routes your request to a free model.',
+  description: 'Automatically routes your request to a free model with limited performance.',
   context_length: minimax_m25_free_model.context_length,
   max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
   prompt_price: '0',
