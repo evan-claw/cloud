@@ -250,6 +250,7 @@ if (projectChoice === '2') {
       }
     } else {
       console.error(`Failed to create project "${projectId}". It may already exist.`);
+      console.error('You may also need to accept the Google Cloud Terms of Service at https://console.cloud.google.com');
       console.error('Try a different name, or choose option 2 to use an existing project.');
       process.exit(1);
     }
