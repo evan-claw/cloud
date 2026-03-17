@@ -328,6 +328,8 @@ export function createIngestHandler(
         // Update heartbeat (debounced to every HEARTBEAT_DEBOUNCE_MS)
         const now = Date.now();
         if (now - attachment.lastHeartbeatUpdate >= HEARTBEAT_DEBOUNCE_MS) {
+          const gap = now - attachment.lastHeartbeatUpdate;
+          console.debug(`Heartbeat update for ${executionId}: gap=${gap}ms since last update`);
           attachment.lastHeartbeatUpdate = now;
           ws.serializeAttachment(attachment);
           void doContext.updateHeartbeat(executionId, now);
