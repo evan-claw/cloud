@@ -320,7 +320,10 @@ export function createConnectionManager(
           // Track activity
           state.updateActivity();
 
-          if (eventType === 'server.connected') continue;
+          if (eventType === 'server.connected') {
+            callbacks.onSseEvent?.();
+            continue;
+          }
 
           // Forward kilo's heartbeat as ingest heartbeat (replaces wrapper's custom heartbeat)
           if (eventType === 'server.heartbeat') {
