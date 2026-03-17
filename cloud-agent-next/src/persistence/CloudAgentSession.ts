@@ -89,6 +89,10 @@ const KILO_SERVER_IDLE_TIMEOUT_MS_DEFAULT = 15 * 60 * 1000;
  *  Covers the first few reconnection attempts (exponential backoff: 1s, 2s, 4s …). */
 const DISCONNECT_GRACE_MS = 10_000;
 
+/** Heartbeat age (60 s) at which we probe the ingest WebSocket.
+ *  Well below STALE_THRESHOLD_MS (600 s) so zombie sockets are caught early. */
+const HEARTBEAT_PROBE_AGE_MS = 60_000;
+
 /** DO storage key for persisting disconnect grace state across hibernation. */
 const DISCONNECT_GRACE_KEY = 'disconnect_grace';
 
@@ -1050,6 +1054,21 @@ export class CloudAgentSession extends DurableObject {
           error: 'Execution timeout - no heartbeat received',
           streamEventType: 'error',
         });
+      } else if (
+        execution.lastHeartbeat &&
+        now - execution.lastHeartbeat > HEARTBEAT_PROBE_AGE_MS
+      ) {
+        // Heartbeat is older than expected but not yet stale.
+        // Probe the ingest WebSocket to detect zombie connections early.
+        const heartbeatAge = now - execution.lastHeartbeat;
+        logger
+          .withFields({
+            sessionId: this.sessionId,
+            executionId: activeExecutionId,
+            heartbeatAge,
+          })
+          .debug('Heartbeat age exceeds probe threshold — probing ingest connection');
+        await this.probeIngestConnection(activeExecutionId);
       }
     }
 
@@ -1233,6 +1252,47 @@ export class CloudAgentSession extends DurableObject {
           error: error instanceof Error ? error.message : String(error),
         })
         .warn('Failed to reset sandbox sleep timer');
+    }
+  }
+
+  /**
+   * Probe the ingest WebSocket for a running execution to detect zombie
+   * connections.  Sends a `{ type: 'ping' }` command; if the socket is
+   * already dead, `ws.send()` throws and Cloudflare closes it, which fires
+   * `webSocketClose` → `startDisconnectGrace`.
+   *
+   * If no ingest sockets exist at all, starts the disconnect grace period
+   * immediately (the wrapper is already gone).
+   */
+  private async probeIngestConnection(executionId: ExecutionId): Promise<void> {
+    const sockets = this.ctx.getWebSockets(`ingest:${executionId}`);
+
+    if (sockets.length === 0) {
+      logger
+        .withFields({ sessionId: this.sessionId, executionId })
+        .warn('No ingest sockets found during probe — starting disconnect grace');
+      await this.startDisconnectGrace(executionId, 0, 'probe: no ingest sockets');
+      return;
+    }
+
+    logger
+      .withFields({ sessionId: this.sessionId, executionId, socketCount: sockets.length })
+      .debug('Probing ingest sockets with ping');
+
+    for (const ws of sockets) {
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (error) {
+        // send() threw — socket is dead. Cloudflare will fire webSocketClose
+        // which triggers startDisconnectGrace via the normal close path.
+        logger
+          .withFields({
+            sessionId: this.sessionId,
+            executionId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          .warn('Ping send failed — socket is dead');
+      }
     }
   }
 
