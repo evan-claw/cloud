@@ -57,6 +57,9 @@ export function WorkspaceFileEditor({
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      dragRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
   }, []);
 
