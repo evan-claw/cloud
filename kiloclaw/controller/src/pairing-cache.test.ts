@@ -811,6 +811,91 @@ describe('createPairingCache', () => {
     });
   });
 
+  describe('concurrent refresh race', () => {
+    it('stale refresh does not overwrite newer data (channel)', async () => {
+      // Simulate: slow refresh starts, then a fast post-approve refresh
+      // completes first with updated data.  The slow one must not clobber it.
+      let resolveSlowChannel!: (v: { stdout: string; stderr: string }) => void;
+      let callCount = 0;
+
+      const execImpl = vi.fn<ExecImpl>().mockImplementation((_cmd, args) => {
+        if (args[0] === 'pairing' && args[1] === 'list') {
+          callCount++;
+          if (callCount === 1) {
+            // First (slow) refresh — parks until we resolve manually
+            return new Promise(resolve => {
+              resolveSlowChannel = resolve;
+            });
+          }
+          // Second (fast) refresh — returns immediately with post-approve data
+          return Promise.resolve({
+            stdout: JSON.stringify({ requests: [] }),
+            stderr: '',
+          });
+        }
+        return Promise.resolve({ stdout: '{}', stderr: '' });
+      });
+
+      const readConfigImpl = vi.fn(() => ({
+        channels: { telegram: { enabled: true, botToken: 'tok' } },
+      }));
+
+      const { cache } = createTestHarness({ execImpl, readConfigImpl });
+
+      // Start slow refresh (does not await)
+      const slowPromise = cache.refreshChannelPairing();
+
+      // Start fast refresh while slow is in-flight
+      await cache.refreshChannelPairing();
+
+      // Fast refresh completed: cache should be empty (approved request gone)
+      expect(cache.getChannelPairing().requests).toHaveLength(0);
+
+      // Now let the slow refresh finish with stale pre-approve data
+      resolveSlowChannel({
+        stdout: JSON.stringify({ requests: [{ code: 'STALE', id: '99' }] }),
+        stderr: '',
+      });
+      await slowPromise;
+
+      // Cache must still reflect the newer (empty) result, NOT the stale data
+      expect(cache.getChannelPairing().requests).toHaveLength(0);
+    });
+
+    it('stale refresh does not overwrite newer data (device)', async () => {
+      let resolveSlowDevice!: (v: { stdout: string; stderr: string }) => void;
+      let callCount = 0;
+
+      const execImpl = vi.fn<ExecImpl>().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return new Promise(resolve => {
+            resolveSlowDevice = resolve;
+          });
+        }
+        return Promise.resolve({
+          stdout: JSON.stringify({ pending: [] }),
+          stderr: '',
+        });
+      });
+
+      const { cache } = createTestHarness({ execImpl });
+
+      const slowPromise = cache.refreshDevicePairing();
+      await cache.refreshDevicePairing();
+
+      expect(cache.getDevicePairing().requests).toHaveLength(0);
+
+      resolveSlowDevice({
+        stdout: JSON.stringify({ pending: [{ requestId: 'r1', deviceId: 'd1' }] }),
+        stderr: '',
+      });
+      await slowPromise;
+
+      expect(cache.getDevicePairing().requests).toHaveLength(0);
+    });
+  });
+
   describe('start idempotency', () => {
     it('calling start twice does not create duplicate timers', async () => {
       const execImpl = vi.fn<ExecImpl>().mockResolvedValue({

@@ -4390,6 +4390,30 @@ describe("status guards: 'starting'", () => {
 
     expect(storage._store.get('status')).toBe('destroying');
   });
+
+  it('background start() aborts if storage was fully deleted (post-deleteAll)', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-1',
+      region: 'iad',
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'machine-1', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    await instance.provision('user-1', {});
+    expect(storage._store.get('status')).toBe('starting');
+
+    // Simulate full storage wipe (as finalizeDestroyIfComplete does via deleteAll)
+    storage._store.clear();
+
+    // Let the background start() complete — status is undefined, should bail
+    await Promise.all(waitUntilPromises);
+
+    // Storage should remain empty — start() must not resurrect the instance
+    expect(storage._store.get('status')).toBeUndefined();
+  });
 });
 
 describe("alarm cadence: 'starting'", () => {
@@ -4585,5 +4609,57 @@ describe('reconcileStarting: transient Fly API errors respect starting timeout',
     // Should fall back to 'stopped' — transient error + timed out
     expect(storage._store.get('status')).toBe('stopped');
     expect(storage._store.get('startingAt')).toBeNull();
+  });
+});
+
+// ============================================================================
+// start: concurrent call guard
+// ============================================================================
+
+describe('start: concurrent calls do not create duplicate machines', () => {
+  it('second start() returns early when first is still in progress', async () => {
+    const { instance, storage } = createInstance();
+    // Provisioned instance with no flyMachineId — metadata recovery will "find" a machine.
+    await seedProvisioned(storage, { flyMachineId: null, status: 'stopped' });
+
+    // Make listMachines slow so the first start() is still in-flight when we
+    // fire the second one. Use a deferred promise so we control resolution.
+    let resolveListMachines!: (v: unknown[]) => void;
+    const listMachinesPromise = new Promise<unknown[]>(r => {
+      resolveListMachines = r;
+    });
+    (flyClient.listMachines as Mock).mockReturnValue(listMachinesPromise);
+
+    // Fire the first start() — it will block inside attemptMetadataRecovery
+    const firstStart = instance.start('user-1');
+
+    // Give it a microtask tick so it enters the await
+    await Promise.resolve();
+
+    // Fire the second start() — should return immediately due to the guard
+    const secondStart = instance.start('user-1');
+    await secondStart; // resolves immediately (no-op)
+
+    // Now let the first start() proceed: recovery finds a running machine
+    resolveListMachines([
+      fakeMachine({
+        id: 'recovered-machine',
+        state: 'started',
+        region: 'iad',
+        config: { image: 'test:latest', mounts: [{ volume: 'vol-1', path: '/root' }] },
+      }),
+    ]);
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      state: 'started',
+      config: { mounts: [{ volume: 'vol-1', path: '/root' }] },
+    });
+    (flyClient.getVolume as Mock).mockResolvedValue({ id: 'vol-1', region: 'iad' });
+
+    await firstStart;
+
+    // createMachine should NOT have been called — no duplicate
+    expect(flyClient.createMachine).not.toHaveBeenCalled();
+    // listMachines called exactly once (only from the first start)
+    expect(flyClient.listMachines).toHaveBeenCalledTimes(1);
   });
 });

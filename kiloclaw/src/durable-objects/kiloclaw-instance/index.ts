@@ -73,6 +73,7 @@ const CHANNEL_ENV_VARS = new Set(
 
 export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private s: InstanceMutableState = createMutableState();
+  private startInProgress = false;
 
   // Kept as `loadState` for backward compat with tests that cast to access private methods.
   private async loadState(): Promise<void> {
@@ -587,6 +588,23 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   // ── Lifecycle ───────────────────────────────────────────────────────
 
   async start(userId?: string): Promise<void> {
+    // Guard against concurrent start() calls — two overlapping invocations
+    // (e.g. startAsync via waitUntil + a direct RPC start) can both see
+    // flyMachineId as null and each create a Fly machine, orphaning one.
+    if (this.startInProgress) {
+      console.warn('[DO] start: already in progress, skipping duplicate call');
+      return;
+    }
+    this.startInProgress = true;
+
+    try {
+      await this._startInner(userId);
+    } finally {
+      this.startInProgress = false;
+    }
+  }
+
+  private async _startInner(userId?: string): Promise<void> {
     await this.loadState();
 
     if (this.s.status === 'destroying') {
@@ -614,7 +632,17 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // If the DO has identity but lost its machine ID, try to recover it
     // from Fly metadata before creating a duplicate machine.
     if (!this.s.flyMachineId) {
-      await attemptMetadataRecovery(flyConfig, this.ctx, this.s, 'start_recovery');
+      const recovered = await attemptMetadataRecovery(
+        flyConfig,
+        this.ctx,
+        this.s,
+        'start_recovery'
+      );
+      if (!recovered && !this.s.flyMachineId) {
+        throw new Error(
+          'Metadata recovery failed; aborting start to avoid creating a duplicate machine'
+        );
+      }
     }
 
     await flyMachines.ensureVolume(flyConfig, this.ctx, this.s, this.env, 'start');
@@ -770,7 +798,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // start() was running in the background (via startAsync/waitUntil), bail out
     // so teardown wins. We bypass loadState() because it no-ops when already loaded.
     const currentStatus = await this.ctx.storage.get('status');
-    if (currentStatus === 'destroying') {
+    if (!currentStatus || currentStatus === 'destroying') {
       console.warn('[DO] start: instance was destroyed while starting, aborting');
       return;
     }

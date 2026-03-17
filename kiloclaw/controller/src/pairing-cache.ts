@@ -127,8 +127,15 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Generation counters prevent stale concurrent refreshes from overwriting
+  // newer data.  Each refresh captures the counter at start; if another
+  // refresh bumps it before this one finishes, the stale result is discarded.
+  let channelGeneration = 0;
+  let deviceGeneration = 0;
+
   const refreshChannelPairing = async (): Promise<void> => {
     if (stopped) return;
+    const gen = ++channelGeneration;
     let channels: string[];
     try {
       const config = readConfigImpl();
@@ -139,7 +146,9 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
     }
 
     if (channels.length === 0) {
-      channelCache = { requests: [], lastUpdated: nowImpl() };
+      if (gen === channelGeneration) {
+        channelCache = { requests: [], lastUpdated: nowImpl() };
+      }
       return;
     }
 
@@ -188,7 +197,9 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
     }
 
     if (anySuccess) {
-      channelCache = { requests: allRequests, lastUpdated: nowImpl() };
+      if (gen === channelGeneration) {
+        channelCache = { requests: allRequests, lastUpdated: nowImpl() };
+      }
     } else {
       console.warn('[pairing-cache] channel refresh: all channels failed, cache not updated');
     }
@@ -196,6 +207,7 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
 
   const refreshDevicePairing = async (): Promise<void> => {
     if (stopped) return;
+    const gen = ++deviceGeneration;
     try {
       const { stdout } = await execImpl(OPENCLAW_BIN, ['devices', 'list', '--json']);
       const parsed: unknown = JSON.parse(stdout.trim());
@@ -216,7 +228,9 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
         })
         .filter(req => req.requestId !== '' && req.deviceId !== '');
 
-      deviceCache = { requests, lastUpdated: nowImpl() };
+      if (gen === deviceGeneration) {
+        deviceCache = { requests, lastUpdated: nowImpl() };
+      }
     } catch (err) {
       console.error(`[pairing-cache] device refresh failed: ${errorMessage(err)}`);
     }
