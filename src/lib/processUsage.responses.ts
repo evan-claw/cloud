@@ -13,6 +13,7 @@ import type {
   VercelProviderMetaData,
 } from '@/lib/processUsage.types';
 import type { GatewayResponsesRequest } from '@/lib/providers/openrouter/types';
+import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
 
 // OpenRouter adds cost fields to the standard Responses API usage object.
 // ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
@@ -38,10 +39,6 @@ type ResponsesApiStreamEvent = {
   response?: ResponsesApiResponse;
   error?: { message: string; code: string };
 };
-
-// For BYOK (Bring Your Own Key) requests, OpenRouter only reports 5% of the actual cost.
-// See processUsage.ts for the authoritative constant and rationale.
-const OPENROUTER_BYOK_COST_MULTIPLIER = 20.0;
 
 export function processResponsesApiUsage(
   usage: ResponsesApiUsage | null | undefined,
