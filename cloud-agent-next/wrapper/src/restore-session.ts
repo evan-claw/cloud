@@ -49,8 +49,9 @@ function tryUnlink(filePath: string): void {
 // deduplication by file path. Runs as a subprocess so the full parsed snapshot
 // is never loaded into the main process's heap — jq's C-native parser uses
 // ~half the memory of a V8 heap.
+// `objects` filters out non-object .summary values (e.g. compaction messages set summary=true)
 const JQ_EXTRACT_DIFFS_FILTER =
-  'reduce (.messages[]?.info.summary.diffs[]? // empty) as $d ({}; .[$d.file] = $d) | [.[]]';
+  'reduce (.messages[]?.info.summary | objects | .diffs[]? // empty) as $d ({}; .[$d.file] = $d) | [.[]]';
 
 /**
  * Extract last-write-wins diffs from a snapshot file via a jq subprocess so the

@@ -1,9 +1,9 @@
 import { api_request_log, type User } from '@kilocode/db/schema';
 import { db } from '@/lib/drizzle';
-import { KILO_ORGANIZATION_ID } from '@/lib/organizations/constants';
 import { logExceptInTest } from '@/lib/utils.server';
 import { after } from 'next/server';
 import type { GatewayRequest } from '@/lib/providers/openrouter/types';
+import { isKiloAffiliatedUser } from '@/lib/isKiloAffiliatedUser';
 
 export function handleRequestLogging(params: {
   clonedResponse: Response;
@@ -14,11 +14,7 @@ export function handleRequestLogging(params: {
   request: GatewayRequest;
 }) {
   const { clonedResponse, user, organization_id, provider, model, request } = params;
-  const isKiloEmployee =
-    user?.google_user_email.endsWith('@kilo.ai') ||
-    user?.google_user_email.endsWith('@kilocode.ai') ||
-    organization_id === KILO_ORGANIZATION_ID;
-  if (!isKiloEmployee) {
+  if (!isKiloAffiliatedUser(user, organization_id)) {
     return;
   }
   after(async () => {

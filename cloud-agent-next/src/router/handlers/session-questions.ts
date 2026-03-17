@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { getSandbox } from '@cloudflare/sandbox';
 import { logger, withLogTags } from '../../logger.js';
-import { generateSandboxId } from '../../sandbox-id.js';
+import { generateSandboxId, getSandboxNamespace } from '../../sandbox-id.js';
 import type { SessionId, SandboxId, Env } from '../../types.js';
 import { SessionService, fetchSessionMetadata } from '../../session-service.js';
 import { protectedProcedure } from '../auth.js';
@@ -23,8 +23,16 @@ async function resolveWrapperClient(opts: {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Session not found' });
   }
 
-  const sandboxId: SandboxId = await generateSandboxId(metadata.orgId, userId, metadata.botId);
-  const sandbox = getSandbox(env.Sandbox, sandboxId);
+  const sandboxId: SandboxId =
+    metadata.sandboxId ??
+    (await generateSandboxId(
+      env.PER_SESSION_SANDBOX_ORG_IDS,
+      metadata.orgId,
+      userId,
+      metadata.sessionId,
+      metadata.botId
+    ));
+  const sandbox = getSandbox(getSandboxNamespace(env, sandboxId), sandboxId);
 
   const wrapperInfo = await findWrapperForSession(sandbox, sessionId);
   if (!wrapperInfo) {

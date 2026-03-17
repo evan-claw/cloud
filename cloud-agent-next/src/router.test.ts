@@ -195,14 +195,20 @@ describe('router sessionId validation', () => {
     describe('format validation', () => {
       it('should generate sandboxId with org prefix for organization accounts', async () => {
         const { generateSandboxId } = await import('./sandbox-id.js');
-        const sandboxId = await generateSandboxId('org-123', 'user-456');
+        const sandboxId = await generateSandboxId(undefined, 'org-123', 'user-456', 's');
         expect(sandboxId).toMatch(/^org-[0-9a-f]{48}$/);
         expect(sandboxId.length).toBe(52);
       });
 
       it('should generate sandboxId with bot prefix when botId is provided', async () => {
         const { generateSandboxId } = await import('./sandbox-id.js');
-        const sandboxId = await generateSandboxId('org-123', 'user-456', 'reviewer');
+        const sandboxId = await generateSandboxId(
+          undefined,
+          'org-123',
+          'user-456',
+          's',
+          'reviewer'
+        );
         expect(sandboxId).toMatch(/^bot-[0-9a-f]{48}$/);
         expect(sandboxId.length).toBe(52);
       });
@@ -211,14 +217,14 @@ describe('router sessionId validation', () => {
     describe('personal accounts', () => {
       it('should generate sandboxId with usr prefix for personal accounts', async () => {
         const { generateSandboxId } = await import('./sandbox-id.js');
-        const sandboxId = await generateSandboxId(undefined, 'abc-123');
+        const sandboxId = await generateSandboxId(undefined, undefined, 'abc-123', 's');
         expect(sandboxId).toMatch(/^usr-[0-9a-f]{48}$/);
         expect(sandboxId.length).toBe(52);
       });
 
       it('should generate sandboxId with ubt prefix for personal bot accounts', async () => {
         const { generateSandboxId } = await import('./sandbox-id.js');
-        const sandboxId = await generateSandboxId(undefined, 'abc-123', 'reviewer');
+        const sandboxId = await generateSandboxId(undefined, undefined, 'abc-123', 's', 'reviewer');
         expect(sandboxId).toMatch(/^ubt-[0-9a-f]{48}$/);
         expect(sandboxId.length).toBe(52);
       });
@@ -229,8 +235,8 @@ describe('router sessionId validation', () => {
         const { generateSandboxId } = await import('./sandbox-id.js');
         const userId = 'same-user-id';
 
-        const orgSandboxId = await generateSandboxId('org-123', userId);
-        const personalSandboxId = await generateSandboxId(undefined, userId);
+        const orgSandboxId = await generateSandboxId(undefined, 'org-123', userId, 's');
+        const personalSandboxId = await generateSandboxId(undefined, undefined, userId, 's');
 
         expect(orgSandboxId).not.toBe(personalSandboxId);
         expect(orgSandboxId).toMatch(/^org-[0-9a-f]{48}$/);
@@ -282,6 +288,7 @@ describe('router sessionId validation', () => {
             request: {} as Request,
             env: {
               Sandbox: {} as TRPCContext['env']['Sandbox'],
+              SandboxSmall: {} as TRPCContext['env']['SandboxSmall'],
               CLOUD_AGENT_SESSION: {
                 idFromName: vi.fn((id: string) => ({ id })),
                 get: vi.fn(() => ({
@@ -395,6 +402,30 @@ describe('router sessionId validation', () => {
             expect(getSandbox).toHaveBeenCalledWith(
               mockContext.env.Sandbox,
               expect.stringMatching(/^bot-[0-9a-f]{48}$/)
+            );
+          });
+
+          it('should route per-session sandbox ID to SandboxSmall namespace', async () => {
+            const sessionId: SessionId = 'agent_22222222-3333-4444-5555-666666666666';
+            const perSessionSandboxId = 'ses-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6';
+            const metadata: CloudAgentSessionState = {
+              version: 123456789,
+              sessionId,
+              orgId: 'org-123',
+              userId: 'test-user-123',
+              timestamp: 123456789,
+              sandboxId: perSessionSandboxId,
+            };
+
+            vi.mocked(fetchSessionMetadata).mockResolvedValue(metadata);
+
+            const result = await caller.deleteSession({ sessionId });
+
+            expect(result).toEqual({ success: true });
+            // ses- prefixed sandbox IDs should route to SandboxSmall, not Sandbox
+            expect(getSandbox).toHaveBeenCalledWith(
+              mockContext.env.SandboxSmall,
+              perSessionSandboxId
             );
           });
         });
@@ -600,8 +631,8 @@ describe('router sessionId validation', () => {
         const userId = 'user-456';
         const botId = 'reviewer';
 
-        const userSandboxId = await generateSandboxId(orgId, userId);
-        const botSandboxId = await generateSandboxId(orgId, userId, botId);
+        const userSandboxId = await generateSandboxId(undefined, orgId, userId, 's');
+        const botSandboxId = await generateSandboxId(undefined, orgId, userId, 's', botId);
 
         expect(userSandboxId).not.toBe(botSandboxId);
         expect(userSandboxId).toMatch(/^org-[0-9a-f]{48}$/);
@@ -628,6 +659,7 @@ describe('router sessionId validation', () => {
           request: {} as Request,
           env: {
             Sandbox: {} as TRPCContext['env']['Sandbox'],
+            SandboxSmall: {} as TRPCContext['env']['SandboxSmall'],
             CLOUD_AGENT_SESSION: {
               idFromName: vi.fn((id: string) => ({ id })),
               get: vi.fn(() => ({

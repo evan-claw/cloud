@@ -42,8 +42,15 @@ export type SandboxInstance = ReturnType<typeof getSandbox>;
 /** Cloudflare Session instance for executing commands within a sandbox */
 export type { ExecutionSession };
 
-/** Unique identifier for a sandbox (container) per organizationId-userId pair, with optional bot suffix */
-export type SandboxId = `${string}__${string}` | `${string}__${string}__${string}`;
+/** Unique identifier for a sandbox (container). Covers hash-based prefixes, per-session IDs, and legacy `__`-delimited formats. */
+export type SandboxId =
+  | `org-${string}`
+  | `usr-${string}`
+  | `bot-${string}`
+  | `ubt-${string}`
+  | `ses-${string}`
+  | `${string}__${string}`
+  | `${string}__${string}__${string}`;
 
 /** Unique identifier for a session within a sandbox */
 export type SessionId = `agent_${string}`;
@@ -79,6 +86,8 @@ export type InterruptResult = {
 
 export type Env = {
   Sandbox: DurableObjectNamespace<Sandbox>;
+  /** Durable Object namespace for per-session sandbox containers (standard-2, experimental) */
+  SandboxSmall: DurableObjectNamespace<Sandbox>;
   /** Durable Object namespace for CloudAgentSession metadata (SQLite-backed) with RPC support */
   CLOUD_AGENT_SESSION: DurableObjectNamespace<CloudAgentSession>;
   /** Service binding for the session ingest worker */
@@ -139,6 +148,8 @@ export type Env = {
   GITHUB_APP_SLUG?: string;
   /** GitHub App bot user ID for git commit email (e.g., '240665456') */
   GITHUB_APP_BOT_USER_ID?: string;
+  /** Comma-separated org IDs that use per-session sandbox containers */
+  PER_SESSION_SANDBOX_ORG_IDS?: string;
 };
 
 /** tRPC context passed to all procedures */

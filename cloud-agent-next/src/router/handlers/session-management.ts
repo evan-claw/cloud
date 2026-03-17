@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { getSandbox } from '@cloudflare/sandbox';
 import { logger, withLogTags } from '../../logger.js';
-import { generateSandboxId } from '../../sandbox-id.js';
+import { generateSandboxId, getSandboxNamespace } from '../../sandbox-id.js';
 import type { SessionId, InterruptResult } from '../../types.js';
 import type { SandboxId } from '../../types.js';
 import type { AgentMode } from '../../schema.js';
@@ -61,15 +61,19 @@ export function createSessionManagementHandlers() {
               };
             }
 
-            const sandboxId: SandboxId = await generateSandboxId(
-              metadata.orgId,
-              userId,
-              metadata.botId
-            );
+            const sandboxId: SandboxId =
+              metadata.sandboxId ??
+              (await generateSandboxId(
+                env.PER_SESSION_SANDBOX_ORG_IDS,
+                metadata.orgId,
+                userId,
+                metadata.sessionId,
+                metadata.botId
+              ));
 
             logger.setTags({ sandboxId, orgId: metadata.orgId ?? '(personal)' });
 
-            const sandbox = getSandbox(env.Sandbox, sandboxId);
+            const sandbox = getSandbox(getSandboxNamespace(env, sandboxId), sandboxId);
 
             // Clean up workspace directories before deleting sandbox session
             // This prevents disk accumulation from abandoned sessions
@@ -175,15 +179,19 @@ export function createSessionManagementHandlers() {
               };
             }
 
-            const sandboxId: SandboxId = await generateSandboxId(
-              metadata.orgId,
-              userId,
-              metadata.botId
-            );
+            const sandboxId: SandboxId =
+              metadata.sandboxId ??
+              (await generateSandboxId(
+                env.PER_SESSION_SANDBOX_ORG_IDS,
+                metadata.orgId,
+                userId,
+                metadata.sessionId,
+                metadata.botId
+              ));
 
             logger.setTags({ sandboxId, orgId: metadata.orgId ?? '(personal)' });
 
-            const sandbox = getSandbox(env.Sandbox, sandboxId);
+            const sandbox = getSandbox(getSandboxNamespace(env, sandboxId), sandboxId);
 
             // Build session context for interrupt service
             const sessionService = new SessionService();
@@ -357,8 +365,16 @@ export function createSessionManagementHandlers() {
             }
           }
 
-          // Compute sandboxId for log correlation (uses same hash as execution)
-          const sandboxId = await generateSandboxId(metadata.orgId, userId, metadata.botId);
+          // Compute sandboxId for log correlation
+          const sandboxId =
+            metadata.sandboxId ??
+            (await generateSandboxId(
+              env.PER_SESSION_SANDBOX_ORG_IDS,
+              metadata.orgId,
+              userId,
+              metadata.sessionId,
+              metadata.botId
+            ));
 
           logger.setTags({ sandboxId, orgId: metadata.orgId ?? '(personal)' });
           logger.info('Session metadata retrieved successfully');
@@ -474,7 +490,7 @@ export function createSessionManagementHandlers() {
 
           logger.setTags({ sandboxId, orgId: sessionService.metadata?.orgId ?? '(personal)' });
 
-          const sandbox = getSandbox(env.Sandbox, sandboxId);
+          const sandbox = getSandbox(getSandboxNamespace(env, sandboxId), sandboxId);
 
           // Get or create a session to read files
           const context = sessionService.buildContext({

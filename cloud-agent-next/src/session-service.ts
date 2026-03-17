@@ -460,12 +460,18 @@ export class SessionService {
 
     this._metadata = fetchedMetadata;
 
-    // Reconstruct sandboxId using the hash-based format
-    const sandboxId: SandboxId = await generateSandboxId(
-      this._metadata.orgId,
-      userId,
-      this._metadata.botId
-    );
+    // Use the stored sandboxId when available (handles per-session sandboxes).
+    // Fall back to generating from orgId/userId/botId for old sessions that
+    // predate sandboxId storage.
+    const sandboxId: SandboxId =
+      this._metadata.sandboxId ??
+      (await generateSandboxId(
+        env.PER_SESSION_SANDBOX_ORG_IDS,
+        this._metadata.orgId,
+        userId,
+        sessionId,
+        this._metadata.botId
+      ));
 
     return sandboxId;
   }
@@ -1619,7 +1625,7 @@ export class SessionService {
     },
     existing?: CloudAgentSessionState
   ): Promise<void> {
-    const { orgId, userId, sessionId, botId, platform } = context;
+    const { orgId, userId, sessionId, botId, platform, sandboxId } = context;
     const doKey = `${userId}:${sessionId}`;
 
     // Build metadata, preserving prepared session fields from existing if provided
@@ -1633,6 +1639,7 @@ export class SessionService {
       userId,
       botId,
       platform,
+      sandboxId,
       timestamp: Date.now(),
       // Apply the new data (may override some existing fields, which is intentional)
       githubRepo: data.githubRepo,

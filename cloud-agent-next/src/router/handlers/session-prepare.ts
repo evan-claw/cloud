@@ -17,8 +17,7 @@ import {
   UpdateSessionInput,
   UpdateSessionOutput,
 } from '../schemas.js';
-import { generateSandboxId } from '../../sandbox-id.js';
-import type { SandboxId } from '../../types.js';
+import { generateSandboxId, getSandboxNamespace } from '../../sandbox-id.js';
 import {
   checkDiskAndCleanBeforeSetup,
   setupWorkspace,
@@ -100,9 +99,11 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       // 1. Generate new cloudAgentSessionId and sandboxId
       const cloudAgentSessionId = generateSessionId();
-      const sandboxId: SandboxId = await generateSandboxId(
+      const sandboxId = await generateSandboxId(
+        ctx.env.PER_SESSION_SANDBOX_ORG_IDS,
         input.kilocodeOrganizationId,
         ctx.userId,
+        cloudAgentSessionId,
         ctx.botId
       );
 
@@ -199,7 +200,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       // 3. Get sandbox
       logger.info('Getting sandbox');
-      const sandbox = getSandbox(ctx.env.Sandbox, sandboxId, {
+      const sandbox = getSandbox(getSandboxNamespace(ctx.env, sandboxId), sandboxId, {
         sleepAfter: SANDBOX_SLEEP_AFTER_SECONDS,
       });
 

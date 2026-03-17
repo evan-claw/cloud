@@ -132,7 +132,7 @@ export type CloudAgentSessionState = {
   /** Git branch name created for the session */
   branchName?: string;
   /** Sandbox ID where the session runs */
-  sandboxId?: string;
+  sandboxId?: SandboxId;
 };
 
 /**
@@ -189,6 +189,8 @@ export type PersistenceEnv = {
   R2_ATTACHMENTS_READONLY_ACCESS_KEY_ID?: string;
   R2_ATTACHMENTS_READONLY_SECRET_ACCESS_KEY?: string;
   R2_ATTACHMENTS_BUCKET?: string;
+  /** Comma-separated org IDs that use per-session sandbox containers */
+  PER_SESSION_SANDBOX_ORG_IDS?: string;
 };
 
 // Re-export commonly used types for convenience

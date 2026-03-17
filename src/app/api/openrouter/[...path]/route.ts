@@ -70,6 +70,7 @@ import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplic
 import type { MicrodollarUsageContext, PromptInfo } from '@/lib/processUsage.types';
 import { extractResponsesPromptInfo } from '@/lib/processUsage.responses';
 import { getMaxTokens, hasMiddleOutTransform } from '@/lib/providers/openrouter/request-helpers';
+import { isKiloAffiliatedUser } from '@/lib/isKiloAffiliatedUser';
 
 export const maxDuration = 800;
 
@@ -234,7 +235,10 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     user = maybeUser;
   }
 
-  if (requestBodyParsed.kind === 'responses' && !user.is_admin) {
+  if (
+    requestBodyParsed.kind === 'responses' &&
+    !isKiloAffiliatedUser(maybeUser, organizationId ?? null)
+  ) {
     return NextResponse.json(
       {
         error: {

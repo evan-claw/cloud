@@ -1,5 +1,6 @@
 import { getSandbox } from '@cloudflare/sandbox';
 import type { TRPCContext } from './types.js';
+import { getSandboxNamespace } from './sandbox-id.js';
 
 /**
  * Sets up a sandbox instance and invokes a callback.
@@ -14,6 +15,6 @@ export async function withSandbox<T>(
   sandboxId: string,
   fn: (sandbox: ReturnType<typeof getSandbox>) => Promise<T>
 ): Promise<T> {
-  const sandbox = getSandbox(ctx.env.Sandbox, sandboxId);
+  const sandbox = getSandbox(getSandboxNamespace(ctx.env, sandboxId), sandboxId);
   return await fn(sandbox);
 }

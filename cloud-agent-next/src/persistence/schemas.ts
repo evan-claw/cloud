@@ -1,5 +1,6 @@
 import * as z from 'zod';
 import { AgentModeSchema, Limits } from '../schema.js';
+import type { SandboxId } from '../types.js';
 
 /**
  * Schema for callback target configuration.
@@ -173,5 +174,12 @@ export const MetadataSchema = z.object({
   workspacePath: z.string().optional(),
   sessionHome: z.string().optional(),
   branchName: z.string().optional(),
-  sandboxId: z.string().optional(),
+  sandboxId: z
+    .string()
+    .refine(
+      s => /^(ses|org|usr|bot|ubt)-[0-9a-f]+$/.test(s) || s.includes('__'),
+      'Invalid sandboxId format'
+    )
+    .transform(s => s as SandboxId)
+    .optional(),
 });

@@ -48,12 +48,9 @@ import {
   parseResponsesMicrodollarUsageFromStream,
   parseResponsesMicrodollarUsageFromString,
 } from '@/lib/processUsage.responses';
+import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
 
 const posthogClient = PostHogClient();
-
-// For BYOK (Bring Your Own Key) requests, OpenRouter only reports 5% of the actual cost
-// because that's what they charge for the BYOK feature. Although we now use upstream_inference_cost, we still do some sanity checks.
-const OPENROUTER_BYOK_COST_MULTIPLIER = 20.0;
 
 export function extractPromptInfo(body: OpenRouterChatCompletionRequest): PromptInfo {
   try {
