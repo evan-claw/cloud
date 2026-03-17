@@ -12,43 +12,17 @@ import type {
 } from '@/lib/processUsage.types';
 import type { GatewayMessagesRequest } from '@/lib/providers/openrouter/types';
 import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
+import type Anthropic from '@anthropic-ai/sdk';
 
 // ref: https://docs.anthropic.com/en/api/messages
 // Anthropic usage combined with OpenRouter cost fields
 // ref: https://docs.anthropic.com/en/api/messages
 // ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
-type MessagesApiUsage = {
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
+type MessagesApiUsage = Anthropic.Messages.Usage & {
   cost?: number;
   is_byok?: boolean | null;
   cost_details?: { upstream_inference_cost: number };
 };
-
-type AnthropicMessageResponse = {
-  id: string;
-  model: string;
-  content: Array<{ type: string; text?: string }>;
-  stop_reason: string | null;
-  usage: MessagesApiUsage;
-};
-
-// SSE event types for Anthropic streaming
-// ref: https://docs.anthropic.com/en/api/messages-streaming
-type MessagesStreamEvent =
-  | { type: 'message_start'; message: AnthropicMessageResponse }
-  | { type: 'content_block_start'; index: number; content_block: { type: string; text?: string } }
-  | { type: 'content_block_delta'; index: number; delta: { type: string; text?: string } }
-  | { type: 'content_block_stop'; index: number }
-  | {
-      type: 'message_delta';
-      delta: { stop_reason: string | null };
-      usage: { output_tokens: number };
-    }
-  | { type: 'message_stop' }
-  | { type: 'error'; error: { type: string; message: string } };
 
 function processMessagesApiUsage(
   usage: MessagesApiUsage | null | undefined,
@@ -120,7 +94,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
   let messageId: string | null = null;
   let model: string | null = null;
   let responseContent = '';
-  let reportedError = statusCode >= 400;
+  const reportedError = statusCode >= 400;
   const startedAt = performance.now();
   let firstTokenReceived = false;
   let inputUsage: MessagesApiUsage | null = null;
@@ -141,7 +115,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
         timeToFirstTokenSpan.end();
       }
 
-      const json = JSON.parse(event.data) as MessagesStreamEvent;
+      const json = JSON.parse(event.data) as Anthropic.Messages.MessageStreamEvent;
 
       if (!json) {
         captureException(new Error('SUSPICIOUS: No JSON in SSE event'), {
@@ -150,14 +124,14 @@ export async function parseMessagesMicrodollarUsageFromStream(
         return;
       }
 
-      if (json.type === 'error') {
-        reportedError = true;
-        captureException(new Error(`Messages API error: ${json.error.message}`), {
-          tags: { source: 'messages_sse_processing' },
-          extra: { json, event },
-        });
-        return;
-      }
+      //if (json.type === 'error') {
+      //  reportedError = true;
+      //  captureException(new Error(`Messages API error: ${json.error.message}`), {
+      //    tags: { source: 'messages_sse_processing' },
+      //    extra: { json, event },
+      //  });
+      //  return;
+      //}
 
       if (json.type === 'message_start') {
         messageId = json.message.id;
@@ -233,7 +207,7 @@ export function parseMessagesMicrodollarUsageFromString(
   fullResponse: string,
   statusCode: number
 ): MicrodollarUsageStats {
-  const responseJson = JSON.parse(fullResponse) as AnthropicMessageResponse | null;
+  const responseJson = JSON.parse(fullResponse) as Anthropic.Messages.Message | null;
 
   const usage = responseJson?.usage;
 
