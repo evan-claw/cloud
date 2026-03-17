@@ -109,11 +109,12 @@ type SendParams = {
   to: string;
   templateName: TemplateName;
   templateVars: TemplateVars;
+  subjectOverride?: string;
 };
 
 export async function send(params: SendParams) {
   if (EMAIL_PROVIDER === 'mailgun') {
-    const subject = subjects[params.templateName];
+    const subject = params.subjectOverride ?? subjects[params.templateName];
     const html = renderTemplate(params.templateName, {
       ...params.templateVars,
       year: String(new Date().getFullYear()),

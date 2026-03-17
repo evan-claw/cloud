@@ -58,7 +58,8 @@ async function trySendEmail(
   emailType: string,
   templateName: TemplateName,
   templateVars: Record<string, string>,
-  summary: CronSummary
+  summary: CronSummary,
+  subjectOverride?: string
 ): Promise<boolean> {
   // Check if already sent (without inserting) by attempting the insert.
   // Insert first to claim the slot, send, then keep. If send fails, delete the row.
@@ -71,7 +72,7 @@ async function trySendEmail(
     return false;
   }
   try {
-    await sendEmail({ to: userEmail, templateName, templateVars });
+    await sendEmail({ to: userEmail, templateName, templateVars, subjectOverride });
   } catch (error) {
     // Send failed — remove the log row so we can retry on the next cron run
     await database
@@ -150,6 +151,7 @@ export async function runKiloClawBillingLifecycleCron(
         if (sent) summary.trial_warnings++;
       } else {
         // 5-day warning (idempotent — skipped if already sent)
+        const daysWord = daysRemaining === 1 ? 'Day' : 'Days';
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -157,7 +159,8 @@ export async function runKiloClawBillingLifecycleCron(
           'claw_trial_5d',
           'clawTrialEndingSoon',
           { days_remaining: String(daysRemaining), claw_url: clawUrl },
-          summary
+          summary,
+          `Your KiloClaw Trial Ends in ${daysRemaining} ${daysWord}`
         );
         if (sent) summary.trial_warnings++;
       }

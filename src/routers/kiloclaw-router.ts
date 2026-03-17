@@ -1045,7 +1045,7 @@ export const kiloclawRouter = createTRPCRouter({
             daysRemaining: sub.trial_ends_at
               ? Math.max(
                   0,
-                  Math.floor((new Date(sub.trial_ends_at).getTime() - now.getTime()) / 86_400_000)
+                  Math.ceil((new Date(sub.trial_ends_at).getTime() - now.getTime()) / 86_400_000)
                 )
               : 0,
             expired: sub.trial_ends_at ? new Date(sub.trial_ends_at) <= now : false,
