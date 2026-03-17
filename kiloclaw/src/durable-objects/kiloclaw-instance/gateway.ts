@@ -213,7 +213,7 @@ export function isErrorUnknownRoute(error: unknown): boolean {
   // masking genuine authentication failures.
   return (
     error instanceof GatewayControllerError &&
-    (error.status === 404 || error.code === 'controller_route_unavailable')
+    (error.code === 'controller_route_unavailable' || (error.status === 404 && !error.code))
   );
 }
 
