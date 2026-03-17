@@ -1097,19 +1097,19 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return gateway.replaceConfigOnMachine(this.s, this.env, config, etag);
   }
 
-  async getFileTree() {
+  async getFileTree(admin = false) {
     await this.loadState();
-    return gateway.getFileTree(this.s, this.env);
+    return gateway.getFileTree(this.s, this.env, admin);
   }
 
-  async readFile(filePath: string) {
+  async readFile(filePath: string, admin = false) {
     await this.loadState();
-    return gateway.readFile(this.s, this.env, filePath);
+    return gateway.readFile(this.s, this.env, filePath, admin);
   }
 
-  async writeFile(filePath: string, content: string, etag?: string) {
+  async writeFile(filePath: string, content: string, etag?: string, admin = false) {
     await this.loadState();
-    return gateway.writeFile(this.s, this.env, filePath, content, etag);
+    return gateway.writeFile(this.s, this.env, filePath, content, etag, admin);
   }
 
   // ── Restart machine (user-facing) ──────────────────────────────────

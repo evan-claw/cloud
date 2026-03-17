@@ -306,13 +306,15 @@ const FileTreeResponseSchema = z.object({
 
 export async function getFileTree(
   state: InstanceMutableState,
-  env: KiloClawEnv
+  env: KiloClawEnv,
+  admin = false
 ): Promise<{ tree: unknown[] } | null> {
   try {
+    const qs = admin ? '?mode=admin' : '';
     return await callGatewayController(
       state,
       env,
-      '/_kilo/files/tree',
+      `/_kilo/files/tree${qs}`,
       'GET',
       FileTreeResponseSchema
     );
@@ -330,13 +332,16 @@ const FileReadResponseSchema = z.object({
 export async function readFile(
   state: InstanceMutableState,
   env: KiloClawEnv,
-  filePath: string
+  filePath: string,
+  admin = false
 ): Promise<{ content: string; etag: string } | null> {
   try {
+    const params = new URLSearchParams({ path: filePath });
+    if (admin) params.set('mode', 'admin');
     return await callGatewayController(
       state,
       env,
-      `/_kilo/files/read?path=${encodeURIComponent(filePath)}`,
+      `/_kilo/files/read?${params.toString()}`,
       'GET',
       FileReadResponseSchema
     );
@@ -355,13 +360,15 @@ export async function writeFile(
   env: KiloClawEnv,
   filePath: string,
   content: string,
-  etag?: string
+  etag?: string,
+  admin = false
 ): Promise<{ etag: string } | null> {
   try {
+    const qs = admin ? '?mode=admin' : '';
     return await callGatewayController(
       state,
       env,
-      '/_kilo/files/write',
+      `/_kilo/files/write${qs}`,
       'POST',
       FileWriteResponseSchema,
       { path: filePath, content, etag }
