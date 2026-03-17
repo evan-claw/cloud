@@ -30,7 +30,6 @@ type AutoModelCard = {
   cost: CostLevel;
   performance: PerformanceLevel;
   performanceDotColor: string;
-  isFree?: boolean;
 };
 
 const autoModelCards: AutoModelCard[] = [
@@ -66,7 +65,6 @@ const autoModelCards: AutoModelCard[] = [
     cost: 0,
     performance: 1,
     performanceDotColor: 'bg-emerald-400',
-    isFree: true,
   },
 ];
 
