@@ -955,7 +955,10 @@ export const kiloclawRouter = createTRPCRouter({
       try {
         const client = new KiloClawInternalClient();
         const result = await client.readFile(ctx.user.id, input.path);
-        if (input.path === 'openclaw.json') {
+        const isOpenclawConfig =
+          input.path === 'openclaw.json' ||
+          /^\.kilo-backups\/openclaw\.json\.\d+\.bak$/.test(input.path);
+        if (isOpenclawConfig) {
           try {
             const parsed = JSON.parse(result.content) as Record<string, unknown>;
             const redacted = redactOpenclawConfig(parsed);

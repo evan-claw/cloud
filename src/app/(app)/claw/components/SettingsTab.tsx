@@ -606,7 +606,7 @@ export function SettingsTab({
                 variant="outline"
                 size="sm"
                 disabled={!isRunning || isDestroying}
-                onClick={() => setEditConfigOpen(prev => !prev)}
+                onClick={() => setEditConfigOpen(true)}
               >
                 <FileCode className="h-4 w-4" />
                 Edit Files
