@@ -40,7 +40,7 @@ import { applyMoonshotProviderSettings, isMoonshotModel } from '@/lib/providers/
 import type { AnonymousUserContext } from '@/lib/anonymous';
 import { isAnonymousContext } from '@/lib/anonymous';
 import { isOpenAiModel } from '@/lib/providers/openai';
-import { applyQwenModelSettings, isQwenModel } from '@/lib/providers/qwen';
+import { applyAlibabaProviderSettings } from '@/lib/providers/qwen';
 import type { ProviderId } from '@/lib/providers/provider-id';
 import { isZaiModel } from '@/lib/providers/zai';
 import { isMinimaxModel } from '@/lib/providers/minimax';
@@ -58,6 +58,12 @@ export const PROVIDERS = {
     apiUrl: 'https://openrouter.ai/api/v1',
     apiKey: getEnvVariable('OPENROUTER_API_KEY'),
     hasGenerationEndpoint: true,
+  },
+  ALIBABA: {
+    id: 'alibaba',
+    apiUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    apiKey: getEnvVariable('ALIBABA_API_KEY'),
+    hasGenerationEndpoint: false,
   },
   GIGAPOTATO: {
     id: 'gigapotato',
@@ -87,12 +93,6 @@ export const PROVIDERS = {
     id: 'morph',
     apiUrl: 'https://api.morphllm.com/v1',
     apiKey: getEnvVariable('MORPH_API_KEY'),
-    hasGenerationEndpoint: false,
-  },
-  OPENAI: {
-    id: 'openai',
-    apiUrl: 'https://api.openai.com/v1',
-    apiKey: getEnvVariable('OPENAI_API_KEY'),
     hasGenerationEndpoint: false,
   },
   VERCEL_AI_GATEWAY: {
@@ -312,8 +312,8 @@ export function applyProviderSpecificLogic(
     applyMoonshotProviderSettings(requestToMutate);
   }
 
-  if (isQwenModel(requestedModel)) {
-    applyQwenModelSettings(requestToMutate);
+  if (provider.id === 'alibaba') {
+    applyAlibabaProviderSettings(requestToMutate);
   }
 
   if (provider.id === 'gigapotato') {

@@ -1,11 +1,11 @@
 export type ProviderId =
   | 'openrouter'
+  | 'alibaba'
   | 'gigapotato'
   | 'corethink'
   | 'martian'
   | 'mistral'
   | 'morph'
-  | 'openai'
   | 'vercel'
   | 'custom'
   | 'dev-tools';

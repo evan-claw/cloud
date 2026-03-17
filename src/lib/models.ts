@@ -18,6 +18,7 @@ import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import { minimax_m21_free_model, minimax_m25_free_model } from '@/lib/providers/minimax';
 import { kimi_k25_free_model } from '@/lib/providers/moonshotai';
 import { morph_warp_grep_free_model } from '@/lib/providers/morph';
+import { qwen35_plus_free_model } from '@/lib/providers/qwen';
 import { grok_code_fast_1_optimized_free_model } from '@/lib/providers/xai';
 import { zai_glm5_free_model } from '@/lib/providers/zai';
 
@@ -73,6 +74,7 @@ export const kiloFreeModels = [
   minimax_m21_free_model,
   morph_warp_grep_free_model,
   grok_code_fast_1_optimized_free_model,
+  qwen35_plus_free_model,
   zai_glm5_free_model,
 ] as KiloFreeModel[];
 

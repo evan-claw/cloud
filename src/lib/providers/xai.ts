@@ -1,10 +1,5 @@
-import { ReasoningDetailType } from '@/lib/custom-llm/reasoning-details';
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
-import type {
-  MessageWithReasoning,
-  OpenRouterChatCompletionRequest,
-  GatewayRequest,
-} from '@/lib/providers/openrouter/types';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 
 export const grok_code_fast_1_optimized_free_model: KiloFreeModel = {
   public_id: 'x-ai/grok-code-fast-1:optimized:free',
@@ -22,26 +17,6 @@ export const grok_code_fast_1_optimized_free_model: KiloFreeModel = {
 
 export function isXaiModel(requestedModel: string) {
   return requestedModel.startsWith('x-ai/');
-}
-
-export function convertReasoningDetailsToReasoningContent(
-  requestToMutate: OpenRouterChatCompletionRequest
-) {
-  for (const message of requestToMutate.messages) {
-    if (message.role !== 'assistant') {
-      continue;
-    }
-    const msgWithReasoning = message as MessageWithReasoning;
-    const reasoningDetailsText = (msgWithReasoning.reasoning_details ?? [])
-      .filter(r => r.type === ReasoningDetailType.Text)
-      .map(r => r.text)
-      .join('');
-    if (reasoningDetailsText) {
-      msgWithReasoning.reasoning_content = reasoningDetailsText;
-      delete msgWithReasoning.reasoning_details;
-      delete msgWithReasoning.reasoning;
-    }
-  }
 }
 
 export function applyXaiModelSettings(

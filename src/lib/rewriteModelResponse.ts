@@ -7,12 +7,6 @@ import { createParser } from 'eventsource-parser';
 import { NextResponse } from 'next/server';
 import type OpenAI from 'openai';
 
-type WithCostInfo = {
-  cost?: number;
-  is_byok?: boolean | null;
-  cost_details?: { upstream_inference_cost: number };
-};
-
 function convertReasoningToOpenRouterFormat(message: MessageWithReasoning) {
   if (!message.reasoning_content) {
     return;
@@ -31,11 +25,16 @@ function convertReasoningToOpenRouterFormat(message: MessageWithReasoning) {
   delete message.reasoning_content;
 }
 
-function removeCostInfo(usage: OpenRouterUsage | WithCostInfo) {
+function rewriteUsage(usage: OpenRouterUsage) {
   // We only rewrite the response for free models, strip upstream cost
   delete usage.cost;
   delete usage.cost_details;
   delete usage.is_byok;
+  if (usage.prompt_tokens_details) {
+    if (usage.prompt_tokens_details.cached_tokens === undefined) {
+      usage.prompt_tokens_details.cached_tokens = 0; // OpenCode crashes if this is absent
+    }
+  }
 }
 
 export async function rewriteFreeModelResponse_ChatCompletions(response: Response, model: string) {
@@ -54,7 +53,7 @@ export async function rewriteFreeModelResponse_ChatCompletions(response: Respons
 
     const usage = json.usage as OpenRouterUsage;
     if (usage) {
-      removeCostInfo(usage);
+      rewriteUsage(usage);
     }
 
     return NextResponse.json(json, {
@@ -98,7 +97,7 @@ export async function rewriteFreeModelResponse_ChatCompletions(response: Respons
           }
 
           if (json.usage) {
-            removeCostInfo(json.usage);
+            rewriteUsage(json.usage);
           }
 
           controller.enqueue('data: ' + JSON.stringify(json) + '\n\n');
@@ -130,7 +129,7 @@ export async function rewriteFreeModelResponse_ChatCompletions(response: Respons
 
 type ResponsesApiEvent = {
   type: string;
-  response?: OpenAI.Responses.Response & { usage?: WithCostInfo | null };
+  response?: OpenAI.Responses.Response & { usage?: OpenRouterUsage | null };
 };
 
 export async function rewriteFreeModelResponse_Responses(response: Response, model: string) {
@@ -138,13 +137,13 @@ export async function rewriteFreeModelResponse_Responses(response: Response, mod
 
   if (headers.get('content-type')?.includes('application/json')) {
     const json = (await response.json()) as OpenAI.Responses.Response & {
-      usage?: WithCostInfo | null;
+      usage?: OpenRouterUsage | null;
     };
     if (json.model) {
       json.model = model;
     }
     if (json.usage) {
-      removeCostInfo(json.usage);
+      rewriteUsage(json.usage);
     }
     return NextResponse.json(json, {
       status: response.status,
@@ -172,7 +171,7 @@ export async function rewriteFreeModelResponse_Responses(response: Response, mod
               json.response.model = model;
             }
             if (json.response.usage) {
-              removeCostInfo(json.response.usage);
+              rewriteUsage(json.response.usage);
             }
           }
           controller.enqueue('data: ' + JSON.stringify(json) + '\n\n');
