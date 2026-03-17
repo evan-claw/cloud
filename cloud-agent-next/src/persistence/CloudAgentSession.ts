@@ -1171,6 +1171,39 @@ export class CloudAgentSession extends DurableObject {
           logger
             .withFields({ error: JSON.stringify(parsed.error.format()) })
             .error('Invalid pending preparation data in storage');
+
+          // Clean up resources left behind by registerSession/createCliSession
+          // so the session doesn't sit in a zombie preparing state forever.
+          const metadata = await this.ctx.storage.get<CloudAgentSessionState>('metadata');
+          await this.ctx.storage.delete('metadata');
+
+          if (metadata?.kiloSessionId && metadata?.userId) {
+            const svc = new SessionService();
+            try {
+              await svc.deleteCliSessionViaSessionIngest(
+                metadata.kiloSessionId,
+                metadata.userId,
+                this.env as unknown as WorkerEnv,
+                { onlyIfEmpty: true }
+              );
+            } catch {
+              // Best-effort — already logged the root cause above
+            }
+          }
+
+          if (this.sessionId) {
+            const prepId: EventSourceId = `prep_${this.sessionId}`;
+            this.broadcastVolatileEvent({
+              executionId: prepId,
+              sessionId: this.sessionId,
+              streamEventType: 'preparing',
+              payload: JSON.stringify({
+                step: 'failed',
+                message: 'Internal error: invalid preparation data',
+              }),
+              timestamp: Date.now(),
+            });
+          }
         }
       }
 
