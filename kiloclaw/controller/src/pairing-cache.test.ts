@@ -32,8 +32,7 @@ function createTestHarness(overrides?: {
     overrides?.readChannelPairingImpl ??
     vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
   const readDevicePairingImpl =
-    overrides?.readDevicePairingImpl ??
-    vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
+    overrides?.readDevicePairingImpl ?? vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
   const nowImpl = vi.fn(() => '2026-03-12T00:00:00.000Z');
   const nowMsImpl = vi.fn(() => NOW_MS);
 
@@ -72,9 +71,13 @@ describe('createPairingCache', () => {
     it('merges requests from multiple channels', async () => {
       const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockImplementation(channel => {
         if (channel === 'telegram') {
-          return Promise.resolve({ requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }] });
+          return Promise.resolve({
+            requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }],
+          });
         }
-        return Promise.resolve({ requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }] });
+        return Promise.resolve({
+          requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }],
+        });
       });
 
       const { cache } = createTestHarness({ readChannelPairingImpl });
@@ -115,7 +118,9 @@ describe('createPairingCache', () => {
         if (channel === 'telegram') {
           return Promise.reject(new Error('read failed'));
         }
-        return Promise.resolve({ requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }] });
+        return Promise.resolve({
+          requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }],
+        });
       });
 
       const { cache } = createTestHarness({ readChannelPairingImpl });
@@ -139,9 +144,13 @@ describe('createPairingCache', () => {
           return Promise.reject(new Error('read failed'));
         }
         if (channel === 'telegram') {
-          return Promise.resolve({ requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }] });
+          return Promise.resolve({
+            requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }],
+          });
         }
-        return Promise.resolve({ requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }] });
+        return Promise.resolve({
+          requests: [{ code: 'DEF', id: '2', createdAt: new Date(RECENT_TS).toISOString() }],
+        });
       });
 
       const { cache } = createTestHarness({ readChannelPairingImpl });
@@ -172,7 +181,9 @@ describe('createPairingCache', () => {
         if (channel === 'telegram' && callCount > 1) {
           return Promise.reject(new Error('read down'));
         }
-        return Promise.resolve({ requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }] });
+        return Promise.resolve({
+          requests: [{ code: 'ABC', id: '1', createdAt: new Date(RECENT_TS).toISOString() }],
+        });
       });
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
@@ -197,7 +208,9 @@ describe('createPairingCache', () => {
 
     it('logs no WARNING when failing channel had no prior data', async () => {
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockRejectedValue(new Error('read down'));
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockRejectedValue(new Error('read down'));
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
@@ -301,7 +314,9 @@ describe('createPairingCache', () => {
       const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockImplementation(channel => {
         if (channel === 'telegram') {
           return Promise.resolve({
-            requests: [{ code: 'BOUNDARY', id: 'b1', createdAt: new Date(exactBoundaryTs).toISOString() }],
+            requests: [
+              { code: 'BOUNDARY', id: 'b1', createdAt: new Date(exactBoundaryTs).toISOString() },
+            ],
           });
         }
         return Promise.resolve({ requests: [] });
@@ -319,7 +334,9 @@ describe('createPairingCache', () => {
       const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockImplementation(channel => {
         if (channel === 'telegram') {
           return Promise.resolve({
-            requests: [{ code: 'EXPIRED', id: 'e1', createdAt: new Date(justExpiredTs).toISOString() }],
+            requests: [
+              { code: 'EXPIRED', id: 'e1', createdAt: new Date(justExpiredTs).toISOString() },
+            ],
           });
         }
         return Promise.resolve({ requests: [] });
@@ -502,7 +519,9 @@ describe('createPairingCache', () => {
         callCount++;
         if (callCount <= 2) {
           // First refresh succeeds (two channels)
-          return Promise.resolve({ requests: [{ code: 'A', id: '1', createdAt: new Date(RECENT_TS).toISOString() }] });
+          return Promise.resolve({
+            requests: [{ code: 'A', id: '1', createdAt: new Date(RECENT_TS).toISOString() }],
+          });
         }
         return Promise.reject(new Error('read down'));
       });
@@ -532,7 +551,9 @@ describe('createPairingCache', () => {
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          return Promise.resolve({ r1: { requestId: 'r1', deviceId: 'd1', ts: RECENT_TS, publicKey: 'k' } });
+          return Promise.resolve({
+            r1: { requestId: 'r1', deviceId: 'd1', ts: RECENT_TS, publicKey: 'k' },
+          });
         }
         return Promise.reject(new Error('fail'));
       });
@@ -573,7 +594,9 @@ describe('createPairingCache', () => {
       const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockImplementation(() => {
         callCount++;
         if (callCount === 1) {
-          return Promise.resolve({ requests: [{ code: 'STALE', id: 's1', createdAt: new Date(RECENT_TS).toISOString() }] });
+          return Promise.resolve({
+            requests: [{ code: 'STALE', id: 's1', createdAt: new Date(RECENT_TS).toISOString() }],
+          });
         }
         return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
       });
@@ -592,7 +615,11 @@ describe('createPairingCache', () => {
       expect(cache.getChannelPairing().requests[0].code).toBe('STALE');
 
       const warnCalls = consoleWarnSpy.mock.calls.map(args => String(args[0]));
-      expect(warnCalls.some(msg => msg.includes('WARNING: keeping stale data for') && msg.includes('telegram'))).toBe(true);
+      expect(
+        warnCalls.some(
+          msg => msg.includes('WARNING: keeping stale data for') && msg.includes('telegram')
+        )
+      ).toBe(true);
 
       consoleWarnSpy.mockRestore();
     });
@@ -600,13 +627,19 @@ describe('createPairingCache', () => {
 
   describe('periodic refresh', () => {
     it('refreshes every 60s after start', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
 
-      const { cache } = createTestHarness({ readChannelPairingImpl, readDevicePairingImpl, readConfigImpl });
+      const { cache } = createTestHarness({
+        readChannelPairingImpl,
+        readDevicePairingImpl,
+        readConfigImpl,
+      });
       cache.start();
 
       // Initial fetch fires immediately
@@ -632,7 +665,9 @@ describe('createPairingCache', () => {
 
   describe('initial fetch', () => {
     it('fires immediately on start', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
@@ -650,7 +685,9 @@ describe('createPairingCache', () => {
 
   describe('debounced refresh', () => {
     it('fires 2s after first trigger', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
@@ -666,13 +703,19 @@ describe('createPairingCache', () => {
     });
 
     it('collapses burst into single refresh (non-sliding window)', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
 
-      const { cache } = createTestHarness({ readChannelPairingImpl, readDevicePairingImpl, readConfigImpl });
+      const { cache } = createTestHarness({
+        readChannelPairingImpl,
+        readDevicePairingImpl,
+        readConfigImpl,
+      });
 
       cache.onPairingLogLine('pairing event 1');
       await vi.advanceTimersByTimeAsync(500);
@@ -711,13 +754,19 @@ describe('createPairingCache', () => {
 
   describe('cleanup', () => {
     it('clears all timers so no further refreshes fire', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
 
-      const { cache } = createTestHarness({ readChannelPairingImpl, readDevicePairingImpl, readConfigImpl });
+      const { cache } = createTestHarness({
+        readChannelPairingImpl,
+        readDevicePairingImpl,
+        readConfigImpl,
+      });
       cache.start();
 
       // Flush the immediate initial refresh
@@ -740,7 +789,9 @@ describe('createPairingCache', () => {
       let shouldFail = false;
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockImplementation(() => {
         if (shouldFail) return Promise.reject(new Error('fail'));
-        return Promise.resolve({ r1: { requestId: 'r1', deviceId: 'd1', ts: RECENT_TS, publicKey: 'k' } });
+        return Promise.resolve({
+          r1: { requestId: 'r1', deviceId: 'd1', ts: RECENT_TS, publicKey: 'k' },
+        });
       });
       const readConfigImpl = vi.fn(() => ({ channels: {} }));
 
@@ -838,7 +889,9 @@ describe('createPairingCache', () => {
 
   describe('post-cleanup behavior', () => {
     it('refreshChannelPairing is a no-op after cleanup', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
@@ -889,7 +942,9 @@ describe('createPairingCache', () => {
     });
 
     it('onPairingLogLine is ignored after cleanup', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
@@ -1012,7 +1067,9 @@ describe('createPairingCache', () => {
       expect(cache.getChannelPairing().requests).toHaveLength(0);
 
       // Now let the slow refresh finish with stale pre-approve data
-      resolveSlowChannel({ requests: [{ code: 'STALE', id: '99', createdAt: new Date(RECENT_TS).toISOString() }] });
+      resolveSlowChannel({
+        requests: [{ code: 'STALE', id: '99', createdAt: new Date(RECENT_TS).toISOString() }],
+      });
       await slowPromise;
 
       // Cache must still reflect the newer (empty) result, NOT the stale data
@@ -1049,13 +1106,19 @@ describe('createPairingCache', () => {
 
   describe('start idempotency', () => {
     it('calling start twice does not create duplicate timers', async () => {
-      const readChannelPairingImpl = vi.fn<ReadChannelPairingImpl>().mockResolvedValue({ requests: [] });
+      const readChannelPairingImpl = vi
+        .fn<ReadChannelPairingImpl>()
+        .mockResolvedValue({ requests: [] });
       const readDevicePairingImpl = vi.fn<ReadDevicePairingImpl>().mockResolvedValue({});
       const readConfigImpl = vi.fn(() => ({
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
 
-      const { cache } = createTestHarness({ readChannelPairingImpl, readDevicePairingImpl, readConfigImpl });
+      const { cache } = createTestHarness({
+        readChannelPairingImpl,
+        readDevicePairingImpl,
+        readConfigImpl,
+      });
       cache.start();
       cache.start(); // second call should be no-op
 

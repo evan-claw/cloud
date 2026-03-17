@@ -99,7 +99,9 @@ export function resolveOpenClawStateDir(): string {
 }
 
 export function resolveCredentialsDir(): string {
-  return process.env.OPENCLAW_OAUTH_DIR?.trim() || path.join(resolveOpenClawStateDir(), 'credentials');
+  return (
+    process.env.OPENCLAW_OAUTH_DIR?.trim() || path.join(resolveOpenClawStateDir(), 'credentials')
+  );
 }
 
 export function resolveDevicePendingPath(): string {
