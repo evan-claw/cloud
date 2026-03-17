@@ -46,28 +46,30 @@ export function isUSRegion(): boolean {
 
 /**
  * Get the read replica URL based on deployment region.
- * - US deployments use the US replica (San Francisco) for lower latency
- * - EU deployments use the primary (Frankfurt) for reads
- * - Falls back to primary if no replica URL is configured
+ * - US deployments use the US replica (POSTGRES_REPLICA_US_URL) for lower latency
+ * - EU deployments use the EU replica (POSTGRES_REPLICA_EU_URL) to split read
+ *   traffic off the primary's connection budget (98.8% of traffic is fra1)
+ * - Falls back to primary if no replica URL is configured for the region
  */
 function getReplicaUrl(): string {
-  const replicaUrl = getEnvVariable('POSTGRES_REPLICA_US_URL');
-
-  // If we're in a US region and have a replica configured, use it
-  if (isUSRegion() && replicaUrl) {
-    return replicaUrl;
+  if (isUSRegion()) {
+    const usReplica = getEnvVariable('POSTGRES_REPLICA_US_URL');
+    if (usReplica) return usReplica;
+  } else {
+    const euReplica = getEnvVariable('POSTGRES_REPLICA_EU_URL');
+    if (euReplica) return euReplica;
   }
 
-  // Otherwise, use the primary for reads (EU region or no replica configured)
   return postgresUrl;
 }
 
-// Keep low because Vercel can spawn 100+ concurrent serverless instances,
-// each with its own pool, all hitting the same pgbouncer. At max:100, a cold-start
-// cascade can open 100×N connections simultaneously and overwhelm pgbouncer.
-const max = 15;
+// 48h of production pool metrics show most instances use 2-5 connections with zero
+// waiting, but the aggregate across ~2,200 concurrent Vercel instances exhausts
+// Supabase's ~500 connection limit (466 idle connections observed from kilocode-backend).
+// Revisit after the microdollar_usage query performance work lands (see plans/db-perf-improvements.md).
+const max = 10;
 
-const idleTimeoutMillis = 10_000;
+const idleTimeoutMillis = 5_000;
 
 const sharedPoolConfig: Partial<pg.PoolConfig> = {
   max,
