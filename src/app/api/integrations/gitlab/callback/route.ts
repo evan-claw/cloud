@@ -145,6 +145,7 @@ export async function GET(request: NextRequest) {
       await db
         .update(platform_integrations)
         .set({
+          integration_type: 'oauth',
           platform_account_id: gitlabUser.id.toString(),
           platform_account_login: gitlabUser.username,
           scopes: tokens.scope.split(' '),

@@ -1595,7 +1595,7 @@ export class GitLabProjectAccessTokenPermissionError extends Error {
  * @param projectId - GitLab project ID or path (URL-encoded)
  * @param tokenName - Name for the token (e.g., "Kilo Code Review Bot")
  * @param expiresAt - Expiration date in YYYY-MM-DD format (max 1 year from now)
- * @param scopes - Token scopes (default: ['api', 'self_rotate'])
+ * @param scopes - Token scopes (default: ['api'])
  * @param accessLevel - Access level for the token (default: DEVELOPER = 30)
  * @param instanceUrl - GitLab instance URL (defaults to gitlab.com)
  * @throws {GitLabProjectAccessTokenPermissionError} When user doesn't have Maintainer+ role
@@ -1607,7 +1607,7 @@ export async function createProjectAccessToken(
   projectId: string | number,
   tokenName: string,
   expiresAt: string,
-  scopes: string[] = ['api', 'self_rotate'],
+  scopes: string[] = ['api'],
   accessLevel: number = GITLAB_ACCESS_LEVELS.DEVELOPER,
   instanceUrl: string = DEFAULT_GITLAB_URL
 ): Promise<GitLabProjectAccessToken> {

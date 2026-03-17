@@ -553,7 +553,7 @@ export async function getOrCreateProjectAccessToken(
       projectId,
       KILO_BOT_TOKEN_NAME,
       expiresAt,
-      ['api', 'self_rotate'], // api for full access, self_rotate for token rotation
+      ['api'], // api for full access; self_rotate not needed since rotation uses the user's token
       30, // Developer access level
       instanceUrl
     );
