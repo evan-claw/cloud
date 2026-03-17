@@ -20,8 +20,22 @@ WORKSPACE_DIR="/root/clawd"
 echo "Config directory: $CONFIG_DIR"
 
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
 mkdir -p "$WORKSPACE_DIR"
 cd "$WORKSPACE_DIR"
+
+# ============================================================
+# STARTUP OPTIMIZATION (openclaw doctor → Startup optimization)
+# ============================================================
+# Avoid extra process self-respawn overhead — the controller already supervises
+# the gateway, so the CLI/gateway don't need their own detached-restart path.
+export OPENCLAW_NO_RESPAWN=1
+
+# Enable Node's module compile cache on the persistent volume so warm bytecode
+# survives machine stop/start cycles. /root is the Fly Volume mount, so this
+# cache persists across restarts (unlike /var/tmp which is ephemeral in Fly VMs).
+export NODE_COMPILE_CACHE=/root/.openclaw/cache/node-compile-cache
+mkdir -p "$NODE_COMPILE_CACHE"
 
 # ============================================================
 # DECRYPT ENCRYPTED ENV VARS

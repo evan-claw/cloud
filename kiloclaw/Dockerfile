@@ -113,7 +113,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-03-12-v62-github-machine-user
+# Build cache bust: 2026-03-16-v63-startup-optimization
 RUN echo "10"
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
