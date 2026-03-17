@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc/utils';
@@ -14,14 +15,28 @@ const ClawDashboardWithBoundary = withStatusQueryBoundary(ClawDashboard);
  * Extracted so the hook only runs when the user actually has access
  * (new users on the WelcomePage don't have an instance to poll).
  */
-function ClawDashboardLoader() {
+function ClawDashboardLoader({
+  isNewSetup,
+  onNewSetupChange,
+}: {
+  isNewSetup: boolean;
+  onNewSetupChange: (v: boolean) => void;
+}) {
   const statusQuery = useKiloClawStatus();
-  return <ClawDashboardWithBoundary statusQuery={statusQuery} />;
+  return (
+    <ClawDashboardWithBoundary
+      statusQuery={statusQuery}
+      isNewSetup={isNewSetup}
+      onNewSetupChange={onNewSetupChange}
+    />
+  );
 }
 
 export default function ClawPage() {
   const trpc = useTRPC();
   const billingQuery = useQuery(trpc.kiloclaw.getBillingStatus.queryOptions());
+  const [isNewSetup, setIsNewSetup] = useState(false);
+  const onNewSetupChange = useCallback((v: boolean) => setIsNewSetup(v), []);
 
   if (billingQuery.isLoading) {
     return (
@@ -65,7 +80,13 @@ export default function ClawPage() {
     // CreateInstanceCard. Provisioning auto-creates the trial via
     // ensureProvisionAccess — no explicit "start trial" action needed.
     if (billing.trialEligible) {
-      return <ClawDashboard status={undefined} />;
+      return (
+        <ClawDashboard
+          status={undefined}
+          isNewSetup={isNewSetup}
+          onNewSetupChange={onNewSetupChange}
+        />
+      );
     }
     // Non-trial-eligible new users (e.g. canceled subscription, no
     // instance) see the plan-selection page.
@@ -83,8 +104,10 @@ export default function ClawPage() {
   // Those users get ClawDashboard with no status, which renders
   // CreateInstanceCard.
   if (billing?.instance) {
-    return <ClawDashboardLoader />;
+    return <ClawDashboardLoader isNewSetup={isNewSetup} onNewSetupChange={onNewSetupChange} />;
   }
 
-  return <ClawDashboard status={undefined} />;
+  return (
+    <ClawDashboard status={undefined} isNewSetup={isNewSetup} onNewSetupChange={onNewSetupChange} />
+  );
 }

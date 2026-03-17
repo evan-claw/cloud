@@ -38,9 +38,10 @@ function EarlybirdActiveCard({
 
 type BillingWrapperProps = {
   children: ReactNode;
+  hideBanners?: boolean;
 };
 
-export function BillingWrapper({ children }: BillingWrapperProps) {
+export function BillingWrapper({ children, hideBanners }: BillingWrapperProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { data: billing } = useQuery(trpc.kiloclaw.getBillingStatus.queryOptions());
@@ -83,19 +84,20 @@ export function BillingWrapper({ children }: BillingWrapperProps) {
   return (
     <>
       {/* Banner — or earlybird card in the banner position */}
-      {bannerState === 'earlybird_active' && billing.earlybird ? (
-        <EarlybirdActiveCard
-          expiresAt={billing.earlybird.expiresAt}
-          onSubscribeClick={handleSubscribe}
-        />
-      ) : (
-        <BillingBanner
-          billing={billing}
-          onSubscribeClick={handleSubscribe}
-          onReactivateClick={handleReactivate}
-          onUpdatePaymentClick={handleUpdatePayment}
-        />
-      )}
+      {!hideBanners &&
+        (bannerState === 'earlybird_active' && billing.earlybird ? (
+          <EarlybirdActiveCard
+            expiresAt={billing.earlybird.expiresAt}
+            onSubscribeClick={handleSubscribe}
+          />
+        ) : (
+          <BillingBanner
+            billing={billing}
+            onSubscribeClick={handleSubscribe}
+            onReactivateClick={handleReactivate}
+            onUpdatePaymentClick={handleUpdatePayment}
+          />
+        ))}
 
       {/* Lock dialog — blocks interaction when access is revoked */}
       <AccessLockedDialog

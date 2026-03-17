@@ -6,10 +6,26 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useAccessCode } from '../hooks/useAccessCode';
 
-const OPEN_BUTTON_ACCENT_CLASS =
-  'animate-pulse-once bg-[oklch(95%_0.15_108)] text-black shadow-[0_0_20px_rgba(237,255,0,0.3)] ring-[oklch(95%_0.15_108)]/20 transition-all duration-500 ease-in-out hover:bg-[oklch(95%_0.15_108)]/90 hover:ring-[oklch(95%_0.15_108)]/40';
+const ACCENT_CLASSES = {
+  header:
+    'animate-pulse-once bg-[oklch(95%_0.15_108)] text-black shadow-[0_0_20px_rgba(237,255,0,0.3)] ring-[oklch(95%_0.15_108)]/20 transition-all duration-500 ease-in-out hover:bg-[oklch(95%_0.15_108)]/90 hover:ring-[oklch(95%_0.15_108)]/40',
+  hero: 'min-w-[180px] bg-emerald-600 text-white hover:bg-emerald-700',
+} as const;
 
-export function OpenClawButton({ canShow, gatewayUrl }: { canShow: boolean; gatewayUrl: string }) {
+type OpenClawButtonProps = {
+  canShow: boolean;
+  gatewayUrl: string;
+  /** "header" = yellow accent (default), "hero" = green prominent */
+  look?: keyof typeof ACCENT_CLASSES;
+  label?: string;
+};
+
+export function OpenClawButton({
+  canShow,
+  gatewayUrl,
+  look = 'header',
+  label = 'Open',
+}: OpenClawButtonProps) {
   const { isGenerating, generateAccessCode } = useAccessCode();
   const [isOpening, setIsOpening] = useState(false);
 
@@ -40,7 +56,7 @@ export function OpenClawButton({ canShow, gatewayUrl }: { canShow: boolean; gate
   return (
     <Button
       variant="primary"
-      className={OPEN_BUTTON_ACCENT_CLASS}
+      className={ACCENT_CLASSES[look]}
       disabled={isOpening || isGenerating}
       onClick={openWithAutoAuth}
     >
@@ -49,7 +65,7 @@ export function OpenClawButton({ canShow, gatewayUrl }: { canShow: boolean; gate
       ) : (
         <ExternalLink className="mr-2 h-4 w-4" />
       )}
-      {isOpening ? 'Opening...' : 'Open'}
+      {isOpening ? 'Opening...' : label}
     </Button>
   );
 }
