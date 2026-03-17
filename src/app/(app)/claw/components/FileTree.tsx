@@ -84,15 +84,7 @@ export function FileTree({
   selectedPath: string | null;
   onSelect: (path: string) => void;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const initial = new Set<string>();
-    for (const node of tree) {
-      if (node.type === 'directory') {
-        initial.add(node.path);
-      }
-    }
-    return initial;
-  });
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const handleToggle = useCallback((path: string) => {
     setExpanded(prev => {
