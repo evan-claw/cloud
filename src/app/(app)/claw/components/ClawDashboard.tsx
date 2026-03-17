@@ -101,7 +101,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         </Alert>
       )}
 
-      {configServiceNudgeVisible && (
+      {configServiceNudgeVisible && !isNewSetup && (
         <div className="border-brand-primary/30 bg-brand-primary/5 flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <Zap className="text-brand-primary mt-0.5 h-5 w-5 shrink-0" />
@@ -126,14 +126,15 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         </div>
       )}
 
-      <BillingWrapper>
+      <BillingWrapper hideBanners={isNewSetup}>
         {!instanceStatus ? (
           <CreateInstanceCard
             mutations={mutations}
             onProvisionStart={() => setIsNewSetup(true)}
             onProvisionError={() => setIsNewSetup(false)}
           />
-        ) : isNewSetup && instanceStatus.status !== 'running' ? (
+        ) : isNewSetup &&
+          (instanceStatus.status !== 'running' || gatewayStatus?.state !== 'running') ? (
           <ProvisioningSpinner onViewDashboard={() => setIsNewSetup(false)} />
         ) : isNewSetup ? (
           <Card className="mt-6">
