@@ -484,7 +484,6 @@ export function CloudChatContainer({
           });
 
           setResumeStrategy(result.resumeStrategy);
-          loadedDbSessionIdRef.current = sessionIdFromParams;
           setLoadedDbSession(session);
 
           // Apply runtime state from DO (mode, model, repository)
@@ -526,6 +525,7 @@ export function CloudChatContainer({
           setNeedsLegacyPrepare(true);
         }
       } finally {
+        loadedDbSessionIdRef.current = sessionIdFromParams;
         setIsLoadingFromDb(false);
         setPreflightComplete(true);
       }
