@@ -265,5 +265,32 @@ describe('file routes', () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it('returns 400 for malformed JSON body', async () => {
+      const res = await app.request('/_kilo/files/write', {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: 'not-json',
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 for invalid body shape', async () => {
+      const res = await app.request('/_kilo/files/write', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ path: {}, content: 123 }),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 for missing content', async () => {
+      const res = await app.request('/_kilo/files/write', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ path: 'SOUL.md' }),
+      });
+      expect(res.status).toBe(400);
+    });
   });
 });

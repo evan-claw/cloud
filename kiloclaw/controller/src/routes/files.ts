@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { z } from 'zod';
 import { getBearerToken } from './gateway';
 import { timingSafeTokenEqual } from '../auth';
 import { resolveSafePath, verifyCanonicalized, SafePathError } from '../safe-path';
@@ -130,12 +131,25 @@ export function registerFileRoutes(app: Hono, expectedToken: string, rootDir: st
     return c.json({ content, etag: computeEtag(content) });
   });
 
-  app.post('/_kilo/files/write', async c => {
-    const body = await c.req.json<{ path: string; content: string; etag?: string }>();
+  const WriteBodySchema = z.object({
+    path: z.string().min(1),
+    content: z.string(),
+    etag: z.string().optional(),
+  });
 
-    if (!body.path || typeof body.content !== 'string') {
-      return c.json({ error: 'Missing path or content' }, 400);
+  app.post('/_kilo/files/write', async c => {
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
     }
+
+    const parsed = WriteBodySchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json({ error: 'Missing or invalid path/content' }, 400);
+    }
+    const body = parsed.data;
 
     const result = resolveAndValidateFile(body.path, rootDir);
     if (typeof result !== 'string') {
