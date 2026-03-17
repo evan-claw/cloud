@@ -5,7 +5,12 @@ import path from 'node:path';
 import { z } from 'zod';
 import { getBearerToken } from './gateway';
 import { timingSafeTokenEqual } from '../auth';
-import { resolveSafePath, verifyCanonicalized, SafePathError } from '../safe-path';
+import {
+  resolveSafePath,
+  verifyCanonicalized,
+  SafePathError,
+  BLOCKED_SEGMENTS,
+} from '../safe-path';
 import { atomicWrite } from '../atomic-write';
 import { backupFile } from '../backup-file';
 
@@ -32,7 +37,7 @@ function buildTree(dir: string, rootDir: string): FileNode[] {
 
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
-    if (entry.isDirectory() && entry.name === 'credentials') continue;
+    if (entry.isDirectory() && BLOCKED_SEGMENTS.has(entry.name)) continue;
 
     const relativePath = path.relative(rootDir, path.join(dir, entry.name));
 
@@ -174,7 +179,12 @@ export function registerFileRoutes(app: Hono, expectedToken: string, rootDir: st
     } catch (err) {
       console.warn('[files] Failed to create backup, proceeding with write:', err);
     }
-    atomicWrite(result, body.content);
+    try {
+      atomicWrite(result, body.content);
+    } catch (err) {
+      console.error('[files] atomicWrite failed:', err);
+      return c.json({ error: 'Failed to write file' }, 500);
+    }
 
     const newEtag = computeEtag(body.content);
     return c.json({ etag: newEtag });
