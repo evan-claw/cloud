@@ -20,8 +20,23 @@ WORKSPACE_DIR="/root/clawd"
 echo "Config directory: $CONFIG_DIR"
 
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
 mkdir -p "$WORKSPACE_DIR"
 cd "$WORKSPACE_DIR"
+
+# ============================================================
+# STARTUP OPTIMIZATION (openclaw doctor → Startup optimization)
+# ============================================================
+# Avoid extra process self-respawn overhead — the controller already supervises
+# the gateway, so the CLI/gateway don't need their own detached-restart path.
+export OPENCLAW_NO_RESPAWN=1
+
+# Enable Node's module compile cache. The cache is version-keyed (Node
+# auto-creates a subdirectory per NODE_VERSION+ARCH+V8 tag), so stale
+# entries from a different Node version are harmlessly ignored.
+# /var/tmp matches the upstream openclaw doctor recommendation.
+export NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+mkdir -p "$NODE_COMPILE_CACHE"
 
 # ============================================================
 # DECRYPT ENCRYPTED ENV VARS
