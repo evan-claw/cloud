@@ -29,7 +29,8 @@ function UserFileEditorPane({
         onError: (err: FileSaveError) => void;
       }
     ) => {
-      mutations.writeFile.mutate(args, callbacks);
+      if (!args.etag) return; // Save is disabled until file loads and ETag is set
+      mutations.writeFile.mutate({ ...args, etag: args.etag }, callbacks);
     },
     [mutations.writeFile]
   );
