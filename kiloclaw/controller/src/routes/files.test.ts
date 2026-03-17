@@ -32,6 +32,19 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 }
 
+function mockDirent(name: string, isDir: boolean, isSymlink = false) {
+  return {
+    name,
+    isDirectory: () => isDir,
+    isSymbolicLink: () => isSymlink,
+    isFile: () => !isDir && !isSymlink,
+  };
+}
+
+function flattenNames(nodes: any[]): string[] {
+  return nodes.flatMap((n: any) => [n.name, ...(n.children ? flattenNames(n.children) : [])]);
+}
+
 describe('file routes', () => {
   let app: Hono;
 
@@ -218,6 +231,77 @@ describe('file routes', () => {
 
       const body = (await res.json()) as any;
       expect(body.code).toBe('file_etag_conflict');
+    });
+  });
+
+  describe('admin mode', () => {
+    it('GET /_kilo/files/tree?mode=admin returns unfiltered tree', async () => {
+      vi.mocked(fs.readdirSync).mockImplementation((dir: any) => {
+        if (dir === ROOT) {
+          return [
+            mockDirent('openclaw.json', false),
+            mockDirent('credentials', true),
+            mockDirent('SOUL.md.bak.2026-03-01', false),
+            mockDirent('debug.log', false),
+          ] as any;
+        }
+        if (dir === `${ROOT}/credentials`) {
+          return [mockDirent('token.txt', false)] as any;
+        }
+        return [];
+      });
+
+      const res = await app.request('/_kilo/files/tree?mode=admin', { headers: authHeaders() });
+      expect(res.status).toBe(200);
+
+      const body = (await res.json()) as any;
+      const names = flattenNames(body.tree);
+      expect(names).toContain('credentials');
+      expect(names).toContain('token.txt');
+      expect(names).toContain('SOUL.md.bak.2026-03-01');
+      expect(names).toContain('debug.log');
+    });
+
+    it('GET /_kilo/files/read?mode=admin reads files with non-allowed extensions', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.lstatSync).mockReturnValue({
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      } as any);
+      vi.mocked(fs.readFileSync).mockReturnValue('log content');
+
+      const res = await app.request('/_kilo/files/read?path=debug.log&mode=admin', {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+
+      const body = (await res.json()) as any;
+      expect(body.content).toBe('log content');
+    });
+
+    it('POST /_kilo/files/write?mode=admin writes files with non-allowed extensions', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.lstatSync).mockReturnValue({
+        isSymbolicLink: () => false,
+        isFile: () => true,
+      } as any);
+
+      const res = await app.request('/_kilo/files/write?mode=admin', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ path: 'debug.log', content: 'new log content' }),
+      });
+      expect(res.status).toBe(200);
+
+      const body = (await res.json()) as any;
+      expect(body.etag).toBeDefined();
+    });
+
+    it('path traversal still rejected in admin mode', async () => {
+      const res = await app.request('/_kilo/files/read?path=../etc/passwd&mode=admin', {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(400);
     });
   });
 });

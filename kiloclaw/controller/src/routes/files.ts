@@ -24,6 +24,10 @@ function isFiltered(name: string): boolean {
   return FILTERED_PATTERNS.some(p => p.test(name));
 }
 
+function isAdminMode(c: { req: { query: (k: string) => string | undefined } }): boolean {
+  return c.req.query('mode') === 'admin';
+}
+
 interface FileNode {
   name: string;
   path: string;
@@ -31,7 +35,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-function buildTree(dir: string, rootDir: string): FileNode[] {
+function buildTree(dir: string, rootDir: string, admin = false): FileNode[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -41,8 +45,8 @@ function buildTree(dir: string, rootDir: string): FileNode[] {
   const nodes: FileNode[] = [];
 
   for (const entry of entries) {
-    if (isFiltered(entry.name)) continue;
-    if (FILTERED_DIRS.has(entry.name) && entry.isDirectory()) continue;
+    if (!admin && isFiltered(entry.name)) continue;
+    if (!admin && FILTERED_DIRS.has(entry.name) && entry.isDirectory()) continue;
     if (entry.isSymbolicLink()) continue;
 
     const relativePath = path.relative(rootDir, path.join(dir, entry.name));
@@ -52,11 +56,11 @@ function buildTree(dir: string, rootDir: string): FileNode[] {
         name: entry.name,
         path: relativePath,
         type: 'directory',
-        children: buildTree(path.join(dir, entry.name), rootDir),
+        children: buildTree(path.join(dir, entry.name), rootDir, admin),
       });
     } else {
-      // Only show files with allowed text extensions
-      if (!isAllowedExtension(entry.name)) continue;
+      // Only show files with allowed text extensions (unless admin mode)
+      if (!admin && !isAllowedExtension(entry.name)) continue;
       nodes.push({
         name: entry.name,
         path: relativePath,
@@ -78,7 +82,8 @@ export function registerFileRoutes(app: Hono, expectedToken: string, rootDir: st
   });
 
   app.get('/_kilo/files/tree', c => {
-    const tree = buildTree(rootDir, rootDir);
+    const admin = isAdminMode(c);
+    const tree = buildTree(rootDir, rootDir, admin);
     return c.json({ tree });
   });
 
@@ -88,7 +93,7 @@ export function registerFileRoutes(app: Hono, expectedToken: string, rootDir: st
       return c.json({ error: 'Missing path parameter' }, 400);
     }
 
-    if (!isAllowedExtension(relativePath)) {
+    if (!isAdminMode(c) && !isAllowedExtension(relativePath)) {
       return c.json({ error: 'File type not allowed' }, 400);
     }
 
@@ -135,7 +140,7 @@ export function registerFileRoutes(app: Hono, expectedToken: string, rootDir: st
       return c.json({ error: 'Missing path or content' }, 400);
     }
 
-    if (!isAllowedExtension(body.path)) {
+    if (!isAdminMode(c) && !isAllowedExtension(body.path)) {
       return c.json({ error: 'File type not allowed' }, 400);
     }
 
