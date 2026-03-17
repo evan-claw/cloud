@@ -516,6 +516,14 @@ EOFTOOLS
     else
         echo "TOOLS.md: Google Workspace section already present"
     fi
+elif [ -f "$TOOLS_MD" ]; then
+    # Google not connected — remove stale gog section if present
+    if grep -q '## Google Workspace' "$TOOLS_MD"; then
+        sed -i '/^## Google Workspace$/,$ d' "$TOOLS_MD"
+        # Trim trailing blank lines left behind
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TOOLS_MD"
+        echo "TOOLS.md: removed stale Google Workspace section"
+    fi
 fi
 
 # ============================================================
