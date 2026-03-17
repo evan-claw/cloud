@@ -1015,6 +1015,19 @@ export class CloudAgentSession extends DurableObject {
       return;
     }
 
+    // Diagnostic: log connection and heartbeat health each alarm cycle
+    const ingestSocketCount = this.ctx.getWebSockets(`ingest:${activeExecutionId}`).length;
+    const heartbeatAge = execution.lastHeartbeat ? now - execution.lastHeartbeat : null;
+    logger
+      .withFields({
+        sessionId: this.sessionId,
+        executionId: activeExecutionId,
+        status: execution.status,
+        ingestSocketCount,
+        heartbeatAge,
+      })
+      .debug('Alarm diagnostic for active execution');
+
     // Check if execution is stale (no heartbeat for STALE_THRESHOLD_MS)
     if (execution.status === 'running') {
       const staleThresholdMs = this.getStaleThresholdMs();
