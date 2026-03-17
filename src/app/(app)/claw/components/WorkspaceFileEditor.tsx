@@ -35,8 +35,6 @@ function UserFileEditorPane({
     [mutations.writeFile]
   );
 
-  const validateBeforeSave = useCallback(validateOpenclawJsonForSave, []);
-
   return (
     <FileEditorPane
       filePath={filePath}
@@ -47,7 +45,7 @@ function UserFileEditorPane({
       onSave={handleSave}
       isSaving={mutations.writeFile.isPending}
       onDirtyChange={onDirtyChange}
-      validateBeforeSave={validateBeforeSave}
+      validateBeforeSave={validateOpenclawJsonForSave}
     />
   );
 }
