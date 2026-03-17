@@ -17,7 +17,7 @@ import type { TemplateName } from '@/lib/email';
 import { send as sendEmail } from '@/lib/email';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KILOCLAW_EARLYBIRD_EXPIRY_DATE } from '@/lib/kiloclaw/constants';
-import { NEXTAUTH_URL } from '@/lib/config.server';
+import { NEXTAUTH_URL, KILOCLAW_BILLING_ENFORCEMENT } from '@/lib/config.server';
 import { sentryLogger } from '@/lib/utils.server';
 
 const logInfo = sentryLogger('kiloclaw-billing-cron', 'info');
@@ -100,6 +100,11 @@ export async function runKiloClawBillingLifecycleCron(
     emails_skipped: 0,
     errors: 0,
   };
+
+  if (!KILOCLAW_BILLING_ENFORCEMENT) {
+    logInfo('KiloClaw billing enforcement is disabled, skipping lifecycle cron');
+    return summary;
+  }
 
   const now = new Date().toISOString();
   const client = new KiloClawInternalClient();

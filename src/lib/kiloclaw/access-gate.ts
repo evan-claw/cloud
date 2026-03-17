@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/lib/drizzle';
 import { kiloclaw_subscriptions, kiloclaw_earlybird_purchases } from '@kilocode/db/schema';
 import { KILOCLAW_EARLYBIRD_EXPIRY_DATE } from '@/lib/kiloclaw/constants';
+import { KILOCLAW_BILLING_ENFORCEMENT } from '@/lib/config.server';
 import { baseProcedure } from '@/lib/trpc/init';
 
 /**
@@ -13,6 +14,8 @@ import { baseProcedure } from '@/lib/trpc/init';
  * Throws TRPCError FORBIDDEN if the user has no valid access.
  */
 export async function requireKiloClawAccess(userId: string): Promise<void> {
+  if (!KILOCLAW_BILLING_ENFORCEMENT) return;
+
   // 1. Active subscription
   const [sub] = await db
     .select({
