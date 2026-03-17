@@ -286,8 +286,22 @@ export async function replaceConfigOnMachine(
   }
 }
 
+const FileNodeSchema: z.ZodType<{
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: { name: string; path: string; type: 'file' | 'directory'; children?: unknown[] }[];
+}> = z.lazy(() =>
+  z.object({
+    name: z.string(),
+    path: z.string(),
+    type: z.enum(['file', 'directory']),
+    children: z.array(FileNodeSchema).optional(),
+  })
+);
+
 const FileTreeResponseSchema = z.object({
-  tree: z.array(z.any()),
+  tree: z.array(FileNodeSchema),
 });
 
 export async function getFileTree(

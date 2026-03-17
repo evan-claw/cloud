@@ -18,7 +18,7 @@ const defaultDeps: BackupFileDeps = {
 export function backupFile(filePath: string, deps: BackupFileDeps = defaultDeps): void {
   const dir = path.dirname(filePath);
   const basename = path.basename(filePath);
-  const backupName = `${basename}.bak.${new Date().toISOString()}`;
+  const backupName = `${basename}.bak.${Date.now()}`;
 
   deps.copyFileSync(filePath, path.join(dir, backupName));
 

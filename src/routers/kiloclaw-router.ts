@@ -905,7 +905,7 @@ export const kiloclawRouter = createTRPCRouter({
     return { success: true };
   }),
 
-  fileTree: baseProcedure.query(async ({ ctx }) => {
+  fileTree: clawAccessProcedure.query(async ({ ctx }) => {
     try {
       const client = new KiloClawInternalClient();
       const result = await client.getFileTree(ctx.user.id);
@@ -931,7 +931,7 @@ export const kiloclawRouter = createTRPCRouter({
     }
   }),
 
-  readFile: baseProcedure
+  readFile: clawAccessProcedure
     .input(z.object({ path: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
@@ -953,6 +953,7 @@ export const kiloclawRouter = createTRPCRouter({
         }
         return result;
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         if (err instanceof KiloClawApiError && err.statusCode === 404) {
           const { code, message } = getKiloClawApiErrorPayload(err);
           throw new TRPCError({
@@ -981,7 +982,7 @@ export const kiloclawRouter = createTRPCRouter({
       }
     }),
 
-  writeFile: baseProcedure
+  writeFile: clawAccessProcedure
     .input(
       z.object({
         path: z.string().min(1),
@@ -1031,6 +1032,7 @@ export const kiloclawRouter = createTRPCRouter({
 
         return await client.writeFile(ctx.user.id, input.path, content, input.etag);
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         if (err instanceof KiloClawApiError && err.statusCode === 404) {
           const { code, message } = getKiloClawApiErrorPayload(err);
           throw new TRPCError({
