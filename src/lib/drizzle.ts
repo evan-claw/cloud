@@ -211,8 +211,9 @@ const primaryDb = primary.db;
  * Read replica database instance - use for read-only queries that can
  * tolerate slight replication lag (typically <100ms).
  *
- * In US regions, this connects to the San Francisco replica for lower latency.
- * In EU regions, this connects to the primary (Frankfurt).
+ * In US regions, this connects to the US replica for lower latency.
+ * In EU regions, this connects to the EU replica to split read traffic off the primary.
+ * Falls back to the primary if no replica URL is configured for the region.
  */
 export const readDb = replica.db;
 
