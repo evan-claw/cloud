@@ -26,7 +26,7 @@ const getGatewayErrorRate_cached = unstable_cache(
       .parse(rows);
   },
   undefined,
-  { revalidate: 60 }
+  { revalidate: 600 }
 );
 
 export async function getGatewayErrorRate() {

@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { Zap, TriangleAlert } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Loader2, Settings, TriangleAlert, Zap } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import {
   useKiloClawGatewayStatus,
@@ -9,6 +9,7 @@ import {
   useKiloClawServiceDegraded,
 } from '@/hooks/useKiloClaw';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGatewayUrl } from '../hooks/useGatewayUrl';
@@ -16,6 +17,7 @@ import { ClawHeader } from './ClawHeader';
 import { CreateInstanceCard } from './CreateInstanceCard';
 import { InstanceControls } from './InstanceControls';
 import { InstanceTab } from './InstanceTab';
+import { OpenClawButton } from './OpenClawButton';
 import { SettingsTab } from './SettingsTab';
 import { ChangelogCard } from './ChangelogCard';
 import { PairingCard } from './PairingCard';
@@ -31,7 +33,15 @@ function hasPopulatedStatus(
   return candidate !== undefined && candidate.status !== null;
 }
 
-export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | undefined }) {
+export function ClawDashboard({
+  status,
+  isNewSetup,
+  onNewSetupChange,
+}: {
+  status: KiloClawDashboardStatus | undefined;
+  isNewSetup: boolean;
+  onNewSetupChange: (v: boolean) => void;
+}) {
   const mutations = useKiloClawMutations();
   const gatewayUrl = useGatewayUrl(status);
   const instanceStatus = hasPopulatedStatus(status) ? status : null;
@@ -72,6 +82,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         region={status?.flyRegion || null}
         gatewayUrl={gatewayUrl}
         gatewayReady={gatewayStatus?.state === 'running'}
+        isSetupWizard={isNewSetup}
       />
 
       {isServiceDegraded && (
@@ -97,7 +108,7 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         </Alert>
       )}
 
-      {configServiceNudgeVisible && (
+      {configServiceNudgeVisible && !isNewSetup && (
         <div className="border-brand-primary/30 bg-brand-primary/5 flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <Zap className="text-brand-primary mt-0.5 h-5 w-5 shrink-0" />
@@ -122,65 +133,124 @@ export function ClawDashboard({ status }: { status: KiloClawDashboardStatus | un
         </div>
       )}
 
-      <BillingWrapper>
-        <Card className="mt-6">
-          {!instanceStatus ? (
-            <CardContent className="p-5">
-              <CreateInstanceCard mutations={mutations} />
-            </CardContent>
-          ) : (
-            <>
-              <CardContent className="border-b p-5">
-                <InstanceControls
-                  status={instanceStatus}
-                  mutations={mutations}
-                  onRedeploySuccess={onRedeploySuccess}
+      <BillingWrapper hideBanners={isNewSetup}>
+        {!instanceStatus ? (
+          <CreateInstanceCard
+            mutations={mutations}
+            onProvisionStart={() => onNewSetupChange(true)}
+          />
+        ) : isNewSetup &&
+          (instanceStatus.status !== 'running' || gatewayStatus?.state !== 'running') ? (
+          <ProvisioningSpinner onViewDashboard={() => onNewSetupChange(false)} />
+        ) : isNewSetup ? (
+          <Card className="mt-6">
+            <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
+              <p className="text-foreground text-lg font-semibold">Your instance is ready!</p>
+              <div className="flex gap-3">
+                <OpenClawButton
+                  canShow={gatewayStatus?.state === 'running'}
+                  gatewayUrl={gatewayUrl}
+                  look="hero"
+                  label="Open KiloClaw"
                 />
+                <Button
+                  className="min-w-[180px]"
+                  variant="outline"
+                  onClick={() => onNewSetupChange(false)}
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Configure Instance
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="mt-6">
+            <CardContent className="border-b p-5">
+              <InstanceControls
+                status={instanceStatus}
+                mutations={mutations}
+                onRedeploySuccess={onRedeploySuccess}
+              />
+            </CardContent>
+            <Tabs defaultValue="instance">
+              <div className="px-5">
+                <TabsList className="h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0">
+                  <TabsTrigger
+                    value="instance"
+                    className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  >
+                    Gateway Process
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="settings"
+                    className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                  >
+                    Settings
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+              <CardContent className="p-5">
+                <TabsContent value="instance" className="mt-0">
+                  <InstanceTab
+                    status={instanceStatus}
+                    gatewayStatus={gatewayStatus}
+                    gatewayLoading={gatewayLoading}
+                    gatewayError={gatewayError}
+                  />
+                </TabsContent>
+                <TabsContent value="settings" className="mt-0">
+                  <SettingsTab
+                    status={instanceStatus}
+                    mutations={mutations}
+                    onSecretsChanged={onSecretsChanged}
+                    dirtySecrets={dirtySecrets}
+                  />
+                </TabsContent>
               </CardContent>
-              <Tabs defaultValue="instance">
-                <div className="px-5">
-                  <TabsList className="h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0">
-                    <TabsTrigger
-                      value="instance"
-                      className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                    >
-                      Gateway Process
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="settings"
-                      className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                    >
-                      Settings
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-                <CardContent className="p-5">
-                  <TabsContent value="instance" className="mt-0">
-                    <InstanceTab
-                      status={instanceStatus}
-                      gatewayStatus={gatewayStatus}
-                      gatewayLoading={gatewayLoading}
-                      gatewayError={gatewayError}
-                    />
-                  </TabsContent>
-                  <TabsContent value="settings" className="mt-0">
-                    <SettingsTab
-                      status={instanceStatus}
-                      mutations={mutations}
-                      onSecretsChanged={onSecretsChanged}
-                      dirtySecrets={dirtySecrets}
-                    />
-                  </TabsContent>
-                </CardContent>
-              </Tabs>
-            </>
-          )}
-        </Card>
+            </Tabs>
+          </Card>
+        )}
 
-        {instanceStatus?.status === 'running' && <PairingCard mutations={mutations} />}
+        {instanceStatus?.status === 'running' && !isNewSetup && (
+          <PairingCard mutations={mutations} />
+        )}
       </BillingWrapper>
 
-      <ChangelogCard />
+      {instanceStatus && !isNewSetup && <ChangelogCard />}
     </div>
+  );
+}
+
+const SLOW_PROVISION_TIMEOUT_MS = 60_000;
+
+function ProvisioningSpinner({ onViewDashboard }: { onViewDashboard: () => void }) {
+  const [isSlow, setIsSlow] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsSlow(true), SLOW_PROVISION_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
+        <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+        <p className="text-muted-foreground text-sm">Setting up your KiloClaw instance...</p>
+        {isSlow && (
+          <p className="text-muted-foreground animate-in fade-in max-w-md text-center text-xs duration-500">
+            This is taking longer than expected. If you&apos;re stuck, please reach out to{' '}
+            <a href="mailto:hi@kilocode.ai" className="underline hover:opacity-80">
+              hi@kilocode.ai
+            </a>{' '}
+            for help, or{' '}
+            <button type="button" onClick={onViewDashboard} className="underline hover:opacity-80">
+              view the dashboard
+            </button>{' '}
+            for details.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
