@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createPairingCache, OPENCLAW_BIN } from './pairing-cache';
+import {
+  createPairingCache,
+  OPENCLAW_BIN,
+  DEBOUNCE_DELAY_MS,
+  INITIAL_REFRESH_DELAY_MS,
+  PERIODIC_INTERVAL_MS,
+  FAILURE_RETRY_BASE_MS,
+  FAILURE_RETRY_MAX_MS,
+} from './pairing-cache';
 
 type ExecImpl = (command: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
@@ -406,7 +414,7 @@ describe('createPairingCache', () => {
   });
 
   describe('periodic refresh', () => {
-    it('refreshes every 60s after start', async () => {
+    it('starts after initial delay and then refreshes every 120s', async () => {
       const execImpl = vi.fn<ExecImpl>().mockResolvedValue({
         stdout: JSON.stringify({ requests: [] }),
         stderr: '',
@@ -418,19 +426,21 @@ describe('createPairingCache', () => {
       const { cache } = createTestHarness({ execImpl, readConfigImpl });
       cache.start();
 
-      // Initial fetch fires immediately
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(INITIAL_REFRESH_DELAY_MS - 1);
+      expect(execImpl).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
       const callsAfterInitial = execImpl.mock.calls.length;
       expect(callsAfterInitial).toBeGreaterThan(0);
 
-      // Advance to 60s — periodic fires
-      await vi.advanceTimersByTimeAsync(60_000);
+      // Advance to periodic interval — periodic fires
+      await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS);
       expect(execImpl.mock.calls.length).toBeGreaterThan(callsAfterInitial);
 
       const callsBefore = execImpl.mock.calls.length;
 
-      // Advance another 60s — periodic fires again
-      await vi.advanceTimersByTimeAsync(60_000);
+      // Advance another periodic interval — periodic fires again
+      await vi.advanceTimersByTimeAsync(PERIODIC_INTERVAL_MS);
       expect(execImpl.mock.calls.length).toBeGreaterThan(callsBefore);
 
       cache.cleanup();
@@ -438,7 +448,7 @@ describe('createPairingCache', () => {
   });
 
   describe('initial fetch', () => {
-    it('fires immediately on start', async () => {
+    it('waits 120s before first refresh', async () => {
       const execImpl = vi.fn<ExecImpl>().mockResolvedValue({
         stdout: JSON.stringify({ requests: [] }),
         stderr: '',
@@ -450,8 +460,10 @@ describe('createPairingCache', () => {
       const { cache } = createTestHarness({ execImpl, readConfigImpl });
       cache.start();
 
-      // Flush the microtask queue so the fire-and-forget refreshAll resolves
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(INITIAL_REFRESH_DELAY_MS - 1);
+      expect(execImpl).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
       expect(execImpl).toHaveBeenCalled();
 
       cache.cleanup();
@@ -535,8 +547,8 @@ describe('createPairingCache', () => {
       const { cache } = createTestHarness({ execImpl, readConfigImpl });
       cache.start();
 
-      // Flush the immediate initial refresh
-      await vi.advanceTimersByTimeAsync(0);
+      // Let the delayed initial refresh run
+      await vi.advanceTimersByTimeAsync(INITIAL_REFRESH_DELAY_MS);
       const callsAfterInitial = execImpl.mock.calls.length;
 
       cache.onPairingLogLine('pairing event');
@@ -910,13 +922,72 @@ describe('createPairingCache', () => {
       cache.start();
       cache.start(); // second call should be no-op
 
-      // Flush microtask queue for the immediate initial refresh
-      await vi.advanceTimersByTimeAsync(0);
+      // Wait for delayed initial refresh
+      await vi.advanceTimersByTimeAsync(INITIAL_REFRESH_DELAY_MS);
 
       // With two channels (telegram), initial fetch calls exec twice
       // If start() wasn't idempotent, we'd see 4 calls
       const callsAfterInitial = execImpl.mock.calls.length;
       expect(callsAfterInitial).toBe(2); // telegram channel + device list
+
+      cache.cleanup();
+    });
+  });
+
+  describe('failure backoff', () => {
+    it('uses exponential backoff and caps retries at 5 minutes', async () => {
+      const execImpl = vi.fn<ExecImpl>().mockRejectedValue(new Error('cli down'));
+      const readConfigImpl = vi.fn(() => ({
+        channels: { telegram: { enabled: true, botToken: 'tok' } },
+      }));
+
+      const { cache } = createTestHarness({ execImpl, readConfigImpl });
+      cache.start();
+
+      await vi.advanceTimersByTimeAsync(INITIAL_REFRESH_DELAY_MS);
+      const callsAfterFirstFailure = execImpl.mock.calls.length;
+      expect(callsAfterFirstFailure).toBeGreaterThan(0);
+
+      // Still within first failure backoff window, so no retry yet.
+      expect(execImpl.mock.calls.length).toBe(callsAfterFirstFailure);
+
+      await vi.advanceTimersByTimeAsync(FAILURE_RETRY_BASE_MS - 1);
+      expect(execImpl.mock.calls.length).toBe(callsAfterFirstFailure);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const callsAfterSecondFailure = execImpl.mock.calls.length;
+      expect(callsAfterSecondFailure).toBeGreaterThan(callsAfterFirstFailure);
+
+      // Second failure should back off longer (2x base).
+      await vi.advanceTimersByTimeAsync(FAILURE_RETRY_BASE_MS * 2 - 1);
+      expect(execImpl.mock.calls.length).toBe(callsAfterSecondFailure);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const callsAfterThirdFailure = execImpl.mock.calls.length;
+      expect(callsAfterThirdFailure).toBeGreaterThan(callsAfterSecondFailure);
+
+      // Third failure backs off to 4x base.
+      await vi.advanceTimersByTimeAsync(FAILURE_RETRY_BASE_MS * 4 - 1);
+      expect(execImpl.mock.calls.length).toBe(callsAfterThirdFailure);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const callsAfterFourthFailure = execImpl.mock.calls.length;
+      expect(callsAfterFourthFailure).toBeGreaterThan(callsAfterThirdFailure);
+
+      // Fourth failure backs off to 8x base.
+      await vi.advanceTimersByTimeAsync(FAILURE_RETRY_BASE_MS * 8 - 1);
+      expect(execImpl.mock.calls.length).toBe(callsAfterFourthFailure);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const callsAfterFifthFailure = execImpl.mock.calls.length;
+      expect(callsAfterFifthFailure).toBeGreaterThan(callsAfterFourthFailure);
+
+      // Next delay should be capped at max (5 minutes), not continue doubling.
+      await vi.advanceTimersByTimeAsync(FAILURE_RETRY_MAX_MS - 1);
+      expect(execImpl.mock.calls.length).toBe(callsAfterFifthFailure);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(execImpl.mock.calls.length).toBeGreaterThan(callsAfterFifthFailure);
 
       cache.cleanup();
     });
