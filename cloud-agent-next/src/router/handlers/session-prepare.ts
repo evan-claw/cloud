@@ -8,8 +8,7 @@ import {
   runSetupCommands,
   writeAuthFile,
 } from '../../session-service.js';
-import { InstallationLookupService } from '../../services/installation-lookup-service.js';
-import { GitHubTokenService } from '../../services/github-token-service.js';
+
 import { internalApiProtectedProcedure } from '../auth.js';
 import {
   PrepareSessionInput,
@@ -114,86 +113,72 @@ const prepareSessionHandler = internalApiProtectedProcedure
       });
       logger.info('Preparing new session with workspace setup');
 
-      // 2. Lookup GitHub installation ID from database when using a GitHub repo without a token
+      // 2. Lookup GitHub installation + generate token via git-token-service RPC
+      let resolvedGithubToken = input.githubToken;
       let resolvedInstallationId: string | undefined;
       let resolvedGithubAppType: 'standard' | 'lite' | undefined;
       if (input.githubRepo && !input.githubToken) {
-        const lookupService = new InstallationLookupService(ctx.env);
-        logger
-          .withFields({ hyperdriveConfigured: lookupService.isConfigured() })
-          .info('Checking for GitHub installation ID lookup');
-        if (lookupService.isConfigured()) {
-          try {
-            const result = await lookupService.findInstallationId({
-              githubRepo: input.githubRepo,
-              userId: ctx.userId,
-              orgId: input.kilocodeOrganizationId,
-            });
+        try {
+          const result = await ctx.env.GIT_TOKEN_SERVICE.getTokenForRepo({
+            githubRepo: input.githubRepo,
+            userId: ctx.userId,
+            orgId: input.kilocodeOrganizationId,
+          });
+          if (result.success) {
+            resolvedGithubToken = result.token;
+            resolvedInstallationId = result.installationId;
+            resolvedGithubAppType = result.appType;
             logger
               .withFields({
-                found: !!result,
-                githubRepo: input.githubRepo,
-                userId: ctx.userId,
-                orgId: input.kilocodeOrganizationId,
+                installationId: result.installationId,
+                accountLogin: result.accountLogin,
+                githubAppType: result.appType,
               })
-              .info('Installation lookup result');
-            if (result) {
-              resolvedInstallationId = result.installationId;
-              resolvedGithubAppType = result.githubAppType;
-              logger
-                .withFields({
-                  installationId: result.installationId,
-                  accountLogin: result.accountLogin,
-                  githubAppType: result.githubAppType,
-                })
-                .info('Resolved GitHub installation ID from database');
-            }
-          } catch (lookupError) {
+              .info('Resolved GitHub token via git-token-service');
+          } else {
             logger
-              .withFields({
-                error: lookupError instanceof Error ? lookupError.message : String(lookupError),
-              })
-              .error('Failed to lookup GitHub installation ID');
-            // Don't throw - fall through to the validation error
+              .withFields({ reason: result.reason, githubRepo: input.githubRepo })
+              .info('GitHub token lookup failed');
           }
+        } catch (error) {
+          logger
+            .withFields({
+              error: error instanceof Error ? error.message : String(error),
+            })
+            .error('Failed to call git-token-service getTokenForRepo');
         }
       }
 
       // Validate that we have auth for GitHub repo
-      if (input.githubRepo && !input.githubToken && !resolvedInstallationId) {
+      if (input.githubRepo && !resolvedGithubToken) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: 'GitHub token or active app installation required for this repository',
         });
       }
 
-      // Generate token from installation ID if using GitHub App auth
-      let resolvedGithubToken = input.githubToken;
-      if (input.githubRepo && !input.githubToken && resolvedInstallationId) {
-        const tokenService = new GitHubTokenService(ctx.env);
-        if (!tokenService.isConfigured(resolvedGithubAppType ?? 'standard')) {
-          throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: 'GitHub App credentials not configured',
-          });
-        }
+      // 2b. Lookup GitLab token via git-token-service RPC when no client token provided
+      let resolvedGitToken = input.gitToken;
+      let gitlabTokenManaged = false;
+      if (input.gitUrl && !input.gitToken && input.platform === 'gitlab') {
         try {
-          resolvedGithubToken = await tokenService.getToken(
-            resolvedInstallationId,
-            resolvedGithubAppType ?? 'standard'
-          );
-          logger.info('Generated GitHub token from installation');
-        } catch (tokenError) {
+          const result = await ctx.env.GIT_TOKEN_SERVICE.getGitLabToken({
+            userId: ctx.userId,
+            orgId: input.kilocodeOrganizationId,
+          });
+          if (result.success) {
+            resolvedGitToken = result.token;
+            gitlabTokenManaged = true;
+            logger.info('Resolved GitLab token via git-token-service');
+          } else {
+            logger.withFields({ reason: result.reason }).info('GitLab token lookup failed');
+          }
+        } catch (error) {
           logger
             .withFields({
-              error: tokenError instanceof Error ? tokenError.message : String(tokenError),
-              installationId: resolvedInstallationId,
+              error: error instanceof Error ? error.message : String(error),
             })
-            .error('Failed to generate GitHub token from installation');
-          throw new TRPCError({
-            code: 'BAD_GATEWAY',
-            message: `Failed to generate GitHub token: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`,
-          });
+            .error('Failed to call git-token-service getGitLabToken');
         }
       }
 
@@ -232,7 +217,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
         githubRepo: input.githubRepo,
         githubToken: resolvedGithubToken, // Use resolved token (from input or generated from installation)
         gitUrl: input.gitUrl,
-        gitToken: input.gitToken,
+        gitToken: resolvedGitToken,
         platform: input.platform,
         upstreamBranch: input.upstreamBranch,
         botId: ctx.botId,
@@ -260,7 +245,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
           session,
           workspacePath,
           input.gitUrl,
-          input.gitToken,
+          resolvedGitToken,
           undefined,
           cloneOptions
         );
@@ -385,8 +370,9 @@ const prepareSessionHandler = internalApiProtectedProcedure
           githubInstallationId: resolvedInstallationId,
           githubAppType: resolvedGithubAppType,
           gitUrl: input.gitUrl,
-          gitToken: input.gitToken,
+          gitToken: resolvedGitToken,
           platform: input.platform,
+          gitlabTokenManaged,
           envVars: input.envVars,
           encryptedSecrets: input.encryptedSecrets,
           setupCommands: input.setupCommands,

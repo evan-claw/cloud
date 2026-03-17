@@ -61,7 +61,6 @@ import { isExecutionError } from '../execution/errors.js';
 import type { Env as WorkerEnv } from '../types.js';
 import { generateSandboxId } from '../sandbox-id.js';
 
-import { GitHubTokenService } from '../services/github-token-service.js';
 import { validateStreamTicket } from '../auth.js';
 import { getSandbox } from '@cloudflare/sandbox';
 import { stopKiloServer } from '../kilo/server-manager.js';
@@ -727,6 +726,7 @@ export class CloudAgentSession extends DurableObject {
     gitUrl?: string;
     gitToken?: string;
     platform?: 'github' | 'gitlab';
+    gitlabTokenManaged?: boolean;
     envVars?: Record<string, string>;
     encryptedSecrets?: EncryptedSecrets;
     setupCommands?: string[];
@@ -1727,17 +1727,6 @@ export class CloudAgentSession extends DurableObject {
     };
   }
 
-  private getGitHubTokenService(): GitHubTokenService {
-    const env = this.env as unknown as WorkerEnv;
-    return new GitHubTokenService({
-      GITHUB_TOKEN_CACHE: env.GITHUB_TOKEN_CACHE,
-      GITHUB_APP_ID: env.GITHUB_APP_ID,
-      GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY,
-      GITHUB_LITE_APP_ID: env.GITHUB_LITE_APP_ID,
-      GITHUB_LITE_APP_PRIVATE_KEY: env.GITHUB_LITE_APP_PRIVATE_KEY,
-    });
-  }
-
   /**
    * Start a V2 execution using direct execution (no queue).
    * This method performs validation, checks for active execution, and executes directly.
@@ -1900,7 +1889,7 @@ export class CloudAgentSession extends DurableObject {
         let githubToken = metadata.githubToken;
         if (metadata.githubInstallationId) {
           const appType = metadata.githubAppType || 'standard';
-          githubToken = await this.getGitHubTokenService().getToken(
+          githubToken = await (this.env as unknown as WorkerEnv).GIT_TOKEN_SERVICE.getToken(
             metadata.githubInstallationId,
             appType
           );
@@ -1912,6 +1901,17 @@ export class CloudAgentSession extends DurableObject {
           );
         }
 
+        let gitToken = metadata.gitToken;
+        if (metadata.gitlabTokenManaged && metadata.platform === 'gitlab') {
+          const result = await (this.env as unknown as WorkerEnv).GIT_TOKEN_SERVICE.getGitLabToken({
+            userId: metadata.userId,
+            orgId: metadata.orgId,
+          });
+          if (result.success) {
+            gitToken = result.token;
+          }
+        }
+
         const sandboxId = await generateSandboxId(metadata.orgId, metadata.userId, request.botId);
         const initContext: InitializeContext = {
           kilocodeToken: token,
@@ -1919,7 +1919,7 @@ export class CloudAgentSession extends DurableObject {
           githubRepo: metadata.githubRepo,
           githubToken,
           gitUrl: metadata.gitUrl,
-          gitToken: metadata.gitToken,
+          gitToken,
           envVars: metadata.envVars,
           encryptedSecrets: metadata.encryptedSecrets,
           setupCommands: metadata.setupCommands,
@@ -1984,7 +1984,7 @@ export class CloudAgentSession extends DurableObject {
       let githubToken = request.tokenOverrides?.githubToken ?? metadata.githubToken;
       if (!request.tokenOverrides?.githubToken && metadata.githubInstallationId) {
         const appType = metadata.githubAppType || 'standard';
-        githubToken = await this.getGitHubTokenService().getToken(
+        githubToken = await (this.env as unknown as WorkerEnv).GIT_TOKEN_SERVICE.getToken(
           metadata.githubInstallationId,
           appType
         );
@@ -1996,12 +1996,24 @@ export class CloudAgentSession extends DurableObject {
         );
       }
 
+      // Refresh GitLab token if auto-managed (no override wins)
+      let gitToken = request.tokenOverrides?.gitToken ?? metadata.gitToken;
+      if (!gitToken && metadata.gitlabTokenManaged && metadata.platform === 'gitlab') {
+        const result = await (this.env as unknown as WorkerEnv).GIT_TOKEN_SERVICE.getGitLabToken({
+          userId: metadata.userId,
+          orgId: metadata.orgId,
+        });
+        if (result.success) {
+          gitToken = result.token;
+        }
+      }
+
       const sandboxId = await generateSandboxId(metadata.orgId, metadata.userId, request.botId);
       const resumeContext: TokenResumeContext = {
         kilocodeToken: metadata.kilocodeToken ?? '',
         kilocodeModel: model,
         githubToken,
-        gitToken: request.tokenOverrides?.gitToken,
+        gitToken,
       };
 
       const plan = this.buildExecutionPlan({
