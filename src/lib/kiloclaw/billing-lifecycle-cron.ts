@@ -151,7 +151,7 @@ export async function runKiloClawBillingLifecycleCron(
         if (sent) summary.trial_warnings++;
       } else {
         // 5-day warning (idempotent — skipped if already sent)
-        const daysWord = daysRemaining === 1 ? 'Day' : 'Days';
+        // daysRemaining is always > 1 here (the <= 1 case is handled above)
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -160,7 +160,7 @@ export async function runKiloClawBillingLifecycleCron(
           'clawTrialEndingSoon',
           { days_remaining: String(daysRemaining), claw_url: clawUrl },
           summary,
-          `Your KiloClaw Trial Ends in ${daysRemaining} ${daysWord}`
+          `Your KiloClaw Trial Ends in ${daysRemaining} Days`
         );
         if (sent) summary.trial_warnings++;
       }

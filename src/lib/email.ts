@@ -121,10 +121,15 @@ export async function send(params: SendParams) {
     });
     return sendViaMailgun({ to: params.to, subject, html });
   }
-  // Customer.io handles its own rendering; pass raw string values
+  // Customer.io handles its own rendering; pass raw string values.
+  // If a subjectOverride is provided, include it as `subject` in message_data
+  // so CIO templates can reference it via Liquid ({{ subject }}).
   const messageData: Record<string, string> = Object.fromEntries(
     Object.entries(params.templateVars).map(([k, v]) => [k, v instanceof RawHtml ? v.html : v])
   );
+  if (params.subjectOverride) {
+    messageData.subject = params.subjectOverride;
+  }
   return sendViaCustomerIo({
     transactional_message_id: templates[params.templateName],
     to: params.to,
