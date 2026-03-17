@@ -3,7 +3,6 @@ import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 import type { AnthropicProviderOptions } from '@ai-sdk/anthropic';
 import type { ReasoningDetailUnion } from '@/lib/custom-llm/reasoning-details';
 import type { AwsCredentials } from '@/lib/providers/openrouter/inference-provider-id';
-import * as z from 'zod';
 
 // Base types for OpenRouter API that don't depend on other lib files
 // This breaks circular dependencies with mistral.ts, minimax.ts, etc.
@@ -84,16 +83,6 @@ export type MessageWithReasoning = {
   reasoning_content?: string;
   reasoning_details?: ReasoningDetailUnion[];
 };
-
-export const GatewayApiKindSchema = z.enum([
-  'chat_completions',
-  'embeddings',
-  'fim_completions',
-  'messages',
-  'responses',
-]);
-
-export type GatewayApiKind = z.infer<typeof GatewayApiKindSchema>;
 
 export type GatewayRequest =
   | { kind: 'chat_completions'; body: OpenRouterChatCompletionRequest }

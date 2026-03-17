@@ -277,6 +277,18 @@ export const ABUSE_CLASSIFICATION = {
   LIKELY_ABUSE: 200,
 } as const;
 
+// --- Microdollar Usage --
+
+export const GatewayApiKindSchema = z.enum([
+  'chat_completions',
+  'embeddings',
+  'fim_completions',
+  'messages',
+  'responses',
+]);
+
+export type GatewayApiKind = z.infer<typeof GatewayApiKindSchema>;
+
 // --- Integration types ---
 
 export type IntegrationPermissions = Record<string, string>;

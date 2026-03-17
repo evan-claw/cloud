@@ -8,7 +8,7 @@ import { sql } from 'drizzle-orm';
 import type { UsageMetaData } from '@/lib/processUsage.types';
 import type { MicrodollarUsage } from '@kilocode/db/schema';
 import stats from './stats.json';
-import { GatewayApiKindSchema } from '@/lib/providers/openrouter/types';
+import { GatewayApiKindSchema } from '@kilocode/db';
 
 const TOTAL_RECORDS = 100_000;
 

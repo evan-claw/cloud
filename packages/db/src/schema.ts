@@ -67,6 +67,7 @@ import type {
   CustomLlmExtraBody,
   CustomLlmProvider,
   InterleavedFormat,
+  GatewayApiKind,
 } from './schema-types';
 import type { AnyPgColumn as DrizzleAnyPgColumn } from 'drizzle-orm/pg-core';
 
@@ -758,7 +759,7 @@ export const api_kind = pgTable(
   'api_kind',
   {
     api_kind_id: serial().notNull().primaryKey(),
-    api_kind: text().notNull(),
+    api_kind: text().notNull().$type<GatewayApiKind>(),
   },
   table => [uniqueIndex('UQ_api_kind').on(table.api_kind)]
 );
@@ -832,7 +833,7 @@ export const microdollar_usage_view = pgView('microdollar_usage_view', {
   streamed: boolean(),
   cancelled: boolean(),
   editor_name: text(),
-  api_kind: text(),
+  api_kind: text().$type<GatewayApiKind>(),
   has_tools: boolean(),
   machine_id: text(),
   feature: text(),
