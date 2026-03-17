@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTRPC } from '@/lib/trpc/utils';
 import { FileEditorShell } from '@/app/(app)/claw/components/FileEditorShell';
 import { FileEditorPane, type FileSaveError } from '@/app/(app)/claw/components/FileEditorPane';
@@ -41,6 +42,22 @@ function AdminFileEditorPaneInner({
     [writeFileMutation, userId]
   );
 
+  const validateBeforeSave = useCallback((path: string, content: string) => {
+    if (path === 'openclaw.json') {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          toast.error('Config must be a JSON object');
+          return false;
+        }
+      } catch {
+        toast.error('Invalid JSON — fix syntax errors before saving');
+        return false;
+      }
+    }
+    return true;
+  }, []);
+
   return (
     <FileEditorPane
       filePath={filePath}
@@ -51,6 +68,7 @@ function AdminFileEditorPaneInner({
       onSave={handleSave}
       isSaving={writeFileMutation.isPending}
       onDirtyChange={onDirtyChange}
+      validateBeforeSave={validateBeforeSave}
     />
   );
 }
