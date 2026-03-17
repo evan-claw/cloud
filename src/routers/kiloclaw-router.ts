@@ -4,12 +4,7 @@ import * as z from 'zod';
 import { TRPCError } from '@trpc/server';
 import { baseProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/init';
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
-import path from 'node:path';
-import {
-  KiloClawInternalClient,
-  KiloClawApiError,
-  type FileNode,
-} from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
 import {
@@ -123,50 +118,6 @@ function getKiloClawApiErrorPayload(err: KiloClawApiError): { message?: string; 
     };
   } catch {
     return {};
-  }
-}
-
-// ── User-facing file filtering ─────────────────────────────────────
-// The controller returns the full, unfiltered tree. These helpers
-// enforce the user-visible subset (extension allowlist, hidden dirs/patterns).
-
-const USER_ALLOWED_EXTENSIONS = new Set([
-  '.json',
-  '.json5',
-  '.md',
-  '.txt',
-  '.yaml',
-  '.yml',
-  '.toml',
-]);
-const USER_FILTERED_PATTERNS = [/\.bak\./, /\.kilotmp\./];
-
-function filterFileTree(nodes: FileNode[]): FileNode[] {
-  const result: FileNode[] = [];
-  for (const node of nodes) {
-    if (USER_FILTERED_PATTERNS.some(p => p.test(node.name))) continue;
-
-    if (node.type === 'directory') {
-      result.push({ ...node, children: filterFileTree(node.children ?? []) });
-    } else {
-      if (!USER_ALLOWED_EXTENSIONS.has(path.extname(node.name).toLowerCase())) continue;
-      result.push(node);
-    }
-  }
-  return result;
-}
-
-function validateUserFilePath(filePath: string): void {
-  if (!USER_ALLOWED_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed' });
-  }
-  const filename = path.basename(filePath);
-  if (USER_FILTERED_PATTERNS.some(p => p.test(filename))) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed' });
-  }
-  const segments = filePath.split('/');
-  if (segments.some(s => s === '..' || s === '.')) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid file path' });
   }
 }
 
@@ -992,7 +943,7 @@ export const kiloclawRouter = createTRPCRouter({
     try {
       const client = new KiloClawInternalClient();
       const result = await client.getFileTree(ctx.user.id);
-      return filterFileTree(result.tree);
+      return result.tree;
     } catch (err) {
       handleFileOperationError(err, 'fetch file tree');
     }
@@ -1001,7 +952,6 @@ export const kiloclawRouter = createTRPCRouter({
   readFile: clawAccessProcedure
     .input(z.object({ path: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      validateUserFilePath(input.path);
       try {
         const client = new KiloClawInternalClient();
         const result = await client.readFile(ctx.user.id, input.path);
@@ -1034,7 +984,6 @@ export const kiloclawRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      validateUserFilePath(input.path);
       try {
         const client = new KiloClawInternalClient();
         let content = input.content;
