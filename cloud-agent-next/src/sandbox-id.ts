@@ -2,21 +2,26 @@ import type { SandboxId, Env } from './types.js';
 import type { Sandbox } from '@cloudflare/sandbox';
 
 /**
- * Org IDs that use per-session sandboxes (standard-2 instance type).
- * Sessions for these orgs get an isolated container per session rather than
- * a shared container per org/user pair.
- *
- * Intentionally hardcoded: changes require a deploy so we can gate rollout
- * and quickly revert by removing an org from this set. Move to an env var
- * once the feature is stable and broadly rolled out.
+ * Parses PER_SESSION_SANDBOX_ORG_IDS from the env var (comma-separated).
+ * Returns an empty set when the var is unset or blank.
  */
-const PER_SESSION_SANDBOX_ORG_IDS = new Set<string>(['abc']);
+function parsePerSessionOrgIds(env: Env): Set<string> {
+  const raw = env.PER_SESSION_SANDBOX_ORG_IDS;
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+  );
+}
 
 /**
  * Returns true if the given org should use per-session sandboxes.
  */
-export function isPerSessionSandboxOrg(orgId?: string): boolean {
-  return orgId !== undefined && PER_SESSION_SANDBOX_ORG_IDS.has(orgId);
+export function isPerSessionSandboxOrg(env: Env, orgId?: string): boolean {
+  if (orgId === undefined) return false;
+  return parsePerSessionOrgIds(env).has(orgId);
 }
 
 /**

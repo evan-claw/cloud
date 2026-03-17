@@ -105,7 +105,7 @@ const prepareSessionHandler = internalApiProtectedProcedure
 
       // 1. Generate new cloudAgentSessionId and sandboxId
       const cloudAgentSessionId = generateSessionId();
-      const sandboxId: SandboxId = isPerSessionSandboxOrg(input.kilocodeOrganizationId)
+      const sandboxId: SandboxId = isPerSessionSandboxOrg(ctx.env, input.kilocodeOrganizationId)
         ? await generatePerSessionSandboxId(cloudAgentSessionId)
         : await generateSandboxId(input.kilocodeOrganizationId, ctx.userId, ctx.botId);
 

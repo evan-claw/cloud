@@ -55,6 +55,7 @@
     "R2_ATTACHMENTS_BUCKET": "cloud-agent-attachments",
     "WS_ALLOWED_ORIGINS": "https://app.kilo.ai",
     "KILO_SESSION_INGEST_URL": "https://ingest.kilosessions.ai",
+    "PER_SESSION_SANDBOX_ORG_IDS": "",
   },
   "placement": { "mode": "smart" },
   /**
@@ -260,6 +261,7 @@
         "R2_ATTACHMENTS_BUCKET": "cloud-agent-attachments-dev",
         "WS_ALLOWED_ORIGINS": "http://localhost:3000,http://192.168.200.174:3000",
         "KILO_SESSION_INGEST_URL": "http://localhost:8787",
+        "PER_SESSION_SANDBOX_ORG_IDS": "",
       },
       "services": [
         {

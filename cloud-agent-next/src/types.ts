@@ -148,6 +148,8 @@ export type Env = {
   GITHUB_APP_SLUG?: string;
   /** GitHub App bot user ID for git commit email (e.g., '240665456') */
   GITHUB_APP_BOT_USER_ID?: string;
+  /** Comma-separated org IDs that use per-session sandbox containers */
+  PER_SESSION_SANDBOX_ORG_IDS?: string;
 };
 
 /** tRPC context passed to all procedures */

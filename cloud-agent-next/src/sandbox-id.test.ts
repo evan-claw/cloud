@@ -152,16 +152,39 @@ describe('generatePerSessionSandboxId', () => {
 });
 
 describe('isPerSessionSandboxOrg', () => {
-  it('should return true for a known per-session org', () => {
-    expect(isPerSessionSandboxOrg('abc')).toBe(true);
+  function envWith(orgIds: string): Env {
+    return { PER_SESSION_SANDBOX_ORG_IDS: orgIds } as unknown as Env;
+  }
+
+  it('should return true for an org in the comma-separated list', () => {
+    expect(isPerSessionSandboxOrg(envWith('abc,def'), 'abc')).toBe(true);
+    expect(isPerSessionSandboxOrg(envWith('abc,def'), 'def')).toBe(true);
+  });
+
+  it('should return true for a single-entry list', () => {
+    expect(isPerSessionSandboxOrg(envWith('abc'), 'abc')).toBe(true);
+  });
+
+  it('should trim whitespace around entries', () => {
+    expect(isPerSessionSandboxOrg(envWith(' abc , def '), 'abc')).toBe(true);
+    expect(isPerSessionSandboxOrg(envWith(' abc , def '), 'def')).toBe(true);
   });
 
   it('should return false for an unknown org', () => {
-    expect(isPerSessionSandboxOrg('some-other-org')).toBe(false);
+    expect(isPerSessionSandboxOrg(envWith('abc,def'), 'some-other-org')).toBe(false);
   });
 
-  it('should return false for undefined', () => {
-    expect(isPerSessionSandboxOrg(undefined)).toBe(false);
+  it('should return false for undefined orgId', () => {
+    expect(isPerSessionSandboxOrg(envWith('abc'), undefined)).toBe(false);
+  });
+
+  it('should return false when env var is empty', () => {
+    expect(isPerSessionSandboxOrg(envWith(''), 'abc')).toBe(false);
+  });
+
+  it('should return false when env var is unset', () => {
+    const env = {} as unknown as Env;
+    expect(isPerSessionSandboxOrg(env, 'abc')).toBe(false);
   });
 });
 
