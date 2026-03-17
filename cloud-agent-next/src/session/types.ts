@@ -28,6 +28,8 @@ export type ExecutionMetadata = {
   /** Process ID for long-running sandbox processes */
   processId?: string;
   lastHeartbeat?: number;
+  /** Timestamp of most recent non-heartbeat ingest event */
+  lastEventAt?: number;
   /** Token for authenticating ingest WebSocket connections */
   ingestToken?: string;
 };

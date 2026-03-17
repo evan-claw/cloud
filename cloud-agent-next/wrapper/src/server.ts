@@ -2,11 +2,10 @@
  * HTTP Server for the long-running wrapper.
  *
  * Exposes the wrapper's HTTP API for the Worker to interact with:
- * - GET /health - Health check
+ * - GET /health - Health check (includes sessionId)
  * - GET /job/status - Current job status
- * - POST /job/start - Start a new job
- * - POST /job/prompt - Send a prompt
- * - POST /job/command - Send a command
+ * - POST /job/prompt - Send a prompt (includes execution binding)
+ * - POST /job/command - Send a command (includes execution binding)
  * - POST /job/answer-permission - Answer a permission request
  * - POST /job/answer-question - Answer a question
  * - POST /job/reject-question - Reject a question
@@ -14,9 +13,9 @@
  */
 
 import type { WrapperState, JobContext } from './state.js';
-import type { KiloClient } from './kilo-client.js';
+import type { WrapperKiloClient } from './kilo-api.js';
+import type { PerTurnConfig } from './lifecycle.js';
 import { createLogUploader } from './log-uploader.js';
-import { SESSION_ID_RE } from '../../src/shared/protocol.js';
 import { logToFile } from './utils.js';
 
 // ---------------------------------------------------------------------------
@@ -25,37 +24,46 @@ import { logToFile } from './utils.js';
 
 export type ServerConfig = {
   port: number;
-  kiloServerPort: number;
   workspacePath: string;
   version: string;
+  /** The root kilo session ID, created at wrapper startup */
+  sessionId: string;
+  /** Stable Cloud Agent session ID, passed at wrapper startup */
+  agentSessionId: string;
+  /** Stable Cloud Agent user ID, passed at wrapper startup */
+  userId: string;
 };
 
 export type ServerDependencies = {
   state: WrapperState;
-  kiloClient: KiloClient;
+  kiloClient: WrapperKiloClient;
   openConnection: () => Promise<void>;
-  getMaxRuntimeMs: () => number;
+  /** Close existing connections (ingest WS + event subscription) */
+  closeConnection: () => Promise<void>;
   /** Set the aborted flag to skip post-completion tasks */
   setAborted: () => void;
   /** Reset lifecycle state for a new execution */
   resetLifecycle: () => void;
+  /** Set per-turn config on the lifecycle manager */
+  setPerTurnConfig: (config: PerTurnConfig) => void;
 };
 
-// Request body types
-type StartJobBody = {
+/**
+ * Per-execution config, included in prompt/command bodies.
+ * A new executionId triggers setup (log uploader, state reset).
+ * Same executionId is idempotent. Omitted means use existing context.
+ */
+type ExecutionBinding = {
   executionId: string;
   ingestUrl: string;
   ingestToken: string;
-  sessionId: string;
-  userId: string;
-  kilocodeToken: string;
-  kiloSessionId?: string;
-  kiloSessionTitle?: string;
+  workerAuthToken: string;
+  upstreamBranch?: string;
 };
 
 type PromptBody = {
   prompt?: string;
-  /** Message parts - only text parts are supported (file parts require URL upload which isn't implemented) */
+  /** Message parts - only text parts are supported */
   parts?: Array<{ type: 'text'; text: string }>;
   model?: { providerID?: string; modelID: string };
   variant?: string;
@@ -63,11 +71,17 @@ type PromptBody = {
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  autoCommit?: boolean;
+  condenseOnComplete?: boolean;
+  /** Per-execution config — new executionId triggers setup */
+  execution?: ExecutionBinding;
 };
 
 type CommandBody = {
   command: string;
   args?: string;
+  /** Per-execution config — new executionId triggers setup */
+  execution?: ExecutionBinding;
 };
 
 type AnswerPermissionBody = {
@@ -100,14 +114,107 @@ function errorResponse(error: string, message: string, status: number): Response
 }
 
 /**
- * Validate required string fields on a request body.
- * Returns array of missing field names.
+ * Bind execution context from a prompt/command body.
+ *
+ * - If `execution` present with a new `executionId`: run setup (store context,
+ *   create log uploader, reset lifecycle).
+ * - If same `executionId`: no-op (idempotent).
+ * - If `execution` omitted: use existing job context (for follow-up calls
+ *   like answer-question).
+ *
+ * Returns an error Response if binding fails, or null on success.
  */
-function getMissingFields<T extends Record<string, unknown>>(
-  body: T,
-  requiredFields: readonly (keyof T)[]
-): string[] {
-  return requiredFields.filter(field => !body[field]) as string[];
+async function bindExecutionContext(
+  execution: ExecutionBinding | undefined,
+  config: ServerConfig,
+  deps: ServerDependencies
+): Promise<Response | null> {
+  const { state } = deps;
+
+  if (!execution) {
+    // No execution binding — use existing context
+    if (!state.hasJob) {
+      return errorResponse('NO_JOB', 'No execution context and no execution binding provided', 400);
+    }
+    return null;
+  }
+
+  // Idempotent: same executionId
+  const currentJob = state.currentJob;
+  if (currentJob && currentJob.executionId === execution.executionId) {
+    return null;
+  }
+
+  // Conflict: different executionId while active
+  if (currentJob && state.isActive) {
+    logToFile(
+      `execution binding conflict: active=${currentJob.executionId} requested=${execution.executionId}`
+    );
+    return errorResponse(
+      'JOB_CONFLICT',
+      `Cannot bind new execution while execution ${currentJob.executionId} is active`,
+      409
+    );
+  }
+
+  // Parse ingest URL to derive worker base URL for log uploads
+  let workerBaseUrl: string;
+  try {
+    const ingestOrigin = new URL(execution.ingestUrl);
+    ingestOrigin.protocol =
+      ingestOrigin.protocol === 'wss:' || ingestOrigin.protocol === 'https:' ? 'https:' : 'http:';
+    workerBaseUrl = ingestOrigin.origin;
+  } catch {
+    return errorResponse('INVALID_REQUEST', 'Invalid ingestUrl', 400);
+  }
+
+  // Build job context
+  const jobContext: JobContext = {
+    executionId: execution.executionId,
+    kiloSessionId: config.sessionId,
+    ingestUrl: execution.ingestUrl,
+    ingestToken: execution.ingestToken,
+    workerAuthToken: execution.workerAuthToken,
+  };
+
+  // Close stale ingest connection from the prior execution. The prior execution's
+  // 'complete' event was already delivered before the DO allowed this new execution
+  // to start, so all A-side events have been flushed — closing now is safe.
+  // Await the close to ensure the old event subscription is fully torn down
+  // before starting the new job context.
+  if (state.isConnected) {
+    await deps.closeConnection();
+  }
+
+  // Reset lifecycle state from previous execution
+  deps.resetLifecycle();
+
+  // Start the job
+  try {
+    state.startJob(jobContext);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logToFile(`execution binding failed: ${msg}`);
+    return errorResponse('JOB_CONFLICT', msg, 409);
+  }
+
+  // Create and start log uploader for this execution
+  const cliLogDir = `/home/${config.agentSessionId}/.local/share/kilo/log`;
+  const wrapperLogPath = process.env.WRAPPER_LOG_PATH ?? '/tmp/kilocode-wrapper.log';
+  const logUploader = createLogUploader({
+    workerBaseUrl,
+    sessionId: config.agentSessionId,
+    executionId: execution.executionId,
+    userId: config.userId,
+    workerAuthToken: execution.workerAuthToken,
+    cliLogDir,
+    wrapperLogPath,
+  });
+  state.setLogUploader(logUploader);
+  logUploader.start();
+  logToFile(`execution bound: executionId=${execution.executionId} sessionId=${config.sessionId}`);
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,8 +226,8 @@ function createHealthHandler(config: ServerConfig, state: WrapperState) {
     return jsonResponse({
       healthy: true,
       state: state.isActive ? 'active' : 'idle',
-      inflightCount: state.inflightCount,
       version: config.version,
+      sessionId: config.sessionId,
     });
   };
 }
@@ -131,149 +238,9 @@ function createStatusHandler(state: WrapperState) {
   };
 }
 
-function createStartJobHandler(deps: ServerDependencies, kiloClient: KiloClient) {
+function createPromptHandler(config: ServerConfig, deps: ServerDependencies) {
   return async (req: Request): Promise<Response> => {
-    const { state } = deps;
-
-    let body: StartJobBody;
-    try {
-      body = (await req.json()) as StartJobBody;
-    } catch {
-      return errorResponse('INVALID_REQUEST', 'Invalid JSON body', 400);
-    }
-
-    // Validate required fields
-    const requiredFields = [
-      'executionId',
-      'ingestUrl',
-      'ingestToken',
-      'sessionId',
-      'userId',
-      'kilocodeToken',
-    ] as const;
-    const missing = getMissingFields(body, requiredFields);
-    if (missing.length > 0) {
-      return errorResponse(
-        'INVALID_REQUEST',
-        `Missing required fields: ${missing.join(', ')}`,
-        400
-      );
-    }
-
-    // Check for idempotent call (same executionId)
-    const currentJob = state.currentJob;
-    if (currentJob && currentJob.executionId === body.executionId) {
-      logToFile(`job/start: idempotent call for executionId=${body.executionId}`);
-      return jsonResponse({
-        status: 'started',
-        kiloSessionId: currentJob.kiloSessionId,
-      });
-    }
-
-    // Check for conflict (different executionId while active)
-    if (currentJob && state.isActive) {
-      logToFile(
-        `job/start: conflict - active execution ${currentJob.executionId}, requested ${body.executionId}`
-      );
-      return errorResponse(
-        'JOB_CONFLICT',
-        `Cannot start new job while execution ${currentJob.executionId} is active`,
-        409
-      );
-    }
-
-    // Validate sessionId format before using in filesystem path (defense-in-depth)
-    if (!SESSION_ID_RE.test(body.sessionId)) {
-      return errorResponse('INVALID_REQUEST', 'Invalid sessionId format', 400);
-    }
-
-    // Parse ingest URL to derive worker base URL for log uploads
-    let workerBaseUrl: string;
-    try {
-      const ingestOrigin = new URL(body.ingestUrl);
-      ingestOrigin.protocol =
-        ingestOrigin.protocol === 'wss:' || ingestOrigin.protocol === 'https:' ? 'https:' : 'http:';
-      workerBaseUrl = ingestOrigin.origin;
-    } catch {
-      return errorResponse('INVALID_REQUEST', 'Invalid ingestUrl', 400);
-    }
-
-    // Create or resume kilo session
-    let kiloSessionId: string;
-    try {
-      if (body.kiloSessionId) {
-        // Resume existing session - verify it exists
-        await kiloClient.getSession(body.kiloSessionId);
-        kiloSessionId = body.kiloSessionId;
-        logToFile(`job/start: resuming kilo session ${kiloSessionId}`);
-      } else {
-        // Create new session
-        const session = await kiloClient.createSession({
-          title: body.kiloSessionTitle,
-        });
-        kiloSessionId = session.id;
-        logToFile(`job/start: created kilo session ${kiloSessionId}`);
-      }
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logToFile(`job/start: failed to create/resume session: ${msg}`);
-      return errorResponse('SESSION_ERROR', `Failed to create/resume kilo session: ${msg}`, 500);
-    }
-
-    // Build job context
-    const jobContext: JobContext = {
-      executionId: body.executionId,
-      sessionId: body.sessionId,
-      userId: body.userId,
-      kiloSessionId,
-      ingestUrl: body.ingestUrl,
-      ingestToken: body.ingestToken,
-      kilocodeToken: body.kilocodeToken,
-    };
-
-    // Reset lifecycle state from previous execution (clears stale isAborted, isDraining, etc.)
-    deps.resetLifecycle();
-
-    // Start the job (this stores context but doesn't connect yet)
-    try {
-      state.startJob(jobContext);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logToFile(`job/start: state.startJob failed: ${msg}`);
-      return errorResponse('JOB_CONFLICT', msg, 409);
-    }
-
-    // Create and start log uploader for this job
-    const cliLogDir = `/home/${body.sessionId}/.local/share/kilo/log`;
-    const wrapperLogPath = process.env.WRAPPER_LOG_PATH ?? '/tmp/kilocode-wrapper.log';
-    const logUploader = createLogUploader({
-      workerBaseUrl,
-      sessionId: body.sessionId,
-      executionId: body.executionId,
-      userId: body.userId,
-      kilocodeToken: body.kilocodeToken,
-      cliLogDir,
-      wrapperLogPath,
-    });
-    state.setLogUploader(logUploader);
-    logUploader.start();
-    logToFile(`job/start: log uploader started (url=${workerBaseUrl})`);
-
-    logToFile(
-      `job/start: job started executionId=${body.executionId} kiloSessionId=${kiloSessionId}`
-    );
-    return jsonResponse({ status: 'started', kiloSessionId });
-  };
-}
-
-function createPromptHandler(deps: ServerDependencies) {
-  return async (req: Request): Promise<Response> => {
-    const { state, kiloClient, openConnection, getMaxRuntimeMs } = deps;
-
-    const job = state.currentJob;
-    if (!job) {
-      return errorResponse('NO_JOB', 'Call /job/start first', 400);
-    }
+    const { state, kiloClient, openConnection } = deps;
 
     let body: PromptBody;
     try {
@@ -282,17 +249,34 @@ function createPromptHandler(deps: ServerDependencies) {
       return errorResponse('INVALID_REQUEST', 'Invalid JSON body', 400);
     }
 
+    // Bind execution context if provided
+    const bindError = await bindExecutionContext(body.execution, config, deps);
+    if (bindError) return bindError;
+
+    const job = state.currentJob;
+    if (!job) {
+      return errorResponse('NO_JOB', 'No execution context available', 400);
+    }
+
     // Validate prompt content
     if (!body.prompt && !body.parts) {
       return errorResponse('INVALID_REQUEST', 'Either prompt or parts is required', 400);
     }
     const messageId = body.messageId ?? state.nextMessageId();
 
+    // Set per-turn config on the lifecycle manager
+    deps.setPerTurnConfig({
+      autoCommit: body.autoCommit ?? false,
+      condenseOnComplete: body.condenseOnComplete ?? false,
+      model: body.model?.modelID,
+      upstreamBranch: body.execution?.upstreamBranch,
+    });
+
     // Open connection if idle
     if (state.isIdle && !state.isConnected) {
       try {
         await openConnection();
-        logToFile(`job/prompt: connection opened`);
+        logToFile('job/prompt: connection opened');
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         logToFile(`job/prompt: failed to open connection: ${msg}`);
@@ -300,13 +284,10 @@ function createPromptHandler(deps: ServerDependencies) {
       }
     }
 
-    // Calculate deadline
-    const deadline = Date.now() + getMaxRuntimeMs();
+    // Mark active
+    state.setActive(true);
 
-    // Track inflight
-    state.addInflight(messageId, deadline);
-
-    // Send to kilo server with the messageId we're tracking
+    // Send to kilo server
     try {
       await kiloClient.sendPromptAsync({
         sessionId: job.kiloSessionId,
@@ -320,8 +301,7 @@ function createPromptHandler(deps: ServerDependencies) {
       });
       logToFile(`job/prompt: sent messageId=${messageId}`);
     } catch (error) {
-      // Remove from inflight on failure
-      state.removeInflight(messageId);
+      state.setActive(false);
       const msg = error instanceof Error ? error.message : String(error);
       logToFile(`job/prompt: failed to send: ${msg}`);
       return errorResponse('SEND_ERROR', `Failed to send prompt: ${msg}`, 500);
@@ -331,14 +311,9 @@ function createPromptHandler(deps: ServerDependencies) {
   };
 }
 
-function createCommandHandler(deps: ServerDependencies) {
+function createCommandHandler(config: ServerConfig, deps: ServerDependencies) {
   return async (req: Request): Promise<Response> => {
     const { state, kiloClient } = deps;
-
-    const job = state.currentJob;
-    if (!job) {
-      return errorResponse('NO_JOB', 'Call /job/start first', 400);
-    }
 
     let body: CommandBody;
     try {
@@ -347,12 +322,19 @@ function createCommandHandler(deps: ServerDependencies) {
       return errorResponse('INVALID_REQUEST', 'Invalid JSON body', 400);
     }
 
+    // Bind execution context if provided
+    const bindError = await bindExecutionContext(body.execution, config, deps);
+    if (bindError) return bindError;
+
+    const job = state.currentJob;
+    if (!job) {
+      return errorResponse('NO_JOB', 'No execution context available', 400);
+    }
+
     if (!body.command) {
       return errorResponse('INVALID_REQUEST', 'command is required', 400);
     }
 
-    // Commands are synchronous - call kilo server directly
-    // Note: Commands do NOT open connection or track inflight
     try {
       const result = await kiloClient.sendCommand({
         sessionId: job.kiloSessionId,
@@ -375,7 +357,7 @@ function createAnswerPermissionHandler(deps: ServerDependencies) {
     const { state, kiloClient } = deps;
 
     if (!state.hasJob) {
-      return errorResponse('NO_JOB', 'Call /job/start first', 400);
+      return errorResponse('NO_JOB', 'No execution context', 400);
     }
 
     let body: AnswerPermissionBody;
@@ -409,7 +391,7 @@ function createAnswerQuestionHandler(deps: ServerDependencies) {
     const { state, kiloClient } = deps;
 
     if (!state.hasJob) {
-      return errorResponse('NO_JOB', 'Call /job/start first', 400);
+      return errorResponse('NO_JOB', 'No execution context', 400);
     }
 
     let body: AnswerQuestionBody;
@@ -441,7 +423,7 @@ function createRejectQuestionHandler(deps: ServerDependencies) {
     const { state, kiloClient } = deps;
 
     if (!state.hasJob) {
-      return errorResponse('NO_JOB', 'Call /job/start first', 400);
+      return errorResponse('NO_JOB', 'No execution context', 400);
     }
 
     let body: RejectQuestionBody;
@@ -496,8 +478,8 @@ function createAbortHandler(deps: ServerDependencies, triggerDrainAndClose: () =
       timestamp: new Date().toISOString(),
     });
 
-    // Clear inflight and trigger close
-    state.clearAllInflight();
+    // Deactivate and trigger close
+    state.setActive(false);
     triggerDrainAndClose();
 
     return jsonResponse({ status: 'aborted' });
@@ -510,7 +492,7 @@ function createAbortHandler(deps: ServerDependencies, triggerDrainAndClose: () =
 
 export type WrapperServer = {
   server: ReturnType<typeof Bun.serve>;
-  stop: () => void;
+  stop: () => Promise<void>;
 };
 
 export function createServer(
@@ -518,14 +500,13 @@ export function createServer(
   deps: ServerDependencies,
   triggerDrainAndClose: () => void
 ): WrapperServer {
-  const { state, kiloClient } = deps;
+  const { state } = deps;
 
   // Create route handlers
   const healthHandler = createHealthHandler(config, state);
   const statusHandler = createStatusHandler(state);
-  const startJobHandler = createStartJobHandler(deps, kiloClient);
-  const promptHandler = createPromptHandler(deps);
-  const commandHandler = createCommandHandler(deps);
+  const promptHandler = createPromptHandler(config, deps);
+  const commandHandler = createCommandHandler(config, deps);
   const answerPermissionHandler = createAnswerPermissionHandler(deps);
   const answerQuestionHandler = createAnswerQuestionHandler(deps);
   const rejectQuestionHandler = createRejectQuestionHandler(deps);
@@ -539,7 +520,6 @@ export function createServer(
       '/job/status': statusHandler,
     },
     POST: {
-      '/job/start': startJobHandler,
       '/job/prompt': promptHandler,
       '/job/command': commandHandler,
       '/job/answer-permission': answerPermissionHandler,

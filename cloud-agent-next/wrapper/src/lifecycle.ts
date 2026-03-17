@@ -2,15 +2,13 @@
  * Lifecycle management for the long-running wrapper.
  *
  * Handles:
- * - Inflight expiry (per-message timeout)
- * - SSE health monitoring (inactivity and initial connection timeouts)
+ * - SSE transport timer (15s reconnect on inactivity)
  * - Drain period (grace period before closing connections)
  * - Auto-commit and condense on completion
  */
 
 import type { WrapperState } from './state.js';
-import type { KiloClient } from './kilo-client.js';
-import type { ConnectionManager } from './connection.js';
+import type { WrapperKiloClient } from './kilo-api.js';
 import { runAutoCommit } from './auto-commit.js';
 import { runCondenseOnComplete } from './condense-on-complete.js';
 import { getCurrentBranch, logToFile } from './utils.js';
@@ -19,17 +17,11 @@ import { getCurrentBranch, logToFile } from './utils.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Interval for checking inflight expiry (5 seconds) */
-const INFLIGHT_CHECK_INTERVAL_MS = 5_000;
-
 /** Grace period before closing connections after inflight hits 0 (250ms) */
 const DRAIN_DELAY_MS = 250;
 
-/** Default per-message timeout if MAX_RUNTIME_MS not set (30 minutes) */
-export const DEFAULT_INFLIGHT_TIMEOUT_MS = 1_800_000;
-
-/** SSE inactivity timeout - if no SSE events for this long while active, assume broken (2 minutes) */
-const SSE_INACTIVITY_TIMEOUT_MS = 120_000;
+/** If no SSE event arrives within this window, reconnect the event subscription (15s) */
+const SSE_TRANSPORT_TIMEOUT_MS = 15_000;
 
 /** Overall timeout for auto-commit operation (2 minutes) */
 const AUTO_COMMIT_TIMEOUT_MS = 120_000;
@@ -39,43 +31,52 @@ const AUTO_COMMIT_TIMEOUT_MS = 120_000;
 // ---------------------------------------------------------------------------
 
 export type LifecycleConfig = {
-  /** Per-message deadline timeout (from MAX_RUNTIME_MS env var) */
-  maxRuntimeMs: number;
-  /** Enable auto-commit on completion */
-  autoCommit: boolean;
-  /** Enable condense on completion */
-  condenseOnComplete: boolean;
-  /** Workspace path for auto-commit/condense */
+  /** Workspace path for auto-commit/condense (session-stable) */
   workspacePath: string;
-  /** Model for auto-commit/condense */
+};
+
+/**
+ * Per-turn options set by the prompt handler.
+ * These override defaults for the current turn and are consumed
+ * when session.idle fires (auto-commit, condense, timeout).
+ */
+export type PerTurnConfig = {
+  autoCommit: boolean;
+  condenseOnComplete: boolean;
   model?: string;
-  /** Upstream branch explicitly provided by the user via API */
   upstreamBranch?: string;
 };
 
 export type LifecycleDependencies = {
   state: WrapperState;
-  kiloClient: KiloClient;
-  connectionManager: ConnectionManager;
+  kiloClient: WrapperKiloClient;
+  /** Close all connections (ingest WS + event subscription) */
+  closeConnections: () => Promise<void>;
+  /** Check if ingest WS is currently connected */
+  isConnected: () => boolean;
+  /** Abort and restart the SDK event subscription */
+  reconnectEventSubscription: () => void;
 };
 
 export type LifecycleManager = {
-  /** Start lifecycle timers */
+  /** Start lifecycle monitoring */
   start: () => void;
-  /** Stop lifecycle timers */
+  /** Stop lifecycle monitoring */
   stop: () => void;
-  /** Called when a message completes - checks if inflight is empty */
+  /** Called when a message completes - checks if idle */
   onMessageComplete: (messageId: string) => void;
   /** Called to trigger drain and close sequence */
   triggerDrainAndClose: () => void;
-  /** Get the max runtime in ms */
-  getMaxRuntimeMs: () => number;
   /** Signal completion for post-processing waiters (called by connection on completion events) */
   signalCompletion: () => void;
   /** Set the aborted flag to prevent post-completion tasks from running */
   setAborted: () => void;
   /** Reset lifecycle state for a new execution (clears isAborted, isDraining, etc.) */
   reset: () => void;
+  /** Set per-turn config (called by prompt handler before each turn) */
+  setPerTurnConfig: (turnConfig: PerTurnConfig) => void;
+  /** Called by connection manager on every SSE event to reset the transport timer */
+  onSseEvent: () => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -86,151 +87,37 @@ export function createLifecycleManager(
   config: LifecycleConfig,
   deps: LifecycleDependencies
 ): LifecycleManager {
-  const { state, kiloClient, connectionManager } = deps;
+  const { state, kiloClient } = deps;
 
-  let inflightCheckInterval: ReturnType<typeof setInterval> | null = null;
+  let sseTransportTimer: ReturnType<typeof setTimeout> | null = null;
   let drainTimeout: ReturnType<typeof setTimeout> | null = null;
   let isDraining = false;
   let isAborted = false;
+
+  // Per-turn config, set by the prompt handler before each turn
+  let perTurn: PerTurnConfig = {
+    autoCommit: false,
+    condenseOnComplete: false,
+  };
 
   // Completion waiter for post-processing tasks (auto-commit, condense)
   let postProcessingResolve: (() => void) | null = null;
   let postProcessingCompleted = false;
 
-  /**
-   * Check for expired inflight entries and handle timeouts.
-   */
-  function checkInflightExpiry(): void {
-    const now = Date.now();
-    const expired = state.getExpiredInflight(now);
-
-    for (const entry of expired) {
-      logToFile(`inflight timeout: messageId=${entry.messageId}`);
-
-      // Send timeout error event to ingest
-      state.sendToIngest({
-        streamEventType: 'error',
-        data: {
-          error: `Prompt ${entry.messageId} timed out after ${(now - entry.startedAt) / 1000}s`,
-          fatal: false,
-          code: 'INFLIGHT_TIMEOUT',
-          messageId: entry.messageId,
-        },
-        timestamp: new Date().toISOString(),
-      });
-
-      // Cache error in state
-      state.setLastError({
-        code: 'INFLIGHT_TIMEOUT',
-        messageId: entry.messageId,
-        message: `Prompt timed out after ${(now - entry.startedAt) / 1000}s`,
-        timestamp: now,
-      });
-
-      // Remove from inflight
-      state.removeInflight(entry.messageId);
-    }
-
-    // Check if inflight is now empty
-    if (state.isIdle && connectionManager.isConnected()) {
-      triggerDrainAndClose();
+  function clearSseTransportTimer(): void {
+    if (sseTransportTimer) {
+      clearTimeout(sseTransportTimer);
+      sseTransportTimer = null;
     }
   }
 
-  /**
-   * Check SSE connection health while active.
-   */
-  function checkSseHealth(): void {
-    // Only check when has job context
+  function resetSseTransportTimer(): void {
+    clearSseTransportTimer();
     if (!state.hasJob) return;
-
-    // Skip SSE health checks while the ingest WS is reconnecting — the SSE stream
-    // is still alive, we just can't relay events until the WS reconnects.
-    if (connectionManager.isReconnecting()) return;
-
-    const now = Date.now();
-
-    // Check SSE inactivity while active (inflight > 0)
-    // If we have inflight prompts but SSE has gone silent, something is broken
-    if (state.isActive && connectionManager.isConnected()) {
-      const sseInactivityMs = state.getSseInactivityMs(now);
-
-      // Only check if we've ever received SSE events (give initial connection time)
-      if (sseInactivityMs !== null && sseInactivityMs >= SSE_INACTIVITY_TIMEOUT_MS) {
-        logToFile(
-          `SSE inactivity timeout: no events for ${sseInactivityMs / 1000}s while ${state.inflightCount} prompts inflight`
-        );
-
-        // Send error event
-        state.sendToIngest({
-          streamEventType: 'error',
-          data: {
-            error: `SSE stream inactive for ${sseInactivityMs / 1000}s - assuming connection broken`,
-            fatal: true,
-            code: 'SSE_INACTIVITY_TIMEOUT',
-          },
-          timestamp: new Date().toISOString(),
-        });
-
-        // Cache error
-        state.setLastError({
-          code: 'SSE_INACTIVITY_TIMEOUT',
-          message: `SSE stream inactive for ${sseInactivityMs / 1000}s`,
-          timestamp: now,
-        });
-
-        // Abort kilo session
-        const job = state.currentJob;
-        if (job) {
-          kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
-        }
-
-        // Mark as aborted so we don't send 'complete' event, then close
-        isAborted = true;
-        state.clearAllInflight();
-        triggerDrainAndClose();
-        return;
-      }
-
-      // Also check if we've been waiting too long for initial SSE events
-      // after connection was established (give 30 seconds for first event)
-      if (!state.hasSseActivity()) {
-        const idleMs = state.getIdleMs(now);
-        const SSE_INITIAL_TIMEOUT_MS = 30_000;
-        if (idleMs >= SSE_INITIAL_TIMEOUT_MS) {
-          logToFile(
-            `SSE initial timeout: no events received within ${idleMs / 1000}s of connection`
-          );
-
-          state.sendToIngest({
-            streamEventType: 'error',
-            data: {
-              error: `No SSE events received within ${idleMs / 1000}s - assuming connection broken`,
-              fatal: true,
-              code: 'SSE_INITIAL_TIMEOUT',
-            },
-            timestamp: new Date().toISOString(),
-          });
-
-          state.setLastError({
-            code: 'SSE_INITIAL_TIMEOUT',
-            message: `No SSE events received within ${idleMs / 1000}s`,
-            timestamp: now,
-          });
-
-          const job = state.currentJob;
-          if (job) {
-            kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
-          }
-
-          // Mark as aborted so we don't send 'complete' event, then close
-          isAborted = true;
-          state.clearAllInflight();
-          triggerDrainAndClose();
-          return;
-        }
-      }
-    }
+    sseTransportTimer = setTimeout(() => {
+      logToFile('SSE transport timeout — reconnecting event subscription');
+      deps.reconnectEventSubscription();
+    }, SSE_TRANSPORT_TIMEOUT_MS);
   }
 
   /**
@@ -260,7 +147,7 @@ export function createLifecycleManager(
     }
 
     // Run auto-commit if enabled
-    if (config.autoCommit) {
+    if (perTurn.autoCommit) {
       logToFile('running auto-commit');
       try {
         const autoCommitPromise = runAutoCommit({
@@ -268,7 +155,7 @@ export function createLifecycleManager(
           onEvent: event => state.sendToIngest(event),
           kiloClient,
           messageId: state.lastAssistantMessageId ?? undefined,
-          upstreamBranch: config.upstreamBranch,
+          upstreamBranch: perTurn.upstreamBranch,
         });
         const timeoutPromise = new Promise<'timeout'>(resolve =>
           setTimeout(() => resolve('timeout'), AUTO_COMMIT_TIMEOUT_MS)
@@ -313,13 +200,13 @@ export function createLifecycleManager(
     const wasAborted = () => isAborted;
 
     // Run condense if enabled
-    if (config.condenseOnComplete) {
+    if (perTurn.condenseOnComplete) {
       logToFile('running condense');
       try {
         await runCondenseOnComplete({
           workspacePath: config.workspacePath,
           kiloSessionId: job.kiloSessionId,
-          model: config.model,
+          model: perTurn.model,
           onEvent: event => state.sendToIngest(event),
           kiloClient,
           expectCompletion,
@@ -349,64 +236,61 @@ export function createLifecycleManager(
 
     logToFile(`starting drain period (isAborted=${isAborted})`);
 
-    // Run post-completion tasks first (auto-commit, condense), THEN send the complete event.
-    // The complete event must be sent after post-completion tasks so that clients don't
-    // disconnect before autocommit output is streamed.
-    void runPostCompletionTasks()
-      .catch(err =>
-        logToFile(
-          `post-completion tasks failed: ${err instanceof Error ? err.message : String(err)}`
-        )
-      )
-      .then(async () => {
-        // Final log upload before closing
-        const uploader = state.logUploader;
-        if (uploader) {
-          await uploader
-            .uploadNow()
-            .catch(err =>
-              logToFile(
-                `final log upload failed: ${err instanceof Error ? err.message : String(err)}`
-              )
-            );
-          uploader.stop();
-        }
-      })
-      .finally(async () => {
+    // Run the full drain sequence as a single async flow.
+    // Order matters: post-completion tasks (autocommit/condense) → log upload →
+    // complete event → drain delay → close connections.
+    void (async () => {
+      try {
+        // 1. Post-completion tasks (auto-commit, condense)
         try {
-          // Send complete event to ingest so DO can update execution status and trigger callbacks
-          // BUT only if not aborted - fatal errors already sent their own terminal event
-          const job = state.currentJob;
-          if (job && !isAborted) {
-            // Capture current branch so the DO can persist it for future warm starts.
-            // Use a short timeout — if git hangs here the drain must still proceed.
-            const currentBranch = await getCurrentBranch(config.workspacePath, 10_000).catch(
-              () => ''
-            );
-            logToFile(
-              `sending complete event for executionId=${job.executionId} branch=${currentBranch || '(none)'}`
-            );
-            state.sendToIngest({
-              streamEventType: 'complete',
-              data: {
-                exitCode: 0,
-                executionId: job.executionId,
-                kiloSessionId: job.kiloSessionId,
-                ...(currentBranch ? { currentBranch } : {}),
-              },
-              timestamp: new Date().toISOString(),
-            });
-          } else if (job && isAborted) {
-            logToFile(`skipping complete event - execution was aborted`);
-          }
+          await runPostCompletionTasks();
         } catch (err) {
-          logToFile(`drain finally error: ${err instanceof Error ? err.message : String(err)}`);
+          logToFile(
+            `post-completion tasks failed: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
 
+        // 2. Final log upload
+        const uploader = state.logUploader;
+        if (uploader) {
+          try {
+            await uploader.uploadNow();
+          } catch (err) {
+            logToFile(
+              `final log upload failed: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+          uploader.stop();
+        }
+      } finally {
+        // 3. Send complete event (always runs, even if upload/post-processing failed)
+        const job = state.currentJob;
+        if (job && !isAborted) {
+          const currentBranch = await getCurrentBranch(config.workspacePath, 10_000).catch(
+            () => ''
+          );
+          logToFile(
+            `sending complete event for executionId=${job.executionId} branch=${currentBranch || '(none)'}`
+          );
+          state.sendToIngest({
+            streamEventType: 'complete',
+            data: {
+              exitCode: 0,
+              executionId: job.executionId,
+              kiloSessionId: job.kiloSessionId,
+              ...(currentBranch ? { currentBranch } : {}),
+            },
+            timestamp: new Date().toISOString(),
+          });
+        } else if (job && isAborted) {
+          logToFile('skipping complete event — execution was aborted');
+        }
+
+        // 4. Drain delay, then close connections
         drainTimeout = setTimeout(() => {
           logToFile('drain complete, closing connections');
-          connectionManager
-            .close()
+          deps
+            .closeConnections()
             .catch(err =>
               logToFile(`close failed: ${err instanceof Error ? err.message : String(err)}`)
             )
@@ -415,44 +299,31 @@ export function createLifecycleManager(
               drainTimeout = null;
             });
         }, DRAIN_DELAY_MS);
-      });
+      }
+    })();
   }
 
   /**
    * Handle message completion.
    */
   function onMessageComplete(messageId: string): void {
-    const removed = state.removeInflight(messageId);
-    if (!removed) {
-      logToFile(`completion for unknown messageId=${messageId}`);
-      return;
-    }
+    logToFile(`message complete: messageId=${messageId}`);
+    state.setActive(false);
 
-    logToFile(`message complete: messageId=${messageId} remaining=${state.inflightCount}`);
-
-    // Check if all inflight are done
-    if (state.isIdle && connectionManager.isConnected()) {
+    if (state.isIdle && deps.isConnected()) {
       triggerDrainAndClose();
     }
   }
 
   return {
     start: () => {
-      logToFile('starting lifecycle timers');
-      inflightCheckInterval = setInterval(() => {
-        checkInflightExpiry();
-        checkSseHealth();
-      }, INFLIGHT_CHECK_INTERVAL_MS);
+      logToFile('lifecycle started (transport timer is event-driven)');
     },
 
     stop: () => {
-      logToFile('stopping lifecycle timers');
+      logToFile('stopping lifecycle');
       isAborted = true;
-
-      if (inflightCheckInterval) {
-        clearInterval(inflightCheckInterval);
-        inflightCheckInterval = null;
-      }
+      clearSseTransportTimer();
 
       if (drainTimeout) {
         clearTimeout(drainTimeout);
@@ -468,17 +339,24 @@ export function createLifecycleManager(
       isAborted = true;
     },
 
-    getMaxRuntimeMs: () => config.maxRuntimeMs,
+    setPerTurnConfig: (turnConfig: PerTurnConfig) => {
+      perTurn = turnConfig;
+    },
 
     reset: () => {
       isAborted = false;
       isDraining = false;
       postProcessingCompleted = false;
       postProcessingResolve = null;
+      clearSseTransportTimer();
       if (drainTimeout) {
         clearTimeout(drainTimeout);
         drainTimeout = null;
       }
+    },
+
+    onSseEvent: () => {
+      resetSseTransportTimer();
     },
   };
 }

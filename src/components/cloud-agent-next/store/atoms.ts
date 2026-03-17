@@ -195,10 +195,13 @@ export const updateMessageAtom = atom(
     const existing = messagesMap.get(messageId);
 
     if (existing) {
-      // Update existing message - merge parts if provided, otherwise keep existing
+      const shouldPreserveExistingParts = parts?.length === 0 && existing.parts.length > 0;
+
+      // Update existing message - keep rendered parts when metadata-only updates
+      // provide an empty parts array.
       messagesMap.set(messageId, {
         info,
-        parts: parts ?? existing.parts,
+        parts: shouldPreserveExistingParts ? existing.parts : (parts ?? existing.parts),
       });
     } else {
       // Create new message

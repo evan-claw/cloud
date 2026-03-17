@@ -64,7 +64,7 @@ import { generateSandboxId } from '../sandbox-id.js';
 import { GitHubTokenService } from '../services/github-token-service.js';
 import { validateStreamTicket } from '../auth.js';
 import { getSandbox } from '@cloudflare/sandbox';
-import { stopKiloServer } from '../kilo/server-manager.js';
+import { stopWrapper } from '../kilo/wrapper-manager.js';
 
 // ---------------------------------------------------------------------------
 // Alarm Constants
@@ -84,6 +84,12 @@ const LAST_ACTIVITY_KEY = 'last_activity';
 
 /** Kilo server idle timeout: 15 minutes */
 const KILO_SERVER_IDLE_TIMEOUT_MS_DEFAULT = 15 * 60 * 1000;
+
+/** Default per-execution wall-clock deadline: 30 minutes */
+const DEFAULT_MAX_RUNTIME_MS = 1_800_000;
+
+/** Hung execution timeout: no non-heartbeat events for 2 minutes */
+const HUNG_EXECUTION_TIMEOUT_MS = 2 * 60 * 1000;
 
 /** Grace period before failing execution after wrapper disconnect (ms).
  *  Covers the first few reconnection attempts (exponential backoff: 1s, 2s, 4s …). */
@@ -273,6 +279,9 @@ export class CloudAgentSession extends DurableObject {
           // The wrapper heartbeat travels over an outbound WebSocket that
           // bypasses containerFetch(), so the idle timer never refreshes otherwise.
           void this.keepContainerAlive();
+        },
+        updateLastEventAt: async (executionId: string, timestamp: number) => {
+          await this.executionQueries.updateLastEventAt(executionId as ExecutionId, timestamp);
         },
         updateExecutionStatus: async (
           executionId: string,
@@ -929,6 +938,16 @@ export class CloudAgentSession extends DurableObject {
 
       logger
         .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
+        .debug('Starting checkHungExecution');
+      await this.checkHungExecution(now);
+
+      logger
+        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
+        .debug('Starting checkMaxRuntime');
+      await this.checkMaxRuntime(now);
+
+      logger
+        .withFields({ sessionId: this.sessionId, elapsedMs: Date.now() - now })
         .debug('Starting cleanupOldEvents');
       this.cleanupOldEvents(now);
 
@@ -1065,6 +1084,69 @@ export class CloudAgentSession extends DurableObject {
   }
 
   /**
+   * Fail a running execution that hasn't received any non-heartbeat events
+   * for HUNG_EXECUTION_TIMEOUT_MS. Skipped when lastEventAt is undefined
+   * (other checks handle that case).
+   */
+  private async checkHungExecution(now: number): Promise<void> {
+    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    if (!activeExecutionId) return;
+
+    const execution = await this.executionQueries.get(activeExecutionId);
+    if (!execution || execution.status !== 'running') return;
+    if (execution.lastEventAt === undefined) return;
+
+    if (now - execution.lastEventAt > HUNG_EXECUTION_TIMEOUT_MS) {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: activeExecutionId,
+          lastEventAt: execution.lastEventAt,
+          hungDurationMs: now - execution.lastEventAt,
+        })
+        .info('Marking hung execution as failed');
+
+      await this.failExecution({
+        executionId: activeExecutionId,
+        status: 'failed',
+        error: 'Execution hung — no events received for 2 minutes',
+        streamEventType: 'error',
+      });
+    }
+  }
+
+  /**
+   * Fail a running execution that has exceeded its wall-clock deadline
+   * (DEFAULT_MAX_RUNTIME_MS = 30 min).
+   */
+  private async checkMaxRuntime(now: number): Promise<void> {
+    const activeExecutionId = await this.executionQueries.getActiveExecutionId();
+    if (!activeExecutionId) return;
+
+    const execution = await this.executionQueries.get(activeExecutionId);
+    if (!execution || execution.status !== 'running') return;
+
+    if (now - execution.startedAt > DEFAULT_MAX_RUNTIME_MS) {
+      logger
+        .withFields({
+          sessionId: this.sessionId,
+          executionId: activeExecutionId,
+          startedAt: execution.startedAt,
+          maxRuntimeMs: DEFAULT_MAX_RUNTIME_MS,
+          elapsedMs: now - execution.startedAt,
+        })
+        .info('Marking execution as failed — exceeded maximum runtime');
+
+      await this.failExecution({
+        executionId: activeExecutionId,
+        status: 'failed',
+        error: 'Execution exceeded maximum runtime',
+        streamEventType: 'error',
+      });
+    }
+  }
+
+  /**
    * Clean up events older than the retention period.
    */
   private cleanupOldEvents(now: number): void {
@@ -1164,7 +1246,7 @@ export class CloudAgentSession extends DurableObject {
         .withFields({ sessionId: this.sessionId, sandboxId })
         .debug('Starting stopKiloServer RPC');
 
-      await stopKiloServer(sandbox, metadata.sessionId);
+      await stopWrapper(sandbox, metadata.sessionId);
 
       logger
         .withFields({ sessionId: this.sessionId, sandboxId, rpcElapsedMs: Date.now() - rpcStart })

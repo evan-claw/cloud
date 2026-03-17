@@ -46,10 +46,14 @@ vi.mock('./workspace.js', () => ({
   manageBranch: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Mock kilo server-manager functions
-vi.mock('./kilo/server-manager.js', () => ({
-  ensureKiloServer: vi.fn().mockResolvedValue(4096),
-  createKiloCliSession: vi.fn().mockResolvedValue({ id: 'cli-session-abc123' }),
+// Mock WrapperClient.ensureWrapper (wrapper now starts kilo server in-process)
+vi.mock('./kilo/wrapper-client.js', () => ({
+  WrapperClient: {
+    ensureWrapper: vi.fn().mockResolvedValue({
+      client: {},
+      sessionId: 'cli-session-abc123',
+    }),
+  },
 }));
 
 // Define mocks BEFORE vi.mock() to avoid hoisting issues

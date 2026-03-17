@@ -1,5 +1,5 @@
 import type { IngestEvent } from '../../src/shared/protocol.js';
-import type { KiloClient } from './kilo-client.js';
+import type { WrapperKiloClient } from './kilo-api.js';
 import { logToFile } from './utils.js';
 
 /** Default timeout for condense operation (3 minutes) */
@@ -19,7 +19,7 @@ export type CondenseOnCompleteOptions = {
   kiloSessionId: string;
   model?: string;
   onEvent: (event: IngestEvent) => void;
-  kiloClient: KiloClient;
+  kiloClient: WrapperKiloClient;
   /** Arm the completion waiter before sending a prompt */
   expectCompletion: () => void;
   /** Wait for the completion event (call after sending prompt) */

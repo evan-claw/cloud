@@ -154,6 +154,55 @@ describe('createEventProcessor', () => {
       );
     });
 
+    it('should keep assistant parts after a late post-completion message.updated', () => {
+      let latestMessage: ProcessedMessage | undefined;
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn((_, __, message) => {
+          latestMessage = {
+            info: message.info,
+            parts: [...message.parts],
+          };
+        }),
+        onMessageCompleted: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('msg-1') })
+      );
+      processor.processEvent(
+        createKilocodeEvent('message.part.updated', {
+          part: {
+            id: 'part-1',
+            sessionID: 'session-123',
+            messageID: 'msg-1',
+            type: 'text',
+            text: 'Hello world',
+          },
+        })
+      );
+      processor.processEvent(
+        createKilocodeEvent('message.updated', {
+          info: createAssistantInfo('msg-1', 'session-123', Date.now()),
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+
+      processor.processEvent(
+        createKilocodeEvent('message.updated', {
+          info: createAssistantInfo('msg-1', 'session-123', Date.now()),
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+      expect(latestMessage).toEqual(
+        expect.objectContaining({
+          parts: [expect.objectContaining({ id: 'part-1', text: 'Hello world' })],
+        })
+      );
+    });
+
     it('should complete user messages when session goes idle', () => {
       const callbacks: EventProcessorCallbacks = {
         onMessageUpdated: jest.fn(),
@@ -170,6 +219,40 @@ describe('createEventProcessor', () => {
       expect(callbacks.onMessageCompleted).not.toHaveBeenCalled();
 
       // Session goes idle - user messages should complete
+      processor.processEvent(
+        createKilocodeEvent('session.status', {
+          sessionID: 'session-123',
+          status: { type: 'idle' },
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledWith(
+        'session-123',
+        'msg-1',
+        expect.objectContaining({ info: expect.objectContaining({ role: 'user' }) }),
+        null
+      );
+    });
+
+    it('should not re-complete the same user message on repeated idle signals', () => {
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createUserInfo('msg-1') })
+      );
+
+      processor.processEvent(
+        createKilocodeEvent('session.status', {
+          sessionID: 'session-123',
+          status: { type: 'idle' },
+        })
+      );
+      processor.processEvent(createKilocodeEvent('session.idle', { sessionID: 'session-123' }));
       processor.processEvent(
         createKilocodeEvent('session.status', {
           sessionID: 'session-123',
@@ -378,6 +461,66 @@ describe('createEventProcessor', () => {
         expect.objectContaining({ info: expect.objectContaining({ id: 'msg-1' }) }),
         null
       );
+    });
+
+    it('should merge late part updates into a completed assistant message', () => {
+      let latestMessage: ProcessedMessage | undefined;
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn((_, __, message) => {
+          latestMessage = message;
+        }),
+        onPartUpdated: jest.fn(),
+        onMessageCompleted: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      processor.processEvent(
+        createKilocodeEvent('message.updated', { info: createAssistantInfo('msg-1') })
+      );
+      processor.processEvent(
+        createKilocodeEvent('message.part.updated', {
+          part: {
+            id: 'part-1',
+            sessionID: 'session-123',
+            messageID: 'msg-1',
+            type: 'text',
+            text: '',
+          },
+          delta: 'Hello',
+        })
+      );
+      processor.processEvent(
+        createKilocodeEvent('message.updated', {
+          info: createAssistantInfo('msg-1', 'session-123', Date.now()),
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+
+      processor.processEvent(
+        createKilocodeEvent('message.part.updated', {
+          part: {
+            id: 'part-1',
+            sessionID: 'session-123',
+            messageID: 'msg-1',
+            type: 'text',
+            text: '',
+          },
+          delta: ' world',
+        })
+      );
+
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+      expect(callbacks.onPartUpdated).toHaveBeenLastCalledWith(
+        'session-123',
+        'msg-1',
+        'part-1',
+        expect.objectContaining({ text: 'Hello world' }),
+        null
+      );
+      expect(latestMessage?.parts).toEqual([
+        expect.objectContaining({ id: 'part-1', text: 'Hello world' }),
+      ]);
     });
   });
 

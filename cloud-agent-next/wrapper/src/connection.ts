@@ -12,9 +12,8 @@
 import type { WrapperState } from './state.js';
 import type { IngestEvent, WrapperCommand } from '../../src/shared/protocol.js';
 import { trimPayload } from '../../src/shared/trim-payload.js';
-import { createSSEConsumer, isTerminalErrorEvent, type SSEConsumer } from './sse-consumer.js';
 import { logToFile } from './utils.js';
-import type { KiloClient } from './kilo-client.js';
+import type { WrapperKiloClient } from './kilo-api.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -39,8 +38,7 @@ export function isSessionIdleEvent(
 // ---------------------------------------------------------------------------
 
 export type ConnectionConfig = {
-  kiloServerPort: number;
-  kiloClient: KiloClient;
+  kiloClient: WrapperKiloClient;
 };
 
 export type ConnectionCallbacks = {
@@ -54,6 +52,8 @@ export type ConnectionCallbacks = {
   onDisconnect: (reason: string) => void;
   /** Called on any completion event to signal post-processing waiters */
   onCompletionSignal: () => void;
+  /** Called on any SSE event to reset transport health timer */
+  onSseEvent?: () => void;
   /** Called when the ingest WS starts reconnecting */
   onReconnecting?: (attempt: number) => void;
   /** Called when the ingest WS successfully reconnects */
@@ -84,6 +84,8 @@ export type ConnectionManager = {
   isConnected: () => boolean;
   /** Whether the ingest WS is currently attempting to reconnect */
   isReconnecting: () => boolean;
+  /** Abort and restart the SDK event subscription (does not tear down ingest WS). */
+  reconnectEventSubscription: () => void;
 };
 
 /**
@@ -97,9 +99,10 @@ export function createConnectionManager(
   config: ConnectionConfig,
   callbacks: ConnectionCallbacks
 ): ConnectionManager {
-  let sseConsumer: SSEConsumer | null = null;
   let ingestWs: WebSocket | null = null;
-  let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  let eventSubscriptionActive = false;
+  let eventSubscriptionGeneration = 0;
+  let eventSubscriptionAbort: AbortController | null = null;
 
   let closedByUs = false;
   let reconnecting = false;
@@ -168,8 +171,6 @@ export function createConnectionManager(
 
     const url = new URL(job.ingestUrl);
     url.searchParams.set('executionId', job.executionId);
-    url.searchParams.set('sessionId', job.sessionId);
-    url.searchParams.set('userId', job.userId);
 
     const wsUrl = url.toString();
     logToFile(`ingest WS connecting to: ${wsUrl}`);
@@ -178,10 +179,10 @@ export function createConnectionManager(
       // Bun's WebSocket supports headers parameter
       const WebSocketWithHeaders = WebSocket as unknown as WebSocketCtor;
 
-      // Use kilocodeToken (user JWT) for auth - ingestToken is just executionId for DO validation
+      // Use workerAuthToken (user JWT) for auth - ingestToken is just executionId for DO validation
       const ws = new WebSocketWithHeaders(wsUrl, {
         headers: {
-          Authorization: `Bearer ${job.kilocodeToken}`,
+          Authorization: `Bearer ${job.workerAuthToken}`,
         },
       });
 
@@ -221,7 +222,6 @@ export function createConnectionManager(
 
         // Unexpected close — attempt reconnection
         logToFile('ingest WS closed unexpectedly — starting reconnection');
-        stopHeartbeat();
         attemptReconnect();
       };
 
@@ -252,67 +252,138 @@ export function createConnectionManager(
   }
 
   /**
-   * Open the SSE consumer for kilo server events.
+   * Check if an event represents a terminal error (payment/billing/quota).
    */
-  async function openSSEConsumer(): Promise<void> {
-    const baseUrl = `http://127.0.0.1:${config.kiloServerPort}`;
+  function isTerminalError(eventType: string, properties: Record<string, unknown>): boolean {
+    if (eventType === 'payment_required' || eventType === 'insufficient_funds') {
+      return true;
+    }
+    const error = properties.error;
+    if (error) {
+      const errorStr = typeof error === 'string' ? error : JSON.stringify(error);
+      if (
+        errorStr.includes('payment') ||
+        errorStr.includes('credit') ||
+        errorStr.includes('balance') ||
+        errorStr.includes('quota')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Start the SDK event subscription. Runs in the background.
+   * Replaces the old SSE consumer with a typed event stream from the SDK.
+   */
+  function startEventSubscription(): void {
+    // Abort the previous subscription's HTTP stream (if any) before starting
+    // a new one.  This ensures the old `for await` loop unblocks immediately
+    // instead of lingering until the next server-sent event arrives.
+    eventSubscriptionAbort?.abort();
+
+    const myGeneration = ++eventSubscriptionGeneration;
+    eventSubscriptionActive = true;
     const abortController = new AbortController();
+    eventSubscriptionAbort = abortController;
 
-    sseConsumer = await createSSEConsumer({
-      baseUrl,
-      onActivity: () => {
-        // Called for ALL SSE events including heartbeats - for activity tracking
-        state.updateActivity();
-        state.recordSseEvent();
-      },
-      onEvent: (event: IngestEvent) => {
-        // Trim large payloads before forwarding to reduce DO storage pressure
-        const trimmed: IngestEvent = {
-          ...event,
-          data: trimPayload(event.streamEventType, event.data),
-        };
-        sendToIngest(trimmed);
+    // Store connections in state for external reference
+    if (ingestWs) {
+      state.setConnections(ingestWs, abortController);
+      state.setSendToIngestFn(sendToIngest);
+    }
 
-        // Check for terminal errors
-        if (event.streamEventType === 'kilocode') {
-          const data = event.data as Record<string, unknown>;
-          const eventName = typeof data.event === 'string' ? data.event : '';
+    void (async () => {
+      try {
+        const result = await config.kiloClient.sdkClient.event.subscribe({
+          signal: abortController.signal,
+        });
+        if (!result.stream) {
+          logToFile('No event stream returned from SDK');
+          eventSubscriptionActive = false;
+          callbacks.onDisconnect('No event stream from SDK');
+          return;
+        }
 
-          // Track the last root-session assistant message ID for autocommit association.
-          // message.updated events carry { event, properties: { info: { id, role, sessionID } } }
-          if (eventName === 'message.updated') {
-            const props = data.properties;
-            if (isRecord(props)) {
-              const info = props.info;
-              if (isRecord(info) && info.role === 'assistant' && typeof info.id === 'string') {
-                const msgSessionId = info.sessionID;
-                const currentSessionId = state.currentJob?.kiloSessionId;
-                if (!currentSessionId || msgSessionId === currentSessionId) {
-                  state.setLastAssistantMessageId(info.id);
-                }
+        logToFile('SDK event subscription started');
+
+        for await (const event of result.stream) {
+          if (abortController.signal.aborted || myGeneration !== eventSubscriptionGeneration) break;
+
+          // eventType is `string` so we can match untyped events like server.heartbeat
+          const eventType: string = event.type ?? '';
+          const properties: Record<string, unknown> = isRecord(event.properties)
+            ? event.properties
+            : {};
+
+          // Track activity
+          state.updateActivity();
+
+          if (eventType === 'server.connected') {
+            callbacks.onSseEvent?.();
+            continue;
+          }
+
+          // Forward kilo's heartbeat as ingest heartbeat (replaces wrapper's custom heartbeat)
+          if (eventType === 'server.heartbeat') {
+            const job = state.currentJob;
+            if (job) {
+              sendToIngest({
+                streamEventType: 'heartbeat',
+                data: { executionId: job.executionId },
+                timestamp: new Date().toISOString(),
+              });
+            }
+            callbacks.onSseEvent?.();
+            continue;
+          }
+
+          // Build and forward ingest event
+          const ingestEvent: IngestEvent = {
+            streamEventType: 'kilocode',
+            data: { ...properties, event: eventType, type: eventType, properties },
+            timestamp: new Date().toISOString(),
+          };
+
+          const trimmed: IngestEvent = {
+            ...ingestEvent,
+            data: trimPayload(ingestEvent.streamEventType, ingestEvent.data),
+          };
+          sendToIngest(trimmed);
+          callbacks.onSseEvent?.();
+
+          // Track the last root-session assistant message ID for autocommit association
+          if (eventType === 'message.updated') {
+            const info = properties.info;
+            if (isRecord(info) && info.role === 'assistant' && typeof info.id === 'string') {
+              const msgSessionId = typeof info.sessionID === 'string' ? info.sessionID : undefined;
+              const currentSessionId = state.currentJob?.kiloSessionId;
+              if (!currentSessionId || msgSessionId === currentSessionId) {
+                state.setLastAssistantMessageId(info.id);
               }
             }
           }
 
-          const terminal = isTerminalErrorEvent({ event: eventName, data });
-          if (terminal.isTerminal) {
-            callbacks.onTerminalError(terminal.reason ?? 'terminal error');
+          // Terminal error detection
+          if (isTerminalError(eventType, properties)) {
+            callbacks.onTerminalError(eventType);
             return;
           }
 
           // Auto-reject permission requests — Cloud Agent has no UI to answer them,
           // so unanswered permissions would block the session indefinitely.
-          if (data.event === 'permission.asked') {
-            const props = data.properties;
-            if (isRecord(props) && typeof props.id === 'string') {
-              const permission =
-                typeof props.permission === 'string' ? props.permission : 'unknown';
-              logToFile(`auto-rejecting permission: id=${props.id} permission=${permission}`);
+          if (eventType === 'permission.asked') {
+            const permissionId = typeof properties.id === 'string' ? properties.id : undefined;
+            if (permissionId) {
+              const permissionType =
+                typeof properties.permission === 'string' ? properties.permission : 'unknown';
+              logToFile(`auto-rejecting permission: id=${permissionId} type=${permissionType}`);
               config.kiloClient
-                .answerPermission(props.id, 'reject')
+                .answerPermission(permissionId, 'reject')
                 .catch((err: unknown) =>
                   logToFile(
-                    `failed to auto-reject permission ${String(props.id)}: ${err instanceof Error ? err.message : String(err)}`
+                    `failed to auto-reject permission ${permissionId}: ${err instanceof Error ? err.message : String(err)}`
                   )
                 );
             }
@@ -322,79 +393,42 @@ export function createConnectionManager(
           // and the session is waiting for the next user input.
           // Only the root session's idle event should trigger completion — child sessions
           // (subagents) also emit session.idle, which we must ignore.
-          if (data.event === 'session.idle') {
-            if (!isSessionIdleEvent(data)) {
-              logToFile(`session.idle without parseable sessionID — ignoring`);
-              return;
+          if (eventType === 'session.idle') {
+            const sessionID =
+              typeof properties.sessionID === 'string' ? properties.sessionID : undefined;
+            if (!sessionID) {
+              logToFile('session.idle without sessionID — ignoring');
+              continue;
             }
             const currentSessionId = state.currentJob?.kiloSessionId;
-            if (currentSessionId && data.properties.sessionID !== currentSessionId) {
+            if (currentSessionId && sessionID !== currentSessionId) {
               logToFile(
-                `ignoring session.idle for child session: event=${data.properties.sessionID} current=${currentSessionId}`
+                `ignoring session.idle for child session: event=${sessionID} current=${currentSessionId}`
               );
-              return;
+              continue;
             }
-            logToFile(`session.idle received - marking all inflight as complete`);
-            // Complete ALL inflight messages for this job - the session is idle
-            const inflightIds = state.inflightMessageIds;
-            for (const messageId of inflightIds) {
-              logToFile(`completing inflight messageId=${messageId}`);
-              callbacks.onMessageComplete(messageId);
-            }
+            logToFile('session.idle received - marking as complete');
+            callbacks.onMessageComplete('session.idle');
             callbacks.onCompletionSignal();
           }
         }
-      },
-      onConnected: () => {
-        logToFile('SSE consumer connected');
-      },
-      onClose: reason => {
-        logToFile(`SSE consumer closed: ${reason}`);
-        if (sseConsumer) {
-          callbacks.onDisconnect(`SSE closed: ${reason}`);
+
+        logToFile('SDK event stream ended');
+        if (!abortController.signal.aborted && myGeneration === eventSubscriptionGeneration) {
+          callbacks.onDisconnect('SDK event stream ended');
         }
-      },
-      onError: error => {
-        logToFile(`SSE consumer error: ${error.message}`);
-      },
-    });
-
-    // Store abort controller in state (ingestWs is guaranteed set after openIngestWs resolves)
-    if (!ingestWs) {
-      throw new Error('ingestWs not set after openIngestWs');
-    }
-    state.setConnections(ingestWs, abortController);
-    state.setSendToIngestFn(sendToIngest);
-  }
-
-  /**
-   * Start heartbeat interval.
-   */
-  function startHeartbeat(): void {
-    const job = state.currentJob;
-    if (!job) return;
-
-    heartbeatInterval = setInterval(() => {
-      if (ingestWs?.readyState === WebSocket.OPEN) {
-        ingestWs.send(
-          JSON.stringify({
-            streamEventType: 'heartbeat',
-            data: { executionId: job.executionId },
-            timestamp: new Date().toISOString(),
-          })
-        );
+      } catch (err) {
+        if (!abortController.signal.aborted && myGeneration === eventSubscriptionGeneration) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logToFile(`SDK event stream error: ${msg}`);
+          callbacks.onDisconnect(`SDK event stream error: ${msg}`);
+        }
+      } finally {
+        if (myGeneration === eventSubscriptionGeneration) {
+          eventSubscriptionActive = false;
+        }
       }
-    }, 20_000);
-  }
-
-  /**
-   * Stop heartbeat interval.
-   */
-  function stopHeartbeat(): void {
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
+    })();
   }
 
   function attemptReconnect(): void {
@@ -408,10 +442,10 @@ export function createConnectionManager(
     logToFile(`reconnected successfully on attempt ${reconnectAttempt}`);
     reconnecting = false;
     reconnectAttempt = 0;
-    startHeartbeat();
-    const sseAbort = state.sseAbortController;
-    if (ingestWs && sseAbort) {
-      state.setConnections(ingestWs, sseAbort);
+    // Re-store ingest WS in state (event subscription abort controller unchanged)
+    const existingAbort = state.sseAbortController;
+    if (ingestWs && existingAbort) {
+      state.setConnections(ingestWs, existingAbort);
     }
     callbacks.onReconnected?.();
   }
@@ -475,12 +509,11 @@ export function createConnectionManager(
     open: async () => {
       logToFile('opening connections');
 
-      // Open both connections
+      // Open ingest WS first
       await openIngestWs();
-      await openSSEConsumer();
 
-      // Start heartbeat
-      startHeartbeat();
+      // Start SDK event subscription (runs in background)
+      startEventSubscription();
 
       logToFile('connections opened');
     },
@@ -489,13 +522,11 @@ export function createConnectionManager(
       logToFile('closing connections');
       generation++;
       cancelReconnect();
-      stopHeartbeat();
 
-      // Stop SSE consumer
-      if (sseConsumer) {
-        sseConsumer.stop();
-        sseConsumer = null;
-      }
+      // Stop event subscription — abort the HTTP stream so the for-await
+      // loop unblocks immediately instead of waiting for the next SSE event.
+      eventSubscriptionAbort?.abort();
+      eventSubscriptionAbort = null;
 
       // Close ingest WS
       if (ingestWs) {
@@ -510,16 +541,23 @@ export function createConnectionManager(
       closedByUs = false;
 
       // Clear state references
-      state.clearConnections();
+      state.clearConnectionRefs();
       state.setSendToIngestFn(null);
 
       logToFile('connections closed');
     },
 
     isConnected: () => {
-      return ingestWs !== null && ingestWs.readyState === WebSocket.OPEN && sseConsumer !== null;
+      return ingestWs !== null && ingestWs.readyState === WebSocket.OPEN && eventSubscriptionActive;
     },
 
     isReconnecting: () => reconnecting,
+
+    reconnectEventSubscription: () => {
+      logToFile('reconnecting SDK event subscription');
+      // startEventSubscription() aborts the previous controller internally,
+      // so no separate abort call is needed here.
+      startEventSubscription();
+    },
   };
 }

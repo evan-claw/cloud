@@ -35,6 +35,7 @@ function createFakeDOContext(): IngestDOContext {
     getExecution: vi.fn().mockResolvedValue(null),
     transitionToRunning: vi.fn().mockResolvedValue(true),
     updateHeartbeat: vi.fn().mockResolvedValue(undefined),
+    updateLastEventAt: vi.fn().mockResolvedValue(undefined),
     updateExecutionStatus: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -50,11 +51,13 @@ function createFakeWebSocket(attachment: unknown = null) {
 }
 
 function makeAttachment(overrides?: Partial<IngestAttachment>): IngestAttachment {
+  const now = Date.now();
   return {
     executionId: EXECUTION_ID,
-    connectedAt: Date.now(),
+    connectedAt: now,
     kiloSessionState: { captured: false },
-    lastHeartbeatUpdate: Date.now(),
+    lastHeartbeatUpdate: now,
+    lastEventAtUpdate: now,
     ...overrides,
   };
 }
@@ -146,6 +149,87 @@ describe('createIngestHandler', () => {
       );
 
       expect(handler.hasActiveConnection(EXECUTION_ID)).toBe(false);
+    });
+  });
+
+  describe('handleIngestMessage — lastEventAt tracking', () => {
+    it('calls updateLastEventAt for non-heartbeat events when debounce elapsed', async () => {
+      const state = createFakeState();
+      const doContext = createFakeDOContext();
+      const broadcast = vi.fn();
+      const handler = createIngestHandler(
+        state,
+        createFakeEventQueries(),
+        SESSION_ID,
+        broadcast,
+        doContext
+      );
+
+      const staleTime = Date.now() - 31_000; // 31s ago — past HEARTBEAT_DEBOUNCE_MS
+      const ws = createFakeWebSocket(makeAttachment({ lastEventAtUpdate: staleTime }));
+
+      const message = JSON.stringify({
+        streamEventType: 'kilocode',
+        data: { event: 'message.updated' },
+        timestamp: new Date().toISOString(),
+      });
+
+      await handler.handleIngestMessage(ws, message);
+
+      expect(doContext.updateLastEventAt).toHaveBeenCalledWith(EXECUTION_ID, expect.any(Number));
+    });
+
+    it('does NOT call updateLastEventAt for heartbeat events', async () => {
+      const state = createFakeState();
+      const doContext = createFakeDOContext();
+      const broadcast = vi.fn();
+      const handler = createIngestHandler(
+        state,
+        createFakeEventQueries(),
+        SESSION_ID,
+        broadcast,
+        doContext
+      );
+
+      const staleTime = Date.now() - 31_000;
+      const ws = createFakeWebSocket(makeAttachment({ lastEventAtUpdate: staleTime }));
+
+      const message = JSON.stringify({
+        streamEventType: 'heartbeat',
+        data: { executionId: EXECUTION_ID },
+        timestamp: new Date().toISOString(),
+      });
+
+      await handler.handleIngestMessage(ws, message);
+
+      expect(doContext.updateLastEventAt).not.toHaveBeenCalled();
+    });
+
+    it('debounces updateLastEventAt calls within 30s', async () => {
+      const state = createFakeState();
+      const doContext = createFakeDOContext();
+      const broadcast = vi.fn();
+      const handler = createIngestHandler(
+        state,
+        createFakeEventQueries(),
+        SESSION_ID,
+        broadcast,
+        doContext
+      );
+
+      // Recent lastEventAtUpdate — within debounce window
+      const recentTime = Date.now() - 5_000; // 5s ago — within HEARTBEAT_DEBOUNCE_MS
+      const ws = createFakeWebSocket(makeAttachment({ lastEventAtUpdate: recentTime }));
+
+      const message = JSON.stringify({
+        streamEventType: 'kilocode',
+        data: { event: 'message.updated' },
+        timestamp: new Date().toISOString(),
+      });
+
+      await handler.handleIngestMessage(ws, message);
+
+      expect(doContext.updateLastEventAt).not.toHaveBeenCalled();
     });
   });
 });

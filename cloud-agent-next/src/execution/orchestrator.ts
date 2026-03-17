@@ -19,7 +19,6 @@ import { ExecutionError } from './errors.js';
 import { SessionService, type PreparedSession } from '../session-service.js';
 import { logger } from '../logger.js';
 import { updateGitRemoteToken } from '../workspace.js';
-import { ensureKiloServer } from '../kilo/server-manager.js';
 import { WrapperClient } from '../kilo/wrapper-client.js';
 import { withDORetry } from '../utils/do-retry.js';
 import { normalizeAgentMode } from '../schema.js';
@@ -102,23 +101,26 @@ export class ExecutionOrchestrator {
       }
     }
 
-    // 4. Ensure kilo server is running (may throw KILO_SERVER_FAILED)
-    let kiloServerPort: number;
+    // 4. Ensure wrapper is running (starts kilo server in-process)
+    let wrapperClient: WrapperClient;
+    let kiloSessionId: string;
     try {
-      kiloServerPort = await ensureKiloServer(
-        sandbox,
-        prepared.session,
-        sessionId,
-        prepared.context.workspacePath
-      );
+      const result = await WrapperClient.ensureWrapper(sandbox, prepared.session, {
+        agentSessionId: sessionId,
+        userId,
+        workspacePath: prepared.context.workspacePath,
+        sessionId: wrapper.kiloSessionId,
+      });
+      wrapperClient = result.client;
+      kiloSessionId = result.sessionId;
     } catch (error) {
-      throw ExecutionError.kiloServerFailed(
-        `Failed to start kilo server: ${error instanceof Error ? error.message : String(error)}`,
+      throw ExecutionError.wrapperStartFailed(
+        `Failed to start wrapper: ${error instanceof Error ? error.message : String(error)}`,
         error
       );
     }
 
-    // Record kilo server activity for idle timeout tracking
+    // 5. Record activity for idle timeout tracking
     try {
       await withDORetry(
         () => this.deps.getSessionStub(userId, sessionId),
@@ -130,59 +132,19 @@ export class ExecutionOrchestrator {
       logger.warn('Failed to record kilo server activity');
     }
 
-    // 5. Ensure wrapper is running (may throw WRAPPER_START_FAILED)
-    let wrapperClient: WrapperClient;
-    try {
-      wrapperClient = await WrapperClient.ensureWrapper(
-        sandbox,
-        prepared.session,
-        sessionId,
-        kiloServerPort,
-        prepared.context.workspacePath,
-        {
-          autoCommit: wrapper.autoCommit,
-          condenseOnComplete: wrapper.condenseOnComplete,
-          upstreamBranch: prepared.context.upstreamBranch,
-          model: wrapper.model?.modelID,
-        }
-      );
-    } catch (error) {
-      throw ExecutionError.wrapperStartFailed(
-        `Failed to start wrapper: ${error instanceof Error ? error.message : String(error)}`,
-        error
-      );
-    }
-
-    // 6. Start job (create/resume kilo session)
+    // 6. Send prompt with execution binding (async - returns messageId immediately)
     const ingestUrl = this.deps.getIngestUrl(sessionId, userId);
-    // Ingest token must match executionId for /ingest auth validation
     const ingestToken = executionId;
-
-    // Get kilocode token from plan
     const kilocodeToken = this.getKilocodeToken(plan);
 
-    let kiloSessionId: string;
-    try {
-      const result = await wrapperClient.startJob({
-        executionId,
-        ingestUrl,
-        ingestToken,
-        sessionId,
-        userId,
-        kilocodeToken,
-        kiloSessionId: wrapper.kiloSessionId,
-        kiloSessionTitle: wrapper.kiloSessionTitle,
-      });
-      kiloSessionId = result.kiloSessionId;
-      logger.withFields({ kiloSessionId }).info('Wrapper job started');
-    } catch (error) {
-      throw ExecutionError.wrapperStartFailed(
-        `Failed to start wrapper job: ${error instanceof Error ? error.message : String(error)}`,
-        error
-      );
-    }
+    const execution = {
+      executionId,
+      ingestUrl,
+      ingestToken,
+      workerAuthToken: kilocodeToken,
+      upstreamBranch: prepared.context.upstreamBranch,
+    };
 
-    // 7. Send prompt (async - returns messageId immediately)
     // Normalize mode to internal mode (e.g., 'architect' -> 'plan', 'orchestrator' -> 'code')
     const normalizedMode = normalizeAgentMode(mode);
     try {
@@ -191,6 +153,9 @@ export class ExecutionOrchestrator {
         model: wrapper.model,
         variant: wrapper.variant,
         agent: normalizedMode,
+        autoCommit: wrapper.autoCommit,
+        condenseOnComplete: wrapper.condenseOnComplete,
+        execution,
       });
       logger.withFields({ inflightId: result.messageId }).info('Prompt sent to wrapper');
     } catch (error) {

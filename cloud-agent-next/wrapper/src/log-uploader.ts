@@ -8,7 +8,7 @@ type LogUploaderOpts = {
   sessionId: string;
   executionId: string;
   userId: string;
-  kilocodeToken: string;
+  workerAuthToken: string;
   /** Directory containing CLI log files (e.g. ~/.local/share/kilo/log/) */
   cliLogDir: string;
   wrapperLogPath: string;
@@ -98,7 +98,7 @@ export function createLogUploader(opts: LogUploaderOpts): LogUploader {
       const url = `${opts.workerBaseUrl}/sessions/${encodeURIComponent(opts.userId)}/${encodeURIComponent(opts.sessionId)}/logs/${encodeURIComponent(opts.executionId)}/logs.tar.gz`;
       const response = await fetch(url, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${opts.kilocodeToken}` },
+        headers: { Authorization: `Bearer ${opts.workerAuthToken}` },
         body: tar.stream,
         // @ts-expect-error -- Node/Bun fetch supports duplex for streaming request bodies
         duplex: 'half',

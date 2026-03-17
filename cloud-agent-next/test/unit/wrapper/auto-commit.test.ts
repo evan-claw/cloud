@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { runAutoCommit, type AutoCommitOptions } from '../../../wrapper/src/auto-commit.js';
-import type { KiloClient } from '../../../wrapper/src/kilo-client.js';
+import type { WrapperKiloClient } from '../../../wrapper/src/kilo-api.js';
 import type { ExecResult } from '../../../wrapper/src/utils.js';
 
 // ---------------------------------------------------------------------------
@@ -31,18 +31,18 @@ const mockGit = vi.mocked(git);
 
 const ok = (stdout = '', stderr = ''): ExecResult => ({ stdout, stderr, exitCode: 0 });
 
-const createMockKiloClient = (): KiloClient => ({
-  listSessions: vi.fn(),
+const createMockKiloClient = (): WrapperKiloClient => ({
   createSession: vi.fn(),
   getSession: vi.fn(),
   sendPromptAsync: vi.fn(),
   abortSession: vi.fn(),
-  checkHealth: vi.fn(),
   sendCommand: vi.fn(),
   answerPermission: vi.fn(),
   answerQuestion: vi.fn(),
   rejectQuestion: vi.fn(),
   generateCommitMessage: vi.fn().mockResolvedValue({ message: 'test commit' }),
+  sdkClient: {} as WrapperKiloClient['sdkClient'],
+  serverUrl: 'http://127.0.0.1:0',
 });
 
 type EmittedEvent = { streamEventType: string; data: Record<string, unknown> };

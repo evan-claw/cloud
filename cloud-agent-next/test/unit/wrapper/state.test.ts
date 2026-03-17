@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { WrapperState, type JobContext, type InflightEntry } from '../../../wrapper/src/state.js';
+import { WrapperState, type JobContext } from '../../../wrapper/src/state.js';
 import type { IngestEvent } from '../../../src/shared/protocol.js';
 
 // ---------------------------------------------------------------------------
@@ -15,12 +15,10 @@ import type { IngestEvent } from '../../../src/shared/protocol.js';
 
 const createJobContext = (overrides: Partial<JobContext> = {}): JobContext => ({
   executionId: 'exc_test-123',
-  sessionId: 'session_abc',
-  userId: 'user_xyz',
   kiloSessionId: 'kilo_sess_456',
   ingestUrl: 'wss://ingest.example.com',
   ingestToken: 'token_secret',
-  kilocodeToken: 'kilo_token_789',
+  workerAuthToken: 'kilo_token_789',
   ...overrides,
 });
 
@@ -50,9 +48,8 @@ describe('WrapperState', () => {
       expect(state.currentJob).toBeNull();
     });
 
-    it('has no inflight entries', () => {
-      expect(state.inflightCount).toBe(0);
-      expect(state.inflightMessageIds).toEqual([]);
+    it('is not active', () => {
+      expect(state.isActive).toBe(false);
     });
 
     it('is not connected', () => {
@@ -127,13 +124,13 @@ describe('WrapperState', () => {
         }).not.toThrow();
       });
 
-      it('throws when starting different job with inflight > 0', () => {
+      it('throws when starting different job while active', () => {
         state.startJob(createJobContext({ executionId: 'exc_first' }));
-        state.addInflight('msg_1', Date.now() + 60000);
+        state.setActive(true);
 
         expect(() => {
           state.startJob(createJobContext({ executionId: 'exc_second' }));
-        }).toThrow(/Cannot start new job while inflight > 0/);
+        }).toThrow(/Cannot start new job while active/);
       });
 
       it('allows replacing job when idle but same job active', () => {
@@ -144,18 +141,6 @@ describe('WrapperState', () => {
         state.startJob(createJobContext({ executionId: 'exc_second' }));
 
         expect(state.currentJob?.executionId).toBe('exc_second');
-      });
-
-      it('resets SSE activity tracking', () => {
-        state.startJob(createJobContext({ executionId: 'exc_first' }));
-        state.recordSseEvent();
-        expect(state.hasSseActivity()).toBe(true);
-
-        state.clearJob();
-        state.startJob(createJobContext({ executionId: 'exc_second' }));
-
-        expect(state.hasSseActivity()).toBe(false);
-        expect(state.getSseInactivityMs(Date.now())).toBeNull();
       });
     });
 
@@ -168,14 +153,12 @@ describe('WrapperState', () => {
         expect(state.currentJob).toBeNull();
       });
 
-      it('clears inflight entries', () => {
+      it('clears active state', () => {
         state.startJob(createJobContext());
-        state.addInflight('msg_1', Date.now() + 60000);
-        state.addInflight('msg_2', Date.now() + 60000);
-
+        state.setActive(true);
         state.clearJob();
-
-        expect(state.inflightCount).toBe(0);
+        expect(state.isActive).toBe(false);
+        expect(state.isIdle).toBe(true);
       });
 
       it('resets message counter', () => {
@@ -192,161 +175,40 @@ describe('WrapperState', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Inflight Management
+  // setActive
   // -------------------------------------------------------------------------
 
-  describe('inflight management', () => {
-    beforeEach(() => {
-      state.startJob(createJobContext());
+  describe('setActive', () => {
+    it('transitions state to active', () => {
+      expect(state.isIdle).toBe(true);
+      state.setActive(true);
+      expect(state.isActive).toBe(true);
+      expect(state.isIdle).toBe(false);
     });
 
-    describe('addInflight', () => {
-      it('adds entry to inflight map', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-
-        expect(state.inflightCount).toBe(1);
-        expect(state.inflightMessageIds).toContain('msg_1');
-      });
-
-      it('transitions state to active', () => {
-        expect(state.isIdle).toBe(true);
-
-        state.addInflight('msg_1', Date.now() + 60000);
-
-        expect(state.isIdle).toBe(false);
-        expect(state.isActive).toBe(true);
-      });
-
-      it('updates activity timestamp', () => {
-        const beforeTime = Date.now();
-        state.addInflight('msg_1', Date.now() + 60000);
-        const afterTime = Date.now();
-
-        const idleMs = state.getIdleMs(afterTime);
-        // Should be very small (just added)
-        expect(idleMs).toBeLessThanOrEqual(afterTime - beforeTime + 1);
-      });
-
-      it('allows multiple inflight entries', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-        state.addInflight('msg_2', Date.now() + 60000);
-        state.addInflight('msg_3', Date.now() + 60000);
-
-        expect(state.inflightCount).toBe(3);
-        expect(state.inflightMessageIds).toEqual(['msg_1', 'msg_2', 'msg_3']);
-      });
+    it('transitions state back to idle', () => {
+      state.setActive(true);
+      state.setActive(false);
+      expect(state.isIdle).toBe(true);
+      expect(state.isActive).toBe(false);
     });
 
-    describe('removeInflight', () => {
-      it('removes entry from inflight map', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-        state.addInflight('msg_2', Date.now() + 60000);
-
-        const removed = state.removeInflight('msg_1');
-
-        expect(removed).toBe(true);
-        expect(state.inflightCount).toBe(1);
-        expect(state.inflightMessageIds).toEqual(['msg_2']);
-      });
-
-      it('returns false for unknown messageId', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-
-        const removed = state.removeInflight('msg_unknown');
-
-        expect(removed).toBe(false);
-        expect(state.inflightCount).toBe(1);
-      });
-
-      it('transitions to idle when last entry removed', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-        expect(state.isActive).toBe(true);
-
-        state.removeInflight('msg_1');
-
-        expect(state.isIdle).toBe(true);
-        expect(state.isActive).toBe(false);
-      });
-
-      it('updates activity timestamp on successful remove', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-        const beforeRemove = Date.now();
-
-        state.removeInflight('msg_1');
-
-        const afterRemove = Date.now();
-        const idleMs = state.getIdleMs(afterRemove);
-        expect(idleMs).toBeLessThanOrEqual(afterRemove - beforeRemove + 1);
-      });
+    it('updates activity timestamp when activating', () => {
+      const before = Date.now();
+      state.setActive(true);
+      const after = Date.now();
+      const idleMs = state.getIdleMs(after);
+      expect(idleMs).toBeLessThanOrEqual(after - before + 1);
     });
 
-    describe('hasInflight', () => {
-      it('returns true for existing messageId', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
+    it('is idempotent for same value', () => {
+      state.setActive(true);
+      state.setActive(true);
+      expect(state.isActive).toBe(true);
 
-        expect(state.hasInflight('msg_1')).toBe(true);
-      });
-
-      it('returns false for unknown messageId', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-
-        expect(state.hasInflight('msg_unknown')).toBe(false);
-      });
-    });
-
-    describe('getExpiredInflight', () => {
-      it('returns entries past their deadline', () => {
-        const now = Date.now();
-        state.addInflight('msg_expired', now - 1000); // Deadline in the past
-        state.addInflight('msg_valid', now + 60000); // Deadline in the future
-
-        const expired = state.getExpiredInflight(now);
-
-        expect(expired).toHaveLength(1);
-        expect(expired[0].messageId).toBe('msg_expired');
-      });
-
-      it('returns empty array when no expired entries', () => {
-        const now = Date.now();
-        state.addInflight('msg_1', now + 60000);
-        state.addInflight('msg_2', now + 60000);
-
-        const expired = state.getExpiredInflight(now);
-
-        expect(expired).toHaveLength(0);
-      });
-
-      it('does not remove expired entries (query only)', () => {
-        const now = Date.now();
-        state.addInflight('msg_expired', now - 1000);
-
-        state.getExpiredInflight(now);
-
-        // Entry should still be in inflight
-        expect(state.hasInflight('msg_expired')).toBe(true);
-      });
-
-      it('includes entries at exactly deadline time', () => {
-        const now = Date.now();
-        state.addInflight('msg_exact', now); // Deadline exactly at now
-
-        const expired = state.getExpiredInflight(now);
-
-        expect(expired).toHaveLength(1);
-      });
-    });
-
-    describe('clearAllInflight', () => {
-      it('removes all inflight entries', () => {
-        state.addInflight('msg_1', Date.now() + 60000);
-        state.addInflight('msg_2', Date.now() + 60000);
-        state.addInflight('msg_3', Date.now() + 60000);
-
-        state.clearAllInflight();
-
-        expect(state.inflightCount).toBe(0);
-        expect(state.isIdle).toBe(true);
-      });
+      state.setActive(false);
+      state.setActive(false);
+      expect(state.isIdle).toBe(true);
     });
   });
 
@@ -504,33 +366,22 @@ describe('WrapperState', () => {
       expect(state.isConnected).toBe(false);
     });
 
-    it('clearConnections closes WebSocket and aborts controller', () => {
+    it('clearConnectionRefs nulls references without closing or aborting', () => {
       const mockClose = vi.fn();
       const mockWs = { readyState: WebSocket.OPEN, close: mockClose } as unknown as WebSocket;
       const mockAbort = new AbortController();
       const abortSpy = vi.spyOn(mockAbort, 'abort');
 
       state.setConnections(mockWs, mockAbort);
-      state.clearConnections();
+      state.clearConnectionRefs();
 
-      expect(mockClose).toHaveBeenCalled();
-      expect(abortSpy).toHaveBeenCalled();
+      // Refs are nulled
       expect(state.ingestWs).toBeNull();
       expect(state.sseAbortController).toBeNull();
-    });
 
-    it('clearConnections handles close errors gracefully', () => {
-      const mockWs = {
-        readyState: WebSocket.OPEN,
-        close: () => {
-          throw new Error('Close failed');
-        },
-      } as unknown as WebSocket;
-
-      state.setConnections(mockWs, new AbortController());
-
-      // Should not throw
-      expect(() => state.clearConnections()).not.toThrow();
+      // clearConnectionRefs is purely passive — close/abort owned by connection.ts
+      expect(mockClose).not.toHaveBeenCalled();
+      expect(abortSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -593,9 +444,7 @@ describe('WrapperState', () => {
       expect(status).toEqual({
         state: 'idle',
         executionId: undefined,
-        kiloSessionId: undefined,
-        inflight: [],
-        inflightCount: 0,
+        sessionId: undefined,
         lastError: undefined,
       });
     });
@@ -613,31 +462,24 @@ describe('WrapperState', () => {
       expect(status).toEqual({
         state: 'idle',
         executionId: 'exec_123',
-        kiloSessionId: 'kilo_456',
-        inflight: [],
-        inflightCount: 0,
+        sessionId: 'kilo_456',
         lastError: undefined,
       });
     });
 
-    it('returns active state with inflight', () => {
+    it('returns active state when active', () => {
       state.startJob(
         createJobContext({
           executionId: 'exec_123',
           kiloSessionId: 'kilo_456',
         })
       );
-      state.addInflight('msg_1', Date.now() + 60000);
-      state.addInflight('msg_2', Date.now() + 60000);
-
+      state.setActive(true);
       const status = state.getStatus();
-
       expect(status).toEqual({
         state: 'active',
         executionId: 'exec_123',
-        kiloSessionId: 'kilo_456',
-        inflight: ['msg_1', 'msg_2'],
-        inflightCount: 2,
+        sessionId: 'kilo_456',
         lastError: undefined,
       });
     });
@@ -663,61 +505,17 @@ describe('WrapperState', () => {
   // -------------------------------------------------------------------------
 
   describe('edge cases and invariants', () => {
-    it('state is IDLE iff inflightCount == 0', () => {
-      state.startJob(createJobContext());
+    it('state is IDLE when not active and ACTIVE when active', () => {
+      expect(state.isIdle).toBe(true);
+      expect(state.isActive).toBe(false);
 
-      // Initially idle
-      expect(state.isIdle).toBe(state.inflightCount === 0);
-      expect(state.isActive).toBe(state.inflightCount > 0);
+      state.setActive(true);
+      expect(state.isIdle).toBe(false);
+      expect(state.isActive).toBe(true);
 
-      // Add one - should be active
-      state.addInflight('msg_1', Date.now() + 60000);
-      expect(state.isIdle).toBe(state.inflightCount === 0);
-      expect(state.isActive).toBe(state.inflightCount > 0);
-
-      // Add another - still active
-      state.addInflight('msg_2', Date.now() + 60000);
-      expect(state.isIdle).toBe(state.inflightCount === 0);
-      expect(state.isActive).toBe(state.inflightCount > 0);
-
-      // Remove one - still active
-      state.removeInflight('msg_1');
-      expect(state.isIdle).toBe(state.inflightCount === 0);
-      expect(state.isActive).toBe(state.inflightCount > 0);
-
-      // Remove last - back to idle
-      state.removeInflight('msg_2');
-      expect(state.isIdle).toBe(state.inflightCount === 0);
-      expect(state.isActive).toBe(state.inflightCount > 0);
-    });
-
-    it('inflight entries independent of job context', () => {
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
-
-      // Inflight exists
-      expect(state.hasInflight('msg_1')).toBe(true);
-
-      // clearJob clears inflight
-      state.clearJob();
-      expect(state.hasInflight('msg_1')).toBe(false);
-    });
-
-    it('duplicate inflight messageId overwrites', () => {
-      state.startJob(createJobContext());
-      const firstDeadline = Date.now() + 30000;
-      const secondDeadline = Date.now() + 60000;
-
-      state.addInflight('msg_1', firstDeadline);
-      state.addInflight('msg_1', secondDeadline);
-
-      // Should only have one entry
-      expect(state.inflightCount).toBe(1);
-
-      // Second deadline should be used
-      const now = firstDeadline + 1; // Past first deadline
-      const expired = state.getExpiredInflight(now);
-      expect(expired).toHaveLength(0); // Not expired yet with second deadline
+      state.setActive(false);
+      expect(state.isIdle).toBe(true);
+      expect(state.isActive).toBe(false);
     });
   });
 });

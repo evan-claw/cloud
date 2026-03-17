@@ -9,7 +9,7 @@ import {
   KiloTimeoutError,
 } from './errors.js';
 import type { ExecutionSession } from '../types.js';
-import type { Session, SessionCommandResponse } from './types.js';
+import type { Session } from './types.js';
 
 type KiloClientPrivates = {
   parseResponse: (stdout: string) => { responseBody: string; httpStatus: number };
@@ -219,7 +219,7 @@ describe('KiloClient', () => {
       const callSpy = vi
         .spyOn(client, 'call')
         .mockResolvedValueOnce(buildSession('ses_1'))
-        .mockResolvedValueOnce({} as unknown as SessionCommandResponse);
+        .mockResolvedValueOnce({} as unknown);
 
       await client.resumeSession('ses_1');
       await client.command('help', '', { model: 'anthropic/claude-sonnet-4-20250514' });

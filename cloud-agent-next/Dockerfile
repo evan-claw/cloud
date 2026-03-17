@@ -39,8 +39,9 @@ RUN npm install -g pnpm @kilocode/cli@${KILOCODE_CLI_VERSION}
 COPY wrapper /tmp/wrapper-build/wrapper
 COPY src/shared /tmp/wrapper-build/src/shared
 
-# Build the wrapper bundle and restore-session script
+# Install wrapper dependencies (pnpm symlinks don't survive COPY) and build
 RUN cd /tmp/wrapper-build/wrapper && \
+    bun install --production && \
     bun build src/main.ts --outfile=/usr/local/bin/kilocode-wrapper.js --target=bun --minify && \
     bun build src/restore-session.ts --outfile=/usr/local/bin/kilo-restore-session.js --target=bun --minify && \
     rm -rf /tmp/wrapper-build

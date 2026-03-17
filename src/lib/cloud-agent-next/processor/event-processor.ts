@@ -2,12 +2,12 @@
  * Event Processor
  *
  * Pure TypeScript class that processes events from WebSocket streams.
- * Buffers in-flight (streaming) messages and emits state changes via callbacks.
+ * Buffers messages while streaming and after completion so late metadata/part
+ * updates can still merge into the final message before the consumer renders it.
  *
  * Key behavior:
- * - Messages are stored internally while streaming (for delta accumulation, pending parts)
- * - When a message completes, onMessageCompleted is called and the message is removed
- * - This avoids duplicate storage between processor and consumer (Jotai/store)
+ * - Messages are stored internally for delta accumulation, pending parts, and late updates
+ * - When a message completes, onMessageCompleted is called and the buffered message is retained
  *
  * Storage uses composite keys (sessionId:messageId) for unified handling of
  * both root session and child session messages.
@@ -118,9 +118,9 @@ export type EventProcessor = {
  * - Session parent tracking (sessions with parentID are child sessions)
  * - Session status management (idle/busy/retry)
  *
- * When a message completes (all parts finished, assistant has completed time):
- * - onMessageCompleted callback is fired with the final message
- * - Message is removed from internal storage (consumer stores completed messages)
+ * When a message completes:
+ * - onMessageCompleted callback is fired once for that completion transition
+ * - Message remains buffered so later metadata-only and part updates can merge safely
  */
 export function createEventProcessor(config: EventProcessorConfig = {}): EventProcessor {
   const callbacks = config.callbacks ?? {};
@@ -132,8 +132,8 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   const pendingParts = new Map<string, PendingPartEntry[]>();
   // sessionParents: sessionId -> parentId (null for root session)
   const sessionParents = new Map<string, string | null>();
-  // completedMessages: tracks user messages that have been completed (to ignore late updates)
-  // Note: user messages don't get completed time and also receive late summaries
+  // completedMessages: tracks messages that have already fired onMessageCompleted
+  // so completion stays idempotent across repeated idle/complete-style signals.
   const completedMessages = new Set<string>();
 
   let streaming = false;
@@ -213,7 +213,7 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   /**
    * Check if an assistant message is complete and handle completion.
    * User messages are completed separately when session goes idle.
-   * If complete, fires onMessageCompleted and removes from storage.
+   * If complete, fires onMessageCompleted once and keeps the buffered message.
    */
   function checkAndHandleCompletion(
     sessionId: string,
@@ -223,10 +223,12 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
     // Only check assistant messages here - user messages complete on session idle
     if (isAssistantMessage(message.info) && isAssistantMessageComplete(message)) {
       const key = messageKey(sessionId, messageId);
+      if (completedMessages.has(key)) {
+        return;
+      }
       const parentSessionId = getParentSessionId(sessionId);
       callbacks.onMessageCompleted?.(sessionId, messageId, message, parentSessionId);
-      // Don't add to completedMessages - allow late updates like summaries
-      messagesMap.delete(key);
+      completedMessages.add(key);
     }
   }
 
@@ -239,17 +241,19 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
     for (const [key, message] of messagesMap) {
       if (isUserMessage(message.info)) {
         const [sessionId, messageId] = key.split(':');
+        if (completedMessages.has(key)) {
+          continue;
+        }
         const parentSessionId = getParentSessionId(sessionId);
         callbacks.onMessageCompleted?.(sessionId, messageId, message, parentSessionId);
         completedMessages.add(key);
-        messagesMap.delete(key);
       }
     }
   }
 
   /**
    * Handle message.updated events - create or update message info.
-   * Ignores updates for messages that have already been completed (e.g., late summary updates).
+   * Completed messages stay buffered so late metadata-only updates do not drop parts.
    */
   function handleMessageUpdated(data: EventMessageUpdated['properties']): void {
     const { info } = data;
@@ -257,11 +261,6 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
     const messageId = info.id;
     const key = messageKey(sessionId, messageId);
     const parentSessionId = getParentSessionId(sessionId);
-
-    // Ignore updates for already-completed messages (e.g., late summary updates)
-    if (completedMessages.has(key)) {
-      return;
-    }
 
     let message = messagesMap.get(key);
     if (!message) {
@@ -278,7 +277,7 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
 
   /**
    * Handle message.part.updated events - update or queue parts.
-   * Ignores updates for messages that have already been completed.
+   * Completed messages stay buffered so late part updates can still merge.
    */
   function handleMessagePartUpdated(data: EventMessagePartUpdated['properties']): void {
     const { delta } = data;
@@ -288,11 +287,6 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
     const messageId = part.messageID;
     const key = messageKey(sessionId, messageId);
     const parentSessionId = getParentSessionId(sessionId);
-
-    // Ignore part updates for already-completed messages
-    if (completedMessages.has(key)) {
-      return;
-    }
 
     const message = messagesMap.get(key);
 
@@ -448,7 +442,6 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
         const parentSessionId = getParentSessionId(sessionId);
         callbacks.onMessageCompleted?.(sessionId, messageId, message, parentSessionId);
         completedMessages.add(key);
-        messagesMap.delete(key);
       }
     }
 

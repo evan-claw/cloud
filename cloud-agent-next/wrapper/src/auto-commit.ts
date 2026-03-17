@@ -1,5 +1,5 @@
 import type { IngestEvent } from '../../src/shared/protocol.js';
-import type { KiloClient } from './kilo-client.js';
+import type { WrapperKiloClient } from './kilo-api.js';
 import { git, getCurrentBranch, hasGitUpstream, logToFile } from './utils.js';
 
 /** Timeout for local git operations (status, add, commit) */
@@ -18,7 +18,7 @@ export type AutoCommitResult = {
 export type AutoCommitOptions = {
   workspacePath: string;
   onEvent: (event: IngestEvent) => void;
-  kiloClient: KiloClient;
+  kiloClient: WrapperKiloClient;
   /** The assistant message ID this autocommit is associated with (for per-message UI rendering) */
   messageId?: string;
   /** If the user explicitly provided an upstream branch via API, pass it here to allow

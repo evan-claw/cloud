@@ -2,7 +2,7 @@
  * Unit tests for lifecycle management.
  *
  * Tests timer logic with mocked state for:
- * - Inflight expiry (per-message timeout)
+ * - SSE transport timer (15s reconnect)
  * - Drain period
  * - Post-completion task triggering
  */
@@ -10,56 +10,60 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   createLifecycleManager,
-  DEFAULT_INFLIGHT_TIMEOUT_MS,
   type LifecycleConfig,
   type LifecycleDependencies,
   type LifecycleManager,
+  type PerTurnConfig,
 } from '../../../wrapper/src/lifecycle.js';
 import { WrapperState, type JobContext } from '../../../wrapper/src/state.js';
-import type { KiloClient } from '../../../wrapper/src/kilo-client.js';
-import type { ConnectionManager } from '../../../wrapper/src/connection.js';
-
+import type { WrapperKiloClient } from '../../../wrapper/src/kilo-api.js';
 // ---------------------------------------------------------------------------
 // Test Helpers
 // ---------------------------------------------------------------------------
 
-const createMockKiloClient = (): KiloClient => ({
-  listSessions: vi.fn().mockResolvedValue([]),
-  createSession: vi.fn().mockResolvedValue({ id: 'kilo_sess', time: { created: '', updated: '' } }),
-  getSession: vi.fn().mockResolvedValue({ id: 'kilo_sess', time: { created: '', updated: '' } }),
+const createMockKiloClient = (): WrapperKiloClient => ({
+  createSession: vi.fn().mockResolvedValue({ id: 'kilo_sess' }),
+  getSession: vi.fn().mockResolvedValue({ id: 'kilo_sess' }),
   sendPromptAsync: vi.fn().mockResolvedValue(undefined),
   abortSession: vi.fn().mockResolvedValue(true),
-  checkHealth: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }),
   sendCommand: vi.fn().mockResolvedValue(undefined),
   answerPermission: vi.fn().mockResolvedValue(true),
   answerQuestion: vi.fn().mockResolvedValue(true),
   rejectQuestion: vi.fn().mockResolvedValue(true),
   generateCommitMessage: vi.fn().mockResolvedValue({ message: 'test commit' }),
+  sdkClient: {} as WrapperKiloClient['sdkClient'],
+  serverUrl: 'http://127.0.0.1:0',
 });
 
-const createMockConnectionManager = (): ConnectionManager => ({
-  open: vi.fn().mockResolvedValue(undefined),
-  close: vi.fn().mockResolvedValue(undefined),
+type MockConnectionFns = {
+  closeConnections: ReturnType<typeof vi.fn>;
+  isConnected: ReturnType<typeof vi.fn>;
+  reconnectEventSubscription: ReturnType<typeof vi.fn>;
+};
+
+const createMockConnectionFns = (): MockConnectionFns => ({
+  closeConnections: vi.fn().mockResolvedValue(undefined),
   isConnected: vi.fn().mockReturnValue(false),
-  isReconnecting: vi.fn().mockReturnValue(false),
+  reconnectEventSubscription: vi.fn(),
 });
 
 const createDefaultConfig = (overrides: Partial<LifecycleConfig> = {}): LifecycleConfig => ({
-  maxRuntimeMs: DEFAULT_INFLIGHT_TIMEOUT_MS,
+  workspacePath: '/workspace',
+  ...overrides,
+});
+
+const createDefaultPerTurnConfig = (overrides: Partial<PerTurnConfig> = {}): PerTurnConfig => ({
   autoCommit: false,
   condenseOnComplete: false,
-  workspacePath: '/workspace',
   ...overrides,
 });
 
 const createJobContext = (overrides: Partial<JobContext> = {}): JobContext => ({
   executionId: 'exec_test',
-  sessionId: 'session_abc',
-  userId: 'user_xyz',
   kiloSessionId: 'kilo_sess_456',
   ingestUrl: 'wss://ingest.example.com',
   ingestToken: 'token_secret',
-  kilocodeToken: 'kilo_token_789',
+  workerAuthToken: 'kilo_token_789',
   ...overrides,
 });
 
@@ -69,8 +73,8 @@ const createJobContext = (overrides: Partial<JobContext> = {}): JobContext => ({
 
 describe('createLifecycleManager', () => {
   let state: WrapperState;
-  let kiloClient: KiloClient;
-  let connectionManager: ConnectionManager;
+  let kiloClient: WrapperKiloClient;
+  let connectionFns: MockConnectionFns;
   let config: LifecycleConfig;
   let manager: LifecycleManager;
 
@@ -78,7 +82,7 @@ describe('createLifecycleManager', () => {
     vi.useFakeTimers();
     state = new WrapperState();
     kiloClient = createMockKiloClient();
-    connectionManager = createMockConnectionManager();
+    connectionFns = createMockConnectionFns();
     config = createDefaultConfig();
   });
 
@@ -90,11 +94,24 @@ describe('createLifecycleManager', () => {
     vi.clearAllMocks();
   });
 
-  const createManager = (overrides: Partial<LifecycleConfig> = {}): LifecycleManager => {
+  const createManager = (
+    overrides: Partial<LifecycleConfig> = {},
+    perTurnOverrides: Partial<PerTurnConfig> = {}
+  ): LifecycleManager => {
     manager = createLifecycleManager(
       { ...config, ...overrides },
-      { state, kiloClient, connectionManager }
+      {
+        state,
+        kiloClient,
+        closeConnections: connectionFns.closeConnections,
+        isConnected: connectionFns.isConnected,
+        reconnectEventSubscription: connectionFns.reconnectEventSubscription,
+      }
     );
+    // Apply per-turn config if overrides provided
+    if (Object.keys(perTurnOverrides).length > 0) {
+      manager.setPerTurnConfig(createDefaultPerTurnConfig(perTurnOverrides));
+    }
     return manager;
   };
 
@@ -110,98 +127,14 @@ describe('createLifecycleManager', () => {
       expect(mgr).toHaveProperty('stop');
       expect(mgr).toHaveProperty('onMessageComplete');
       expect(mgr).toHaveProperty('triggerDrainAndClose');
-      expect(mgr).toHaveProperty('getMaxRuntimeMs');
+      expect(mgr).toHaveProperty('onSseEvent');
       expect(mgr).toHaveProperty('signalCompletion');
       expect(mgr).toHaveProperty('setAborted');
     });
 
-    it('getMaxRuntimeMs returns configured value', () => {
-      const mgr = createManager({ maxRuntimeMs: 300000 });
-
-      expect(mgr.getMaxRuntimeMs()).toBe(300000);
-    });
-
-    it('uses default values when config not provided', () => {
+    it('has onSseEvent method', () => {
       const mgr = createManager();
-
-      expect(mgr.getMaxRuntimeMs()).toBe(DEFAULT_INFLIGHT_TIMEOUT_MS);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Inflight Expiry
-  // -------------------------------------------------------------------------
-
-  describe('inflight expiry', () => {
-    it('expires inflight entries past deadline', async () => {
-      const mgr = createManager();
-      const sendToIngestSpy = vi.fn();
-      state.setSendToIngestFn(sendToIngestSpy);
-
-      state.startJob(createJobContext());
-      const now = Date.now();
-      // Add entry that expires in 3 seconds
-      state.addInflight('msg_1', now + 3000);
-
-      mgr.start();
-
-      // Advance past the deadline + check interval (5 seconds)
-      await vi.advanceTimersByTimeAsync(6000);
-
-      // Should have sent error event
-      expect(sendToIngestSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          streamEventType: 'error',
-          data: expect.objectContaining({
-            code: 'INFLIGHT_TIMEOUT',
-            messageId: 'msg_1',
-          }),
-        })
-      );
-
-      // Entry should be removed
-      expect(state.hasInflight('msg_1')).toBe(false);
-    });
-
-    it('sets lastError on inflight timeout', async () => {
-      const mgr = createManager();
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 1000);
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(6000);
-
-      const error = state.getLastError();
-      expect(error).not.toBeNull();
-      expect(error?.code).toBe('INFLIGHT_TIMEOUT');
-      expect(error?.messageId).toBe('msg_1');
-    });
-
-    it('does not expire entries before deadline', async () => {
-      const mgr = createManager();
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000); // 60 seconds from now
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(6000); // Only 6 seconds
-
-      expect(state.hasInflight('msg_1')).toBe(true);
-    });
-
-    it('triggers drain and close when inflight hits 0 after expiry', async () => {
-      const mgr = createManager();
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 1000);
-
-      mgr.start();
-      await vi.advanceTimersByTimeAsync(6000);
-
-      // After drain delay, close should be called
-      await vi.advanceTimersByTimeAsync(500);
-
-      expect(connectionManager.close).toHaveBeenCalled();
+      expect(typeof mgr.onSseEvent).toBe('function');
     });
   });
 
@@ -210,46 +143,22 @@ describe('createLifecycleManager', () => {
   // -------------------------------------------------------------------------
 
   describe('onMessageComplete', () => {
-    it('removes message from inflight', () => {
+    it('sets state to inactive', () => {
       const mgr = createManager();
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
-
+      state.setActive(true);
       mgr.onMessageComplete('msg_1');
-
-      expect(state.hasInflight('msg_1')).toBe(false);
+      expect(state.isIdle).toBe(true);
     });
 
-    it('triggers drain when last message completes', async () => {
+    it('triggers drain when message completes', async () => {
       const mgr = createManager();
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
-
+      state.setActive(true);
       mgr.onMessageComplete('msg_1');
-
-      // Drain should be triggered (close called after delay)
-      // Need to use advanceTimersByTimeAsync for async operations
       await vi.advanceTimersByTimeAsync(500);
-      expect(connectionManager.close).toHaveBeenCalled();
-    });
-
-    it('does not trigger drain when other messages remain', () => {
-      const mgr = createManager();
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-      state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
-      state.addInflight('msg_2', Date.now() + 60000);
-
-      mgr.onMessageComplete('msg_1');
-
-      // Advance past drain delay
-      vi.advanceTimersByTime(500);
-
-      // Close should NOT be called - still have msg_2
-      expect(connectionManager.close).not.toHaveBeenCalled();
+      expect(connectionFns.closeConnections).toHaveBeenCalled();
     });
 
     it('handles unknown messageId gracefully', () => {
@@ -273,12 +182,12 @@ describe('createLifecycleManager', () => {
       mgr.triggerDrainAndClose();
 
       // Before delay - not closed
-      expect(connectionManager.close).not.toHaveBeenCalled();
+      expect(connectionFns.closeConnections).not.toHaveBeenCalled();
 
       // After 250ms drain delay
       await vi.advanceTimersByTimeAsync(300);
 
-      expect(connectionManager.close).toHaveBeenCalled();
+      expect(connectionFns.closeConnections).toHaveBeenCalled();
     });
 
     it('is idempotent - multiple calls do not queue multiple drains', async () => {
@@ -292,7 +201,7 @@ describe('createLifecycleManager', () => {
       await vi.advanceTimersByTimeAsync(1000);
 
       // Close should only be called once
-      expect(connectionManager.close).toHaveBeenCalledTimes(1);
+      expect(connectionFns.closeConnections).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -331,7 +240,7 @@ describe('createLifecycleManager', () => {
       vi.advanceTimersByTime(500);
 
       // Close should not have been called
-      expect(connectionManager.close).not.toHaveBeenCalled();
+      expect(connectionFns.closeConnections).not.toHaveBeenCalled();
     });
 
     it('sets aborted flag', () => {
@@ -350,22 +259,19 @@ describe('createLifecycleManager', () => {
 
   describe('setAborted', () => {
     it('prevents post-completion tasks from running', async () => {
-      const mgr = createManager({ autoCommit: true });
+      const mgr = createManager({}, { autoCommit: true });
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
+      state.setActive(true);
 
       // Set aborted before completion
       mgr.setAborted();
 
       // Complete the message (would trigger post-completion tasks)
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
       mgr.onMessageComplete('msg_1');
 
       // Wait for any async tasks
       await vi.advanceTimersByTimeAsync(1000);
-
-      // Auto-commit should not have been attempted
-      // (We can't easily test this without more mocking, but the flag is set)
     });
   });
 
@@ -377,16 +283,16 @@ describe('createLifecycleManager', () => {
     it('reset clears aborted flag - allows complete event after reset', async () => {
       const mgr = createManager();
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
+      state.setActive(true);
 
       mgr.setAborted();
       mgr.reset();
 
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
       const sendToIngestSpy = vi.fn();
       state.setSendToIngestFn(sendToIngestSpy);
 
-      // Completing the last inflight triggers drain
+      // Completing the last active message triggers drain
       mgr.onMessageComplete('msg_1');
       await vi.advanceTimersByTimeAsync(1000);
 
@@ -401,13 +307,13 @@ describe('createLifecycleManager', () => {
     it('reset clears draining flag - allows new drain after reset', async () => {
       const mgr = createManager();
       state.startJob(createJobContext());
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
       // First drain
       mgr.triggerDrainAndClose();
       await vi.advanceTimersByTimeAsync(500);
 
-      expect(connectionManager.close).toHaveBeenCalledTimes(1);
+      expect(connectionFns.closeConnections).toHaveBeenCalledTimes(1);
 
       // Reset clears isDraining so a second drain can happen
       mgr.reset();
@@ -415,24 +321,24 @@ describe('createLifecycleManager', () => {
       // Start a fresh job
       state.clearJob();
       state.startJob(createJobContext({ executionId: 'exc_second' }));
-      state.addInflight('msg_2', Date.now() + 60000);
+      state.setActive(true);
 
-      // Completing last inflight triggers a new drain
+      // Completing last active message triggers a new drain
       mgr.onMessageComplete('msg_2');
       await vi.advanceTimersByTimeAsync(1000);
 
-      expect(connectionManager.close).toHaveBeenCalledTimes(2);
+      expect(connectionFns.closeConnections).toHaveBeenCalledTimes(2);
     });
 
     it('reset enables post-completion flow after previous abort', async () => {
-      const mgr = createManager({ autoCommit: false });
+      const mgr = createManager({}, { autoCommit: false });
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
+      state.setActive(true);
 
       mgr.setAborted();
       mgr.reset();
 
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
       const sendToIngestSpy = vi.fn();
       state.setSendToIngestFn(sendToIngestSpy);
 
@@ -471,11 +377,11 @@ describe('createLifecycleManager', () => {
 
   describe('post-completion tasks', () => {
     it('runs auto-commit when enabled', async () => {
-      const mgr = createManager({ autoCommit: true });
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      const mgr = createManager({}, { autoCommit: true });
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
+      state.setActive(true);
 
       mgr.start();
       mgr.onMessageComplete('msg_1');
@@ -489,11 +395,11 @@ describe('createLifecycleManager', () => {
     });
 
     it('runs condense when enabled', async () => {
-      const mgr = createManager({ condenseOnComplete: true });
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      const mgr = createManager({}, { condenseOnComplete: true });
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
 
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 60000);
+      state.setActive(true);
 
       mgr.start();
       mgr.onMessageComplete('msg_1');
@@ -515,21 +421,9 @@ describe('createLifecycleManager', () => {
   // -------------------------------------------------------------------------
 
   describe('edge cases', () => {
-    it('handles state with no job during expiry check', async () => {
-      const mgr = createManager();
-
-      // Add inflight without job context (unusual but possible)
-      state.addInflight('msg_1', Date.now() - 1000); // Already expired
-
-      mgr.start();
-
-      // Should not throw during expiry check
-      await vi.advanceTimersByTimeAsync(6000);
-    });
-
     it('handles connection not connected during drain', async () => {
       const mgr = createManager();
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(false);
+      (connectionFns.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
       state.startJob(createJobContext());
 
@@ -539,52 +433,80 @@ describe('createLifecycleManager', () => {
       await vi.advanceTimersByTimeAsync(500);
 
       // close() should still be called (to ensure cleanup)
-      expect(connectionManager.close).toHaveBeenCalled();
+      expect(connectionFns.closeConnections).toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // onSseEvent / transport timer
+  // -------------------------------------------------------------------------
+
+  describe('onSseEvent / transport timer', () => {
+    it('fires reconnectEventSubscription after 15s of no events', async () => {
+      const mgr = createManager();
+      state.startJob(createJobContext());
+
+      // First call starts the timer
+      mgr.onSseEvent();
+
+      // Advance 15 seconds — timer should fire
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      expect(connectionFns.reconnectEventSubscription).toHaveBeenCalledTimes(1);
     });
 
-    it('multiple inflight entries with different deadlines', async () => {
+    it('resets timer on each onSseEvent call', async () => {
       const mgr = createManager();
-      const sendToIngestSpy = vi.fn();
-      state.setSendToIngestFn(sendToIngestSpy);
-
       state.startJob(createJobContext());
-      const now = Date.now();
-      state.addInflight('msg_short', now + 2000); // Expires at 2s
-      state.addInflight('msg_long', now + 10000); // Expires at 10s
 
-      mgr.start();
+      mgr.onSseEvent();
 
-      // After 6 seconds, only msg_short should be expired
-      await vi.advanceTimersByTimeAsync(6000);
+      // Advance 10s (not yet expired)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(connectionFns.reconnectEventSubscription).not.toHaveBeenCalled();
 
-      expect(state.hasInflight('msg_short')).toBe(false);
-      expect(state.hasInflight('msg_long')).toBe(true);
+      // Reset timer
+      mgr.onSseEvent();
 
-      // Check that error was sent for short one only
-      const errorCalls = sendToIngestSpy.mock.calls.filter(
-        call => call[0]?.streamEventType === 'error'
-      );
-      expect(errorCalls).toHaveLength(1);
-      expect(errorCalls[0][0].data.messageId).toBe('msg_short');
+      // Advance another 10s (timer was reset, so 10s since last reset)
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(connectionFns.reconnectEventSubscription).not.toHaveBeenCalled();
+
+      // Advance 5 more seconds (15s since last reset)
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(connectionFns.reconnectEventSubscription).toHaveBeenCalledTimes(1);
     });
 
-    it('skips SSE health checks while reconnecting', async () => {
+    it('does not fire timer when no job context', async () => {
       const mgr = createManager();
-      (connectionManager.isConnected as ReturnType<typeof vi.fn>).mockReturnValue(true);
-      (connectionManager.isReconnecting as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      // No job started
 
+      mgr.onSseEvent();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(connectionFns.reconnectEventSubscription).not.toHaveBeenCalled();
+    });
+
+    it('transport timer is cleared on stop', async () => {
+      const mgr = createManager();
       state.startJob(createJobContext());
-      state.addInflight('msg_1', Date.now() + 600_000);
-      // Record initial SSE activity so the inactivity check has a baseline
-      state.recordSseEvent();
 
-      mgr.start();
+      mgr.onSseEvent();
+      mgr.stop();
 
-      // Advance past SSE inactivity timeout (120s) + check interval
-      await vi.advanceTimersByTimeAsync(130_000);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(connectionFns.reconnectEventSubscription).not.toHaveBeenCalled();
+    });
 
-      // abortSession should NOT have been called because we're reconnecting
-      expect(kiloClient.abortSession).not.toHaveBeenCalled();
+    it('transport timer is cleared on reset', async () => {
+      const mgr = createManager();
+      state.startJob(createJobContext());
+
+      mgr.onSseEvent();
+      mgr.reset();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(connectionFns.reconnectEventSubscription).not.toHaveBeenCalled();
     });
   });
 });

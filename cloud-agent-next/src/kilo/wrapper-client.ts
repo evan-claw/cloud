@@ -7,11 +7,9 @@
 
 import type { ExecutionSession, SandboxInstance } from '../types.js';
 import { logger } from '../logger.js';
-import {
-  findWrapperForSession,
-  findAvailableWrapperPort,
-  getWrapperSessionMarker,
-} from './wrapper-manager.js';
+import { findWrapperForSession, getWrapperSessionMarker } from './wrapper-manager.js';
+import { randomPort } from './ports.js';
+import { WRAPPER_VERSION } from '../shared/wrapper-version.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,15 +22,28 @@ export type WrapperClientOptions = {
   port: number;
 };
 
-export type StartJobOptions = {
+export type ExecutionBinding = {
   executionId: string;
   ingestUrl: string;
   ingestToken: string;
-  sessionId: string;
+  workerAuthToken: string;
+  upstreamBranch?: string;
+};
+
+export type EnsureRunningOptions = {
+  agentSessionId: string;
   userId: string;
-  kilocodeToken: string;
-  kiloSessionId?: string;
-  kiloSessionTitle?: string;
+  wrapperPath?: string;
+  maxWaitMs?: number;
+  workspacePath: string;
+  sessionId?: string;
+};
+
+export type EnsureWrapperOptions = {
+  agentSessionId: string;
+  userId: string;
+  workspacePath: string;
+  sessionId?: string;
 };
 
 export type WrapperPromptOptions = {
@@ -44,6 +55,15 @@ export type WrapperPromptOptions = {
   messageId?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  autoCommit?: boolean;
+  condenseOnComplete?: boolean;
+  execution?: ExecutionBinding;
+};
+
+export type WrapperCommandOptions = {
+  command: string;
+  args?: string;
+  execution?: ExecutionBinding;
 };
 
 export type WrapperPermissionResponse = 'always' | 'once' | 'reject';
@@ -51,16 +71,14 @@ export type WrapperPermissionResponse = 'always' | 'once' | 'reject';
 export type WrapperHealthResponse = {
   healthy: boolean;
   state: 'idle' | 'active';
-  inflightCount: number;
   version: string;
+  sessionId: string;
 };
 
 export type JobStatus = {
   state: 'idle' | 'active';
   executionId?: string;
-  kiloSessionId?: string;
-  inflight: string[];
-  inflightCount: number;
+  sessionId?: string;
   lastError?: {
     code: string;
     messageId?: string;
@@ -118,13 +136,8 @@ const ERROR_STATUS_CODES: Record<string, number> = {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Max attempts for wrapper startup (1 retry on transient failures like Bun SIGILL or briefly unreachable kilo server) */
-const MAX_WRAPPER_START_ATTEMPTS = 2;
-
-/** Delay between wrapper startup retries to allow transient issues (e.g. kilo server briefly unreachable) to resolve */
-const WRAPPER_RETRY_DELAY_MS = 1_500;
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+/** Max attempts for port allocation in ensureWrapper (retry with new random port on failure) */
+const MAX_PORT_ATTEMPTS = 3;
 
 // ---------------------------------------------------------------------------
 // WrapperClient Implementation
@@ -287,38 +300,17 @@ export class WrapperClient {
    * Ensure the wrapper is running and healthy.
    * Starts the wrapper if needed and waits for it to be ready.
    *
-   * NOTE: This method assumes the WrapperClient was created with the correct port
-   * (either found via findWrapperForSession or allocated via findAvailableWrapperPort).
-   * Use the static ensureWrapper() method for the full flow.
+   * NOTE: This method assumes the WrapperClient was created with a port.
+   * Port retry on EADDRINUSE is handled by the static ensureWrapper() method.
    */
-  async ensureRunning(options: {
-    sessionId: string;
-    wrapperPath?: string;
-    maxWaitMs?: number;
-    pollIntervalMs?: number;
-    /** Kilo server port (required for wrapper to connect) */
-    kiloServerPort: number;
-    /** Workspace path (required by wrapper) */
-    workspacePath: string;
-    /** Enable auto-commit after prompt completes */
-    autoCommit?: boolean;
-    /** Enable condense-on-complete */
-    condenseOnComplete?: boolean;
-    /** Upstream branch name */
-    upstreamBranch?: string;
-    /** Model ID for the wrapper */
-    model?: string;
-  }): Promise<void> {
+  async ensureRunning(options: EnsureRunningOptions): Promise<void> {
     const {
-      sessionId,
+      agentSessionId,
+      userId,
       wrapperPath = '/usr/local/bin/kilocode-wrapper.js',
       maxWaitMs = 30_000,
-      kiloServerPort,
       workspacePath,
-      autoCommit,
-      condenseOnComplete,
-      upstreamBranch,
-      model,
+      sessionId,
     } = options;
 
     // First, try to check health
@@ -335,115 +327,122 @@ export class WrapperClient {
 
     // Start the wrapper process using startProcess so it's trackable via listProcesses()
     // The command includes a session marker so we can find this wrapper later
-    const sessionMarker = getWrapperSessionMarker(sessionId);
-    const wrapperLogPath = `/tmp/kilocode-wrapper-${sessionId}-${Date.now()}.log`;
+    const sessionMarker = getWrapperSessionMarker(agentSessionId);
+    const wrapperLogPath = `/tmp/kilocode-wrapper-${agentSessionId}-${Date.now()}.log`;
     const envParts = [
       `WRAPPER_PORT=${this.port}`,
-      `KILO_SERVER_PORT=${kiloServerPort}`,
       `WORKSPACE_PATH=${workspacePath}`,
       `WRAPPER_LOG_PATH=${wrapperLogPath}`,
     ];
-    if (autoCommit) envParts.push('AUTO_COMMIT=true');
-    if (condenseOnComplete) envParts.push('CONDENSE_ON_COMPLETE=true');
-    if (upstreamBranch) envParts.push(`UPSTREAM_BRANCH=${upstreamBranch}`);
-    if (model) envParts.push(`MODEL=${model}`);
+    const argParts = [`--user-id ${this.shellQuote(userId)}`];
+    if (sessionId) {
+      argParts.push(`--session-id ${this.shellQuote(sessionId)}`);
+    }
 
-    const command = `${envParts.join(' ')} bun run ${this.shellQuote(wrapperPath)} ${sessionMarker}`;
+    const command = `${envParts.join(' ')} bun run ${this.shellQuote(wrapperPath)} ${sessionMarker} ${argParts.join(' ')}`;
 
-    let lastError: Error | undefined;
+    logger.debug('WrapperClient: starting wrapper process', {
+      command,
+      port: this.port,
+    });
 
-    for (let attempt = 0; attempt < MAX_WRAPPER_START_ATTEMPTS; attempt++) {
-      logger.debug('WrapperClient: starting wrapper process', {
-        command,
-        port: this.port,
-        attempt: attempt + 1,
+    let proc: Awaited<ReturnType<ExecutionSession['startProcess']>> | undefined;
+
+    try {
+      proc = await this.session.startProcess(command, {
+        cwd: workspacePath,
       });
 
-      let proc: Awaited<ReturnType<ExecutionSession['startProcess']>> | undefined;
-
-      try {
-        proc = await this.session.startProcess(command, {
-          cwd: workspacePath,
-        });
-
-        // Wait for wrapper to become healthy via port check
-        await proc.waitForPort(this.port, {
+      // Wait for wrapper to become healthy via port check.
+      // Race against our own timer because the SDK's built-in timeout may
+      // not fire when the process crashes immediately (e.g. EADDRINUSE).
+      let waitTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        proc.waitForPort(this.port, {
           mode: 'http',
           path: '/health',
           timeout: maxWaitMs,
-        });
+        }),
+        new Promise<never>((_, reject) => {
+          waitTimeoutId = setTimeout(() => reject(new Error('waitForPort timed out')), maxWaitMs);
+        }),
+      ]);
+      clearTimeout(waitTimeoutId);
 
-        logger.debug('WrapperClient: wrapper is ready', { port: this.port, processId: proc.id });
-        return;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
+      logger.debug('WrapperClient: wrapper is ready', { port: this.port, processId: proc.id });
+      return;
+    } catch (error) {
+      const startupError = error instanceof Error ? error : new Error(String(error));
 
-        // Capture process stdout/stderr for diagnostics
-        let stdout: string | undefined;
-        let stderr: string | undefined;
-        if (proc) {
-          try {
-            const logs = await proc.getLogs();
-            stdout = logs.stdout;
-            stderr = logs.stderr;
-          } catch (logError) {
-            logger.debug('Failed to read wrapper process logs', {
-              port: this.port,
-              processId: proc.id,
-              error: logError instanceof Error ? logError.message : String(logError),
-            });
-          }
-        }
-
-        // Read the wrapper's own log file for richer diagnostics (logToFile output)
-        let wrapperFileLog: string | undefined;
+      // Capture process stdout/stderr for diagnostics (best-effort)
+      let stdout: string | undefined;
+      let stderr: string | undefined;
+      if (proc) {
         try {
-          const quotedWrapperLogPath = `'${wrapperLogPath.replace(/'/g, "'\\''")}'`;
-          const logResult = await this.session.exec(`cat ${quotedWrapperLogPath} 2>/dev/null`);
-          const content = logResult.stdout?.trim();
-          if (content) {
-            wrapperFileLog = content;
-          }
-        } catch (logFileError) {
-          logger.debug('Failed to read wrapper log file', {
-            wrapperLogPath,
-            error: logFileError instanceof Error ? logFileError.message : String(logFileError),
+          let logsTimeoutId: ReturnType<typeof setTimeout> | undefined;
+          const logs = await Promise.race([
+            proc.getLogs(),
+            new Promise<never>((_, reject) => {
+              logsTimeoutId = setTimeout(() => reject(new Error('getLogs timed out')), 5_000);
+            }),
+          ]);
+          clearTimeout(logsTimeoutId);
+          stdout = logs.stdout;
+          stderr = logs.stderr;
+        } catch (logError) {
+          logger.debug('Failed to read wrapper process logs', {
+            port: this.port,
+            processId: proc.id,
+            error: logError instanceof Error ? logError.message : String(logError),
           });
         }
-
-        const diagnostics = {
-          port: this.port,
-          attempt: attempt + 1,
-          error: lastError.message,
-          stdout,
-          stderr,
-          wrapperFileLog,
-        };
-
-        if (attempt + 1 < MAX_WRAPPER_START_ATTEMPTS) {
-          // Kill the failed process before retrying (proc.kill() is unreliable
-          // in the sandbox SDK, so use pkill -f against the session marker).
-          try {
-            await this.session.exec(`pkill -f -- '${sessionMarker}'`);
-          } catch {
-            // Process may already be dead - ignore
-          }
-
-          logger.warn('Wrapper startup failed, retrying', diagnostics);
-
-          // Delay before retrying to let transient issues resolve (e.g. kilo server briefly unreachable)
-          await sleep(WRAPPER_RETRY_DELAY_MS);
-          continue;
-        }
-
-        // Final attempt failed
-        logger.error('Wrapper startup failed after all attempts', diagnostics);
       }
-    }
 
-    throw new WrapperNotReadyError(
-      `Wrapper did not become ready within ${maxWaitMs}ms after ${MAX_WRAPPER_START_ATTEMPTS} attempt(s): ${lastError?.message ?? 'unknown error'} (check logs for process stdout/stderr and wrapperFileLog)`
-    );
+      // Read the wrapper's own log file for richer diagnostics (logToFile output)
+      let wrapperFileLog: string | undefined;
+      try {
+        const quotedWrapperLogPath = `'${wrapperLogPath.replace(/'/g, "'\\''")}'`;
+        const logResult = await this.session.exec(`cat ${quotedWrapperLogPath} 2>/dev/null`);
+        const content = logResult.stdout?.trim();
+        if (content) {
+          wrapperFileLog = content;
+        }
+      } catch (logFileError) {
+        logger.debug('Failed to read wrapper log file', {
+          wrapperLogPath,
+          error: logFileError instanceof Error ? logFileError.message : String(logFileError),
+        });
+      }
+
+      // Kill the failed process (proc.kill() is unreliable in the sandbox SDK,
+      // so use pkill -f against the session marker).
+      try {
+        await this.session.exec(`pkill -f -- '${sessionMarker}'`);
+      } catch {
+        // Process may already be dead - ignore
+      }
+
+      const diagParts = [
+        startupError.message,
+        stdout ? `stdout: ${stdout}` : undefined,
+        stderr ? `stderr: ${stderr}` : undefined,
+        wrapperFileLog ? `wrapperFileLog: ${wrapperFileLog}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' | ');
+
+      logger.error('Wrapper startup failed', {
+        port: this.port,
+        error: startupError.message,
+        stdout,
+        stderr,
+        wrapperFileLog,
+      });
+
+      throw new WrapperNotReadyError(
+        `Wrapper did not become ready on port ${this.port} within ${maxWaitMs}ms: ${diagParts}`
+      );
+    }
   }
 
   /**
@@ -456,71 +455,94 @@ export class WrapperClient {
    *
    * @param sandbox - The sandbox instance (for listing processes across all sessions)
    * @param session - The execution session (for starting processes within session context)
-   * @param sessionId - The cloud-agent session ID
-   * @param kiloServerPort - Port where kilo server is running
-   * @param workspacePath - Workspace path for the session
-   * @returns A WrapperClient connected to the running wrapper
+   * @param options - Wrapper startup config
+   * @returns A WrapperClient and the root kilo session ID from the wrapper health response
    */
   static async ensureWrapper(
     sandbox: SandboxInstance,
     session: ExecutionSession,
-    sessionId: string,
-    kiloServerPort: number,
-    workspacePath: string,
-    wrapperConfig?: {
-      autoCommit?: boolean;
-      condenseOnComplete?: boolean;
-      upstreamBranch?: string;
-      model?: string;
-    }
-  ): Promise<WrapperClient> {
-    logger.withFields({ sessionId, workspacePath }).info('Ensuring wrapper is running');
+    options: EnsureWrapperOptions
+  ): Promise<{ client: WrapperClient; sessionId: string }> {
+    const { agentSessionId, workspacePath } = options;
+
+    logger.withFields({ agentSessionId, workspacePath }).info('Ensuring wrapper is running');
 
     // 1. Check for existing wrapper (sandbox-wide search)
-    const existing = await findWrapperForSession(sandbox, sessionId);
+    const existing = await findWrapperForSession(sandbox, agentSessionId);
 
     if (existing) {
       const { port } = existing;
-      logger.withFields({ sessionId, port }).info('Found existing wrapper');
+      logger.withFields({ agentSessionId, port }).info('Found existing wrapper');
       const client = new WrapperClient({ session, port });
 
-      // Verify it's healthy. If so, reuse it — wrapperConfig env vars are
-      // immutable for the lifetime of the wrapper process (set at startup only).
+      // Verify it's healthy. If so, reuse it.
       try {
-        await client.health();
-        return client;
+        const healthResponse = await client.health();
+        if (healthResponse.version === WRAPPER_VERSION) {
+          return { client, sessionId: healthResponse.sessionId };
+        }
+
+        logger
+          .withFields({
+            agentSessionId,
+            port,
+            wrapperVersion: healthResponse.version,
+            expectedWrapperVersion: WRAPPER_VERSION,
+          })
+          .warn('Existing wrapper version mismatch, restarting');
+
+        try {
+          await sandbox.exec(`pkill -f -- '${getWrapperSessionMarker(agentSessionId)}'`);
+        } catch (error) {
+          logger
+            .withFields({
+              agentSessionId,
+              port,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            .warn('Failed to stop version-mismatched wrapper, starting replacement anyway');
+        }
       } catch {
         logger
-          .withFields({ sessionId, port })
+          .withFields({ agentSessionId, port })
           .warn('Existing wrapper not healthy, will start new one');
       }
     }
 
-    // 2. Find available port and start new wrapper
-    const port = await findAvailableWrapperPort(sandbox, sessionId);
-    logger.withFields({ sessionId, port }).info('Starting new wrapper');
+    // 2. Try starting a new wrapper, retrying with a new random port on failure
+    let lastError: Error | undefined;
 
-    const client = new WrapperClient({ session, port });
-    await client.ensureRunning({
-      sessionId,
-      kiloServerPort,
-      workspacePath,
-      ...wrapperConfig,
-    });
+    for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+      const port = randomPort();
+      logger
+        .withFields({ agentSessionId, port, attempt: attempt + 1 })
+        .info('Starting new wrapper');
 
-    return client;
-  }
+      const client = new WrapperClient({ session, port });
 
-  /**
-   * Start a new job (creates/resumes kilo session and stores context).
-   */
-  async startJob(options: StartJobOptions): Promise<{ kiloSessionId: string }> {
-    const response = await this.request<{
-      status: string;
-      kiloSessionId: string;
-    }>('POST', '/job/start', options);
+      try {
+        await client.ensureRunning(options);
+        const healthResponse = await client.health();
+        if (healthResponse.version !== WRAPPER_VERSION) {
+          throw new WrapperNotReadyError(
+            `Wrapper version mismatch after startup: expected ${WRAPPER_VERSION}, got ${healthResponse.version}`
+          );
+        }
 
-    return { kiloSessionId: response.kiloSessionId };
+        return { client, sessionId: healthResponse.sessionId };
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt + 1 < MAX_PORT_ATTEMPTS) {
+          logger
+            .withFields({ agentSessionId, port, attempt: attempt + 1, error: lastError.message })
+            .warn('Wrapper startup failed, retrying with different port');
+          continue;
+        }
+      }
+    }
+
+    throw lastError ?? new WrapperNotReadyError('Failed to start wrapper after port retries');
   }
 
   // ---------------------------------------------------------------------------
@@ -548,11 +570,11 @@ export class WrapperClient {
    * Send a command (slash command) to the wrapper.
    * Does NOT open connection or track inflight.
    */
-  async command(command: string, args?: string): Promise<WrapperSessionCommandResponse> {
+  async command(options: WrapperCommandOptions): Promise<WrapperSessionCommandResponse> {
     const response = await this.request<{
       status: string;
       result: WrapperSessionCommandResponse;
-    }>('POST', '/job/command', { command, args });
+    }>('POST', '/job/command', options);
 
     return response.result;
   }

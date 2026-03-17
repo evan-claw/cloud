@@ -93,6 +93,8 @@ export type IngestAttachment = {
   kiloSessionState: KiloSessionCaptureState;
   /** Last heartbeat update timestamp for debouncing */
   lastHeartbeatUpdate: number;
+  /** Last lastEventAt update timestamp for debouncing */
+  lastEventAtUpdate: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,8 @@ export type IngestDOContext = {
   transitionToRunning: (executionId: string) => Promise<boolean>;
   /** Update execution heartbeat timestamp (debounced) */
   updateHeartbeat: (executionId: string, timestamp: number) => Promise<void>;
+  /** Update lastEventAt timestamp for non-heartbeat events (debounced) */
+  updateLastEventAt: (executionId: string, timestamp: number) => Promise<void>;
   /** Update execution status when complete/failed/interrupted */
   updateExecutionStatus: (
     executionId: string,
@@ -237,6 +241,7 @@ export function createIngestHandler(
         connectedAt: now,
         kiloSessionState: { captured: false },
         lastHeartbeatUpdate: now,
+        lastEventAtUpdate: 0,
       };
 
       // Accept the WebSocket with hibernation support
@@ -331,6 +336,20 @@ export function createIngestHandler(
           attachment.lastHeartbeatUpdate = now;
           ws.serializeAttachment(attachment);
           void doContext.updateHeartbeat(executionId, now);
+        }
+
+        // Update lastEventAt for non-heartbeat events (leading-edge throttle).
+        // Events arriving within HEARTBEAT_DEBOUNCE_MS of the last write are
+        // skipped — the stored timestamp may lag behind the true latest event
+        // by up to the throttle window. This is fine because the only consumer
+        // (checkHungExecution) uses a 2-minute timeout on a 2-minute alarm cycle.
+        const eventType: string = ingestEvent.streamEventType;
+        if (eventType !== 'heartbeat') {
+          if (now - attachment.lastEventAtUpdate >= HEARTBEAT_DEBOUNCE_MS) {
+            attachment.lastEventAtUpdate = now;
+            ws.serializeAttachment(attachment);
+            void doContext.updateLastEventAt(executionId, now);
+          }
         }
 
         // -- Handler integrations --

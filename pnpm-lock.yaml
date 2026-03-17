@@ -680,6 +680,10 @@ importers:
         version: 4.69.0(@cloudflare/workers-types@4.20260305.0)
 
   cloud-agent-next/wrapper:
+    dependencies:
+      '@kilocode/sdk':
+        specifier: 7.0.47
+        version: 7.0.47
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -3759,6 +3763,9 @@ packages:
 
   '@kilocode/sdk@7.0.37':
     resolution: {integrity: sha512-t7HEjYpAuW3IdbEp+2VYQPFLhidYFSmWK3nl6vWri0QBNh+spQcotdMYENNmv/HQOAXr84pXgOFtc8YCEOz5wQ==}
+
+  '@kilocode/sdk@7.0.47':
+    resolution: {integrity: sha512-Zuj/rmiIkhyb7tR2U5DOCILozuc6xIu53iFpuz/Du+a+6DxrJBB2/DR8Yt0osDavJwdHGTsmELI22kUuPQYAuw==}
 
   '@lottiefiles/dotlottie-react@0.17.7':
     resolution: {integrity: sha512-A6wO3zqkDx/t0ULfctcr1Bmb1f1hc4zUV3NcbKQOsBGAOIx1vABV/fRabFYElvbJl9lmOR24yMh//Z0fvvJV+Q==}
@@ -14896,6 +14903,8 @@ snapshots:
       zod: 4.1.8
 
   '@kilocode/sdk@7.0.37': {}
+
+  '@kilocode/sdk@7.0.47': {}
 
   '@lottiefiles/dotlottie-react@0.17.7(react@19.2.0)':
     dependencies:

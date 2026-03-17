@@ -6,8 +6,8 @@
  * explicit, simplifies testing, and prevents scattered state bugs.
  *
  * State model:
- * - IDLE: inflight.size == 0 (no pending prompt completions)
- * - ACTIVE: inflight.size > 0 (one or more prompts waiting for completion)
+ * - IDLE: _isActive == false
+ * - ACTIVE: _isActive == true
  */
 
 import type { IngestEvent } from '../../src/shared/protocol.js';
@@ -18,48 +18,38 @@ export type { LogUploader } from './log-uploader.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export interface InflightEntry {
-  messageId: string;
-  startedAt: number;
-  deadlineAt: number;
-}
-
-export interface JobContext {
+export type JobContext = {
   executionId: string;
-  sessionId: string;
-  userId: string;
   kiloSessionId: string;
   ingestUrl: string;
   ingestToken: string;
-  kilocodeToken: string;
-}
+  workerAuthToken: string;
+};
 
-export interface LastError {
+export type LastError = {
   code: string;
   messageId?: string;
   message: string;
   timestamp: number;
-}
+};
 
-export interface WrapperStatus {
+export type WrapperStatus = {
   state: 'idle' | 'active';
   executionId?: string;
-  kiloSessionId?: string;
-  inflight: string[];
-  inflightCount: number;
+  sessionId?: string;
   lastError?: LastError;
-}
+};
 
 // ---------------------------------------------------------------------------
 // WrapperState Class
 // ---------------------------------------------------------------------------
 
 export class WrapperState {
-  // Job context (set on /job/start, cleared on reset or drain)
+  // Job context (set on the first turn-start request, cleared on reset or drain)
   private job: JobContext | null = null;
 
-  // Inflight prompts (keyed by messageId)
-  private inflight = new Map<string, InflightEntry>();
+  // Whether the wrapper is actively processing a prompt
+  private _isActive = false;
 
   // Connection state - managed externally, stored here for reference
   private _ingestWs: WebSocket | null = null;
@@ -68,9 +58,6 @@ export class WrapperState {
   // Activity tracking
   private lastActivityAt = Date.now();
   private _lastError: LastError | null = null;
-
-  // SSE activity tracking (separate from general activity - tracks actual SSE events)
-  private lastSseEventAt = 0; // 0 means no SSE events received yet
 
   // Message counter for ID generation
   private messageCounter = 0;
@@ -89,11 +76,11 @@ export class WrapperState {
   // ---------------------------------------------------------------------------
 
   get isIdle(): boolean {
-    return this.inflight.size === 0;
+    return !this._isActive;
   }
 
   get isActive(): boolean {
-    return this.inflight.size > 0;
+    return this._isActive;
   }
 
   get hasJob(): boolean {
@@ -104,39 +91,27 @@ export class WrapperState {
     return this.job;
   }
 
-  get inflightCount(): number {
-    return this.inflight.size;
-  }
-
-  get inflightMessageIds(): string[] {
-    return Array.from(this.inflight.keys());
-  }
-
   // ---------------------------------------------------------------------------
   // Job Lifecycle
   // ---------------------------------------------------------------------------
 
   /**
-   * Start a new job. If a job with the same executionId is already active,
-   * this is a no-op (idempotent). If a different job is active and has
-   * inflight prompts, throws an error (caller should return 409).
+   * Start a new job. Idempotent for same executionId.
+   * Throws if a different job is currently active (caller should return 409).
    */
   startJob(context: JobContext): void {
-    // Idempotent: same executionId returns early
     if (this.job && this.job.executionId === context.executionId) {
       return;
     }
 
-    // Conflict: different job with inflight prompts
     if (this.job && this.job.executionId !== context.executionId && this.isActive) {
-      throw new Error(`Cannot start new job while inflight > 0 (active: ${this.job.executionId})`);
+      throw new Error(`Cannot start new job while active (current: ${this.job.executionId})`);
     }
 
     // Start new job
     this.job = context;
     this._lastError = null;
     this.messageCounter = 0;
-    this.lastSseEventAt = 0;
     this.updateActivity();
   }
 
@@ -147,64 +122,24 @@ export class WrapperState {
     this._logUploader?.stop();
     this._logUploader = null;
     this.job = null;
-    this.inflight.clear();
+    this._isActive = false;
     this.messageCounter = 0;
     this._lastAssistantMessageId = null;
   }
 
   // ---------------------------------------------------------------------------
-  // Inflight Management
+  // Active State Management
   // ---------------------------------------------------------------------------
 
   /**
-   * Add a prompt to the inflight map.
+   * Set whether the wrapper is actively processing a prompt.
+   * Replaces addInflight/removeInflight — only one prompt is active at a time.
    */
-  addInflight(messageId: string, deadlineAt: number): void {
-    this.inflight.set(messageId, {
-      messageId,
-      startedAt: Date.now(),
-      deadlineAt,
-    });
-    this.updateActivity();
-  }
-
-  /**
-   * Remove a prompt from the inflight map.
-   * Returns true if the messageId was found and removed.
-   */
-  removeInflight(messageId: string): boolean {
-    const removed = this.inflight.delete(messageId);
-    if (removed) {
+  setActive(active: boolean): void {
+    this._isActive = active;
+    if (active) {
       this.updateActivity();
     }
-    return removed;
-  }
-
-  /**
-   * Get all inflight entries that have exceeded their deadline.
-   */
-  getExpiredInflight(now: number): InflightEntry[] {
-    const expired: InflightEntry[] = [];
-    for (const entry of this.inflight.values()) {
-      if (now >= entry.deadlineAt) {
-        expired.push(entry);
-      }
-    }
-    return expired;
-  }
-
-  /**
-   * Clear all inflight entries. Called on abort or disconnect.
-   */
-  clearAllInflight(): void {
-    this.inflight.clear();
-  }
-
-  /**
-   * Check if a specific messageId is inflight.
-   */
-  hasInflight(messageId: string): boolean {
-    return this.inflight.has(messageId);
   }
 
   // ---------------------------------------------------------------------------
@@ -232,21 +167,12 @@ export class WrapperState {
   }
 
   /**
-   * Clear connection references and close if open.
+   * Clear connection references. Does NOT close or abort — connection.ts
+   * exclusively owns close semantics and calls this after its own cleanup.
    */
-  clearConnections(): void {
-    if (this._sseAbortController) {
-      this._sseAbortController.abort();
-      this._sseAbortController = null;
-    }
-    if (this._ingestWs) {
-      try {
-        this._ingestWs.close();
-      } catch {
-        // Ignore close errors
-      }
-      this._ingestWs = null;
-    }
+  clearConnectionRefs(): void {
+    this._sseAbortController = null;
+    this._ingestWs = null;
   }
 
   /**
@@ -297,33 +223,6 @@ export class WrapperState {
    */
   getIdleMs(now: number): number {
     return now - this.lastActivityAt;
-  }
-
-  // ---------------------------------------------------------------------------
-  // SSE Activity Tracking
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Record that an SSE event was received.
-   */
-  recordSseEvent(): void {
-    this.lastSseEventAt = Date.now();
-  }
-
-  /**
-   * Get milliseconds since last SSE event.
-   * Returns null if no SSE events have been received yet.
-   */
-  getSseInactivityMs(now: number): number | null {
-    if (this.lastSseEventAt === 0) return null;
-    return now - this.lastSseEventAt;
-  }
-
-  /**
-   * Check if SSE events have ever been received.
-   */
-  hasSseActivity(): boolean {
-    return this.lastSseEventAt > 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -400,9 +299,7 @@ export class WrapperState {
     return {
       state: this.isActive ? 'active' : 'idle',
       executionId: this.job?.executionId,
-      kiloSessionId: this.job?.kiloSessionId,
-      inflight: this.inflightMessageIds,
-      inflightCount: this.inflightCount,
+      sessionId: this.job?.kiloSessionId,
       lastError: this._lastError ?? undefined,
     };
   }

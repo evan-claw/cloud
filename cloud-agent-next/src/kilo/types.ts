@@ -1,13 +1,33 @@
 import type { ExecutionSession } from '../types.js';
 
-export type {
-  Session,
-  AssistantMessage,
-  Part,
-  TextPartInput,
-  FilePartInput,
-  SessionCommandResponse,
-} from '../shared/kilo-types.js';
+// ---------------------------------------------------------------------------
+// Kilo API types (subset needed by worker-side code)
+// Previously imported from shared/kilo-types.ts which has been deleted.
+// ---------------------------------------------------------------------------
+
+export type Session = {
+  id: string;
+  parentID?: string;
+  title?: string;
+  [key: string]: unknown;
+};
+
+export type TextPartInput = {
+  type: 'text';
+  text: string;
+};
+
+export type FilePartInput = {
+  type: 'file';
+  data: string;
+  mimeType: string;
+};
+
+export type SessionCommandResponse = unknown;
+
+// ---------------------------------------------------------------------------
+// Client options
+// ---------------------------------------------------------------------------
 
 export interface KiloClientOptions {
   session: ExecutionSession;

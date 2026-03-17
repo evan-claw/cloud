@@ -1,20 +1,23 @@
 /**
  * Long-running wrapper entry point.
  *
- * The wrapper runs as a long-running HTTP server that:
- * - Stays alive for the lifetime of the sandbox session
- * - Exposes an HTTP API for the Worker to send commands
- * - Connects to /ingest WebSocket on-demand (only when active)
- * - Handles SSE event forwarding, auto-commit, and condensation
+ * The wrapper runs as a single control plane inside the sandbox container.
+ * It starts the kilo server in-process via `@kilocode/sdk`'s `createKilo()`,
+ * then exposes an HTTP API for the Worker to send commands.
  *
- * Configuration is via environment variables (session-level).
- * Execution-specific config is passed via HTTP API.
+ * Configuration:
+ * - Session-level: WRAPPER_PORT, WORKSPACE_PATH (env vars at process start)
+ * - Session identity: --agent-session, --user-id, --session-id (CLI args at process start)
+ * - Execution-level: passed via POST /job/prompt body (per-turn)
  */
 
+import { createKilo, type KiloClient as SDKClient } from '@kilocode/sdk';
+import { SESSION_ID_RE } from '../../src/shared/protocol.js';
+import { WRAPPER_VERSION } from '../../src/shared/wrapper-version.js';
 import { WrapperState } from './state.js';
-import { createKiloClient } from './kilo-client.js';
+import { createWrapperKiloClient, type KiloServerHandle } from './kilo-api.js';
 import { createConnectionManager } from './connection.js';
-import { createLifecycleManager, DEFAULT_INFLIGHT_TIMEOUT_MS } from './lifecycle.js';
+import { createLifecycleManager } from './lifecycle.js';
 import { createServer } from './server.js';
 import { logToFile } from './utils.js';
 import type { WrapperCommand } from '../../src/shared/protocol.js';
@@ -23,11 +26,11 @@ import type { WrapperCommand } from '../../src/shared/protocol.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Version string for health check */
-const VERSION = '2.0.0';
-
 /** Grace period before force exit during shutdown (20 seconds) */
 const SHUTDOWN_TIMEOUT_MS = 20_000;
+
+/** Timeout for createKilo() server startup */
+const KILO_STARTUP_TIMEOUT_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Environment Variable Parsing
@@ -43,10 +46,6 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
-function getOptionalEnv(name: string, defaultValue: string): string {
-  return process.env[name] ?? defaultValue;
-}
-
 function getOptionalEnvInt(name: string, defaultValue: number): number {
   const value = process.env[name];
   if (!value) return defaultValue;
@@ -58,10 +57,66 @@ function getOptionalEnvInt(name: string, defaultValue: number): number {
   return parsed;
 }
 
-function getOptionalEnvBool(name: string, defaultValue: boolean): boolean {
-  const value = process.env[name];
-  if (!value) return defaultValue;
-  return value.toLowerCase() === 'true' || value === '1';
+function failStartup(message: string): never {
+  logToFile(`ERROR: ${message}`);
+  console.error(message);
+  process.exit(1);
+}
+
+type StartupArgs = {
+  agentSessionId: string;
+  userId: string;
+  sessionId?: string;
+};
+
+function parseStartupArgs(argv: string[]): StartupArgs {
+  let agentSessionId: string | undefined;
+  let userId: string | undefined;
+  let sessionId: string | undefined;
+
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    const value = argv[index + 1];
+
+    if (arg === '--agent-session') {
+      if (!value) {
+        failStartup('Missing value for --agent-session');
+      }
+      agentSessionId = value;
+      index++;
+      continue;
+    }
+
+    if (arg === '--user-id') {
+      if (!value) {
+        failStartup('Missing value for --user-id');
+      }
+      userId = value;
+      index++;
+      continue;
+    }
+
+    if (arg === '--session-id') {
+      if (!value) {
+        failStartup('Missing value for --session-id');
+      }
+      sessionId = value;
+      index++;
+      continue;
+    }
+
+    failStartup(`Unknown argument: ${arg}`);
+  }
+
+  if (!agentSessionId) {
+    failStartup('Missing required --agent-session argument');
+  }
+
+  if (!userId) {
+    failStartup('Missing required --user-id argument');
+  }
+
+  return { agentSessionId, userId, sessionId };
 }
 
 // ---------------------------------------------------------------------------
@@ -71,24 +126,20 @@ function getOptionalEnvBool(name: string, defaultValue: boolean): boolean {
 async function main() {
   logToFile(`wrapper starting (long-running mode) bun=${Bun.version}`);
 
-  // Parse environment variables
+  // Parse environment variables and startup args — only session-stable config remains here.
+  // Per-execution config (autoCommit, condenseOnComplete, model, upstreamBranch)
+  // is now passed in the POST /job/prompt body.
   const wrapperPort = getOptionalEnvInt('WRAPPER_PORT', 5000);
-  const kiloServerPort = getOptionalEnvInt('KILO_SERVER_PORT', 4000);
   const workspacePath = getRequiredEnv('WORKSPACE_PATH');
+  const {
+    agentSessionId,
+    userId,
+    sessionId: configuredSessionId,
+  } = parseStartupArgs(process.argv.slice(2));
 
-  const args = process.argv.slice(2);
-  const agentSessionFlagIndex = args.indexOf('--agent-session');
-  const agentSessionId =
-    agentSessionFlagIndex >= 0 && args.length > agentSessionFlagIndex + 1
-      ? args[agentSessionFlagIndex + 1]
-      : undefined;
-
-  const autoCommit = getOptionalEnvBool('AUTO_COMMIT', false);
-  const condenseOnComplete = getOptionalEnvBool('CONDENSE_ON_COMPLETE', false);
-  const model = getOptionalEnv('MODEL', '');
-  const upstreamBranch = process.env.UPSTREAM_BRANCH || undefined;
-
-  const maxRuntimeMs = getOptionalEnvInt('MAX_RUNTIME_MS', DEFAULT_INFLIGHT_TIMEOUT_MS);
+  if (!SESSION_ID_RE.test(agentSessionId)) {
+    failStartup(`Invalid agent session ID: ${agentSessionId}`);
+  }
 
   // Set log path if not already set
   if (!process.env.WRAPPER_LOG_PATH) {
@@ -96,50 +147,79 @@ async function main() {
   }
 
   logToFile(
-    `config: wrapperPort=${wrapperPort} kiloServerPort=${kiloServerPort} workspacePath=${workspacePath}`
+    `config: wrapperPort=${wrapperPort} workspacePath=${workspacePath} agentSessionId=${agentSessionId}`
   );
-  if (agentSessionId) {
-    logToFile(`config: agentSession=${agentSessionId}`);
+  if (configuredSessionId) {
+    logToFile(`config: sessionId=${configuredSessionId}`);
   }
-  logToFile(
-    `config: autoCommit=${autoCommit} condenseOnComplete=${condenseOnComplete} maxRuntimeMs=${maxRuntimeMs} upstreamBranch=${upstreamBranch ?? '(none)'}`
-  );
 
-  // Create state
-  const state = new WrapperState();
-
-  // Create kilo client
-  const kiloServerBaseUrl = `http://127.0.0.1:${kiloServerPort}`;
-  const kiloClient = createKiloClient(kiloServerBaseUrl);
-
-  // Verify kilo server is reachable
+  // ---------------------------------------------------------------------------
+  // Start kilo server in-process via SDK
+  // ---------------------------------------------------------------------------
+  logToFile('starting kilo server in-process via @kilocode/sdk');
+  let sdkClient: SDKClient;
+  let kiloServer: KiloServerHandle;
   try {
-    const health = await kiloClient.checkHealth();
-    logToFile(`kilo server healthy: version=${health.version}`);
+    const result = await createKilo({
+      hostname: '127.0.0.1',
+      port: 0, // Let OS assign a random port
+      timeout: KILO_STARTUP_TIMEOUT_MS,
+    });
+    sdkClient = result.client;
+    kiloServer = result.server;
+    logToFile(`kilo server started at ${kiloServer.url}`);
   } catch (error) {
-    logToFile(
-      `kilo server health check failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-    console.error('Kilo server is not reachable at', kiloServerBaseUrl);
+    const msg = error instanceof Error ? error.message : String(error);
+    logToFile(`failed to start kilo server: ${msg}`);
+    console.error('Failed to start kilo server:', msg);
     process.exit(1);
   }
 
-  const lifecycleManagerRef = {
-    current: null as ReturnType<typeof createLifecycleManager> | null,
-  };
-  const getLifecycleManager = (): ReturnType<typeof createLifecycleManager> => {
-    if (!lifecycleManagerRef.current) {
-      throw new Error('Lifecycle manager not initialized');
+  // Create wrapper kilo client (adapter over SDK client + raw fetch)
+  const kiloClient = createWrapperKiloClient(sdkClient, kiloServer.url);
+
+  // ---------------------------------------------------------------------------
+  // Create or verify kilo session
+  // ---------------------------------------------------------------------------
+  let kiloSessionId: string;
+
+  if (configuredSessionId) {
+    // Verify the expected session exists — fail hard if it doesn't.
+    // The Worker passed --session-id because it expects conversation continuity;
+    // silently creating a new session would lose history without anyone noticing.
+    try {
+      await kiloClient.getSession(configuredSessionId);
+      kiloSessionId = configuredSessionId;
+      logToFile(`verified existing kilo session: ${kiloSessionId}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      failStartup(`configured session ${configuredSessionId} not found: ${msg}`);
     }
-    return lifecycleManagerRef.current;
-  };
+  } else {
+    // Create a new session
+    const session = await kiloClient.createSession();
+    kiloSessionId = session.id;
+    logToFile(`created kilo session: ${kiloSessionId}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wire up components
+  // ---------------------------------------------------------------------------
+  const state = new WrapperState();
+
+  // Late-bound: assigned after connectionManager is created (the lifecycle
+  // callbacks below capture this variable by reference and only read it at
+  // runtime, well after the assignment on the next line after createConnectionManager).
+  // eslint-disable-next-line prefer-const
+  let lifecycleManager: ReturnType<typeof createLifecycleManager> | undefined;
+
   // Create connection manager
   const connectionManager = createConnectionManager(
     state,
-    { kiloServerPort, kiloClient },
+    { kiloClient },
     {
       onMessageComplete: (messageId: string) => {
-        getLifecycleManager().onMessageComplete(messageId);
+        lifecycleManager?.onMessageComplete(messageId);
       },
       onTerminalError: (reason: string) => {
         logToFile(`terminal error: ${reason}`);
@@ -148,34 +228,29 @@ async function main() {
           data: { error: reason, fatal: true },
           timestamp: new Date().toISOString(),
         });
-        // Abort the session if possible
         const job = state.currentJob;
         if (job) {
           kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
         }
-        // Mark as aborted (don't send 'complete' since we sent fatal error), then close
-        getLifecycleManager().setAborted();
-        state.clearAllInflight();
-        getLifecycleManager().triggerDrainAndClose();
+        lifecycleManager?.setAborted();
+        state.setActive(false);
+        lifecycleManager?.triggerDrainAndClose();
       },
       onCommand: (cmd: WrapperCommand) => {
         logToFile(`command received: ${cmd.type}`);
         if (cmd.type === 'kill') {
-          // Send interrupted event before aborting
           state.sendToIngest({
             streamEventType: 'interrupted',
             data: { reason: 'Session stopped' },
             timestamp: new Date().toISOString(),
           });
-          // Abort the kilo session
           const job = state.currentJob;
           if (job) {
             kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
           }
-          // Mark as aborted (don't send 'complete' since we sent interrupted), then close
-          getLifecycleManager().setAborted();
-          state.clearAllInflight();
-          getLifecycleManager().triggerDrainAndClose();
+          lifecycleManager?.setAborted();
+          state.setActive(false);
+          lifecycleManager?.triggerDrainAndClose();
         }
         if (cmd.type === 'ping') {
           state.sendToIngest({
@@ -192,51 +267,42 @@ async function main() {
           message: reason,
           timestamp: Date.now(),
         });
-
-        // Abort the kilo session — the CLI is still running but we can't relay events
         const job = state.currentJob;
         if (job) {
           kiloClient.abortSession({ sessionId: job.kiloSessionId }).catch(() => {});
         }
-
-        // Mark as aborted so we don't send 'complete' (the WS is dead anyway)
-        getLifecycleManager().setAborted();
-        state.clearAllInflight();
-        getLifecycleManager().triggerDrainAndClose();
+        lifecycleManager?.setAborted();
+        state.setActive(false);
+        lifecycleManager?.triggerDrainAndClose();
       },
       onCompletionSignal: () => {
-        // Signal completion to lifecycle manager for post-processing waiters
-        getLifecycleManager().signalCompletion();
+        lifecycleManager?.signalCompletion();
       },
       onReconnecting: (attempt: number) => {
         logToFile(`ingest WS reconnecting: attempt ${attempt}`);
       },
       onReconnected: () => {
         logToFile('ingest WS reconnected');
-        // Only clear DISCONNECT errors — preserve more severe errors
-        // (e.g. INFLIGHT_TIMEOUT) that may have been set during the reconnect window
         const lastError = state.getLastError();
         if (lastError?.code === 'DISCONNECT') {
           state.clearLastError();
         }
       },
+      onSseEvent: () => {
+        lifecycleManager?.onSseEvent();
+      },
     }
   );
 
   // Create lifecycle manager
-  lifecycleManagerRef.current = createLifecycleManager(
-    {
-      maxRuntimeMs,
-      autoCommit,
-      condenseOnComplete,
-      workspacePath,
-      model: model || undefined,
-      upstreamBranch,
-    },
+  lifecycleManager = createLifecycleManager(
+    { workspacePath },
     {
       state,
       kiloClient,
-      connectionManager,
+      closeConnections: () => connectionManager.close(),
+      isConnected: () => connectionManager.isConnected(),
+      reconnectEventSubscription: () => connectionManager.reconnectEventSubscription(),
     }
   );
 
@@ -244,28 +310,33 @@ async function main() {
   const server = createServer(
     {
       port: wrapperPort,
-      kiloServerPort,
       workspacePath,
-      version: VERSION,
+      version: WRAPPER_VERSION,
+      sessionId: kiloSessionId,
+      agentSessionId,
+      userId,
     },
     {
       state,
       kiloClient,
       openConnection: () => connectionManager.open(),
-      getMaxRuntimeMs: () => getLifecycleManager().getMaxRuntimeMs(),
-      setAborted: () => getLifecycleManager().setAborted(),
-      resetLifecycle: () => getLifecycleManager().reset(),
+      closeConnection: () => connectionManager.close(),
+      setAborted: () => lifecycleManager?.setAborted(),
+      resetLifecycle: () => lifecycleManager?.reset(),
+      setPerTurnConfig: config => lifecycleManager?.setPerTurnConfig(config),
     },
-    () => getLifecycleManager().triggerDrainAndClose()
+    () => lifecycleManager?.triggerDrainAndClose()
   );
 
   // Start lifecycle timers
-  getLifecycleManager().start();
+  lifecycleManager?.start();
 
-  logToFile(`wrapper ready on port ${wrapperPort}`);
+  logToFile(`wrapper ready on port ${wrapperPort} (kilo server at ${kiloServer.url})`);
   console.log(`Wrapper listening on port ${wrapperPort}`);
 
-  // Graceful shutdown handler
+  // ---------------------------------------------------------------------------
+  // Graceful shutdown
+  // ---------------------------------------------------------------------------
   let isShuttingDown = false;
 
   async function handleShutdown(signal: string): Promise<void> {
@@ -283,7 +354,7 @@ async function main() {
     });
 
     // Stop lifecycle timers
-    getLifecycleManager().stop();
+    lifecycleManager?.stop();
 
     // Force exit after timeout
     setTimeout(() => {
@@ -291,7 +362,7 @@ async function main() {
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS);
 
-    // Best-effort final log upload (with short timeout to avoid blocking shutdown)
+    // Best-effort final log upload
     const uploader = state.logUploader;
     if (uploader) {
       const uploadTimeout = new Promise<void>(resolve => setTimeout(resolve, 5_000));
@@ -308,8 +379,16 @@ async function main() {
     // Close connections
     void connectionManager.close();
 
+    // Close kilo server
+    try {
+      kiloServer.close();
+      logToFile('kilo server closed');
+    } catch (err) {
+      logToFile(`kilo server close error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Stop HTTP server
-    server.stop();
+    await server.stop();
 
     // Try graceful exit
     setTimeout(() => {
@@ -320,6 +399,31 @@ async function main() {
 
   process.on('SIGTERM', () => void handleShutdown('SIGTERM'));
   process.on('SIGINT', () => void handleShutdown('SIGINT'));
+
+  // ---------------------------------------------------------------------------
+  // Crash handlers — best-effort log upload on unexpected crashes
+  // ---------------------------------------------------------------------------
+  function handleCrash(label: string, error: unknown): void {
+    if (isShuttingDown) return;
+
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    logToFile(`${label}: ${message}`);
+    console.error(`Wrapper ${label}:`, error);
+
+    const uploader = state.logUploader;
+    if (uploader) {
+      const timeout = new Promise<void>(resolve => setTimeout(resolve, 5_000));
+      void Promise.race([uploader.uploadNow().catch(() => {}), timeout]).finally(() => {
+        uploader.stop();
+        process.exit(1);
+      });
+    } else {
+      process.exit(1);
+    }
+  }
+
+  process.on('uncaughtException', err => handleCrash('uncaught exception', err));
+  process.on('unhandledRejection', reason => handleCrash('unhandled rejection', reason));
 }
 
 main().catch(err => {

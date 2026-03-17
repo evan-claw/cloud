@@ -11,7 +11,7 @@ import {
   type ConnectionCallbacks,
 } from '../../../wrapper/src/connection.js';
 import { WrapperState, type JobContext } from '../../../wrapper/src/state.js';
-import type { KiloClient } from '../../../wrapper/src/kilo-client.js';
+import type { WrapperKiloClient } from '../../../wrapper/src/kilo-api.js';
 import type { IngestEvent } from '../../../src/shared/protocol.js';
 
 // ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ const createJobContext = (): JobContext => ({
   kiloSessionId: 'kilo_sess_456',
   ingestUrl: 'wss://ingest.example.com/ingest',
   ingestToken: 'token_secret',
-  kilocodeToken: 'kilo_token_789',
+  workerAuthToken: 'kilo_token_789',
 });
 
 const createCallbacks = (): ConnectionCallbacks & {
@@ -131,18 +131,28 @@ const createCallbacks = (): ConnectionCallbacks & {
   onReconnected: vi.fn(),
 });
 
-const createMockKiloClient = (): KiloClient => ({
-  listSessions: vi.fn().mockResolvedValue([]),
-  createSession: vi.fn().mockResolvedValue({ id: 'kilo_sess', time: { created: '', updated: '' } }),
-  getSession: vi.fn().mockResolvedValue({ id: 'kilo_sess', time: { created: '', updated: '' } }),
+const createMockKiloClient = (): WrapperKiloClient => ({
+  createSession: vi.fn().mockResolvedValue({ id: 'kilo_sess' }),
+  getSession: vi.fn().mockResolvedValue({ id: 'kilo_sess' }),
   sendPromptAsync: vi.fn().mockResolvedValue(undefined),
   abortSession: vi.fn().mockResolvedValue(true),
-  checkHealth: vi.fn().mockResolvedValue({ healthy: true, version: '1.0.0' }),
   sendCommand: vi.fn().mockResolvedValue(undefined),
   answerPermission: vi.fn().mockResolvedValue(true),
   answerQuestion: vi.fn().mockResolvedValue(true),
   rejectQuestion: vi.fn().mockResolvedValue(true),
   generateCommitMessage: vi.fn().mockResolvedValue({ message: 'test commit' }),
+  sdkClient: {
+    event: {
+      // Return a stream that never yields — keeps event subscription alive
+      subscribe: vi.fn().mockResolvedValue({
+        stream: (async function* () {
+          // Never yield — keeps alive without events
+          await new Promise(() => {});
+        })(),
+      }),
+    },
+  } as unknown as WrapperKiloClient['sdkClient'],
+  serverUrl: 'http://127.0.0.1:0',
 });
 
 /**
@@ -179,7 +189,7 @@ async function openConnection(
   // openIngestWs creates a WS and waits for onopen
   const ws = MockWebSocket.latest!;
   ws.simulateOpen();
-  // openSSEConsumer calls fetch (mocked above), then resolves
+  // Event subscription starts in the background (fire-and-forget)
   await openPromise;
   return ws;
 }
@@ -209,11 +219,7 @@ describe('ingest WS reconnection', () => {
   });
 
   function createManager() {
-    return createConnectionManager(
-      state,
-      { kiloServerPort: 4000, kiloClient: createMockKiloClient() },
-      callbacks
-    );
+    return createConnectionManager(state, { kiloClient: createMockKiloClient() }, callbacks);
   }
 
   // -------------------------------------------------------------------------
@@ -371,20 +377,16 @@ describe('ingest WS reconnection', () => {
   // Test: SSE consumer stays alive during reconnection
   // -------------------------------------------------------------------------
 
-  it('keeps SSE consumer alive during WS reconnection', async () => {
+  it('keeps event subscription alive during WS reconnection', async () => {
     const manager = createManager();
     const ws = await openConnection(manager);
-
-    // SSE consumer was created (fetch was called once)
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Simulate unexpected WS close
     ws.simulateClose(1006);
     expect(manager.isReconnecting()).toBe(true);
 
-    // The SSE consumer's onClose callback should NOT have fired
-    // (only WS disconnected, not SSE). Verify via onDisconnect not being called.
+    // The event subscription should NOT have triggered onDisconnect
+    // (only WS disconnected, not the event stream).
     expect(callbacks.onDisconnect).not.toHaveBeenCalled();
 
     // Reconnect
@@ -392,9 +394,9 @@ describe('ingest WS reconnection', () => {
     MockWebSocket.latest!.simulateOpen();
     await vi.advanceTimersByTimeAsync(0);
 
-    // SSE consumer should still be alive (no new fetch calls for SSE re-creation)
-    // The SSE consumer was set up once during open() and stays running.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // After reconnection, the connection should be working again
+    expect(manager.isReconnecting()).toBe(false);
+    expect(manager.isConnected()).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -422,54 +424,23 @@ describe('ingest WS reconnection', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test: heartbeat pauses during reconnection and resumes on reconnect
+  // Test: no custom heartbeat interval (heartbeats are forwarded from kilo)
   // -------------------------------------------------------------------------
 
-  it('pauses heartbeat during reconnection and resumes after reconnect', async () => {
+  it('does not send custom heartbeat — heartbeats come from kilo server.heartbeat forwarding', async () => {
     const manager = createManager();
     const ws = await openConnection(manager);
 
-    // Heartbeat starts after open() — fires every 20s
-    // Advance 20s to see a heartbeat on the initial WS
-    await vi.advanceTimersByTimeAsync(20_000);
+    // Advance well past the old 20s heartbeat interval
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // No heartbeats should be sent by the wrapper — they are forwarded
+    // from kilo's server.heartbeat event, not generated on a timer.
     const heartbeats = ws.sent.filter(msg => {
       const parsed = JSON.parse(msg);
       return parsed.streamEventType === 'heartbeat';
     });
-    expect(heartbeats.length).toBeGreaterThanOrEqual(1);
-
-    const sentCountBefore = ws.sent.length;
-
-    // Simulate unexpected close — heartbeat should stop
-    ws.simulateClose(1006);
-
-    // Advance 20s — no heartbeat should be sent (heartbeat paused)
-    await vi.advanceTimersByTimeAsync(20_000);
-    // Old WS should not have received any new messages after close
-    expect(ws.sent.length).toBe(sentCountBefore);
-
-    // Reconnect: advance past 1s backoff (total advanced: 20s+20s+1s since close,
-    // but reconnect timer is from close time, and we already advanced 20s)
-    // We need to advance from the start of reconnection. Since we already advanced
-    // 20s for the heartbeat check, the 1s reconnect timer has already elapsed.
-    // A new WS should have been created.
-    const newWs = MockWebSocket.latest!;
-    expect(newWs).not.toBe(ws);
-    newWs.simulateOpen();
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(callbacks.onReconnected).toHaveBeenCalled();
-
-    // Clear sent array on new WS to track fresh heartbeats
-    newWs.sent.length = 0;
-
-    // Advance 20s — heartbeat should resume on the new WS
-    await vi.advanceTimersByTimeAsync(20_000);
-    const newHeartbeats = newWs.sent.filter(msg => {
-      const parsed = JSON.parse(msg);
-      return parsed.streamEventType === 'heartbeat';
-    });
-    expect(newHeartbeats.length).toBeGreaterThanOrEqual(1);
+    expect(heartbeats.length).toBe(0);
   });
 
   // -------------------------------------------------------------------------
@@ -749,7 +720,7 @@ describe('ingest WS reconnection', () => {
     const callbacks2 = createCallbacks();
     const manager2 = createConnectionManager(
       state,
-      { kiloServerPort: 4000, kiloClient: createMockKiloClient() },
+      { kiloClient: createMockKiloClient() },
       callbacks2
     );
     const ws2 = await openConnection(manager2);

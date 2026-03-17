@@ -158,6 +158,22 @@ export function createExecutionQueries(storage: KVStorage) {
     },
 
     /**
+     * Update lastEventAt timestamp for non-heartbeat events.
+     * Returns false if execution not found.
+     */
+    async updateLastEventAt(executionId: ExecutionId, timestamp: number): Promise<boolean> {
+      const executions = await this.getAll();
+      const index = executions.findIndex(e => e.executionId === executionId);
+
+      if (index === -1) return false;
+
+      executions[index].lastEventAt = timestamp;
+      await storage.put(EXECUTIONS_KEY, executions);
+
+      return true;
+    },
+
+    /**
      * Set process ID for long-running executions.
      * Returns false if execution not found.
      */
