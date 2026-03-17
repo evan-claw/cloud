@@ -3,10 +3,12 @@
  */
 
 import {
+  isKiloAutoModel,
   KILO_AUTO_BALANCED_MODEL,
   KILO_AUTO_FREE_MODEL,
   KILO_AUTO_FREE_MODEL_DEPRECATED,
   KILO_AUTO_FRONTIER_MODEL,
+  resolveAutoModel,
 } from '@/lib/kilo-auto-model';
 import {
   CLAUDE_OPUS_CURRENT_MODEL_ID,
@@ -39,6 +41,16 @@ export const preferredModels = [
   'z-ai/glm-5',
   'x-ai/grok-code-fast-1',
 ].filter(m => m !== null);
+
+export function getMonitoredModels() {
+  return [
+    ...new Set(
+      preferredModels.map(model =>
+        isKiloAutoModel(model) ? resolveAutoModel(model, null).model : model
+      )
+    ),
+  ];
+}
 
 export function isFreeModel(model: string): boolean {
   return (
