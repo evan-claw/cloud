@@ -6,8 +6,8 @@ import { syncArtificialAnalysisBenchmarks } from '@/lib/model-stats/sync-artific
 import { syncOpenRouterModels } from '@/lib/model-stats/sync-openrouter';
 import { syncInternalUsageStats } from '@/lib/model-stats/sync-internal-data';
 import { CRON_SECRET } from '@/lib/config.server';
-import { preferredModels } from '@/lib/models';
 import type { OpenRouterModel } from '@/lib/organizations/organization-types';
+import { getMonitoredModels } from '@/lib/models';
 
 const BETTERSTACK_HEARTBEAT_URL =
   'https://uptime.betterstack.com/api/v1/heartbeat/1zuL4cAH8Ui6JF9j8M3L8oAD';
@@ -57,14 +57,15 @@ export async function GET(request: NextRequest) {
       return model;
     });
 
-    const preferredModelData = allModels.filter(model => preferredModels.includes(model.id));
+    const monitoredModels = getMonitoredModels();
+    const preferredModelData = allModels.filter(model => monitoredModels.includes(model.id));
 
     console.log(
       `[sync-model-stats] Found ${preferredModelData.length} preferred models out of ${allModels.length} total`
     );
 
     // Sync OpenRouter model data to database
-    const syncResult = await syncOpenRouterModels(allModels, preferredModels);
+    const syncResult = await syncOpenRouterModels(allModels, monitoredModels);
     const { newModels, updatedModels, totalProcessed } = syncResult;
 
     console.log(

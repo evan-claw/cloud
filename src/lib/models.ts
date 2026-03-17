@@ -3,10 +3,12 @@
  */
 
 import {
+  isKiloAutoModel,
   KILO_AUTO_BALANCED_MODEL,
   KILO_AUTO_FREE_MODEL,
   KILO_AUTO_FREE_MODEL_DEPRECATED,
   KILO_AUTO_FRONTIER_MODEL,
+  resolveAutoModel,
 } from '@/lib/kilo-auto-model';
 import {
   CLAUDE_OPUS_CURRENT_MODEL_ID,
@@ -29,19 +31,27 @@ export const preferredModels = [
   KILO_AUTO_BALANCED_MODEL.id,
   KILO_AUTO_FREE_MODEL.id,
   'nvidia/nemotron-3-super-120b-a12b:free',
-  minimax_m25_free_model.status === 'public'
-    ? minimax_m25_free_model.public_id
-    : 'minimax/minimax-m2.5',
-  kimi_k25_free_model.status === 'public' ? kimi_k25_free_model.public_id : 'moonshotai/kimi-k2.5',
   giga_potato_thinking_model.status === 'public' ? giga_potato_thinking_model.public_id : null,
   'arcee-ai/trinity-large-preview:free',
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
   'openai/gpt-5.4',
   'google/gemini-3.1-pro-preview',
+  'minimax/minimax-m2.5',
+  'moonshotai/kimi-k2.5',
   'z-ai/glm-5',
   'x-ai/grok-code-fast-1',
 ].filter(m => m !== null);
+
+export function getMonitoredModels() {
+  return [
+    ...new Set(
+      preferredModels.map(model =>
+        isKiloAutoModel(model) ? resolveAutoModel(model, null).model : model
+      )
+    ),
+  ];
+}
 
 export function isFreeModel(model: string): boolean {
   return (
