@@ -1,3 +1,4 @@
+import type { FeatureValue } from '@/lib/feature-detection';
 import {
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -27,7 +28,7 @@ type AutoModel = {
 export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
   id: 'kilo-auto/frontier',
   name: 'Kilo Auto Frontier',
-  description: 'Highest performance and capability for any task`,
+  description: 'Highest performance and capability for any task.',
   context_length: 1_000_000,
   max_completion_tokens: 128_000,
   prompt_price: '0.000005',
@@ -210,9 +211,10 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
 export function applyResolvedAutoModel(
   model: string,
   request: GatewayRequest,
-  modeHeader: string | null
+  modeHeader: string | null,
+  featureHeader: FeatureValue | null
 ) {
-  const resolved = resolveAutoModel(model, modeHeader);
+  const resolved = resolveAutoModel(model, featureHeader === 'kiloclaw' ? 'plan' : modeHeader);
   request.body.model = resolved.model;
   if (resolved.reasoning) request.body.reasoning = resolved.reasoning;
   if (resolved.verbosity) {
