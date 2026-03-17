@@ -36,17 +36,18 @@ export function WorkspaceFileEditor({
   >(null);
   const hasUnsavedChangesRef = useRef(false);
   const [sidebarWidth, setSidebarWidth] = useState(220);
-  const isDragging = useRef(false);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging.current) return;
+      if (!dragRef.current) return;
       e.preventDefault();
-      setSidebarWidth(prev => Math.min(Math.max(e.movementX + prev, 140), 500));
+      const newWidth = dragRef.current.startWidth + (e.clientX - dragRef.current.startX);
+      setSidebarWidth(Math.min(Math.max(newWidth, 140), 500));
     };
     const handleMouseUp = () => {
-      if (isDragging.current) {
-        isDragging.current = false;
+      if (dragRef.current) {
+        dragRef.current = null;
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
       }
@@ -123,9 +124,9 @@ export function WorkspaceFileEditor({
           <FileTree tree={tree} selectedPath={selectedPath} onSelect={handleSelect} />
         </div>
         <div
-          className="hover:bg-border bg-border/50 w-1 shrink-0 cursor-col-resize"
-          onMouseDown={() => {
-            isDragging.current = true;
+          className="bg-border w-1 shrink-0 cursor-col-resize"
+          onMouseDown={e => {
+            dragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
           }}
