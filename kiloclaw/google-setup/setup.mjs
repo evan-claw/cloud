@@ -214,10 +214,7 @@ if (projectChoice === '2') {
     projectId = await ask('\nEnter your project ID: ');
   }
 } else {
-  // Generate a project ID based on date
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const defaultId = `kiloclaw-${dateStr}`;
+  const defaultId = `kiloclaw-${crypto.randomBytes(4).toString('hex')}`;
   const inputId = await ask(`Project ID [${defaultId}]: `);
   projectId = inputId || defaultId;
 
