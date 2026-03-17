@@ -124,7 +124,7 @@ export function WorkspaceFileEditor({
           <FileTree tree={tree} selectedPath={selectedPath} onSelect={handleSelect} />
         </div>
         <div
-          className="bg-border w-1 shrink-0 cursor-col-resize"
+          className="before:bg-border hover:before:bg-border relative w-3 shrink-0 cursor-col-resize before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:content-['']"
           onMouseDown={e => {
             dragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
             document.body.style.cursor = 'col-resize';
