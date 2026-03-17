@@ -214,18 +214,26 @@ export function applyResolvedAutoModel(
 ) {
   const resolved = resolveAutoModel(model, modeHeader);
   request.body.model = resolved.model;
-  if (resolved.reasoning && request.kind === 'chat_completions') {
-    request.body.reasoning = resolved.reasoning;
+  if (resolved.reasoning) {
+    if (request.kind === 'messages') {
+      request.body.thinking = { type: resolved.reasoning.enabled ? 'adaptive' : 'disabled' };
+    } else {
+      request.body.reasoning = resolved.reasoning;
+    }
   }
   if (resolved.verbosity) {
-    if (request.kind === 'chat_completions') {
-      request.body.verbosity = resolved.verbosity as OpenRouterChatCompletionRequest['verbosity'];
+    if (request.kind === 'messages') {
+      request.body.output_config = {
+        ...request.body.output_config,
+        effort: resolved.verbosity,
+      };
     } else if (request.kind === 'responses') {
       request.body.text = {
         ...request.body.text,
         verbosity: resolved.verbosity as OpenAI.Responses.ResponseTextConfig['verbosity'],
       };
+    } else {
+      request.body.verbosity = resolved.verbosity as OpenRouterChatCompletionRequest['verbosity'];
     }
-    // messages kind does not support verbosity
   }
 }
