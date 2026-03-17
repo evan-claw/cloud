@@ -84,7 +84,6 @@ async function reconcileApiKeyExpiry(
   if (state.status !== 'running' || !state.flyMachineId) return;
   if (!state.kilocodeApiKeyExpiresAt || !state.userId) return;
 
-  // Capture after guards so narrowing is explicit across awaits.
   const machineId = state.flyMachineId;
   const userId = state.userId;
 
@@ -100,8 +99,11 @@ async function reconcileApiKeyExpiry(
   try {
     const info = await gateway.getControllerVersion(state, env);
     controllerVersion = info?.version ?? null;
-  } catch {
-    // Version check failed — log null, don't block refresh.
+  } catch (err) {
+    console.warn(
+      '[reconcile] controller version check failed:',
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
   reconcileLog(reason, 'api_key_expiry_approaching', {
@@ -112,13 +114,13 @@ async function reconcileApiKeyExpiry(
   });
 
   // 1. Mint fresh key.
-  let mintTimeout: ReturnType<typeof setTimeout>;
-  let freshKey: { token: string; expiresAt: string } | null;
+  let mintTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  let freshKey: { token: string; expiresAt: string } | null = null;
   try {
     freshKey = await Promise.race([
-      mintFreshApiKey(env, userId).finally(() => clearTimeout(mintTimeout)),
+      mintFreshApiKey(env, userId),
       new Promise<never>((_, reject) => {
-        mintTimeout = setTimeout(() => reject(new Error('mint timeout')), MINT_TIMEOUT_MS);
+        mintTimeoutId = setTimeout(() => reject(new Error('mint timeout')), MINT_TIMEOUT_MS);
       }),
     ]);
   } catch (err) {
@@ -127,6 +129,8 @@ async function reconcileApiKeyExpiry(
       error: err instanceof Error ? err.message : String(err),
     });
     return;
+  } finally {
+    clearTimeout(mintTimeoutId);
   }
   if (!freshKey) {
     reconcileLog(reason, 'api_key_mint_failed', { user_id: userId });
@@ -325,9 +329,30 @@ async function reconcileStarting(
           healthCheckFailCount: 0,
         })
       );
+    } else if (isTimedOut) {
+      // Transient Fly API error but we've exceeded the starting timeout.
+      // Fall back to 'stopped' so the user can retry instead of staying
+      // stuck in 'starting' indefinitely while the Fly API is unreachable.
+      reconcileLog(reason, 'starting_timeout_transient_error', {
+        machine_id: state.flyMachineId,
+        error: err instanceof Error ? err.message : String(err),
+        elapsed_ms: startingAt !== null ? Date.now() - startingAt : undefined,
+        new_state: 'stopped',
+      });
+      state.status = 'stopped';
+      state.startingAt = null;
+      state.lastStoppedAt = Date.now();
+      state.healthCheckFailCount = 0;
+      await ctx.storage.put(
+        storageUpdate({
+          status: 'stopped',
+          startingAt: null,
+          lastStoppedAt: state.lastStoppedAt,
+          healthCheckFailCount: 0,
+        })
+      );
     } else {
       // Transient Fly API error — leave in 'starting', alarm will retry.
-      // If timed out, still give the next alarm a chance to reach Fly.
       console.error('[DO] reconcileStarting: transient error checking machine:', err);
     }
   }
@@ -358,8 +383,9 @@ async function reconcileVolume(
       state.flyVolumeId = null;
       await ctx.storage.put(storageUpdate({ flyVolumeId: null }));
       await ensureVolume(flyConfig, ctx, state, env, reason);
+    } else {
+      console.warn('[reconcile] getVolume failed (will retry next alarm):', err);
     }
-    // Other errors: leave as-is, retry next alarm
   }
 }
 
@@ -629,12 +655,12 @@ async function reconcileMachineMount(
 
   if (hasCorrectMount) return;
 
+  if (!state.flyMachineId) return;
+
   reconcileLog(reason, 'repair_mount', {
     machine_id: state.flyMachineId,
     volume_id: state.flyVolumeId,
   });
-
-  if (!state.flyMachineId) return;
 
   await fly.stopMachineAndWait(flyConfig, state.flyMachineId);
   await fly.updateMachine(flyConfig, state.flyMachineId, {
@@ -675,7 +701,6 @@ async function handleMachineGone(
 // Two-phase destroy helpers
 // ========================================================================
 
-/** Fly machine IDs are lowercase alphanumeric. */
 const MACHINE_ID_RE = /^[a-z0-9]+$/;
 
 async function retryPendingDestroy(

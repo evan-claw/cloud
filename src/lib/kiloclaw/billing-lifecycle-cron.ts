@@ -58,10 +58,11 @@ async function trySendEmail(
   emailType: string,
   templateName: TemplateName,
   templateVars: Record<string, string>,
-  summary: CronSummary
+  summary: CronSummary,
+  subjectOverride?: string
 ): Promise<boolean> {
-  // Check if already sent (without inserting) by attempting the insert.
-  // Insert first to claim the slot, send, then keep. If send fails, delete the row.
+  // Insert first to claim the slot; if rowCount is 0, already sent — skip.
+  // If send fails, delete to allow retry on the next cron run.
   const result = await database
     .insert(kiloclaw_email_log)
     .values({ user_id: userId, email_type: emailType })
@@ -71,14 +72,21 @@ async function trySendEmail(
     return false;
   }
   try {
-    await sendEmail({ to: userEmail, templateName, templateVars });
+    await sendEmail({ to: userEmail, templateName, templateVars, subjectOverride });
   } catch (error) {
-    // Send failed — remove the log row so we can retry on the next cron run
-    await database
-      .delete(kiloclaw_email_log)
-      .where(
-        and(eq(kiloclaw_email_log.user_id, userId), eq(kiloclaw_email_log.email_type, emailType))
+    try {
+      await database
+        .delete(kiloclaw_email_log)
+        .where(
+          and(eq(kiloclaw_email_log.user_id, userId), eq(kiloclaw_email_log.email_type, emailType))
+        );
+    } catch (deleteError) {
+      console.error(
+        '[billing-cron] Failed to remove email log row after send failure:',
+        deleteError,
+        { userId, emailType }
       );
+    }
     throw error;
   }
   summary.emails_sent++;
@@ -150,6 +158,7 @@ export async function runKiloClawBillingLifecycleCron(
         if (sent) summary.trial_warnings++;
       } else {
         // 5-day warning (idempotent — skipped if already sent)
+        // daysRemaining is always > 1 here (the <= 1 case is handled above)
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -157,7 +166,8 @@ export async function runKiloClawBillingLifecycleCron(
           'claw_trial_5d',
           'clawTrialEndingSoon',
           { days_remaining: String(daysRemaining), claw_url: clawUrl },
-          summary
+          summary,
+          `Your KiloClaw Trial Ends in ${daysRemaining} Days`
         );
         if (sent) summary.trial_warnings++;
       }
@@ -188,7 +198,10 @@ export async function runKiloClawBillingLifecycleCron(
         eq(kiloclaw_earlybird_purchases.user_id, kiloclaw_subscriptions.user_id)
       )
       .where(
-        sql`(${kiloclaw_subscriptions.status} IS NULL OR ${kiloclaw_subscriptions.status} NOT IN ('active', 'trialing'))`
+        and(
+          sql`(${kiloclaw_subscriptions.status} IS NULL OR ${kiloclaw_subscriptions.status} NOT IN ('active', 'trialing'))`,
+          isNull(kiloclaw_subscriptions.suspended_at)
+        )
       );
 
     for (const row of earlybirdRows) {

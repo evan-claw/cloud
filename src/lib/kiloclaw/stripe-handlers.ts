@@ -37,8 +37,11 @@ function getKiloClawMetadata(
 }
 
 function getSubscriptionPeriods(subscription: Stripe.Subscription) {
-  // In the current Stripe API, period timestamps live on the subscription item, not the subscription.
+  // Stripe moved period timestamps to the item level (not the top-level subscription object).
   const item = subscription.items.data[0];
+  if (!item) {
+    console.warn('[stripe] Subscription has no items:', subscription.id);
+  }
   return {
     current_period_start: item ? new Date(item.current_period_start * 1000).toISOString() : null,
     current_period_end: item ? new Date(item.current_period_end * 1000).toISOString() : null,

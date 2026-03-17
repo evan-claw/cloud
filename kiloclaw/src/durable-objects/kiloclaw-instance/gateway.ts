@@ -96,20 +96,17 @@ export async function callGatewayController<T>(
   }
 
   if (!response.ok) {
-    const errorCode =
-      typeof body === 'object' &&
-      body !== null &&
-      'code' in body &&
-      typeof (body as { code?: unknown }).code === 'string'
-        ? (body as { code: string }).code
-        : undefined;
-    const errorMessage =
-      typeof body === 'object' &&
-      body !== null &&
-      'error' in body &&
-      typeof (body as { error?: unknown }).error === 'string'
-        ? (body as { error: string }).error
-        : `Gateway controller request failed (${response.status})`;
+    const bodyObj =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    const errorCode = typeof bodyObj.code === 'string' ? bodyObj.code : undefined;
+
+    let errorMessage = `Gateway controller request failed (${response.status})`;
+    if (typeof bodyObj.error === 'string') {
+      errorMessage = bodyObj.error;
+    } else if (typeof bodyObj.message === 'string') {
+      errorMessage = bodyObj.message;
+    }
+
     throw new GatewayControllerError(response.status, errorMessage, errorCode);
   }
 
@@ -207,10 +204,13 @@ export function restoreConfig(
   );
 }
 
-function isErrorUnknownRoute(error: unknown): boolean {
+export function isErrorUnknownRoute(error: unknown): boolean {
   // If a controller predates a new route, the request will either:
-  //   - fall through to the catch-all proxy (401 REQUIRE_PROXY_TOKEN)
+  //   - fall through to the catch-all proxy which returns 401 with code
+  //     'controller_route_unavailable' (for /_kilo/* paths)
   //   - forward to the gateway which returns 404 for the unknown path.
+  // We intentionally do NOT match bare 401 (without the code) to avoid
+  // masking genuine authentication failures.
   return (
     error instanceof GatewayControllerError &&
     (error.status === 404 || error.code === 'controller_route_unavailable')

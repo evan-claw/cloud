@@ -348,8 +348,11 @@ export const kiloclawRouter = createTRPCRouter({
       try {
         const tokenResp = await client.getGatewayToken(ctx.user.id);
         gatewayToken = tokenResp.gatewayToken;
-      } catch {
-        // non-fatal -- dashboard still works without token
+      } catch (err) {
+        console.warn(
+          '[kiloclaw] getGatewayToken failed (non-fatal):',
+          err instanceof Error ? err.message : String(err)
+        );
       }
     }
 

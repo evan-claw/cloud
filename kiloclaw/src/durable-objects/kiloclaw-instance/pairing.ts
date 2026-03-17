@@ -1,31 +1,52 @@
+import { z } from 'zod';
 import type { KiloClawEnv } from '../../types';
 import * as fly from '../../fly/client';
 import type { InstanceMutableState } from './types';
 import { getFlyConfig } from './types';
+import { callGatewayController, isErrorUnknownRoute } from './gateway';
+import {
+  GatewayControllerError,
+  ControllerChannelPairingResponseSchema,
+  ControllerDevicePairingResponseSchema,
+  ControllerPairingApproveResponseSchema,
+} from '../gateway-controller-types';
 
-const PAIRING_CACHE_TTL_SECONDS = 120;
-const DEVICE_PAIRING_CACHE_TTL_SECONDS = 120;
+const CACHE_TTL_SECONDS = 120;
 
-// ──────────────────────────────────────────────────────────────────────
-// Channel pairing
-// ──────────────────────────────────────────────────────────────────────
+const CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+const CODE_RE = /^[A-Za-z0-9]{1,32}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function pairingCacheKey(state: InstanceMutableState): string | null {
+// Schemas for KV cache / fly exec output — `lastUpdated` is not present on these paths
+const ChannelRequestsSchema = z.object({
+  requests: ControllerChannelPairingResponseSchema.shape.requests,
+});
+const DeviceRequestsSchema = z.object({
+  requests: ControllerDevicePairingResponseSchema.shape.requests,
+});
+
+function makeCacheKey(prefix: string, state: InstanceMutableState): string | null {
   const { flyAppName, flyMachineId } = state;
   if (!flyAppName || !flyMachineId) return null;
-  return `pairing:${flyAppName}:${flyMachineId}`;
+  return `${prefix}:${flyAppName}:${flyMachineId}`;
 }
 
-type PairingRequest = {
-  code: string;
-  id: string;
-  channel: string;
-  meta?: unknown;
-  createdAt?: string;
-};
+function parseCachedChannelRequests(cached: unknown): PairingRequest[] | null {
+  const result = ChannelRequestsSchema.safeParse(cached);
+  return result.success ? result.data.requests : null;
+}
+
+function parseCachedDeviceRequests(cached: unknown): DevicePairingRequest[] | null {
+  const result = DeviceRequestsSchema.safeParse(cached);
+  return result.success ? result.data.requests : null;
+}
+
+type PairingRequest = z.infer<typeof ControllerChannelPairingResponseSchema>['requests'][number];
 
 /**
- * List pending channel pairing requests. Cached in KV for 2 minutes.
+ * List pending channel pairing requests. Prefers the gateway controller's
+ * in-memory cache; falls back to KV cache, then fly exec (result is written
+ * back to KV).
  */
 export async function listPairingRequests(
   state: InstanceMutableState,
@@ -37,17 +58,35 @@ export async function listPairingRequests(
     return { requests: [] };
   }
 
-  const cacheKey = pairingCacheKey(state);
+  // Try controller first
+  try {
+    const path = forceRefresh ? '/_kilo/pairing/channels?refresh=true' : '/_kilo/pairing/channels';
+    const result = await callGatewayController(
+      state,
+      env,
+      path,
+      'GET',
+      ControllerChannelPairingResponseSchema
+    );
+    return { requests: result.requests };
+  } catch (error) {
+    if (!isErrorUnknownRoute(error)) {
+      console.warn(
+        `[DO] listPairingRequests controller call failed sandboxId=${state.sandboxId} appId=${state.flyAppName}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
+    }
+    // Controller predates this route — fall through to KV cache / fly exec
+  }
+
+  const cacheKey = makeCacheKey('pairing', state);
   if (cacheKey && !forceRefresh) {
     const cached = await env.KV_CLAW_CACHE.get(cacheKey, 'json');
-    if (
-      cached &&
-      typeof cached === 'object' &&
-      'requests' in cached &&
-      Array.isArray(cached.requests)
-    ) {
+    const requests = parseCachedChannelRequests(cached);
+    if (requests) {
       console.log(`[DO] pairing list served from KV cache (key=${cacheKey})`);
-      return { requests: cached.requests as PairingRequest[] };
+      return { requests };
     }
   }
 
@@ -62,25 +101,34 @@ export async function listPairingRequests(
 
   const empty: { requests: PairingRequest[] } = { requests: [] };
 
+  const logCtx = `sandboxId=${state.sandboxId} appId=${state.flyAppName}`;
   if (result.exit_code !== 0) {
-    console.error('[DO] pairing list failed:', result.stderr);
+    console.error(
+      `[DO] pairing list failed (exit_code=${result.exit_code}) ${logCtx}:`,
+      result.stderr || result.stdout
+    );
     return empty;
   }
 
   let pairing = empty;
   try {
-    const data = JSON.parse(result.stdout.trim()) as unknown;
-    if (data && typeof data === 'object' && 'requests' in data && Array.isArray(data.requests)) {
-      pairing = { requests: data.requests as PairingRequest[] };
+    const data: unknown = JSON.parse(result.stdout.trim());
+    const requests = parseCachedChannelRequests(data);
+    if (requests) {
+      pairing = { requests };
     }
-  } catch {
-    console.error('[DO] pairing list parse error:', result.stdout);
+  } catch (parseErr) {
+    console.error('[DO] pairing list parse error:', parseErr, '| stdout:', result.stdout, logCtx);
   }
 
   if (cacheKey) {
-    await env.KV_CLAW_CACHE.put(cacheKey, JSON.stringify(pairing), {
-      expirationTtl: PAIRING_CACHE_TTL_SECONDS,
-    });
+    try {
+      await env.KV_CLAW_CACHE.put(cacheKey, JSON.stringify(pairing), {
+        expirationTtl: CACHE_TTL_SECONDS,
+      });
+    } catch (kvErr) {
+      console.warn('[DO] Failed to write pairing cache to KV:', kvErr);
+    }
   }
 
   return pairing;
@@ -100,15 +148,38 @@ export async function approvePairingRequest(
     return { success: false, message: 'Instance is not running' };
   }
 
-  const flyConfig = getFlyConfig(env, state);
-
-  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(channel)) {
+  if (!CHANNEL_RE.test(channel)) {
     return { success: false, message: 'Invalid channel name' };
   }
-  if (!/^[A-Za-z0-9]{1,32}$/.test(code)) {
+  if (!CODE_RE.test(code)) {
     return { success: false, message: 'Invalid pairing code' };
   }
 
+  // Try controller first
+  try {
+    return await callGatewayController(
+      state,
+      env,
+      '/_kilo/pairing/channels/approve',
+      'POST',
+      ControllerPairingApproveResponseSchema,
+      { channel, code }
+    );
+  } catch (error) {
+    if (error instanceof GatewayControllerError && error.status === 400) {
+      return { success: false, message: error.message };
+    }
+    if (!isErrorUnknownRoute(error)) {
+      console.warn(
+        `[DO] approvePairingRequest controller call failed sandboxId=${state.sandboxId} appId=${state.flyAppName}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
+    }
+    // Controller predates this route — fall through to fly exec
+  }
+
+  const flyConfig = getFlyConfig(env, state);
   const result = await fly.execCommand(
     flyConfig,
     flyMachineId,
@@ -119,43 +190,34 @@ export async function approvePairingRequest(
   const success = result.exit_code === 0;
 
   if (success) {
-    const cacheKey = pairingCacheKey(state);
+    const cacheKey = makeCacheKey('pairing', state);
     if (cacheKey) {
-      await env.KV_CLAW_CACHE.delete(cacheKey);
+      try {
+        await env.KV_CLAW_CACHE.delete(cacheKey);
+      } catch (kvErr) {
+        console.warn('[DO] Failed to invalidate pairing cache from KV:', kvErr);
+      }
     }
-  }
-
-  if (!success) {
+  } else {
     console.error('[DO] pairing approve failed:', result.stderr || result.stdout);
   }
 
   return {
     success,
-    message: success ? 'Pairing approved' : 'Approval failed',
+    message: success
+      ? 'Pairing approved'
+      : `Approval failed: ${(result.stderr || result.stdout).trim().slice(0, 200) || 'unknown error'}`,
   };
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Device pairing
-// ──────────────────────────────────────────────────────────────────────
-
-function devicePairingCacheKey(state: InstanceMutableState): string | null {
-  const { flyAppName, flyMachineId } = state;
-  if (!flyAppName || !flyMachineId) return null;
-  return `device-pairing:${flyAppName}:${flyMachineId}`;
-}
-
-type DevicePairingRequest = {
-  requestId: string;
-  deviceId: string;
-  role?: string;
-  platform?: string;
-  clientId?: string;
-  ts?: number;
-};
+type DevicePairingRequest = z.infer<
+  typeof ControllerDevicePairingResponseSchema
+>['requests'][number];
 
 /**
- * List pending device pairing requests. Cached in KV for 2 minutes.
+ * List pending device pairing requests. Prefers the gateway controller's
+ * in-memory cache; falls back to KV cache, then fly exec (result is written
+ * back to KV).
  */
 export async function listDevicePairingRequests(
   state: InstanceMutableState,
@@ -167,17 +229,35 @@ export async function listDevicePairingRequests(
     return { requests: [] };
   }
 
-  const cacheKey = devicePairingCacheKey(state);
+  // Try controller first
+  try {
+    const path = forceRefresh ? '/_kilo/pairing/devices?refresh=true' : '/_kilo/pairing/devices';
+    const result = await callGatewayController(
+      state,
+      env,
+      path,
+      'GET',
+      ControllerDevicePairingResponseSchema
+    );
+    return { requests: result.requests };
+  } catch (error) {
+    if (!isErrorUnknownRoute(error)) {
+      console.warn(
+        `[DO] listDevicePairingRequests controller call failed sandboxId=${state.sandboxId} appId=${state.flyAppName}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
+    }
+    // Controller predates this route — fall through to KV cache / fly exec
+  }
+
+  const cacheKey = makeCacheKey('device-pairing', state);
   if (cacheKey && !forceRefresh) {
     const cached = await env.KV_CLAW_CACHE.get(cacheKey, 'json');
-    if (
-      cached &&
-      typeof cached === 'object' &&
-      'requests' in cached &&
-      Array.isArray(cached.requests)
-    ) {
+    const requests = parseCachedDeviceRequests(cached);
+    if (requests) {
       console.log(`[DO] device pairing list served from KV cache (key=${cacheKey})`);
-      return { requests: cached.requests as DevicePairingRequest[] };
+      return { requests };
     }
   }
 
@@ -200,18 +280,28 @@ export async function listDevicePairingRequests(
 
   let pairing = empty;
   try {
-    const data = JSON.parse(result.stdout.trim()) as unknown;
-    if (data && typeof data === 'object' && 'requests' in data && Array.isArray(data.requests)) {
-      pairing = { requests: data.requests as DevicePairingRequest[] };
+    const data: unknown = JSON.parse(result.stdout.trim());
+    const requests = parseCachedDeviceRequests(data);
+    if (requests) {
+      pairing = { requests };
     }
-  } catch {
-    console.error(`[DO] device pairing list parse error: ${result.stdout} ${logCtx}`);
+  } catch (parseErr) {
+    console.error(
+      `[DO] device pairing list parse error ${logCtx}:`,
+      parseErr,
+      '| stdout:',
+      result.stdout
+    );
   }
 
   if (cacheKey) {
-    await env.KV_CLAW_CACHE.put(cacheKey, JSON.stringify(pairing), {
-      expirationTtl: DEVICE_PAIRING_CACHE_TTL_SECONDS,
-    });
+    try {
+      await env.KV_CLAW_CACHE.put(cacheKey, JSON.stringify(pairing), {
+        expirationTtl: CACHE_TTL_SECONDS,
+      });
+    } catch (kvErr) {
+      console.warn('[DO] Failed to write device pairing cache to KV:', kvErr);
+    }
   }
 
   return pairing;
@@ -230,12 +320,35 @@ export async function approveDevicePairingRequest(
     return { success: false, message: 'Instance is not running' };
   }
 
-  const flyConfig = getFlyConfig(env, state);
-
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
+  if (!UUID_RE.test(requestId)) {
     return { success: false, message: 'Invalid request ID' };
   }
 
+  // Try controller first
+  try {
+    return await callGatewayController(
+      state,
+      env,
+      '/_kilo/pairing/devices/approve',
+      'POST',
+      ControllerPairingApproveResponseSchema,
+      { requestId }
+    );
+  } catch (error) {
+    if (error instanceof GatewayControllerError && error.status === 400) {
+      return { success: false, message: error.message };
+    }
+    if (!isErrorUnknownRoute(error)) {
+      console.warn(
+        `[DO] approveDevicePairingRequest controller call failed sandboxId=${state.sandboxId} appId=${state.flyAppName}:`,
+        error instanceof Error ? error.message : String(error)
+      );
+      throw error;
+    }
+    // Controller predates this route — fall through to fly exec
+  }
+
+  const flyConfig = getFlyConfig(env, state);
   const result = await fly.execCommand(
     flyConfig,
     flyMachineId,
@@ -246,25 +359,25 @@ export async function approveDevicePairingRequest(
   const success = result.exit_code === 0;
 
   if (success) {
-    const cacheKey = devicePairingCacheKey(state);
+    const cacheKey = makeCacheKey('device-pairing', state);
     if (cacheKey) {
-      await env.KV_CLAW_CACHE.delete(cacheKey);
+      try {
+        await env.KV_CLAW_CACHE.delete(cacheKey);
+      } catch (kvErr) {
+        console.warn('[DO] Failed to invalidate device pairing cache from KV:', kvErr);
+      }
     }
-  }
-
-  if (!success) {
+  } else {
     console.error('[DO] device pairing approve failed:', result.stderr || result.stdout);
   }
 
   return {
     success,
-    message: success ? 'Device pairing approved' : 'Approval failed',
+    message: success
+      ? 'Device pairing approved'
+      : `Approval failed: ${(result.stderr || result.stdout).trim().slice(0, 200) || 'unknown error'}`,
   };
 }
-
-// ──────────────────────────────────────────────────────────────────────
-// Doctor command
-// ──────────────────────────────────────────────────────────────────────
 
 /**
  * Run `openclaw doctor --fix --non-interactive` on the machine.

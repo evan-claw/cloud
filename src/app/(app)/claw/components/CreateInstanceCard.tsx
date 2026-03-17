@@ -10,7 +10,7 @@ import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
 import { useKiloClawLatestVersion, useKiloClawMyPin } from '@/hooks/useKiloClaw';
 import { useOpenRouterModels } from '@/app/api/openrouter/hooks';
 import { useTRPC } from '@/lib/trpc/utils';
-import { ModelCombobox, type ModelOption } from '@/components/shared/ModelCombobox';
+import type { ModelOption } from '@/components/shared/ModelCombobox';
 import { useUser } from '@/hooks/useUser';
 import { KILO_AUTO_FRONTIER_MODEL, KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { ChannelTokenInput } from './ChannelTokenInput';
 import { getIcon } from './secret-ui-adapter';
 import { getCreateModelOptions } from './modelSupport';
+import { AutoModelPicker } from './AutoModelPicker';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -59,9 +60,6 @@ export function CreateInstanceCard({
   );
 
   const canStartTrial = Boolean(billingStatus?.trialEligible);
-  const provisionButtonLabel = canStartTrial
-    ? 'Start Free Trial & Provision'
-    : 'Provision New Instance';
   const provisionSubtitle = canStartTrial
     ? '30-day free trial, no credit card required'
     : undefined;
@@ -198,7 +196,7 @@ export function CreateInstanceCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Get Started with KiloClaw</CardTitle>
+        <CardTitle className="text-xl">Get Started with KiloClaw</CardTitle>
         <CardDescription>
           Choose a default model to provision your first KiloClaw instance.
           {provisionSubtitle && (
@@ -209,9 +207,8 @@ export function CreateInstanceCard({
           )}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <ModelCombobox
-          label="Default Model"
+      <CardContent className="mt-4 space-y-6">
+        <AutoModelPicker
           models={modelOptions}
           value={selectedModel}
           onValueChange={setSelectedModel}
@@ -223,7 +220,6 @@ export function CreateInstanceCard({
             isLoadingProvisionTargetVersion ||
             hasProvisionTargetError
           }
-          required
         />
 
         <div className="space-y-3">
@@ -306,13 +302,13 @@ export function CreateInstanceCard({
           })}
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex">
           <Button
             onClick={handleCreate}
             disabled={mutations.provision.isPending || !selectedModel}
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            className="grow bg-emerald-600 text-white hover:bg-emerald-700"
           >
-            {mutations.provision.isPending ? 'Setting up...' : provisionButtonLabel}
+            {mutations.provision.isPending ? 'Setting up...' : 'Get Started'}
           </Button>
         </div>
       </CardContent>
