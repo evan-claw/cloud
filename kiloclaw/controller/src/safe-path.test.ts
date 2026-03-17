@@ -28,21 +28,15 @@ describe('resolveSafePath', () => {
     expect(() => resolveSafePath('workspace/SOUL\0.md', ROOT)).toThrow();
   });
 
-  it('rejects credentials directory', () => {
-    expect(() => resolveSafePath('credentials/key.json', ROOT)).toThrow();
+  it('allows credentials directory', () => {
+    expect(resolveSafePath('credentials/key.json', ROOT)).toBe(
+      '/root/.openclaw/credentials/key.json'
+    );
   });
 
-  it('rejects credentials directory with nested path', () => {
-    expect(() => resolveSafePath('credentials/sub/key.json', ROOT)).toThrow();
-  });
-
-  it('rejects nested credentials directory', () => {
-    expect(() => resolveSafePath('workspace/credentials/key.json', ROOT)).toThrow();
-  });
-
-  it('allows paths that contain "credentials" as substring in filename', () => {
-    expect(resolveSafePath('workspace/my-credentials-notes.md', ROOT)).toBe(
-      '/root/.openclaw/workspace/my-credentials-notes.md'
+  it('allows nested credentials directory', () => {
+    expect(resolveSafePath('workspace/credentials/key.json', ROOT)).toBe(
+      '/root/.openclaw/workspace/credentials/key.json'
     );
   });
 
@@ -62,12 +56,7 @@ describe('verifyCanonicalized', () => {
     );
   });
 
-  it('rejects a canonicalized path through credentials at any depth', () => {
-    expect(() => verifyCanonicalized('/root/.openclaw/credentials/key.json', ROOT)).toThrow(
-      'credentials'
-    );
-    expect(() =>
-      verifyCanonicalized('/root/.openclaw/workspace/credentials/key.json', ROOT)
-    ).toThrow('credentials');
+  it('allows a canonicalized path through credentials', () => {
+    expect(() => verifyCanonicalized('/root/.openclaw/credentials/key.json', ROOT)).not.toThrow();
   });
 });

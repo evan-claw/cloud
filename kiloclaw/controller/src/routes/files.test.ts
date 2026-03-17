@@ -65,7 +65,7 @@ describe('file routes', () => {
   });
 
   describe('GET /_kilo/files/tree', () => {
-    it('returns recursive directory listing excluding credentials', async () => {
+    it('returns recursive directory listing including credentials', async () => {
       vi.mocked(fs.readdirSync).mockImplementation((dir: any) => {
         if (dir === ROOT) {
           return [
@@ -78,6 +78,9 @@ describe('file routes', () => {
         }
         if (dir === `${ROOT}/workspace`) {
           return [mockDirent('SOUL.md', false)] as any;
+        }
+        if (dir === `${ROOT}/credentials`) {
+          return [mockDirent('token.txt', false)] as any;
         }
         return [];
       });
@@ -93,8 +96,8 @@ describe('file routes', () => {
       expect(names).toContain('SOUL.md.bak.2026-03-01');
       expect(names).toContain('debug.log');
       expect(names).toContain('SOUL.md');
-      expect(names).not.toContain('credentials');
-      expect(names).not.toContain('token.txt');
+      expect(names).toContain('credentials');
+      expect(names).toContain('token.txt');
     });
 
     it('skips symlinks', async () => {

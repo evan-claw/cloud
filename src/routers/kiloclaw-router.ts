@@ -140,13 +140,11 @@ const USER_ALLOWED_EXTENSIONS = new Set([
   '.toml',
 ]);
 const USER_FILTERED_PATTERNS = [/\.bak\./, /\.kilotmp\./];
-const USER_FILTERED_DIRS = new Set(['credentials']);
 
 function filterFileTree(nodes: FileNode[]): FileNode[] {
   const result: FileNode[] = [];
   for (const node of nodes) {
     if (USER_FILTERED_PATTERNS.some(p => p.test(node.name))) continue;
-    if (node.type === 'directory' && USER_FILTERED_DIRS.has(node.name)) continue;
 
     if (node.type === 'directory') {
       result.push({ ...node, children: filterFileTree(node.children ?? []) });
@@ -169,9 +167,6 @@ function validateUserFilePath(filePath: string): void {
   const segments = filePath.split('/');
   if (segments.some(s => s === '..' || s === '.')) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid file path' });
-  }
-  if (segments.some(s => USER_FILTERED_DIRS.has(s))) {
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Access to this directory is forbidden' });
   }
 }
 
