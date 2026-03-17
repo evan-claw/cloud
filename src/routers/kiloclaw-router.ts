@@ -167,6 +167,9 @@ function validateUserFilePath(filePath: string): void {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'File type not allowed' });
   }
   const segments = filePath.split('/');
+  if (segments.some(s => s === '..' || s === '.')) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid file path' });
+  }
   if (segments.some(s => USER_FILTERED_DIRS.has(s))) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'Access to this directory is forbidden' });
   }
