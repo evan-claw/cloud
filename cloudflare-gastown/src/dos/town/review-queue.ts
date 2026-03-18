@@ -473,10 +473,15 @@ export function closeOrphanedReviewBeads(sql: SqlStorage): void {
 }
 
 /**
- * Recover source beads stuck in 'in_review' whose MR bead has already
- * reached a terminal state (closed/failed). This can happen when an MR
- * bead failure path bypasses completeReviewWithResult (which is the only
- * path that returns the source bead to in_progress for rework).
+ * Recover source beads stuck in 'in_review' whose MR beads have all
+ * reached a terminal state (closed/failed) with no pending review still
+ * in flight. This can happen when an MR bead failure path bypasses
+ * completeReviewWithResult (which is the only path that returns the
+ * source bead to in_progress for rework).
+ *
+ * Returns beads to 'open' (not 'in_progress') so the scheduler can
+ * assign and dispatch a fresh polecat — by this point the original
+ * agent has already been unhooked.
  *
  * Only affects source beads that have been stuck for longer than the
  * recovery timeout, to avoid interfering with in-flight reviews.
@@ -499,6 +504,15 @@ export function recoverOrphanedSourceBeads(sql: SqlStorage): void {
         WHERE src.${beads.columns.status} = 'in_review'
           AND src.${beads.columns.updated_at} < ?
           AND mr.${beads.columns.status} IN ('closed', 'failed')
+          AND NOT EXISTS (
+            SELECT 1 FROM ${bead_dependencies} AS dep2
+            INNER JOIN ${beads} AS mr2
+              ON mr2.${beads.columns.bead_id} = dep2.${bead_dependencies.columns.bead_id}
+            WHERE dep2.${bead_dependencies.columns.depends_on_bead_id} = src.${beads.columns.bead_id}
+              AND dep2.${bead_dependencies.columns.dependency_type} = 'tracks'
+              AND mr2.${beads.columns.type} = 'merge_request'
+              AND mr2.${beads.columns.status} IN ('open', 'in_progress')
+          )
       `,
       [cutoff]
     ),
@@ -507,9 +521,9 @@ export function recoverOrphanedSourceBeads(sql: SqlStorage): void {
   for (const row of stuckRows) {
     const parsed = z.object({ source_bead_id: z.string() }).parse(row);
     try {
-      updateBeadStatus(sql, parsed.source_bead_id, 'in_progress', 'system');
+      updateBeadStatus(sql, parsed.source_bead_id, 'open', 'system');
       console.log(
-        `[review-queue] recoverOrphanedSourceBeads: returned bead=${parsed.source_bead_id} to in_progress`
+        `[review-queue] recoverOrphanedSourceBeads: returned bead=${parsed.source_bead_id} to open`
       );
     } catch (err) {
       console.warn(
