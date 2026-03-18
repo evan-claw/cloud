@@ -3040,7 +3040,8 @@ export class TownDO extends DurableObject<Env> {
           role: agent.role,
         });
       } else {
-        // Container failed to start — roll back to idle
+        // Container failed to start — roll back agent to idle and bead
+        // to open so schedulePendingWork can retry on the next alarm.
         query(
           this.sql,
           /* sql */ `
@@ -3050,6 +3051,9 @@ export class TownDO extends DurableObject<Env> {
           `,
           [agent.id]
         );
+        if (agent.current_hook_bead_id) {
+          beadOps.updateBeadStatus(this.sql, agent.current_hook_bead_id, 'open', agent.id);
+        }
         this.emitEvent({
           event: 'agent.dispatch_failed',
           townId: this.townId,
@@ -3504,6 +3508,7 @@ export class TownDO extends DurableObject<Env> {
   private async processReviewQueue(): Promise<void> {
     reviewQueue.recoverStuckReviews(this.sql);
     reviewQueue.closeOrphanedReviewBeads(this.sql);
+    reviewQueue.recoverOrphanedSourceBeads(this.sql);
 
     // Poll open PRs created by the 'pr' strategy
     await this.pollPendingPRs();
@@ -3516,12 +3521,15 @@ export class TownDO extends DurableObject<Env> {
     const rigId = entry.rig_id;
     if (!rigId) {
       console.error(`${TOWN_LOG} processReviewQueue: entry ${entry.id} has no rig_id, skipping`);
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      this.failReviewWithRework(entry, 'MR bead has no rig_id');
       return;
     }
     const rigConfig = await this.getRigConfig(rigId);
     if (!rigConfig) {
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      console.error(
+        `${TOWN_LOG} processReviewQueue: no rig config for rig=${rigId}, entry=${entry.id}`
+      );
+      this.failReviewWithRework(entry, `No rig config found for rig ${rigId}`);
       return;
     }
 
@@ -3638,7 +3646,61 @@ export class TownDO extends DurableObject<Env> {
       console.error(
         `${TOWN_LOG} processReviewQueue: refinery agent failed to start for entry=${entry.id}`
       );
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      this.failReviewWithRework(entry, 'Refinery container failed to start');
+    }
+  }
+
+  /**
+   * Fail an MR bead via the full review lifecycle (completeReviewWithResult)
+   * so that convoy progress is updated and the source bead is returned to
+   * in_progress for rework. Mirrors the rework dispatch in
+   * completeReviewWithResult and agentCompleted.
+   *
+   * Used by processReviewQueue failure paths that previously called
+   * completeReview directly — which bypassed convoy progress and left the
+   * source bead stuck in in_review.
+   */
+  private failReviewWithRework(entry: ReviewQueueEntry, reason: string): void {
+    reviewQueue.completeReviewWithResult(this.sql, {
+      entry_id: entry.id,
+      status: 'failed',
+      message: reason,
+    });
+
+    this.emitEvent({
+      event: 'review.failed',
+      townId: this.townId,
+      beadId: entry.id,
+    });
+
+    // The source bead was returned to in_progress by completeReviewWithResult.
+    // Attempt to dispatch a polecat for rework (same pattern as the public
+    // completeReviewWithResult method).
+    const sourceBeadId = entry.bead_id;
+    if (sourceBeadId && sourceBeadId !== entry.id) {
+      const sourceBead = beadOps.getBead(this.sql, sourceBeadId);
+      if (sourceBead?.rig_id) {
+        try {
+          const reworkAgent = agents.getOrCreateAgent(
+            this.sql,
+            'polecat',
+            sourceBead.rig_id,
+            this.townId
+          );
+          agents.hookBead(this.sql, reworkAgent.id, sourceBeadId);
+          this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
+            console.error(
+              `${TOWN_LOG} failReviewWithRework: rework dispatch failed for bead=${sourceBeadId}`,
+              err
+            )
+          );
+        } catch (err) {
+          console.warn(
+            `${TOWN_LOG} failReviewWithRework: could not dispatch rework for bead=${sourceBeadId}:`,
+            err
+          );
+        }
+      }
     }
   }
 
