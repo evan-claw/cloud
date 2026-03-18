@@ -273,8 +273,25 @@ OpenClaw has strict config validation. Common gotchas:
 The Dockerfile is based on `debian:bookworm-slim` and installs Node.js 22 + OpenClaw.
 The image is pushed to Fly's registry (`registry.fly.io/{FLY_APP_NAME}`) via CI.
 
-The Dockerfile includes a cache bust comment for the controller build layer. Use
-`--build-arg CONTROLLER_CACHE_BUST=$(date +%s)` to force a controller rebuild.
+The Dockerfile has two cache bust mechanisms:
+
+- **Controller build layer**: Use `--build-arg CONTROLLER_CACHE_BUST=$(date +%s)` to force a controller rebuild.
+- **COPY layers** (helper scripts, skills, etc.): Increment the number in the `RUN echo "N"` line and update the adjacent `# Build cache bust:` comment. This invalidates Docker's layer cache for all subsequent COPY instructions.
+
+### Files COPYed into the image
+
+These files are COPYed by the Dockerfile and hashed by CI (`deploy-kiloclaw.yml`) to
+produce the content-hash image tag. If you add or remove a COPY in the Dockerfile,
+update the `find` command in the workflow's "Compute source content hash" step to match.
+
+| Path                              | Purpose                                           |
+| --------------------------------- | ------------------------------------------------- |
+| `Dockerfile`                      | Base image, apt packages, npm versions (hashed)   |
+| `controller/`                     | Compiled to `kiloclaw-controller.js` (entrypoint) |
+| `openclaw-pairing-list.js`        | Helper script used at runtime by controller       |
+| `openclaw-device-pairing-list.js` | Helper script used at runtime by controller       |
+| `skills/`                         | Custom skills copied to `/root/clawd/skills/`     |
+| `container/TOOLS.md`              | Staged to `/usr/local/share/kiloclaw/TOOLS.md`    |
 
 ## Fly Machine Lifecycle
 
