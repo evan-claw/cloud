@@ -39,6 +39,7 @@ import type {
   BeadStatus,
   BeadPriority,
   BeadType,
+  FailureReason,
 } from '../../types';
 import type { BeadEventType } from '../../db/tables/bead-events.table';
 
@@ -250,7 +251,8 @@ export function updateBeadStatus(
   sql: SqlStorage,
   beadId: string,
   status: string,
-  agentId: string | null
+  agentId: string | null,
+  failureReason?: FailureReason
 ): Bead {
   const bead = getBead(sql, beadId);
   if (!bead) throw new Error(`Bead ${beadId} not found`);
@@ -280,6 +282,7 @@ export function updateBeadStatus(
     eventType: 'status_changed',
     oldValue: oldStatus,
     newValue: status,
+    metadata: status === 'failed' && failureReason ? { failure_reason: failureReason } : {},
   });
 
   // If the bead reached a terminal status and is tracked by a convoy,

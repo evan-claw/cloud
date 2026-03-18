@@ -36,6 +36,17 @@ export type CreateBeadInput = {
   created_by?: string;
 };
 
+export type FailureReason = {
+  /** Machine-readable failure code */
+  code: string;
+  /** Human-readable summary */
+  message: string;
+  /** Optional stack trace, error output, or container logs */
+  details?: string;
+  /** What triggered the failure: 'scheduler', 'patrol', 'refinery', 'triage', 'admin', 'container' */
+  source: string;
+};
+
 export type BeadFilter = {
   status?: BeadStatus;
   type?: BeadType;
