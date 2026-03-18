@@ -15,6 +15,7 @@
  *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts
  *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --execute
  *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --batch-size=1000
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --concurrency=20
  */
 
 import '../lib/load-env';
@@ -22,6 +23,7 @@ import '../lib/load-env';
 import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import pLimit from 'p-limit';
 import { db, closeAllDrizzleConnections } from '@/lib/drizzle';
 import { credit_transactions, kilocode_users } from '@kilocode/db/schema';
 import { and, eq, gt, isNull, sql, inArray } from 'drizzle-orm';
@@ -34,10 +36,11 @@ const EXPIRY_DATE_OBJ = new Date(EXPIRY_DATE);
 
 // ── Arg parsing ──────────────────────────────────────────────────────────────
 
-function parseArgs(): { execute: boolean; batchSize: number } {
+function parseArgs(): { execute: boolean; batchSize: number; concurrency: number } {
   const args = process.argv.slice(2);
   let execute = false;
-  let batchSize = 500;
+  let batchSize = 10_000;
+  let concurrency = 50;
 
   for (const arg of args) {
     if (arg === '--execute') {
@@ -49,21 +52,17 @@ function parseArgs(): { execute: boolean; batchSize: number } {
         process.exit(1);
       }
       batchSize = value;
+    } else if (arg.startsWith('--concurrency=')) {
+      const value = parseInt(arg.split('=')[1], 10);
+      if (isNaN(value) || value <= 0) {
+        console.error(`Invalid --concurrency value: ${arg}`);
+        process.exit(1);
+      }
+      concurrency = value;
     }
   }
 
-  return { execute, batchSize };
-}
-
-// ── Output file ──────────────────────────────────────────────────────────────
-
-async function createOutputFile() {
-  const outputDir = path.join(__dirname, 'output');
-  await mkdir(outputDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/:/g, '-');
-  const filePath = path.join(outputDir, `expire-free-credits-${timestamp}.jsonl`);
-  console.log(`Writing output to ${filePath}\n`);
-  return createWriteStream(filePath);
+  return { execute, batchSize, concurrency };
 }
 
 // ── Process a single user ────────────────────────────────────────────────────
@@ -198,18 +197,32 @@ async function processUser(
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { execute, batchSize } = parseArgs();
+  const { execute, batchSize, concurrency } = parseArgs();
 
   console.log(`Mode: ${execute ? 'EXECUTE' : 'DRY RUN'}`);
-  console.log(`Batch size: ${batchSize}\n`);
+  console.log(`Batch size: ${batchSize}`);
+  console.log(`Concurrency: ${concurrency}\n`);
 
-  const output = await createOutputFile();
+  const outputDir = path.join(__dirname, 'output');
+  await mkdir(outputDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/:/g, '-');
+  const output = createWriteStream(
+    path.join(outputDir, `expire-free-credits-${timestamp}.jsonl`)
+  );
+  const errorLog = createWriteStream(
+    path.join(outputDir, `expire-free-credits-${timestamp}.errors.jsonl`)
+  );
+  console.log(`Output:  ${path.join(outputDir, `expire-free-credits-${timestamp}.jsonl`)}`);
+  console.log(`Errors:  ${path.join(outputDir, `expire-free-credits-${timestamp}.errors.jsonl`)}\n`);
+
+  const limit = pLimit(concurrency);
 
   let lastId = '';
   let totalUsers = 0;
   let totalCreditsAffected = 0;
   let totalProjectedExpiration = 0;
   let usersAffected = 0;
+  let totalErrors = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -227,24 +240,37 @@ async function main() {
 
     if (batch.length === 0) break;
 
-    for (const user of batch) {
-      const result = await processUser(user, execute, output);
-      totalUsers++;
+    const results = await Promise.allSettled(
+      batch.map((user, i) =>
+        limit(async () => {
+          const result = await processUser(user, execute, output);
+          return { index: i, result };
+        })
+      )
+    );
 
-      if (result) {
+    for (let i = 0; i < results.length; i++) {
+      const settled = results[i];
+      totalUsers++;
+      if (settled.status === 'rejected') {
+        totalErrors++;
+        const error = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        errorLog.write(JSON.stringify({ user_id: batch[i].id, error }) + '\n');
+      } else if (settled.value.result) {
         usersAffected++;
-        totalCreditsAffected += result.creditsAffected;
-        totalProjectedExpiration += result.projectedExpiration;
+        totalCreditsAffected += settled.value.result.creditsAffected;
+        totalProjectedExpiration += settled.value.result.projectedExpiration;
       }
     }
 
     lastId = batch[batch.length - 1].id;
     console.log(
-      `Processed ${totalUsers} users so far (${usersAffected} affected, ${totalCreditsAffected} credits tagged)...`
+      `Processed ${totalUsers} users so far (${usersAffected} affected, ${totalCreditsAffected} credits tagged, ${totalErrors} errors)...`
     );
   }
 
   output.end();
+  errorLog.end();
 
   console.log('\n--- Summary ---');
   console.log(`Total users scanned:        ${totalUsers}`);
@@ -253,6 +279,7 @@ async function main() {
   console.log(
     `Projected expiration total:  ${totalProjectedExpiration} microdollars ($${(totalProjectedExpiration / 1_000_000).toFixed(2)})`
   );
+  console.log(`Errors:                      ${totalErrors}`);
   console.log(`Mode:                        ${execute ? 'EXECUTED' : 'DRY RUN'}`);
 }
 
