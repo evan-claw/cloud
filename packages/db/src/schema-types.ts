@@ -804,6 +804,15 @@ export const ReasoningEffortSchema = z.enum(['none', 'low', 'medium', 'high', 'x
 
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
+export const CustomLlmProviderSchema = z.enum([
+  'anthropic',
+  'openai',
+  'openai-compatible',
+  'openrouter',
+]);
+
+export type CustomLlmProvider = z.infer<typeof CustomLlmProviderSchema>;
+
 export const OpenCodeVariantSchema = z.object({
   verbosity: VerbositySchema.optional(),
   reasoning: z
@@ -817,16 +826,13 @@ export const OpenCodeVariantSchema = z.object({
 export type OpenCodeVariant = z.infer<typeof OpenCodeVariantSchema>;
 
 export const OpenCodeSettingsSchema = z.object({
+  ai_sdk_provider: CustomLlmProviderSchema.optional(),
   family: OpenCodeFamilySchema.optional(),
   prompt: OpenCodePromptSchema.optional(),
   variants: z.record(z.string(), OpenCodeVariantSchema).optional(),
 });
 
 export type OpenCodeSettings = z.infer<typeof OpenCodeSettingsSchema>;
-
-export const CustomLlmProviderSchema = z.enum(['anthropic', 'openai', 'openai-compatible']);
-
-export type CustomLlmProvider = z.infer<typeof CustomLlmProviderSchema>;
 
 export const InterleavedFormatSchema = z.enum(['reasoning_content', 'think']);
 

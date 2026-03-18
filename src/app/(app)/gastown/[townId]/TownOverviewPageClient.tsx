@@ -39,6 +39,10 @@ type Agent = GastownOutputs['gastown']['listAgents'][number];
 
 type TownOverviewPageClientProps = {
   townId: string;
+  /** Override base path for org-scoped routes (e.g. /organizations/[id]/gastown/[townId]) */
+  basePath?: string;
+  /** When set, integration queries use org-scoped endpoints. */
+  organizationId?: string;
 };
 
 const ROLE_ICONS: Record<string, typeof Bot> = {
@@ -80,7 +84,12 @@ function bucketEventsOverTime(events: Array<{ created_at: string }>, windowMinut
   return buckets;
 }
 
-export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) {
+export function TownOverviewPageClient({
+  townId,
+  basePath: basePathOverride,
+  organizationId,
+}: TownOverviewPageClientProps) {
+  const townBasePath = basePathOverride ?? `/gastown/${townId}`;
   const router = useRouter();
   const trpc = useGastownTRPC();
   const [isCreateRigOpen, setIsCreateRigOpen] = useState(false);
@@ -423,7 +432,7 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ delay: i * 0.04, duration: 0.25 }}
-                  onClick={() => void router.push(`/gastown/${townId}/rigs/${rig.id}`)}
+                  onClick={() => void router.push(`${townBasePath}/rigs/${rig.id}`)}
                   className="group mb-2 cursor-pointer rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:border-white/[0.12] hover:bg-white/[0.04]"
                 >
                   <div className="flex items-center justify-between">
@@ -466,7 +475,7 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
                     Recent Agents
                   </span>
                   <button
-                    onClick={() => void router.push(`/gastown/${townId}/agents`)}
+                    onClick={() => void router.push(`${townBasePath}/agents`)}
                     className="text-[10px] text-white/25 transition-colors hover:text-white/50"
                   >
                     View all
@@ -586,7 +595,7 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
                     rigs={rigs}
                     agentsByRig={agentsByRig}
                     recentEvents={events.slice(-10)}
-                    onSelectRig={rigId => void router.push(`/gastown/${townId}/rigs/${rigId}`)}
+                    onSelectRig={rigId => void router.push(`${townBasePath}/rigs/${rigId}`)}
                   />
                 </div>
               </div>
@@ -599,6 +608,7 @@ export function TownOverviewPageClient({ townId }: TownOverviewPageClientProps) 
         townId={townId}
         isOpen={isCreateRigOpen}
         onClose={() => setIsCreateRigOpen(false)}
+        organizationId={organizationId}
       />
 
       {/* Drawers are rendered by the layout-level DrawerStackProvider */}

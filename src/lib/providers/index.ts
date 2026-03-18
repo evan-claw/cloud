@@ -40,7 +40,7 @@ import { eq } from 'drizzle-orm';
 import { applyMoonshotProviderSettings, isMoonshotModel } from '@/lib/providers/moonshotai';
 import type { AnonymousUserContext } from '@/lib/anonymous';
 import { isAnonymousContext } from '@/lib/anonymous';
-import { isOpenAiModel } from '@/lib/providers/openai';
+import { isOpenAiModel, isOpenAiOssModel } from '@/lib/providers/openai';
 import { applyAlibabaProviderSettings } from '@/lib/providers/qwen';
 import type { ProviderId } from '@/lib/providers/provider-id';
 import { isZaiModel } from '@/lib/providers/zai';
@@ -256,6 +256,12 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
     return [
       OpenRouterInferenceProviderIdSchema.enum.friendli,
       OpenRouterInferenceProviderIdSchema.enum['z-ai'],
+    ];
+  }
+  if (isOpenAiOssModel(requestedModel)) {
+    return [
+      OpenRouterInferenceProviderIdSchema.enum.novita,
+      OpenRouterInferenceProviderIdSchema.enum['amazon-bedrock'],
     ];
   }
   return [];
