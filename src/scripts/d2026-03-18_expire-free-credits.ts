@@ -4,7 +4,7 @@
  *
  * The set of credits to expire is defined by (credit_category, description)
  * pairs copied from the reviewed spreadsheet. Each row must match both fields
- * (empty description matches NULL or empty).
+ * (empty description matches any description for that category).
  *
  * The script queries by credit_category first (much faster than scanning all
  * users), then processes each affected user.
@@ -306,22 +306,19 @@ async function main() {
   console.log(`Concurrency: ${concurrency}\n`);
 
   for (const row of rows) {
-    console.log(`  ${row.category} | ${row.description ?? '(empty)'}`);
+    console.log(`  ${row.category} | ${row.description ?? '(any)'}`);
   }
   console.log();
 
   // Build the OR condition matching all (category, description) pairs.
-  // Empty description means "match NULL or empty string description".
+  // Empty description means "match any description for that category".
   const rowConditions = rows.map(row =>
     row.description
       ? and(
           eq(credit_transactions.credit_category, row.category),
           eq(credit_transactions.description, row.description)
         )
-      : and(
-          eq(credit_transactions.credit_category, row.category),
-          or(isNull(credit_transactions.description), eq(credit_transactions.description, ''))
-        )
+      : eq(credit_transactions.credit_category, row.category)
   );
   const categoryFilter = rowConditions.length === 1 ? rowConditions[0] : or(...rowConditions);
 
@@ -340,7 +337,7 @@ async function main() {
   // Per-(category, description) stats
   type PairKey = string;
   const pairKey = (cat: string, desc: string | null): PairKey =>
-    desc ? `${cat} | ${desc}` : `${cat} | (empty)`;
+    desc ? `${cat} | ${desc}` : `${cat} | (any)`;
   const pairStats = new Map<
     PairKey,
     { credits: number; amount: number; projectedExpiration: number }
