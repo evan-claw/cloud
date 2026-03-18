@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useAccessCode } from '../hooks/useAccessCode';
 
@@ -18,6 +19,7 @@ type OpenClawButtonProps = {
   /** "header" = yellow accent (default), "hero" = green prominent */
   look?: keyof typeof ACCENT_CLASSES;
   label?: string;
+  className?: string;
 };
 
 export function OpenClawButton({
@@ -25,6 +27,7 @@ export function OpenClawButton({
   gatewayUrl,
   look = 'header',
   label = 'Open',
+  className,
 }: OpenClawButtonProps) {
   const { isGenerating, generateAccessCode } = useAccessCode();
   const [isOpening, setIsOpening] = useState(false);
@@ -56,7 +59,7 @@ export function OpenClawButton({
   return (
     <Button
       variant="primary"
-      className={ACCENT_CLASSES[look]}
+      className={cn(ACCENT_CLASSES[look], className)}
       disabled={isOpening || isGenerating}
       onClick={openWithAutoAuth}
     >
