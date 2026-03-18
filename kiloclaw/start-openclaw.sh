@@ -489,6 +489,48 @@ EOFPATCH
 export GOG_KEYRING_PASSWORD="kiloclaw"
 
 # ============================================================
+# TOOLS.MD — GOOGLE WORKSPACE SECTION
+# ============================================================
+# When gog credentials are present, append a Google Workspace section to
+# TOOLS.md so the agent knows gog is available. Idempotent: skips if the
+# marker is already present (e.g. after a restart on an existing volume).
+GOG_MARKER_BEGIN="<!-- BEGIN:google-workspace -->"
+GOG_MARKER_END="<!-- END:google-workspace -->"
+TOOLS_MD="/root/.openclaw/workspace/TOOLS.md"
+if [ -n "${KILOCLAW_GOG_CONFIG_TARBALL:-}" ] && [ -f "$TOOLS_MD" ]; then
+    if ! grep -q "$GOG_MARKER_BEGIN" "$TOOLS_MD"; then
+        cat >> "$TOOLS_MD" << EOFTOOLS
+
+${GOG_MARKER_BEGIN}
+## Google Workspace
+
+The \`gog\` CLI is configured and ready for Google Workspace operations (Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, Forms, Chat, Classroom).
+
+- List accounts: \`gog auth list\`
+- Gmail — search: \`gog gmail search --account <email> --query "from:X"\`
+- Gmail — read: \`gog gmail get --account <email> <message-id>\`
+- Gmail — send: \`gog gmail send --account <email> --to <addr> --subject "..." --body "..."\`
+- Calendar — list events: \`gog calendar events list --account <email>\`
+- Drive — list files: \`gog drive files list --account <email>\`
+- Docs — read: \`gog docs get --account <email> <doc-id>\`
+- Run \`gog --help\` and \`gog <service> --help\` for all available commands.
+${GOG_MARKER_END}
+EOFTOOLS
+        echo "TOOLS.md: added Google Workspace section"
+    else
+        echo "TOOLS.md: Google Workspace section already present"
+    fi
+elif [ -f "$TOOLS_MD" ]; then
+    # Google not connected — remove stale gog section if present
+    if grep -q "$GOG_MARKER_BEGIN" "$TOOLS_MD"; then
+        sed -i "/${GOG_MARKER_BEGIN}/,/${GOG_MARKER_END}/d" "$TOOLS_MD"
+        # Trim trailing blank lines left behind
+        sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TOOLS_MD"
+        echo "TOOLS.md: removed stale Google Workspace section"
+    fi
+fi
+
+# ============================================================
 # START CONTROLLER
 # ============================================================
 # Tell the gateway it's running under a supervisor. On SIGUSR1 restart,

@@ -466,9 +466,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     this.s.googleCredentials = credentials;
     this.s.gmailPushOidcEmail = credentials.gmailPushOidcEmail ?? null;
+    this.s.gmailNotificationsEnabled = true;
+
     await this.ctx.storage.put({
       googleCredentials: this.s.googleCredentials,
       gmailPushOidcEmail: this.s.gmailPushOidcEmail,
+      gmailNotificationsEnabled: true,
     });
 
     return { googleConnected: true };
