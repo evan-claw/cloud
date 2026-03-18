@@ -105,9 +105,25 @@ describe('generateBaseConfig', () => {
     expect(config.browser.noSandbox).toBe(true);
   });
 
-  it('always sets tool profile to full on restore', () => {
+  it('preserves user tool profile on non-fresh boot', () => {
     const existing = JSON.stringify({ tools: { profile: 'coding' } });
     const { deps } = fakeDeps(existing);
+    const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
+
+    expect(config.tools.profile).toBe('coding');
+  });
+
+  it('overrides tool profile to full on fresh install', () => {
+    const existing = JSON.stringify({ tools: { profile: 'coding' } });
+    const { deps } = fakeDeps(existing);
+    const env = { ...minimalEnv(), KILOCLAW_FRESH_INSTALL: 'true' };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.tools.profile).toBe('full');
+  });
+
+  it('defaults tool profile to full when not previously set', () => {
+    const { deps } = fakeDeps();
     const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
 
     expect(config.tools.profile).toBe('full');
@@ -356,6 +372,35 @@ describe('generateBaseConfig', () => {
     expect(config.channels.telegram.allowFrom).toEqual(['user1', 'user2']);
     expect(config.channels.telegram.dmPolicy).toBe('pairing');
   });
+
+  it('configures hooks when KILOCLAW_HOOKS_TOKEN is set', () => {
+    const { deps } = fakeDeps();
+    const env = { ...minimalEnv(), KILOCLAW_HOOKS_TOKEN: 'test-hooks-token' };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.hooks.enabled).toBe(true);
+    expect(config.hooks.token).toBe('test-hooks-token');
+    expect(config.hooks.presets).toContain('gmail');
+  });
+
+  it('does not configure hooks when KILOCLAW_HOOKS_TOKEN is not set', () => {
+    const { deps } = fakeDeps();
+    const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
+
+    expect(config.hooks).toBeUndefined();
+  });
+
+  it('does not duplicate gmail preset in hooks', () => {
+    const existing = JSON.stringify({
+      hooks: { enabled: true, token: 'old-token', presets: ['gmail'] },
+    });
+    const { deps } = fakeDeps(existing);
+    const env = { ...minimalEnv(), KILOCLAW_HOOKS_TOKEN: 'new-token' };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.hooks.presets).toEqual(['gmail']);
+    expect(config.hooks.token).toBe('new-token');
+  });
 });
 
 describe('backupConfigFile', () => {
@@ -432,7 +477,7 @@ describe('writeBaseConfig', () => {
     expect(config.tools.exec.host).toBe('gateway');
   });
 
-  it('passes all onboard flags matching start-openclaw.sh', () => {
+  it('passes all required onboard flags for non-interactive setup', () => {
     const { deps, execCalls } = fakeDeps();
     writeBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
 
@@ -447,6 +492,20 @@ describe('writeBaseConfig', () => {
     expect(args).toContain('--skip-channels');
     expect(args).toContain('--skip-skills');
     expect(args).toContain('--skip-health');
+  });
+
+  it('forces tools.profile to full even without KILOCLAW_FRESH_INSTALL', () => {
+    // writeBaseConfig is used for both fresh installs and config restores.
+    // The restore endpoint doesn't set KILOCLAW_FRESH_INSTALL, but the config
+    // should still get tools.profile='full' (not the onboard default 'messaging').
+    const { deps, written } = fakeDeps();
+    const env = minimalEnv();
+    // Explicitly unset to simulate the restore endpoint path
+    delete env.KILOCLAW_FRESH_INSTALL;
+    writeBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    const config = JSON.parse(written[0].data);
+    expect(config.tools.profile).toBe('full');
   });
 
   it('throws if KILOCODE_API_KEY is missing', () => {

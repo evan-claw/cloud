@@ -1,7 +1,7 @@
 /**
  * Generates the base openclaw.json config from environment variables.
  *
- * This is a TypeScript port of the EOFPATCH block in start-openclaw.sh.
+ * Config patching for openclaw.json — channels, gateway auth, exec policy, etc.
  * Both this module and the shell script must produce identical config for the
  * same set of env vars. When updating one, update the other.
  */
@@ -39,7 +39,7 @@ function pruneOldConfigBackups(dir: string, base: string, deps: ConfigWriterDeps
   }
 }
 
-/** Flags passed to `openclaw onboard`, matching start-openclaw.sh. */
+/** Flags passed to `openclaw onboard` for non-interactive first-boot setup. */
 const ONBOARD_FLAGS = [
   'onboard',
   '--non-interactive',
@@ -87,7 +87,7 @@ const defaultDeps: ConfigWriterDeps = {
 /**
  * Generate the base config object from environment variables.
  * Reads the existing config file (if any) as the starting point, then
- * applies all the same patches as start-openclaw.sh's EOFPATCH block.
+ * applies all env-var-derived patches (channels, gateway auth, exec policy, etc.).
  */
 export function generateBaseConfig(
   env: EnvLike,
@@ -97,14 +97,26 @@ export function generateBaseConfig(
   let config: ConfigObject = {};
 
   try {
-    const parsed: unknown = JSON.parse(deps.readFileSync(configPath, 'utf8'));
+    const raw = deps.readFileSync(configPath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       config = parsed as ConfigObject;
     } else {
       console.warn('Config file is not a JSON object, starting fresh');
     }
-  } catch {
-    console.log('Starting with empty config');
+  } catch (err) {
+    // If the file exists but can't be parsed, that's unexpected — openclaw
+    // doctor just ran against it, or writeBaseConfig just wrote it. Throwing
+    // here prevents silent data loss (wiping user customizations like channels,
+    // plugins, model preferences) by falling through to an empty config.
+    // On the onboard path this catch is hit when there's no file at all,
+    // which is fine — but we distinguish by checking if the file exists.
+    if (deps.existsSync(configPath)) {
+      throw new Error(
+        `Failed to parse existing config at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    console.log('No existing config file, starting with empty config');
   }
 
   config.gateway = config.gateway ?? {};
@@ -183,11 +195,13 @@ export function generateBaseConfig(
     delete config.agents.defaults.models;
   }
 
-  // Tool profile: always set to "full" on config restore. The onboard
-  // default "messaging" only allows session/message tools, which leaves
-  // agents without file, shell, or web access.
+  // Tool profile: on fresh install (or explicit config restore), override the
+  // onboard default "messaging" with "full" so agents have all tools. On
+  // subsequent boots, leave the user's choice untouched.
   config.tools = config.tools ?? {};
-  config.tools.profile = 'full';
+  if (env.KILOCLAW_FRESH_INSTALL === 'true' || !config.tools.profile) {
+    config.tools.profile = 'full';
+  }
 
   // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
   // gateway host directly. Allowlist mode gates unknown commands via the
@@ -259,6 +273,23 @@ export function generateBaseConfig(
     config.plugins.entries.slack.enabled = true;
   }
 
+  // Webhook hooks configuration (required for Gmail push notifications via gog).
+  // hooks.token authenticates incoming hook requests from gog's --hook-token.
+  // The gmail preset maps gog's gmailHookPayload into OpenClaw's expected format.
+  if (env.KILOCLAW_HOOKS_TOKEN) {
+    config.hooks = config.hooks ?? {};
+    config.hooks.enabled = true;
+    config.hooks.token = env.KILOCLAW_HOOKS_TOKEN;
+    config.hooks.presets = config.hooks.presets ?? [];
+    if (!Array.isArray(config.hooks.presets)) {
+      config.hooks.presets = [];
+    }
+    if (!(config.hooks.presets as string[]).includes('gmail')) {
+      (config.hooks.presets as string[]).push('gmail');
+    }
+    console.log('Hooks enabled with gmail preset (dedicated token)');
+  }
+
   return config;
 }
 
@@ -325,8 +356,17 @@ export function writeBaseConfig(
     });
     console.log('Onboard completed, patching config...');
 
-    // 4. Patch the fresh onboard config with env-var-derived fields
+    // 4. Patch the fresh onboard config with env-var-derived fields.
+    // writeBaseConfig is called for both fresh installs (bootstrap onboard path)
+    // and config restores (/_kilo/config/restore). In both cases, tools.profile
+    // should be forced to 'full' — the onboard default 'messaging' leaves agents
+    // without shell/file/web tools.
+    const prevFreshInstall = env.KILOCLAW_FRESH_INSTALL;
+    env.KILOCLAW_FRESH_INSTALL = 'true';
     const config = generateBaseConfig(env, tmpPath, deps);
+    // Restore the original value so callers that set it before calling us
+    // (like bootstrap's runOnboardOrDoctor) don't get surprised.
+    env.KILOCLAW_FRESH_INSTALL = prevFreshInstall;
 
     // 5. Serialize and validate roundtrip
     const serialized = JSON.stringify(config, null, 2);
@@ -336,7 +376,7 @@ export function writeBaseConfig(
     deps.writeFileSync(tmpPath, serialized);
     deps.renameSync(tmpPath, configPath);
 
-    console.log('Configuration restored successfully');
+    console.log('Configuration patched successfully');
     return config;
   } catch (error) {
     // Clean up the temp file so we don't leak partial writes

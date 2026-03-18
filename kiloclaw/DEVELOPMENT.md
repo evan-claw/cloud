@@ -485,11 +485,11 @@ docker build --progress=plain -t kiloclaw:controller .
 Then run one of:
 
 - `bash scripts/controller-smoke-test.sh`
-  - Fastest check. Runs the controller binary directly as the container entrypoint.
+  - Fresh container (onboard path). Tests auth, env patch, version endpoints.
   - Use this when iterating on controller auth/proxy behavior.
 - `bash scripts/controller-entrypoint-smoke-test.sh`
-  - Runs the default image CMD (`start-openclaw.sh`) and validates the full startup path.
-  - Use this when changing startup script, env patching, or Docker wiring.
+  - Volume-mounted container with pre-seeded config (doctor path).
+  - Use this when changing bootstrap, env patching, or Docker wiring.
 - `bash scripts/controller-proxy-auth-smoke-test.sh`
   - Validates proxy enforcement semantics end-to-end:
     no token -> `401`, correct proxy token -> pass-through.

@@ -109,27 +109,23 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
-# Copy startup script
-# Build cache bust: 2026-03-16-v63-startup-optimization
+# Copy helper scripts (used at runtime by the controller/gateway)
+# Build cache bust: 2026-03-17-v65-remove-startup-script
 RUN echo "10"
-COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 COPY openclaw-pairing-list.js /usr/local/bin/openclaw-pairing-list.js
 COPY openclaw-device-pairing-list.js /usr/local/bin/openclaw-device-pairing-list.js
-RUN chmod +x /usr/local/bin/start-openclaw.sh
-RUN ls -l /usr/local/bin/start-openclaw.sh \
-    && head -n 1 /usr/local/bin/start-openclaw.sh | cat -v \
-    && od -An -t x1 -N 4 /usr/local/bin/start-openclaw.sh \
-    && ls -l /bin/bash
 
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
 
 # Stage TOOLS.md outside /root so it survives the Fly Volume mount.
-# start-openclaw.sh copies it to /root/.openclaw/workspace/TOOLS.md on first boot.
+# The controller's bootstrap copies it to /root/.openclaw/workspace/TOOLS.md on first boot.
 COPY container/TOOLS.md /usr/local/share/kiloclaw/TOOLS.md
 
 # Expose the gateway port
 EXPOSE 18789
 
-# Entrypoint: start the KiloClaw controller daemon
-CMD ["/usr/local/bin/start-openclaw.sh"]
+# Entrypoint: start the KiloClaw controller daemon directly.
+# All bootstrap logic (env decryption, onboard/doctor, config patching,
+# feature flags) lives in the controller's bootstrap module — no shell wrapper needed.
+CMD ["node", "/usr/local/bin/kiloclaw-controller.js"]

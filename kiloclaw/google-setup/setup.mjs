@@ -347,7 +347,7 @@ const gogHome = '/tmp/gogcli-home';
 // GOG_KEYRING_PASSWORD is NOT a secret. The 99designs/keyring file backend
 // requires a password to operate, but gog runs inside a single-tenant VM
 // with no shared access. The value is arbitrary — it just needs to be
-// consistent across setup (here), container startup (start-openclaw.sh),
+// consistent across setup (here), container bootstrap (controller/src/bootstrap.ts),
 // and runtime (controller/src/gog-credentials.ts).
 const gogEnv = {
   ...process.env,
@@ -399,9 +399,13 @@ console.log('  5. Copy the redirect URL from your browser and paste it here');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 try {
-  await runCommand('gog', ['auth', 'add', userEmail, '--services=all', '--force-consent', '--manual'], {
-    env: gogEnv,
-  });
+  await runCommand(
+    'gog',
+    ['auth', 'add', userEmail, '--services=all', '--force-consent', '--manual'],
+    {
+      env: gogEnv,
+    }
+  );
 } catch (err) {
   console.error('gog auth add failed:', err.message);
   process.exit(1);
