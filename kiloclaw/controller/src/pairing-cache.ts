@@ -65,8 +65,10 @@ export const FAILURE_RETRY_MAX_MS = 300_000;
 export const CONFIG_PATH = '/root/.openclaw/openclaw.json';
 
 // TTL constants — exact matches to openclaw source
-export const CHANNEL_PAIRING_TTL_MS = 60 * 60 * 1000; // pairing-store.ts:15 PAIRING_PENDING_TTL_MS
-export const DEVICE_PAIRING_TTL_MS = 5 * 60 * 1000; // device-pairing.ts:98 PENDING_TTL_MS
+// https://github.com/openclaw/openclaw/blob/d073ec42cd7fabd1004f6959628743817a4cb0e8/src/pairing/pairing-store.ts#L15 PAIRING_PENDING_TTL_MS
+export const CHANNEL_PAIRING_TTL_MS = 60 * 60 * 1000;
+// https://github.com/openclaw/openclaw/blob/d073ec42cd7fabd1004f6959628743817a4cb0e8/src/infra/device-pairing.ts#L98 PENDING_TTL_MS
+export const DEVICE_PAIRING_TTL_MS = 5 * 60 * 1000;
 
 const CHANNEL_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const CODE_RE = /^[A-Za-z0-9]{1,32}$/;
@@ -222,7 +224,7 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
           .filter(req => req.code !== '' && req.id !== '')
           .filter(req => {
             // Mirrors pairing-store.ts isExpired() — PAIRING_PENDING_TTL_MS = 60 * 60 * 1000
-            // ~/Developer/OpenSource/openclaw/src/pairing/pairing-store.ts:171
+            // https://github.com/openclaw/openclaw/blob/d073ec42cd7fabd1004f6959628743817a4cb0e8/src/pairing/pairing-store.ts#L171
             if (!req.createdAt) return false; // falsy (undefined, empty string) → expired
             const createdAtMs = Date.parse(req.createdAt);
             if (!Number.isFinite(createdAtMs)) return false; // garbage timestamp → expired
@@ -281,7 +283,7 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
         .filter(isRecord)
         .filter(entry => {
           // Mirrors pairing-files.ts pruneExpiredPending() — PENDING_TTL_MS = 5 * 60 * 1000
-          // ~/Developer/OpenSource/openclaw/src/infra/device-pairing.ts:98
+          // https://github.com/openclaw/openclaw/blob/d073ec42cd7fabd1004f6959628743817a4cb0e8/src/infra/device-pairing.ts#L98
           // No typeof guard: if ts is missing, nowMs - undefined = NaN, NaN > TTL is false → preserved
           return !(nowMs - (entry.ts as number) > DEVICE_PAIRING_TTL_MS);
         })
