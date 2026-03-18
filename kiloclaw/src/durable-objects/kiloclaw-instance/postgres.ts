@@ -62,6 +62,7 @@ export async function restoreFromPostgres(
         pendingDestroyMachineId: null,
         pendingDestroyVolumeId: null,
         pendingPostgresMarkOnFinalize: false,
+        lastMetadataRecoveryAt: null,
         openclawVersion: null,
         imageVariant: null,
         trackedImageTag: null,
