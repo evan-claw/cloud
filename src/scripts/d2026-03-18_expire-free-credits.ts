@@ -240,7 +240,6 @@ async function main() {
   let usersAffected = 0;
   let totalErrors = 0;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     // Query credits by category directly — much faster than scanning all users
     const batch = await db
