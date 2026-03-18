@@ -796,9 +796,9 @@ describe('reactivateSubscription', () => {
 describe('createSubscriptionCheckout — concurrent checkout guard', () => {
   it('expires stale open checkout sessions and creates a new one', async () => {
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list
-      .mockResolvedValueOnce({ data: [{ id: 'cs_existing', metadata: { type: 'kiloclaw' } }] })
-      .mockResolvedValueOnce({ data: [] }); // re-check after expire
+    stripeMock.checkout.sessions.list.mockResolvedValue({
+      data: [{ id: 'cs_existing', metadata: { type: 'kiloclaw' } }],
+    });
     stripeMock.checkout.sessions.create.mockResolvedValue({
       id: 'cs_new',
       url: 'https://checkout.stripe.com/new',
@@ -812,17 +812,12 @@ describe('createSubscriptionCheckout — concurrent checkout guard', () => {
     expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
   });
 
-  it('tolerates already-expired sessions from concurrent expire calls', async () => {
+  it('swallows expire errors (session already expired or completed)', async () => {
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list
-      .mockResolvedValueOnce({ data: [{ id: 'cs_racy', metadata: { type: 'kiloclaw' } }] })
-      .mockResolvedValueOnce({ data: [] }); // re-check after expire
-    stripeMock.checkout.sessions.expire.mockRejectedValue(
-      new stripeMock.errors.StripeInvalidRequestError({
-        type: 'invalid_request_error',
-        message: 'This Session has already expired.',
-      })
-    );
+    stripeMock.checkout.sessions.list.mockResolvedValue({
+      data: [{ id: 'cs_gone', metadata: { type: 'kiloclaw' } }],
+    });
+    stripeMock.checkout.sessions.expire.mockRejectedValue(new Error('session no longer open'));
     stripeMock.checkout.sessions.create.mockResolvedValue({
       id: 'cs_new',
       url: 'https://checkout.stripe.com/new',
@@ -831,42 +826,8 @@ describe('createSubscriptionCheckout — concurrent checkout guard', () => {
     const caller = await createCallerForUser(user.id);
     const result = await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
 
-    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_racy');
+    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_gone');
     expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
-  });
-
-  it('rejects when a concurrent request created a new session between expire and create', async () => {
-    stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list
-      .mockResolvedValueOnce({ data: [{ id: 'cs_stale', metadata: { type: 'kiloclaw' } }] })
-      .mockResolvedValueOnce({
-        data: [{ id: 'cs_concurrent', metadata: { type: 'kiloclaw' } }],
-      }); // re-check shows a new session from a concurrent request
-
-    const caller = await createCallerForUser(user.id);
-    await expect(caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' })).rejects.toThrow(
-      'A checkout is already in progress'
-    );
-    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_stale');
-    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects when expire fails for a non-expired reason (e.g. session completed concurrently)', async () => {
-    stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list.mockResolvedValue({
-      data: [{ id: 'cs_completed', metadata: { type: 'kiloclaw' } }],
-    });
-    stripeMock.checkout.sessions.expire.mockRejectedValue(
-      new stripeMock.errors.StripeInvalidRequestError({
-        type: 'invalid_request_error',
-        message: 'This Session is not in an expirable state.',
-      })
-    );
-
-    const caller = await createCallerForUser(user.id);
-    await expect(caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' })).rejects.toThrow(
-      'not in an expirable state'
-    );
   });
 
   it('rejects when an active Stripe subscription already exists', async () => {

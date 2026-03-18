@@ -93,10 +93,14 @@ lapses, with email notifications at each stage.
    MUST start billing immediately with no delayed period.
 8. The system SHOULD include referral tracking data in checkout sessions
    when a referral cookie is present.
-9. When open checkout sessions tagged as KiloClaw already exist for the
-   user, the system MUST expire them before creating a new checkout
-   session. This allows users who abandoned a previous checkout to start
-   fresh without manual intervention.
+9. The system SHOULD attempt to expire open checkout sessions tagged as
+   KiloClaw before creating a new checkout session, so users who
+   abandoned a previous checkout can start fresh. Expiration is
+   best-effort: errors from the payment provider (e.g. the session was
+   already expired or completed) MUST be swallowed. Duplicate open
+   sessions from concurrent requests are tolerable because each requires
+   independent user action to complete, and rule 3 prevents duplicate
+   subscriptions.
 
 ### Commit Plan Lifecycle
 

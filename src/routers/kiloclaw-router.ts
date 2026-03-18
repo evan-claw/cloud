@@ -1155,49 +1155,28 @@ export const kiloclawRouter = createTRPCRouter({
           message: 'You already have an active subscription.',
         });
       }
-      // Expire any stale open checkout sessions so the user can start fresh.
-      // This handles the case where a user started checkout, closed the tab,
-      // and came back to try again.
-      // Concurrent requests may race: two requests list the same session,
-      // the first expires it, and the second gets an error from Stripe.
-      // We only swallow "already expired" errors to stay idempotent — other
-      // StripeInvalidRequestError reasons (e.g. a session that was completed
-      // between list() and expire()) must propagate so we don't silently
-      // create a duplicate checkout.
+      // Best-effort cleanup: expire stale open checkout sessions so the user
+      // can start fresh (e.g. they started checkout, closed the tab, and came
+      // back to retry). Errors are swallowed because a session may already be
+      // expired or completed by the time we call expire() — either way the
+      // stale session is no longer open, which is the goal.
+      //
+      // NOTE: This does not prevent two concurrent requests from both reaching
+      // sessions.create(). That race is inherent to any read-then-write
+      // pattern against the Stripe API and cannot be closed without an
+      // external lock. Duplicate open checkout sessions are tolerable: each
+      // requires independent user action to complete, and the subscription-
+      // level guard above (hasActiveKiloClawSub) prevents the real harm —
+      // duplicate subscriptions.
       const staleKiloClawSessions = openSessions.data.filter(s => s.metadata?.type === 'kiloclaw');
       await Promise.all(
         staleKiloClawSessions.map(s =>
-          stripe.checkout.sessions.expire(s.id).catch(err => {
-            if (
-              err instanceof stripe.errors.StripeInvalidRequestError &&
-              /already expired/i.test(err.message)
-            )
-              return;
-            throw err;
+          stripe.checkout.sessions.expire(s.id).catch(() => {
+            // Swallow — session is already expired, completed, or otherwise
+            // no longer open. The goal (clearing stale sessions) is met.
           })
         )
       );
-
-      // Re-check for open kiloclaw sessions after expiring stale ones.
-      // If a concurrent request created a new session between our initial
-      // list() and now, we'll see it here and reject to prevent duplicates.
-      if (staleKiloClawSessions.length > 0) {
-        const recheckSessions = await stripe.checkout.sessions.list({
-          customer: stripeCustomerId,
-          status: 'open',
-          limit: 10,
-        });
-        const hasConcurrentKiloClawCheckout = recheckSessions.data.some(
-          s => s.metadata?.type === 'kiloclaw'
-        );
-        if (hasConcurrentKiloClawCheckout) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message:
-              'A checkout is already in progress. Please complete or cancel the existing checkout.',
-          });
-        }
-      }
 
       const priceId = getStripePriceIdForClawPlan(input.plan);
 
