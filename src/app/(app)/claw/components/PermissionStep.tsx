@@ -113,7 +113,7 @@ export function PermissionStep({
     <Card className="mt-6">
       <CardContent className="flex flex-col items-center gap-6 py-10">
         {/* Permission toggle */}
-        <div className="w-full max-w-md space-y-3">
+        <div className="w-full space-y-3">
           <p className="text-foreground text-center text-lg font-semibold">
             How should KiloClaw handle tool permissions?
           </p>
@@ -146,8 +146,8 @@ export function PermissionStep({
 
         {/* Provisioning status banner */}
         {!instanceRunning && (
-          <div className="border-border flex w-full max-w-md items-start gap-3 rounded-lg border p-4">
-            <span className="relative mt-1.5 flex h-2 w-2 shrink-0">
+          <div className="border-border flex w-full items-center gap-3 rounded-lg border p-4">
+            <span className="relative flex h-2 w-2 shrink-0">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
@@ -160,11 +160,7 @@ export function PermissionStep({
           </div>
         )}
 
-        <Button
-          className="w-full max-w-md py-6 text-base"
-          disabled={!canContinue}
-          onClick={handleContinue}
-        >
+        <Button className="w-full py-6 text-base" disabled={!canContinue} onClick={handleContinue}>
           {isApplying ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
