@@ -3,15 +3,9 @@
 import { useEffect, useRef } from 'react';
 import { Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useReadFile } from '@/hooks/useKiloClaw';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  type ExecPreset,
-  type ClawMutations,
-  OPENCLAW_CONFIG_PATH,
-  mergeExecPreset,
-} from './claw.types';
+import { type ExecPreset, type ClawMutations, execPresetToConfig } from './claw.types';
 
 /** Play a short chime via the Web Audio API. */
 function playChime() {
@@ -49,19 +43,8 @@ export function ProvisioningStep({
   // state transitions (pending→error) produce new object references.
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
-  const writeFileRef = useRef(mutations.writeFile.mutate);
-  writeFileRef.current = mutations.writeFile.mutate;
-
-  const needsPatch = preset === 'never-ask';
-  const {
-    data: fileData,
-    error: fileError,
-    refetch,
-  } = useReadFile(OPENCLAW_CONFIG_PATH, instanceRunning && needsPatch);
-  const refetchRef = useRef(refetch);
-  refetchRef.current = refetch;
-
-  const fileNotFound = fileError?.data?.code === 'NOT_FOUND';
+  const patchOpenclawConfigRef = useRef(mutations.patchOpenclawConfig.mutate);
+  patchOpenclawConfigRef.current = mutations.patchOpenclawConfig.mutate;
 
   useEffect(() => {
     if (!instanceRunning || completedRef.current) return;
@@ -73,52 +56,24 @@ export function ProvisioningStep({
       return;
     }
 
-    // "never-ask" — wait for config file to load, or confirm it doesn't exist yet
-    if (!fileData && !fileNotFound) return;
-
+    // "never-ask" — deep-merge the exec preset into the live config
     completedRef.current = true;
 
-    let currentConfig: Record<string, unknown> = {};
-    if (fileData) {
-      try {
-        const parsed: unknown = JSON.parse(fileData.content);
-        currentConfig = (
-          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
-        ) as Record<string, unknown>;
-      } catch {
-        toast.error('Failed to parse config — please try again');
-        completedRef.current = false;
-        return;
-      }
-    }
-
-    const merged = mergeExecPreset(currentConfig, preset);
-    writeFileRef.current(
-      {
-        path: OPENCLAW_CONFIG_PATH,
-        content: JSON.stringify(merged, null, 2),
-        ...(fileData ? { etag: fileData.etag } : {}),
-      },
+    const { security, ask } = execPresetToConfig(preset);
+    patchOpenclawConfigRef.current(
+      { patch: { tools: { exec: { security, ask } } } },
       {
         onSuccess: () => {
           playChime();
           onCompleteRef.current();
         },
-        onError: (err: {
-          message: string;
-          data?: { code?: string; upstreamCode?: string } | null;
-        }) => {
+        onError: (err: { message: string }) => {
           completedRef.current = false;
-          if (err.data?.code === 'CONFLICT') {
-            void refetchRef.current();
-            toast.error('Config was modified externally — please try again');
-          } else {
-            toast.error(err.message);
-          }
+          toast.error(err.message);
         },
       }
     );
-  }, [instanceRunning, preset, fileData, fileNotFound]);
+  }, [instanceRunning, preset]);
 
   return (
     <Card className="mt-6">

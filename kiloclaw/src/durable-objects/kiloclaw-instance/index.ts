@@ -1129,6 +1129,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return gateway.patchConfigOnMachine(this.s, this.env, patch);
   }
 
+  async patchOpenclawConfig(patch: Record<string, unknown>): Promise<{ ok: boolean }> {
+    await this.loadState();
+    return gateway.patchOpenclawConfig(this.s, this.env, patch);
+  }
+
   /** Returns null if the controller is too old to have the /_kilo/config/read endpoint. */
   async getOpenclawConfig(): Promise<{ config: Record<string, unknown>; etag?: string } | null> {
     await this.loadState();

@@ -7,8 +7,6 @@ export type ExecPreset = 'always-ask' | 'never-ask';
 
 export type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
-export const OPENCLAW_CONFIG_PATH = 'openclaw.json';
-
 export function execPresetToConfig(preset: ExecPreset): { security: string; ask: string } {
   switch (preset) {
     case 'never-ask':
@@ -17,21 +15,6 @@ export function execPresetToConfig(preset: ExecPreset): { security: string; ask:
     default:
       return { security: 'allowlist', ask: 'on-miss' };
   }
-}
-
-export function mergeExecPreset(
-  currentConfig: Record<string, unknown>,
-  preset: ExecPreset
-): Record<string, unknown> {
-  const tools = (currentConfig.tools ?? {}) as Record<string, unknown>;
-  const exec = (tools.exec ?? {}) as Record<string, unknown>;
-  return {
-    ...currentConfig,
-    tools: {
-      ...tools,
-      exec: { ...exec, ...execPresetToConfig(preset) },
-    },
-  };
 }
 
 export const CLAW_STATUS_BADGE: Record<
