@@ -252,6 +252,7 @@ async function processUser(
   // 7. Write JSONL line
   const logLine = JSON.stringify({
     user_id: user.id,
+    next_credit_expiration_at: user.next_credit_expiration_at,
     current_balance_microdollars: currentBalance,
     projected_balance_microdollars: projectedBalance,
     credits_affected: creditsAffectedWithProjection,
