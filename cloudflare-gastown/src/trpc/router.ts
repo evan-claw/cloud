@@ -13,6 +13,7 @@ import { getTownDOStub } from '../dos/Town.do';
 import { getTownContainerStub } from '../dos/TownContainer.do';
 import { getGastownUserStub } from '../dos/GastownUser.do';
 import { getGastownOrgStub } from '../dos/GastownOrg.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import type { JwtOrgMembership } from '../middleware/auth.middleware';
 import { generateKiloApiToken } from '../util/kilo-token.util';
 import { resolveSecret } from '../util/secret.util';
@@ -65,13 +66,17 @@ async function refreshGitCredentials(
     return;
   }
 
-  const townStub = getTownDOStub(env, townId);
-  await townStub.updateTownConfig({
-    git_auth: {
-      github_token: result.token,
-      platform_integration_id: result.installationId,
-    },
-  });
+  await withDORetry(
+    () => getTownDOStub(env, townId),
+    stub =>
+      stub.updateTownConfig({
+        git_auth: {
+          github_token: result.token,
+          platform_integration_id: result.installationId,
+        },
+      }),
+    'TownDO.updateTownConfig(git_auth)'
+  );
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -137,20 +142,26 @@ async function resolveTownOwnership(
   | { type: 'org'; stub: RigOwnerStub; orgId: string }
 > {
   // Fast path: personal town lookup
-  const userStub = getGastownUserStub(env, userId);
-  const personalTown = await userStub.getTownAsync(townId);
+  const personalTown = await withDORetry(
+    () => getGastownUserStub(env, userId),
+    stub => stub.getTownAsync(townId),
+    'GastownUserDO.getTownAsync'
+  );
   if (personalTown) {
     if (personalTown.owner_user_id !== userId) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Not your town' });
     }
-    return { type: 'user', stub: userStub, town: personalTown };
+    return { type: 'user', stub: getGastownUserStub(env, userId), town: personalTown };
   }
 
   // Check TownDO config for org ownership, verify via JWT claims
-  const townStub = getTownDOStub(env, townId);
   let config;
   try {
-    config = await townStub.getTownConfig();
+    config = await withDORetry(
+      () => getTownDOStub(env, townId),
+      stub => stub.getTownConfig(),
+      'TownDO.getTownConfig(ownership)'
+    );
   } catch {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Town not found' });
   }
@@ -195,8 +206,11 @@ async function verifyTownOwnership(
   if (result.type === 'user') return result.town;
 
   // Fetch the org town record for name/timestamps
-  const orgStub = getGastownOrgStub(env, result.orgId);
-  const orgTown = await orgStub.getTownAsync(townId);
+  const orgTown = await withDORetry(
+    () => getGastownOrgStub(env, result.orgId),
+    stub => stub.getTownAsync(townId),
+    'GastownOrgDO.getTownAsync(verify)'
+  );
   return {
     id: townId,
     name: orgTown?.name ?? townId,
@@ -217,15 +231,24 @@ async function verifyRigOwnership(
   memberships: JwtOrgMembership[]
 ) {
   // Fast path: personal rig lookup
-  const userStub = getGastownUserStub(env, userId);
-  const personalRig = await userStub.getRigAsync(rigId);
+  const personalRig = await withDORetry(
+    () => getGastownUserStub(env, userId),
+    stub => stub.getRigAsync(rigId),
+    'GastownUserDO.getRigAsync'
+  );
   if (personalRig) return personalRig;
 
   // Check org DOs in parallel (billing_manager excluded)
   const orgIds = listAccessibleOrgIds(memberships);
   if (orgIds.length > 0) {
     const results = await Promise.all(
-      orgIds.map(orgId => getGastownOrgStub(env, orgId).getRigAsync(rigId))
+      orgIds.map(orgId =>
+        withDORetry(
+          () => getGastownOrgStub(env, orgId),
+          stub => stub.getRigAsync(rigId),
+          'GastownOrgDO.getRigAsync'
+        )
+      )
     );
     const orgRig = results.find(r => r !== null);
     if (orgRig) return orgRig;
@@ -263,24 +286,38 @@ export const gastownRouter = router({
     .output(RpcTownOutput)
     .mutation(async ({ ctx, input }) => {
       const user = userFromCtx(ctx);
-      const userStub = getGastownUserStub(ctx.env, user.id);
-      const town = await userStub.createTown({ name: input.name, owner_user_id: user.id });
+      const town = await withDORetry(
+        () => getGastownUserStub(ctx.env, user.id),
+        stub => stub.createTown({ name: input.name, owner_user_id: user.id }),
+        'GastownUserDO.createTown'
+      );
 
       // Store kilocode token so agents can auth with the Kilo LLM gateway
       const kilocodeToken = await mintKilocodeToken(ctx.env, user);
-      const townStub = getTownDOStub(ctx.env, town.id);
-      await townStub.setTownId(town.id);
-      await townStub.updateTownConfig({
-        kilocode_token: kilocodeToken,
-        owner_user_id: user.id,
-      });
+      await withDORetry(
+        () => getTownDOStub(ctx.env, town.id),
+        stub => stub.setTownId(town.id),
+        'TownDO.setTownId(createTown)'
+      );
+      await withDORetry(
+        () => getTownDOStub(ctx.env, town.id),
+        stub =>
+          stub.updateTownConfig({
+            kilocode_token: kilocodeToken,
+            owner_user_id: user.id,
+          }),
+        'TownDO.updateTownConfig(createTown)'
+      );
 
       return town;
     }),
 
   listTowns: gastownProcedure.output(z.array(RpcTownOutput)).query(async ({ ctx }) => {
-    const userStub = getGastownUserStub(ctx.env, ctx.userId);
-    return userStub.listTowns();
+    return withDORetry(
+      () => getGastownUserStub(ctx.env, ctx.userId),
+      stub => stub.listTowns(),
+      'GastownUserDO.listTowns'
+    );
   }),
 
   getTown: gastownProcedure
@@ -311,8 +348,11 @@ export const gastownRouter = router({
       // Let failures propagate — if cleanup fails, don't delete the
       // user record (that's the only reference for recovering the
       // leaked resources).
-      const townDOStub = getTownDOStub(ctx.env, input.townId);
-      await townDOStub.destroy();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.destroy(),
+        'TownDO.destroy'
+      );
 
       await ownerStub.deleteTown(input.townId);
     }),
@@ -340,12 +380,19 @@ export const gastownRouter = router({
       );
       const ownerStub = ownership.stub;
 
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(createRig)'
+      );
 
       // For org towns, use the town owner's identity for credentials;
       // for personal towns the caller is always the owner.
-      const townConfig = await townStub.getTownConfig();
+      const townConfig = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getTownConfig(),
+        'TownDO.getTownConfig(createRig)'
+      );
       const credentialUserId = townConfig.owner_user_id ?? user.id;
 
       // Only re-mint kilocode token if the caller is the owner (they
@@ -354,7 +401,11 @@ export const gastownRouter = router({
       let kilocodeToken: string | undefined;
       if (credentialUserId === user.id) {
         kilocodeToken = await mintKilocodeToken(ctx.env, user);
-        await townStub.updateTownConfig({ kilocode_token: kilocodeToken });
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub => stub.updateTownConfig({ kilocode_token: kilocodeToken }),
+          'TownDO.updateTownConfig(createRig-token)'
+        );
       }
 
       // Resolve git credentials using the town owner's identity
@@ -381,21 +432,31 @@ export const gastownRouter = router({
       // Configure the Town DO with rig metadata so dispatchAgent can find it.
       // If this fails, roll back the rig creation to avoid an orphaned record.
       try {
-        await townStub.configureRig({
-          rigId: rig.id,
-          townId: input.townId,
-          gitUrl: input.gitUrl,
-          defaultBranch: input.defaultBranch,
-          userId: credentialUserId,
-          kilocodeToken,
-          platformIntegrationId: input.platformIntegrationId,
-        });
-        await townStub.addRig({
-          rigId: rig.id,
-          name: input.name,
-          gitUrl: input.gitUrl,
-          defaultBranch: input.defaultBranch,
-        });
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub =>
+            stub.configureRig({
+              rigId: rig.id,
+              townId: input.townId,
+              gitUrl: input.gitUrl,
+              defaultBranch: input.defaultBranch,
+              userId: credentialUserId,
+              kilocodeToken,
+              platformIntegrationId: input.platformIntegrationId,
+            }),
+          'TownDO.configureRig'
+        );
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub =>
+            stub.addRig({
+              rigId: rig.id,
+              name: input.name,
+              gitUrl: input.gitUrl,
+              defaultBranch: input.defaultBranch,
+            }),
+          'TownDO.addRig'
+        );
       } catch (err) {
         console.error(
           `[gastown-trpc] createRig: Town DO configure FAILED for rig ${rig.id}, rolling back:`,
@@ -422,7 +483,7 @@ export const gastownRouter = router({
         input.townId,
         ctx.orgMemberships
       );
-      return ownerStub.listRigs(input.townId);
+      return withDORetry(() => ownerStub, stub => stub.listRigs(input.townId), 'OwnerDO.listRigs');
     }),
 
   getRig: gastownProcedure
@@ -430,10 +491,17 @@ export const gastownRouter = router({
     .output(RpcRigDetailOutput)
     .query(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
       // Sequential to avoid "excessively deep" type inference with Rpc.Promisified DO stubs.
-      const agentList = await townStub.listAgents({ rig_id: rig.id });
-      const beadList = await townStub.listBeads({ rig_id: rig.id, status: 'in_progress' });
+      const agentList = await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.listAgents({ rig_id: rig.id }),
+        'TownDO.listAgents(getRig)'
+      );
+      const beadList = await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.listBeads({ rig_id: rig.id, status: 'in_progress' }),
+        'TownDO.listBeads(getRig)'
+      );
       return { ...rig, agents: agentList, beads: beadList };
     }),
 
@@ -456,8 +524,11 @@ export const gastownRouter = router({
       // Remove from Town DO first so the name is freed before the owner
       // record is deleted. If this fails the owner record is still intact
       // and the user can retry.
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      await townStub.removeRig(input.rigId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.removeRig(input.rigId),
+        'TownDO.removeRig'
+      );
       const ownerStub = ownership.stub;
       await ownerStub.deleteRig(input.rigId);
     }),
@@ -474,16 +545,22 @@ export const gastownRouter = router({
     .output(z.array(RpcBeadOutput))
     .query(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      return townStub.listBeads({ rig_id: rig.id, status: input.status });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.listBeads({ rig_id: rig.id, status: input.status }),
+        'TownDO.listBeads'
+      );
     }),
 
   deleteBead: gastownProcedure
     .input(z.object({ rigId: z.string().uuid(), beadId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      await townStub.deleteBead(input.beadId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.deleteBead(input.beadId),
+        'TownDO.deleteBead'
+      );
     }),
 
   updateBead: gastownProcedure
@@ -517,10 +594,13 @@ export const gastownRouter = router({
     .output(RpcBeadOutput)
     .mutation(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
 
       // Verify the bead belongs to this rig
-      const existing = await townStub.getBeadAsync(input.beadId);
+      const existing = await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.getBeadAsync(input.beadId),
+        'TownDO.getBeadAsync(updateBead)'
+      );
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Bead not found' });
       }
@@ -529,7 +609,11 @@ export const gastownRouter = router({
       }
 
       const { rigId: _rigId, beadId, ...fields } = input;
-      return townStub.updateBead(beadId, fields, ctx.userId);
+      return withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.updateBead(beadId, fields, ctx.userId),
+        'TownDO.updateBead'
+      );
     }),
 
   // ── Agents ──────────────────────────────────────────────────────────
@@ -539,16 +623,22 @@ export const gastownRouter = router({
     .output(z.array(RpcAgentOutput))
     .query(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      return townStub.listAgents({ rig_id: rig.id });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.listAgents({ rig_id: rig.id }),
+        'TownDO.listAgents'
+      );
     }),
 
   deleteAgent: gastownProcedure
     .input(z.object({ rigId: z.string().uuid(), agentId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      await townStub.deleteAgent(input.agentId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.deleteAgent(input.agentId),
+        'TownDO.deleteAgent'
+      );
     }),
 
   // ── Work Assignment ─────────────────────────────────────────────────
@@ -568,7 +658,11 @@ export const gastownRouter = router({
       const rig = await verifyRigOwnership(ctx.env, user.id, input.rigId, ctx.orgMemberships);
 
       // Best-effort: refresh git credentials using the town owner's identity
-      const townConfig = await getTownDOStub(ctx.env, rig.town_id).getTownConfig();
+      const townConfig = await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.getTownConfig(),
+        'TownDO.getTownConfig(sling)'
+      );
       const credentialUserId = townConfig.owner_user_id ?? user.id;
       try {
         await refreshGitCredentials(
@@ -582,14 +676,22 @@ export const gastownRouter = router({
         console.warn('[gastown-trpc] sling: git credential refresh failed', err);
       }
 
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      await townStub.setTownId(rig.town_id);
-      return townStub.slingBead({
-        rigId: rig.id,
-        title: input.title,
-        body: input.body,
-        metadata: { model: input.model, slung_by: user.id },
-      });
+      await withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.setTownId(rig.town_id),
+        'TownDO.setTownId(sling)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub =>
+          stub.slingBead({
+            rigId: rig.id,
+            title: input.title,
+            body: input.body,
+            metadata: { model: input.model, slung_by: user.id },
+          }),
+        'TownDO.slingBead'
+      );
     }),
 
   // ── Mayor ───────────────────────────────────────────────────────────
@@ -608,9 +710,16 @@ export const gastownRouter = router({
     .mutation(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
 
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      return townStub.sendMayorMessage(input.message, input.model, input.uiContext);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(sendMessage)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.sendMayorMessage(input.message, input.model, input.uiContext),
+        'TownDO.sendMayorMessage'
+      );
     }),
 
   getMayorStatus: gastownProcedure
@@ -618,9 +727,16 @@ export const gastownRouter = router({
     .output(RpcMayorStatusOutput)
     .query(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      return townStub.getMayorStatus();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(getMayorStatus)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getMayorStatus(),
+        'TownDO.getMayorStatus'
+      );
     }),
 
   getAlarmStatus: gastownProcedure
@@ -628,9 +744,16 @@ export const gastownRouter = router({
     .output(RpcAlarmStatusOutput)
     .query(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      return townStub.getAlarmStatus();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(getAlarmStatus)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getAlarmStatus(),
+        'TownDO.getAlarmStatus'
+      );
     }),
 
   ensureMayor: gastownProcedure
@@ -645,10 +768,18 @@ export const gastownRouter = router({
       );
 
       // Best-effort: refresh git credentials using the town owner's identity
-      const townConfig = await getTownDOStub(ctx.env, input.townId).getTownConfig();
+      const townConfig = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getTownConfig(),
+        'TownDO.getTownConfig(ensureMayor)'
+      );
       const credentialUserId = townConfig.owner_user_id ?? ctx.userId;
       try {
-        const rigList = await ownerStub.listRigs(input.townId);
+        const rigList = await withDORetry(
+          () => ownerStub,
+          stub => stub.listRigs(input.townId),
+          'OwnerDO.listRigs(ensureMayor)'
+        );
         for (const rig of rigList) {
           if (extractGithubRepo(rig.git_url)) {
             await refreshGitCredentials(
@@ -665,9 +796,16 @@ export const gastownRouter = router({
         console.warn('[gastown-trpc] ensureMayor: git credential refresh failed', err);
       }
 
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      return townStub.ensureMayor();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(ensureMayor)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.ensureMayor(),
+        'TownDO.ensureMayor'
+      );
     }),
 
   // ── Agent Streams ───────────────────────────────────────────────────
@@ -773,8 +911,11 @@ export const gastownRouter = router({
         input.townId,
         ctx.orgMemberships
       );
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      const config = await townStub.getTownConfig();
+      const config = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getTownConfig(),
+        'TownDO.getTownConfig(getTownConfig)'
+      );
 
       // Mask secrets for non-owner, non-creator org members
       if (ownership.type === 'org') {
@@ -828,13 +969,15 @@ export const gastownRouter = router({
         ...safeConfig
       } = input.config;
 
-      const townStub = getTownDOStub(ctx.env, input.townId);
-
       // For org towns, only owners or the town creator can update config
       if (ownership.type === 'org') {
         const membership = getOrgMembership(ctx.orgMemberships, ownership.orgId);
         const isOrgOwner = membership?.role === 'owner';
-        const existingConfig = await townStub.getTownConfig();
+        const existingConfig = await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub => stub.getTownConfig(),
+          'TownDO.getTownConfig(updateTownConfig-check)'
+        );
         const isTownCreator = ctx.userId === existingConfig.created_by_user_id;
         if (!isOrgOwner && !isTownCreator) {
           throw new TRPCError({
@@ -843,12 +986,20 @@ export const gastownRouter = router({
           });
         }
       }
-      const result = await townStub.updateTownConfig(safeConfig);
+      const result = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.updateTownConfig(safeConfig),
+        'TownDO.updateTownConfig'
+      );
 
       // Push updated env vars to the running container so changes
       // take effect without a container restart
       try {
-        await townStub.syncConfigToContainer();
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub => stub.syncConfigToContainer(),
+          'TownDO.syncConfigToContainer'
+        );
       } catch (err) {
         console.warn('[gastown-trpc] updateTownConfig: syncConfigToContainer failed:', err);
       }
@@ -860,9 +1011,16 @@ export const gastownRouter = router({
     .input(z.object({ townId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      await townStub.forceRefreshContainerToken();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(refreshContainerToken)'
+      );
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.forceRefreshContainerToken(),
+        'TownDO.forceRefreshContainerToken'
+      );
     }),
 
   // ── Events ──────────────────────────────────────────────────────────
@@ -879,12 +1037,11 @@ export const gastownRouter = router({
     .output(z.array(RpcBeadEventOutput))
     .query(async ({ ctx, input }) => {
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, rig.town_id);
-      return townStub.listBeadEvents({
-        beadId: input.beadId,
-        since: input.since,
-        limit: input.limit,
-      });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, rig.town_id),
+        stub => stub.listBeadEvents({ beadId: input.beadId, since: input.since, limit: input.limit }),
+        'TownDO.listBeadEvents(getBeadEvents)'
+      );
     }),
 
   getTownEvents: gastownProcedure
@@ -898,11 +1055,11 @@ export const gastownRouter = router({
     .output(z.array(RpcBeadEventOutput))
     .query(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.listBeadEvents({
-        since: input.since,
-        limit: input.limit,
-      });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.listBeadEvents({ since: input.since, limit: input.limit }),
+        'TownDO.listBeadEvents(getTownEvents)'
+      );
     }),
 
   listConvoys: gastownProcedure
@@ -914,8 +1071,11 @@ export const gastownRouter = router({
     .output(z.array(RpcConvoyDetailOutput))
     .query(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.listConvoysDetailed();
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.listConvoysDetailed(),
+        'TownDO.listConvoysDetailed'
+      );
     }),
 
   getConvoy: gastownProcedure
@@ -928,8 +1088,11 @@ export const gastownRouter = router({
     .output(RpcConvoyDetailOutput.nullable())
     .query(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.getConvoyStatus(input.convoyId);
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getConvoyStatus(input.convoyId),
+        'TownDO.getConvoyStatus(getConvoy)'
+      );
     }),
 
   closeConvoy: gastownProcedure
@@ -942,10 +1105,17 @@ export const gastownRouter = router({
     .output(RpcConvoyDetailOutput.nullable())
     .mutation(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      const convoy = await townStub.closeConvoy(input.convoyId);
+      const convoy = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.closeConvoy(input.convoyId),
+        'TownDO.closeConvoy'
+      );
       if (!convoy) return null;
-      const status = await townStub.getConvoyStatus(input.convoyId);
+      const status = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getConvoyStatus(input.convoyId),
+        'TownDO.getConvoyStatus(closeConvoy)'
+      );
       return status ?? { ...convoy, beads: [] };
     }),
 
@@ -959,9 +1129,16 @@ export const gastownRouter = router({
     .output(RpcConvoyDetailOutput.nullable())
     .mutation(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId, ctx.orgMemberships);
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.startConvoy(input.convoyId);
-      const status = await townStub.getConvoyStatus(input.convoyId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.startConvoy(input.convoyId),
+        'TownDO.startConvoy'
+      );
+      const status = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getConvoyStatus(input.convoyId),
+        'TownDO.getConvoyStatus(startConvoy)'
+      );
       return status ?? null;
     }),
 
@@ -974,8 +1151,11 @@ export const gastownRouter = router({
       const membership = getOrgMembership(ctx.orgMemberships, input.organizationId);
       if (!membership || membership.role === 'billing_manager')
         throw new TRPCError({ code: 'FORBIDDEN' });
-      const stub = getGastownOrgStub(ctx.env, input.organizationId);
-      return stub.listTowns();
+      return withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.listTowns(),
+        'GastownOrgDO.listTowns'
+      );
     }),
 
   createOrgTown: gastownProcedure
@@ -985,27 +1165,39 @@ export const gastownRouter = router({
       const membership = getOrgMembership(ctx.orgMemberships, input.organizationId);
       if (!membership || membership.role === 'billing_manager')
         throw new TRPCError({ code: 'FORBIDDEN' });
-      const stub = getGastownOrgStub(ctx.env, input.organizationId);
-      const town = await stub.createTown({
-        name: input.name,
-        owner_org_id: input.organizationId,
-        created_by_user_id: ctx.userId,
-      });
+      const town = await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub =>
+          stub.createTown({
+            name: input.name,
+            owner_org_id: input.organizationId,
+            created_by_user_id: ctx.userId,
+          }),
+        'GastownOrgDO.createTown'
+      );
 
       // Mint kilocode token so the mayor can start without waiting for rig creation
       const user = userFromCtx(ctx);
       const kilocodeToken = await mintKilocodeToken(ctx.env, user);
 
-      const townStub = getTownDOStub(ctx.env, town.id);
-      await townStub.setTownId(town.id);
-      await townStub.updateTownConfig({
-        kilocode_token: kilocodeToken,
-        owner_type: 'org',
-        owner_id: input.organizationId,
-        owner_user_id: ctx.userId,
-        organization_id: input.organizationId,
-        created_by_user_id: ctx.userId,
-      });
+      await withDORetry(
+        () => getTownDOStub(ctx.env, town.id),
+        stub => stub.setTownId(town.id),
+        'TownDO.setTownId(createOrgTown)'
+      );
+      await withDORetry(
+        () => getTownDOStub(ctx.env, town.id),
+        stub =>
+          stub.updateTownConfig({
+            kilocode_token: kilocodeToken,
+            owner_type: 'org',
+            owner_id: input.organizationId,
+            owner_user_id: ctx.userId,
+            organization_id: input.organizationId,
+            created_by_user_id: ctx.userId,
+          }),
+        'TownDO.updateTownConfig(createOrgTown)'
+      );
 
       return town;
     }),
@@ -1015,14 +1207,20 @@ export const gastownRouter = router({
     .mutation(async ({ input, ctx }) => {
       const membership = getOrgMembership(ctx.orgMemberships, input.organizationId);
       if (!membership || membership.role !== 'owner') throw new TRPCError({ code: 'FORBIDDEN' });
-      const stub = getGastownOrgStub(ctx.env, input.organizationId);
-      const town = await stub.getTownAsync(input.townId);
+      const town = await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.getTownAsync(input.townId),
+        'GastownOrgDO.getTownAsync(deleteOrgTown)'
+      );
       if (!town) throw new TRPCError({ code: 'NOT_FOUND', message: 'Town not found' });
 
       // Destroy the Town DO (handles all rigs, agents, and mayor cleanup)
       try {
-        const townStub = getTownDOStub(ctx.env, input.townId);
-        await townStub.destroy();
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub => stub.destroy(),
+          'TownDO.destroy(deleteOrgTown)'
+        );
       } catch (err) {
         console.error(
           `[gastown-trpc] deleteOrgTown: failed to destroy Town DO for ${input.townId}:`,
@@ -1030,7 +1228,11 @@ export const gastownRouter = router({
         );
       }
 
-      await stub.deleteTown(input.townId);
+      await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.deleteTown(input.townId),
+        'GastownOrgDO.deleteTown'
+      );
     }),
 
   listOrgRigs: gastownProcedure
@@ -1040,10 +1242,17 @@ export const gastownRouter = router({
       const membership = getOrgMembership(ctx.orgMemberships, input.organizationId);
       if (!membership || membership.role === 'billing_manager')
         throw new TRPCError({ code: 'FORBIDDEN' });
-      const stub = getGastownOrgStub(ctx.env, input.organizationId);
-      const town = await stub.getTownAsync(input.townId);
+      const town = await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.getTownAsync(input.townId),
+        'GastownOrgDO.getTownAsync(listOrgRigs)'
+      );
       if (!town) throw new TRPCError({ code: 'NOT_FOUND', message: 'Town not found' });
-      return stub.listRigs(input.townId);
+      return withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.listRigs(input.townId),
+        'GastownOrgDO.listRigs'
+      );
     }),
 
   createOrgRig: gastownProcedure
@@ -1063,22 +1272,36 @@ export const gastownRouter = router({
       if (!membership || membership.role === 'billing_manager')
         throw new TRPCError({ code: 'FORBIDDEN' });
 
-      const orgStub = getGastownOrgStub(ctx.env, input.organizationId);
-      const town = await orgStub.getTownAsync(input.townId);
+      const town = await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub => stub.getTownAsync(input.townId),
+        'GastownOrgDO.getTownAsync(createOrgRig)'
+      );
       if (!town) throw new TRPCError({ code: 'NOT_FOUND', message: 'Town not found' });
 
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(createOrgRig)'
+      );
 
       // Use the town owner's identity for credentials. Only re-mint the
       // kilocode token if the caller is the owner (they have their pepper
       // in ctx). For non-owner members, keep the existing town token.
-      const townConfig = await townStub.getTownConfig();
+      const townConfig = await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getTownConfig(),
+        'TownDO.getTownConfig(createOrgRig)'
+      );
       const credentialUserId = townConfig.owner_user_id ?? ctx.userId;
       let kilocodeToken: string | undefined;
       if (credentialUserId === ctx.userId) {
         kilocodeToken = await mintKilocodeToken(ctx.env, userFromCtx(ctx));
-        await townStub.updateTownConfig({ kilocode_token: kilocodeToken });
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub => stub.updateTownConfig({ kilocode_token: kilocodeToken }),
+          'TownDO.updateTownConfig(createOrgRig-token)'
+        );
       }
 
       // Resolve git credentials using the town owner's identity
@@ -1094,37 +1317,56 @@ export const gastownRouter = router({
         console.warn('[gastown-trpc] createOrgRig: git credential refresh failed', err);
       }
 
-      const rig = await orgStub.createRig({
-        town_id: input.townId,
-        name: input.name,
-        git_url: input.gitUrl,
-        default_branch: input.defaultBranch,
-        platform_integration_id: input.platformIntegrationId,
-      });
+      const rig = await withDORetry(
+        () => getGastownOrgStub(ctx.env, input.organizationId),
+        stub =>
+          stub.createRig({
+            town_id: input.townId,
+            name: input.name,
+            git_url: input.gitUrl,
+            default_branch: input.defaultBranch,
+            platform_integration_id: input.platformIntegrationId,
+          }),
+        'GastownOrgDO.createRig'
+      );
 
       try {
-        await townStub.configureRig({
-          rigId: rig.id,
-          townId: input.townId,
-          gitUrl: input.gitUrl,
-          defaultBranch: input.defaultBranch,
-          userId: credentialUserId,
-          kilocodeToken,
-          platformIntegrationId: input.platformIntegrationId,
-        });
-        await townStub.addRig({
-          rigId: rig.id,
-          name: input.name,
-          gitUrl: input.gitUrl,
-          defaultBranch: input.defaultBranch,
-        });
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub =>
+            stub.configureRig({
+              rigId: rig.id,
+              townId: input.townId,
+              gitUrl: input.gitUrl,
+              defaultBranch: input.defaultBranch,
+              userId: credentialUserId,
+              kilocodeToken,
+              platformIntegrationId: input.platformIntegrationId,
+            }),
+          'TownDO.configureRig(createOrgRig)'
+        );
+        await withDORetry(
+          () => getTownDOStub(ctx.env, input.townId),
+          stub =>
+            stub.addRig({
+              rigId: rig.id,
+              name: input.name,
+              gitUrl: input.gitUrl,
+              defaultBranch: input.defaultBranch,
+            }),
+          'TownDO.addRig(createOrgRig)'
+        );
       } catch (err) {
         console.error(
           `[gastown-trpc] createOrgRig: Town DO configure FAILED for rig ${rig.id}, rolling back:`,
           err
         );
         try {
-          await orgStub.deleteRig(rig.id);
+          await withDORetry(
+            () => getGastownOrgStub(ctx.env, input.organizationId),
+            stub => stub.deleteRig(rig.id),
+            'GastownOrgDO.deleteRig(rollback)'
+          );
         } catch {
           /* best effort rollback */
         }
@@ -1149,20 +1391,22 @@ export const gastownRouter = router({
     )
     .output(z.array(RpcBeadOutput))
     .query(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.listBeads({
-        status: input.status,
-        type: input.type,
-        limit: input.limit,
-      });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.listBeads({ status: input.status, type: input.type, limit: input.limit }),
+        'TownDO.listBeads(adminListBeads)'
+      );
     }),
 
   adminListAgents: adminProcedure
     .input(z.object({ townId: z.string().uuid() }))
     .output(z.array(RpcAgentOutput))
     .query(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.listAgents({});
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.listAgents({}),
+        'TownDO.listAgents(adminListAgents)'
+      );
     }),
 
   adminForceRestartContainer: adminProcedure
@@ -1175,34 +1419,54 @@ export const gastownRouter = router({
   adminForceResetAgent: adminProcedure
     .input(z.object({ townId: z.string().uuid(), agentId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.unhookBead(input.agentId);
-      await townStub.updateAgentStatus(input.agentId, 'idle');
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.unhookBead(input.agentId),
+        'TownDO.unhookBead(adminForceResetAgent)'
+      );
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.updateAgentStatus(input.agentId, 'idle'),
+        'TownDO.updateAgentStatus(adminForceResetAgent)'
+      );
     }),
 
   adminForceCloseBead: adminProcedure
     .input(z.object({ townId: z.string().uuid(), beadId: z.string().uuid() }))
     .output(RpcBeadOutput)
     .mutation(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.closeBead(input.beadId, 'admin');
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.closeBead(input.beadId, 'admin'),
+        'TownDO.closeBead(adminForceCloseBead)'
+      );
     }),
 
   adminForceFailBead: adminProcedure
     .input(z.object({ townId: z.string().uuid(), beadId: z.string().uuid() }))
     .output(RpcBeadOutput)
     .mutation(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.updateBeadStatus(input.beadId, 'failed', 'admin');
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.updateBeadStatus(input.beadId, 'failed', 'admin'),
+        'TownDO.updateBeadStatus(adminForceFailBead)'
+      );
     }),
 
   adminGetAlarmStatus: adminProcedure
     .input(z.object({ townId: z.string().uuid() }))
     .output(RpcAlarmStatusOutput)
     .query(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      await townStub.setTownId(input.townId);
-      return townStub.getAlarmStatus();
+      await withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.setTownId(input.townId),
+        'TownDO.setTownId(adminGetAlarmStatus)'
+      );
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getAlarmStatus(),
+        'TownDO.getAlarmStatus(adminGetAlarmStatus)'
+      );
     }),
 
   adminGetTownEvents: adminProcedure
@@ -1216,20 +1480,23 @@ export const gastownRouter = router({
     )
     .output(z.array(RpcBeadEventOutput))
     .query(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.listBeadEvents({
-        beadId: input.beadId,
-        since: input.since,
-        limit: input.limit,
-      });
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub =>
+          stub.listBeadEvents({ beadId: input.beadId, since: input.since, limit: input.limit }),
+        'TownDO.listBeadEvents(adminGetTownEvents)'
+      );
     }),
 
   adminGetBead: adminProcedure
     .input(z.object({ townId: z.string().uuid(), beadId: z.string().uuid() }))
     .output(RpcBeadOutput.nullable())
     .query(async ({ ctx, input }) => {
-      const townStub = getTownDOStub(ctx.env, input.townId);
-      return townStub.getBeadAsync(input.beadId);
+      return withDORetry(
+        () => getTownDOStub(ctx.env, input.townId),
+        stub => stub.getBeadAsync(input.beadId),
+        'TownDO.getBeadAsync(adminGetBead)'
+      );
     }),
 });
 
