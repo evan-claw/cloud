@@ -7,6 +7,7 @@
 import { Hono } from 'hono';
 import type { Env, FixRequest, FixResponse } from './types';
 import {
+  withDORetry,
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
@@ -48,13 +49,27 @@ app.post('/fix/dispatch', async c => {
 
     // Get or create Durable Object instance
     const id = c.env.AUTO_FIX_ORCHESTRATOR.idFromName(body.ticketId);
-    const stub = c.env.AUTO_FIX_ORCHESTRATOR.get(id);
 
     // Initialize the fix session
-    const result = await stub.start(body);
+    const result = await withDORetry(
+      () => c.env.AUTO_FIX_ORCHESTRATOR.get(id),
+      stub => stub.start(body),
+      'start'
+    );
 
-    // Run the fix process asynchronously
-    c.executionCtx.waitUntil(stub.runFix());
+    // Run the fix process asynchronously (fire-and-forget)
+    c.executionCtx.waitUntil(
+      withDORetry(
+        () => c.env.AUTO_FIX_ORCHESTRATOR.get(id),
+        stub => stub.runFix(),
+        'runFix'
+      ).catch((error: Error) => {
+        console.error('[AutoFixWorker] runFix failed:', {
+          ticketId: body.ticketId,
+          error: error.message,
+        });
+      })
+    );
 
     return c.json<FixResponse>({
       ticketId: body.ticketId,
@@ -82,10 +97,13 @@ app.get('/fix/:ticketId/status', async c => {
 
     // Get Durable Object instance
     const id = c.env.AUTO_FIX_ORCHESTRATOR.idFromName(ticketId);
-    const stub = c.env.AUTO_FIX_ORCHESTRATOR.get(id);
 
-    // Get status (this would need to be implemented in the DO)
-    const result = stub.getEvents();
+    // Get status via RPC with retry
+    const result = await withDORetry(
+      () => c.env.AUTO_FIX_ORCHESTRATOR.get(id),
+      stub => stub.getEvents(),
+      'getEvents'
+    );
 
     return c.json(result);
   } catch (error) {
