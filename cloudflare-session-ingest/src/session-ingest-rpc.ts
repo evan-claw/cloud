@@ -91,13 +91,33 @@ export class SessionIngestRPC extends WorkerEntrypoint<Env> {
   async deleteSessionForCloudAgent(params: {
     sessionId: string;
     kiloUserId: string;
+    onlyIfEmpty?: boolean;
   }): Promise<void> {
     const parsed = z
       .object({
         sessionId: sessionIdSchema,
         kiloUserId: z.string().min(1),
+        onlyIfEmpty: z.boolean().optional(),
       })
       .parse(params);
+
+    // When onlyIfEmpty is set, atomically check emptiness and clear within a
+    // single DO request to prevent a TOCTOU race where ingest data arrives
+    // between an isEmpty() check and a subsequent clear() call.
+    if (parsed.onlyIfEmpty) {
+      const cleared = await withDORetry(
+        () =>
+          getSessionIngestDO(this.env, {
+            kiloUserId: parsed.kiloUserId,
+            sessionId: parsed.sessionId,
+          }),
+        stub => stub.clearIfEmpty(),
+        'SessionIngestDO.clearIfEmpty'
+      );
+      if (!cleared) {
+        return;
+      }
+    }
 
     const db = getWorkerDb(this.env.HYPERDRIVE.connectionString);
 
@@ -124,20 +144,23 @@ export class SessionIngestRPC extends WorkerEntrypoint<Env> {
       );
     }
 
-    try {
-      await withDORetry(
-        () =>
-          getSessionIngestDO(this.env, {
-            kiloUserId: parsed.kiloUserId,
-            sessionId: parsed.sessionId,
-          }),
-        stub => stub.clear(),
-        'SessionIngestDO.clear'
-      );
-    } catch (error) {
-      cacheErrors.push(
-        `SessionIngestDO.clear: ${error instanceof Error ? error.message : String(error)}`
-      );
+    // When onlyIfEmpty was set, the DO was already cleared atomically above.
+    if (!parsed.onlyIfEmpty) {
+      try {
+        await withDORetry(
+          () =>
+            getSessionIngestDO(this.env, {
+              kiloUserId: parsed.kiloUserId,
+              sessionId: parsed.sessionId,
+            }),
+          stub => stub.clear(),
+          'SessionIngestDO.clear'
+        );
+      } catch (error) {
+        cacheErrors.push(
+          `SessionIngestDO.clear: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
 
     if (cacheErrors.length > 0) {

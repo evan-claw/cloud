@@ -71,6 +71,8 @@ export type InstanceMutableState = {
   lastDestroyErrorStatus: number | null;
   lastDestroyErrorMessage: string | null;
   lastDestroyErrorAt: number | null;
+  lastStartErrorMessage: string | null;
+  lastStartErrorAt: number | null;
   lastBoundMachineRecoveryAt: number | null;
   instanceFeatures: string[];
   gmailNotificationsEnabled: boolean;
@@ -78,6 +80,8 @@ export type InstanceMutableState = {
   gmailPushOidcEmail: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
+  /** In-memory only — guards syncStatusFromLiveCheck during restartMachine. */
+  restartingAt: number | null;
 };
 
 /**

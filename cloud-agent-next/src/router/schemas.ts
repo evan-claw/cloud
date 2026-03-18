@@ -221,6 +221,13 @@ export const PrepareSessionInput = z
       .describe(
         'PR gate threshold — when not "off", the agent should evaluate findings and report gateResult in its callback'
       ),
+    autoInitiate: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        'When true, return immediately after creating IDs and run preparation asynchronously. Progress events are streamed via WebSocket.'
+      ),
   })
   .refine(validateGitSource, {
     message: 'Must provide either githubRepo or gitUrl, but not both',
@@ -234,7 +241,7 @@ export const PrepareSessionInput = z
 /** Output schema for prepareSession endpoint */
 export const PrepareSessionOutput = z.object({
   cloudAgentSessionId: z.string().describe('The generated cloud-agent session ID'),
-  kiloSessionId: z.string().describe('The generated Kilo CLI session ID'),
+  kiloSessionId: z.string().describe('The Kilo CLI session ID'),
 });
 
 /**

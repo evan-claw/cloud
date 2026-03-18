@@ -298,7 +298,7 @@
           "image": "./Dockerfile.dev",
           "instance_type": "standard-2",
           "image_vars": {
-            "KILOCODE_CLI_VERSION": "7.0.46",
+            "KILOCODE_CLI_VERSION": "7.0.47",
           },
           "max_instances": 2,
           "rollout_active_grace_period": 60,

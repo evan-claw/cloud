@@ -19,6 +19,7 @@ export type CreateSessionForCloudAgentParams = {
 export type DeleteSessionForCloudAgentParams = {
   sessionId: string;
   kiloUserId: string;
+  onlyIfEmpty?: boolean;
 };
 
 export type SessionIngestBinding = Fetcher & {

@@ -19,6 +19,7 @@ export const OpenRouterInferenceProviderIdSchema = z.enum([
   'novita',
   'streamlake',
   'stealth',
+  'xiaomi',
   'z-ai',
 
   // not real OpenRouter providers

@@ -6,6 +6,7 @@ import type { InstanceMutableState } from './types';
 import { getFlyConfig } from './types';
 import { storageUpdate } from './state';
 import { attemptMetadataRecovery } from './reconcile';
+import { doError, doWarn, toLoggable } from './log';
 
 /**
  * Restore DO state from Postgres backup if SQLite was wiped.
@@ -18,7 +19,7 @@ export async function restoreFromPostgres(
 ): Promise<void> {
   const connectionString = env.HYPERDRIVE?.connectionString;
   if (!connectionString) {
-    console.warn('[DO] HYPERDRIVE not configured, cannot restore from Postgres');
+    doWarn(state, 'HYPERDRIVE not configured, cannot restore from Postgres');
     return;
   }
 
@@ -27,7 +28,7 @@ export async function restoreFromPostgres(
     const instance = await getActiveInstance(db, userId);
 
     if (!instance) {
-      console.warn('[DO] No active instance found in Postgres for', userId);
+      doWarn(state, 'No active instance found in Postgres', { userId });
       return;
     }
 
@@ -103,10 +104,12 @@ export async function restoreFromPostgres(
       const flyConfig = getFlyConfig(env, state);
       await attemptMetadataRecovery(flyConfig, ctx, state, 'postgres_restore');
     } catch (err) {
-      console.warn('[DO] Metadata recovery after Postgres restore failed:', err);
+      doWarn(state, 'Metadata recovery after Postgres restore failed', {
+        error: toLoggable(err),
+      });
     }
   } catch (err) {
-    console.error('[DO] Postgres restore failed:', err);
+    doError(state, 'Postgres restore failed', { error: toLoggable(err) });
   }
 }
 
@@ -122,7 +125,7 @@ export async function markDestroyedInPostgresHelper(
 ): Promise<boolean> {
   const connectionString = env.HYPERDRIVE?.connectionString;
   if (!connectionString) {
-    console.warn('[DO] HYPERDRIVE not configured, skipping Postgres mark-destroyed');
+    doWarn(state, 'HYPERDRIVE not configured, skipping Postgres mark-destroyed');
     return true;
   }
 
@@ -133,7 +136,9 @@ export async function markDestroyedInPostgresHelper(
     await ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: false }));
     return true;
   } catch (err) {
-    console.error('[DO] Failed to mark instance destroyed in Postgres:', err);
+    doError(state, 'Failed to mark instance destroyed in Postgres', {
+      error: toLoggable(err),
+    });
     return false;
   }
 }

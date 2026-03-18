@@ -13,6 +13,7 @@ import {
 } from '../gateway-controller-types';
 import { HEALTH_PROBE_TIMEOUT_SECONDS, HEALTH_PROBE_INTERVAL_MS } from '../../config';
 import type { InstanceMutableState } from './types';
+import { doWarn, toLoggable } from './log';
 
 /**
  * Validate that the instance has all context needed for gateway controller RPCs.
@@ -96,38 +97,32 @@ export async function callGatewayController<T>(
   }
 
   if (!response.ok) {
-    const errorCode =
-      typeof body === 'object' &&
-      body !== null &&
-      'code' in body &&
-      typeof (body as { code?: unknown }).code === 'string'
-        ? (body as { code: string }).code
-        : undefined;
-    const errorMessage =
-      typeof body === 'object' &&
-      body !== null &&
-      'error' in body &&
-      typeof (body as { error?: unknown }).error === 'string'
-        ? (body as { error: string }).error
-        : `Gateway controller request failed (${response.status})`;
+    const bodyObj =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    const errorCode = typeof bodyObj.code === 'string' ? bodyObj.code : undefined;
+
+    let errorMessage = `Gateway controller request failed (${response.status})`;
+    if (typeof bodyObj.error === 'string') {
+      errorMessage = bodyObj.error;
+    } else if (typeof bodyObj.message === 'string') {
+      errorMessage = bodyObj.message;
+    }
+
     throw new GatewayControllerError(response.status, errorMessage, errorCode);
   }
 
   const parsed = responseSchema.safeParse(body ?? {});
   if (!parsed.success) {
-    console.warn(
-      '[DO] Gateway controller returned invalid response payload',
-      JSON.stringify({
-        path,
-        status: response.status,
-        body: rawBody.slice(0, 1024),
-        issues: parsed.error.issues.map(issue => ({
-          path: issue.path.join('.'),
-          code: issue.code,
-          message: issue.message,
-        })),
-      })
-    );
+    doWarn(state, 'Gateway controller returned invalid response payload', {
+      path,
+      status: response.status,
+      body: rawBody.slice(0, 1024),
+      issues: parsed.error.issues.map(issue => ({
+        path: issue.path.join('.'),
+        code: issue.code,
+        message: issue.message,
+      })),
+    });
     throw new GatewayControllerError(
       502,
       `Gateway controller returned invalid response for ${path}`
@@ -207,10 +202,13 @@ export function restoreConfig(
   );
 }
 
-function isErrorUnknownRoute(error: unknown): boolean {
+export function isErrorUnknownRoute(error: unknown): boolean {
   // If a controller predates a new route, the request will either:
-  //   - fall through to the catch-all proxy (401 REQUIRE_PROXY_TOKEN)
+  //   - fall through to the catch-all proxy which returns 401 with code
+  //     'controller_route_unavailable' (for /_kilo/* paths)
   //   - forward to the gateway which returns 404 for the unknown path.
+  // We intentionally do NOT match bare 401 (without the code) to avoid
+  // masking genuine authentication failures.
   return (
     error instanceof GatewayControllerError &&
     (error.status === 404 || error.code === 'controller_route_unavailable')
@@ -326,10 +324,9 @@ export async function patchConfigOnMachine(
       patch
     );
   } catch (err) {
-    console.warn(
-      '[DO] patchConfigOnMachine failed (non-fatal):',
-      err instanceof Error ? err.message : String(err)
-    );
+    doWarn(state, 'patchConfigOnMachine failed (non-fatal)', {
+      error: toLoggable(err),
+    });
   }
 }
 
@@ -392,9 +389,7 @@ export async function waitForHealthy(
     await new Promise(r => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
   }
 
-  console.warn(
-    '[DO] Gateway health probe timed out after',
-    HEALTH_PROBE_TIMEOUT_SECONDS,
-    's — proceeding anyway'
-  );
+  doWarn(state, 'Gateway health probe timed out — proceeding anyway', {
+    timeoutSeconds: HEALTH_PROBE_TIMEOUT_SECONDS,
+  });
 }

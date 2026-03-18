@@ -12,7 +12,7 @@ import { parseRegions, shuffleRegions, deprioritizeRegion } from '../regions';
 import { guestFromSize, volumeNameFromSandboxId } from '../machine-config';
 import type { InstanceMutableState } from './types';
 import { storageUpdate } from './state';
-import { reconcileLog } from './log';
+import { reconcileLog, doError, doWarn, toLoggable } from './log';
 
 /**
  * Ensure a Fly Volume exists. Creates one if flyVolumeId is null.
@@ -84,7 +84,9 @@ export async function replaceStrandedVolume(
       if (fly.isFlyNotFound(err)) {
         machineGone = true;
       } else {
-        console.warn('[DO] Failed to destroy stranded machine:', err);
+        doWarn(state, 'Failed to destroy stranded machine', {
+          error: toLoggable(err),
+        });
       }
     }
     if (machineGone) {
@@ -150,7 +152,10 @@ export async function replaceStrandedVolume(
     });
   } catch (err) {
     if (!fly.isFlyNotFound(err)) {
-      console.warn('[DO] Failed to delete stranded volume (will leak):', oldVolumeId, err);
+      doWarn(state, 'Failed to delete stranded volume (will leak)', {
+        volumeId: oldVolumeId,
+        error: toLoggable(err),
+      });
     }
   }
 }
@@ -205,7 +210,9 @@ export async function startExistingMachine(
         envFlyRegion
       );
     } else {
-      console.error('[DO] Transient error starting existing machine:', err);
+      doError(state, 'Transient error starting existing machine', {
+        error: toLoggable(err),
+      });
       throw err;
     }
   }

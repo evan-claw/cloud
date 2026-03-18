@@ -183,3 +183,49 @@ export const MetadataSchema = z.object({
     .transform(s => s as SandboxId)
     .optional(),
 });
+
+/**
+ * Schema for async preparation input stored in DO storage.
+ * Single source of truth for the shape of data passed between
+ * startPreparationAsync (write) and runPreparationAsync (read via alarm).
+ */
+export const PreparationInputSchema = z.object({
+  // Session identity
+  sessionId: z.string(),
+  kiloSessionId: z.string().optional(),
+  userId: z.string(),
+  orgId: z.string().optional(),
+  botId: z.string().optional(),
+  // Auth
+  authToken: z.string(),
+  // Git source
+  githubRepo: z.string().optional(),
+  githubToken: z.string().optional(),
+  gitUrl: z.string().optional(),
+  gitToken: z.string().optional(),
+  platform: z.enum(['github', 'gitlab']).optional(),
+  // Execution params
+  prompt: z.string(),
+  mode: z.string(),
+  model: z.string(),
+  variant: z.string().optional(),
+  // Configuration
+  envVars: z.record(z.string(), z.string()).optional(),
+  encryptedSecrets: EncryptedSecretsSchema.optional(),
+  setupCommands: z.array(z.string()).optional(),
+  mcpServers: z.record(z.string(), MCPServerConfigSchema).optional(),
+  upstreamBranch: z.string().optional(),
+  autoCommit: z.boolean().optional(),
+  condenseOnComplete: z.boolean().optional(),
+  appendSystemPrompt: z.string().optional(),
+  callbackTarget: CallbackTargetSchema.optional(),
+  images: ImagesSchema.optional(),
+  createdOnPlatform: z.string().optional(),
+  shallow: z.boolean().optional(),
+  gateThreshold: z.enum(['off', 'all', 'warning', 'critical']).optional(),
+  kilocodeOrganizationId: z.string().optional(),
+  // Auto-initiate after preparation
+  autoInitiate: z.boolean(),
+});
+
+export type PreparationInput = z.infer<typeof PreparationInputSchema>;

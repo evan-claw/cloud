@@ -1232,6 +1232,7 @@ export class SessionService {
         kilocodeToken,
         freshGithubToken,
         freshGitToken,
+        onProgress: options.onProgress,
       });
     }
 
@@ -1252,6 +1253,7 @@ export class SessionService {
     kilocodeToken,
     freshGithubToken,
     freshGitToken,
+    onProgress,
   }: {
     session: ExecutionSession;
     sessionId: string;
@@ -1263,6 +1265,7 @@ export class SessionService {
     kilocodeToken: string;
     freshGithubToken?: string;
     freshGitToken?: string;
+    onProgress?: (step: string, message: string) => void;
   }): Promise<void> {
     if (!metadata) {
       throw new Error(
@@ -1284,6 +1287,7 @@ export class SessionService {
       // Clone first so .git exists when `kilo import` runs — the CLI derives
       // the project ID from the repo's root commit hash; without a repo the
       // FK on session.project_id fails.
+      onProgress?.('cloning', 'Cloning repository…');
       await restoreWorkspace(session, context.workspacePath, context.branchName, {
         githubRepo: metadata.githubRepo,
         githubToken: freshGithubToken ?? metadata.githubToken,
@@ -1294,11 +1298,13 @@ export class SessionService {
         platform: context.platform,
       });
       // Write auth file BEFORE kilo import so KiloSessions.bootstrap() can authenticate
+      onProgress?.('workspace_setup', 'Setting up workspace…');
       await writeAuthFile(sandbox, context.sessionHome, kilocodeToken);
       await writeGlobalRules(sandbox, context.sessionHome, sessionId);
 
       // Single restore script handles download, import, and diff application inside
       // the sandbox — the snapshot never enters worker memory.
+      onProgress?.('kilo_session', 'Restoring session…');
       logger.info('Starting cold-start session restore');
 
       const escapedId = metadata.kiloSessionId.replaceAll("'", "'\\''");
@@ -1369,9 +1375,13 @@ export class SessionService {
 
       // Re-run setup commands (fresh clone, need to reinstall)
       if (metadata.setupCommands && metadata.setupCommands.length > 0) {
+        onProgress?.('setup_commands', 'Running setup commands…');
         logger.info('Re-running setup commands after fresh clone');
         await runSetupCommands(session, context, metadata.setupCommands, false); // lenient
       }
+
+      // Wrapper will be (re)started by the orchestrator after we return
+      onProgress?.('kilo_server', 'Starting Kilo…');
     } catch (error) {
       // Remove the workspace and sessionHome so the next retry sees a true
       // cold start and re-runs the full restore from scratch.
@@ -1723,12 +1733,14 @@ export class SessionService {
   async deleteCliSessionViaSessionIngest(
     kiloSessionId: string,
     kiloUserId: string,
-    env: PersistenceEnv
+    env: PersistenceEnv,
+    opts?: { onlyIfEmpty?: boolean }
   ): Promise<void> {
     try {
       await env.SESSION_INGEST.deleteSessionForCloudAgent({
         sessionId: kiloSessionId,
         kiloUserId,
+        onlyIfEmpty: opts?.onlyIfEmpty,
       });
     } catch (error) {
       logger
@@ -1859,6 +1871,7 @@ export interface ResumeOptions {
   env: PersistenceEnv;
   githubToken?: string;
   gitToken?: string;
+  onProgress?: (step: string, message: string) => void;
 }
 
 /**

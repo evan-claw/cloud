@@ -20,9 +20,9 @@ export default async function GetStartedPage() {
     : '/users/sign_in?callbackPath=/organizations/new';
 
   return (
-    <KiloCardLayout>
+    <KiloCardLayout contentClassName="space-y-4 p-4 pt-0">
       <ProductOptionsContent isAuthenticated={isAuthenticated} />
-      <div className="px-6 pb-6">
+      <div className="pb-2">
         <p className="text-muted-foreground mb-3 text-lg">Using Kilo for work?</p>
         <Link
           href={orgLink}

@@ -36,9 +36,16 @@ function getKiloClawMetadata(
   return { type: 'kiloclaw', plan, kiloUserId };
 }
 
-function getSubscriptionPeriods(subscription: Stripe.Subscription) {
-  // In the current Stripe API, period timestamps live on the subscription item, not the subscription.
+function getSubscriptionPeriods(subscription: Stripe.Subscription, kiloUserId?: string) {
+  // Stripe moved period timestamps to the item level (not the top-level subscription object).
   const item = subscription.items.data[0];
+  if (!item) {
+    console.warn(
+      '[stripe] Subscription has no items:',
+      subscription.id,
+      kiloUserId ? `userId=${kiloUserId}` : ''
+    );
+  }
   return {
     current_period_start: item ? new Date(item.current_period_start * 1000).toISOString() : null,
     current_period_end: item ? new Date(item.current_period_end * 1000).toISOString() : null,
@@ -147,7 +154,7 @@ export async function handleKiloClawSubscriptionCreated(params: {
 
   const { kiloUserId } = metadata;
   const plan = detectPlanFromSubscription(subscription, metadata.plan);
-  const periods = getSubscriptionPeriods(subscription);
+  const periods = getSubscriptionPeriods(subscription, kiloUserId);
   const status = mapStripeStatus(subscription.status);
 
   // Capture suspension state before the upsert clears it, so auto-resume
@@ -278,7 +285,7 @@ export async function handleKiloClawSubscriptionUpdated(params: {
 
   const { kiloUserId } = metadata;
   const plan = detectPlanFromSubscription(subscription, metadata.plan);
-  const periods = getSubscriptionPeriods(subscription);
+  const periods = getSubscriptionPeriods(subscription, kiloUserId);
   const status = mapStripeStatus(subscription.status);
 
   const wasSuspended =

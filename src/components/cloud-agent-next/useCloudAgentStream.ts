@@ -72,6 +72,12 @@ export type UseCloudAgentStreamOptions = {
   onSendFailed?: (messageText: string) => void;
   /** Callback when the agent's current branch changes (from complete event) */
   onBranchChanged?: (branch: string) => void;
+  /** Callback when async preparation emits a progress event */
+  onPreparingProgress?: (step: string, message: string) => void;
+  /** Callback when async preparation completes (step === 'ready') */
+  onPreparationReady?: () => void;
+  /** Callback when async preparation fails (step === 'failed') */
+  onPreparationFailed?: (message: string) => void;
 };
 
 export type UseCloudAgentStreamReturn = {
@@ -111,6 +117,9 @@ export function useCloudAgentStream({
   onQuestionAsked,
   onSendFailed,
   onBranchChanged,
+  onPreparingProgress,
+  onPreparationReady,
+  onPreparationFailed,
 }: UseCloudAgentStreamOptions): UseCloudAgentStreamReturn {
   const trpcClient = useRawTRPCClient();
 
@@ -179,6 +188,9 @@ export function useCloudAgentStream({
   const onQuestionAskedRef = useRef(onQuestionAsked);
   const onSendFailedRef = useRef(onSendFailed);
   const onBranchChangedRef = useRef(onBranchChanged);
+  const onPreparingProgressRef = useRef(onPreparingProgress);
+  const onPreparationReadyRef = useRef(onPreparationReady);
+  const onPreparationFailedRef = useRef(onPreparationFailed);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -205,6 +217,18 @@ export function useCloudAgentStream({
   }, [onSendFailed]);
 
   useEffect(() => {
+    onPreparingProgressRef.current = onPreparingProgress;
+  }, [onPreparingProgress]);
+
+  useEffect(() => {
+    onPreparationReadyRef.current = onPreparationReady;
+  }, [onPreparationReady]);
+
+  useEffect(() => {
+    onPreparationFailedRef.current = onPreparationFailed;
+  }, [onPreparationFailed]);
+
+  useEffect(() => {
     cloudAgentSessionIdRef.current = cloudAgentSessionIdProp ?? null;
   }, [cloudAgentSessionIdProp]);
 
@@ -218,7 +242,11 @@ export function useCloudAgentStream({
    */
   const setIndicator = useCallback(
     (
-      indicator: { type: 'error' | 'warning' | 'info'; message: string; timestamp: number } | null
+      indicator: {
+        type: 'error' | 'warning' | 'info' | 'progress';
+        message: string;
+        timestamp: number;
+      } | null
     ) => {
       if (infoClearTimerRef.current) {
         clearTimeout(infoClearTimerRef.current);
@@ -449,6 +477,47 @@ export function useCloudAgentStream({
 
   const handleEvent = useCallback(
     (event: CloudAgentEvent) => {
+      // Handle preparation progress events (async preparation flow)
+      if (event.streamEventType === 'preparing') {
+        const raw = event.data;
+        const step =
+          typeof raw === 'object' && raw !== null && 'step' in raw && typeof raw.step === 'string'
+            ? raw.step
+            : 'unknown';
+        const message =
+          typeof raw === 'object' &&
+          raw !== null &&
+          'message' in raw &&
+          typeof raw.message === 'string'
+            ? raw.message
+            : '';
+
+        onPreparingProgressRef.current?.(step, message);
+
+        if (step === 'ready') {
+          onPreparationReadyRef.current?.();
+          setIndicator({
+            type: 'progress',
+            message: 'Starting session…',
+            timestamp: Date.now(),
+          });
+        } else if (step === 'failed') {
+          onPreparationFailedRef.current?.(message);
+          setIndicator({
+            type: 'error',
+            message: message || 'Preparation failed',
+            timestamp: Date.now(),
+          });
+        } else {
+          setIndicator({
+            type: 'progress',
+            message,
+            timestamp: Date.now(),
+          });
+        }
+        return;
+      }
+
       // Set inline indicator for session-level events (no ErrorBanner).
       // The event processor handles streaming state and message completion.
       if (event.streamEventType === 'wrapper_disconnected') {

@@ -60,7 +60,7 @@ function enhancedModelList(models: OpenRouterModel[]) {
   const enhancedModels = models
     .filter(
       (model: OpenRouterModel) =>
-        !kiloFreeModels.some(m => m.public_id === model.id && m.status === 'public') &&
+        !kiloFreeModels.some(m => m.public_id === model.id && m.status !== 'disabled') &&
         !isRateLimitedToDeath(model.id)
     )
     .concat(

@@ -265,6 +265,8 @@ export function CloudChatContainer({
 
   // Legacy sessions may have cloudAgentSessionId without prepared state in the DO
   const [needsLegacyPrepare, setNeedsLegacyPrepare] = useState(false);
+  // Async preparation in progress (autoInitiate flow: DO has metadata but no preparedAt)
+  const [isPreparingAsync, setIsPreparingAsync] = useState(false);
   const [preflightComplete, setPreflightComplete] = useState(false);
   const preflightedCloudAgentSessionRef = useRef<string | null>(null);
 
@@ -289,6 +291,24 @@ export function CloudChatContainer({
     setFailedMessageText(messageText);
   }, []);
 
+  // Handle async preparation progress — show progress in chat feed
+  const handlePreparationReady = useCallback(() => {
+    setIsPreparingAsync(false);
+    setIsSessionInitiated(true);
+  }, []);
+
+  const handlePreparationFailed = useCallback(
+    (message: string) => {
+      setIsPreparingAsync(false);
+      // Prevent the auto-initiate effect from firing after preparation failure
+      if (cloudAgentSessionId) {
+        setAutoInitiatedSessionId(cloudAgentSessionId);
+      }
+      setError(`Session preparation failed: ${message}`);
+    },
+    [setError, cloudAgentSessionId]
+  );
+
   // Stream hook (V2 WebSocket-based)
   const {
     sendMessage: sendMessageV2,
@@ -308,6 +328,8 @@ export function CloudChatContainer({
     onBranchChanged: useCallback((branch: string) => {
       setLoadedDbSession(prev => (prev ? { ...prev, git_branch: branch } : prev));
     }, []),
+    onPreparationReady: handlePreparationReady,
+    onPreparationFailed: handlePreparationFailed,
   });
 
   // Wrapper for sendMessage that doesn't use sessionIdOverride
@@ -460,12 +482,20 @@ export function CloudChatContainer({
           const isInitiated = runtimeState?.initiatedAt ? true : hasMessages;
           setIsSessionInitiated(isInitiated);
 
-          // Check if this is a legacy session (has cloud_agent_session_id but no preparedAt in DO)
+          // Check session state: distinguish legacy (no DO), async-preparing, and ready
           if (sessionData.cloud_agent_session_id) {
-            if (!runtimeState || !runtimeState.preparedAt) {
+            if (!runtimeState) {
+              // No DO at all — truly legacy session
               setNeedsLegacyPrepare(true);
-            } else {
+              setIsPreparingAsync(false);
+            } else if (!runtimeState.preparedAt) {
+              // DO exists but not yet prepared — async preparation in progress
               setNeedsLegacyPrepare(false);
+              setIsPreparingAsync(true);
+            } else {
+              // Fully prepared — ready to initiate
+              setNeedsLegacyPrepare(false);
+              setIsPreparingAsync(false);
             }
             // Mark preflight tracking ref so we don't re-run
             preflightedCloudAgentSessionRef.current = sessionData.cloud_agent_session_id;
@@ -484,7 +514,6 @@ export function CloudChatContainer({
           });
 
           setResumeStrategy(result.resumeStrategy);
-          loadedDbSessionIdRef.current = sessionIdFromParams;
           setLoadedDbSession(session);
 
           // Apply runtime state from DO (mode, model, repository)
@@ -526,6 +555,7 @@ export function CloudChatContainer({
           setNeedsLegacyPrepare(true);
         }
       } finally {
+        loadedDbSessionIdRef.current = sessionIdFromParams;
         setIsLoadingFromDb(false);
         setPreflightComplete(true);
       }
@@ -537,6 +567,7 @@ export function CloudChatContainer({
     isLoadingFromDb,
     isStreaming,
     cloudAgentSessionId,
+    organizationId,
     refetchSession,
     refetchMessages,
     loadSessionToIndexedDb,
@@ -555,6 +586,7 @@ export function CloudChatContainer({
       !cloudAgentSessionId ||
       !preflightComplete ||
       needsLegacyPrepare ||
+      isPreparingAsync ||
       isSessionInitiated ||
       isStreaming ||
       isLoadingFromDb ||
@@ -577,6 +609,7 @@ export function CloudChatContainer({
     cloudAgentSessionId,
     preflightComplete,
     needsLegacyPrepare,
+    isPreparingAsync,
     isSessionInitiated,
     isStreaming,
     isLoadingFromDb,
@@ -589,10 +622,10 @@ export function CloudChatContainer({
   // Track which sessions we've already connected to (for existing sessions)
   const connectedExistingSessionRef = useRef<string | null>(null);
 
-  // Connect to WebSocket for already-initiated sessions (e.g., when loading a previously started session)
+  // Connect to WebSocket for already-initiated sessions or during async preparation
   useEffect(() => {
-    // Only connect if session was previously initiated (has blob URLs)
-    if (!isSessionInitiated) {
+    // Connect if session was previously initiated OR async preparation is in progress
+    if (!isSessionInitiated && !isPreparingAsync) {
       return;
     }
 
@@ -639,6 +672,7 @@ export function CloudChatContainer({
     cloudAgentSessionId,
     currentSessionId,
     isSessionInitiated,
+    isPreparingAsync,
     isStreaming,
     isLoadingFromDb,
     connectionState.status,
@@ -656,6 +690,7 @@ export function CloudChatContainer({
       // Disconnect old WebSocket to prevent events from old session updating UI
       cleanup();
       setAutoInitiatedSessionId(null);
+      setIsPreparingAsync(false);
       setPersistedConfig(null);
       setResumeConfigError(null);
       connectedExistingSessionRef.current = null;

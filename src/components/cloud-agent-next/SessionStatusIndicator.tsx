@@ -29,6 +29,13 @@ function IndicatorContent({ indicator }: { indicator: SessionStatusIndicatorType
           <span>{indicator.message}</span>
         </span>
       );
+    case 'progress':
+      return (
+        <span className="text-muted-foreground flex items-center gap-2">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>{indicator.message}</span>
+        </span>
+      );
     case 'info':
       return (
         <span className="text-muted-foreground flex items-center gap-2">

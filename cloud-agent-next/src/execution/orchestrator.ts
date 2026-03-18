@@ -60,7 +60,10 @@ export class ExecutionOrchestrator {
    *
    * @throws ExecutionError with appropriate code on failure (no internal retry)
    */
-  async execute(plan: ExecutionPlan): Promise<ExecutionResult> {
+  async execute(
+    plan: ExecutionPlan,
+    options?: { onProgress?: (step: string, message: string) => void }
+  ): Promise<ExecutionResult> {
     const { executionId, sessionId, userId, orgId, prompt, mode, workspace, wrapper } = plan;
 
     logger.setTags({
@@ -91,7 +94,7 @@ export class ExecutionOrchestrator {
     }
 
     // 2. Workspace preparation (may throw WORKSPACE_SETUP_FAILED)
-    const prepared = await this.prepareWorkspace(sandbox, plan);
+    const prepared = await this.prepareWorkspace(sandbox, plan, options?.onProgress);
 
     // 3. Update git remote token if needed (resume path with token overrides)
     if (!workspace.shouldPrepare) {
@@ -179,7 +182,8 @@ export class ExecutionOrchestrator {
    */
   private async prepareWorkspace(
     sandbox: SandboxInstance,
-    plan: ExecutionPlan
+    plan: ExecutionPlan,
+    onProgress?: (step: string, message: string) => void
   ): Promise<PreparedSession> {
     const { workspace, sessionId, userId, orgId } = plan;
 
@@ -203,6 +207,7 @@ export class ExecutionOrchestrator {
           env: this.deps.env,
           githubToken: resumeContext.githubToken,
           gitToken: resumeContext.gitToken,
+          onProgress,
         });
       }
 

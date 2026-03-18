@@ -16,6 +16,15 @@ import { ulid } from 'ulid';
 export type ExecutionId = `exc_${string}`;
 
 /**
+ * Unique identifier for a preparation request.
+ * Format: prep_<string>
+ */
+export type PreparationId = `prep_${string}`;
+
+/** Union of IDs that can be used as an event source */
+export type EventSourceId = ExecutionId | PreparationId;
+
+/**
  * Session identifier - supports both:
  * - `sess_*` for new WebSocket sessions
  * - `agent_*` for backward compatibility with existing session format
@@ -47,6 +56,9 @@ export const createLeaseId = (): LeaseId => `lease_${crypto.randomUUID()}`;
 
 /** Check if a string is a valid ExecutionId (exc_<ulid> format) */
 export const isExecutionId = (s: string): s is ExecutionId => s.startsWith('exc_');
+
+/** Check if a string is a valid PreparationId */
+export const isPreparationId = (s: string): s is PreparationId => s.startsWith('prep_');
 
 /** Check if a string is a valid SessionId (supports both sess_ and agent_ prefixes) */
 export const isSessionId = (s: string): s is SessionId =>

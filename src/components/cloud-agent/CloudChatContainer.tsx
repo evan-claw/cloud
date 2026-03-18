@@ -402,7 +402,6 @@ export function CloudChatContainer({
           });
 
           setResumeStrategy(result.resumeStrategy);
-          loadedDbSessionIdRef.current = sessionIdFromParams;
           setLoadedDbSession(session);
 
           if (result.needsOrgContextPrompt) {
@@ -418,6 +417,7 @@ export function CloudChatContainer({
         console.error('Failed to load session from database:', err);
         toast.error('Failed to load session');
       } finally {
+        loadedDbSessionIdRef.current = sessionIdFromParams;
         setIsLoadingFromDb(false);
       }
     };

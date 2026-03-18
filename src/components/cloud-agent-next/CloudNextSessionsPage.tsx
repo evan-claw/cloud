@@ -384,6 +384,7 @@ export function CloudNextSessionsPage({ organizationId }: CloudNextSessionsPageP
         setupCommands: manualSetupCommands.length > 0 ? manualSetupCommands : undefined,
         profileName: selectedProfile?.name,
         autoCommit: true,
+        autoInitiate: true,
       };
 
       let result: { kiloSessionId: string; cloudAgentSessionId: string };

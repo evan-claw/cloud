@@ -4,6 +4,8 @@ import { KILOCLAW_API_URL } from '@/lib/config.server';
 import { KiloClawApiError } from './kiloclaw-internal-client';
 import type { UserConfigResponse, PlatformStatusResponse, RestartMachineResponse } from './types';
 
+type RequestContext = { userId: string };
+
 /**
  * KiloClaw worker client for user-facing routes.
  * Uses Bearer JWT auth (forwarding the user's token). Server-only.
@@ -20,7 +22,7 @@ export class KiloClawUserClient {
     this.baseUrl = KILOCLAW_API_URL;
   }
 
-  private async request<T>(path: string, options?: RequestInit): Promise<T> {
+  private async request<T>(path: string, options?: RequestInit, ctx?: RequestContext): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       headers: {
@@ -34,7 +36,8 @@ export class KiloClawUserClient {
       const body = await res.text();
       console.error(
         `KiloClaw API error (${res.status}) ${options?.method ?? 'GET'} ${path}:`,
-        body
+        body,
+        ...(ctx ? [`userId=${ctx.userId}`] : [])
       );
       throw new KiloClawApiError(res.status);
     }
@@ -42,18 +45,25 @@ export class KiloClawUserClient {
     return res.json() as Promise<T>;
   }
 
-  async getConfig(): Promise<UserConfigResponse> {
-    return this.request('/api/kiloclaw/config');
+  async getConfig(ctx?: RequestContext): Promise<UserConfigResponse> {
+    return this.request('/api/kiloclaw/config', undefined, ctx);
   }
 
-  async getStatus(): Promise<PlatformStatusResponse> {
-    return this.request('/api/kiloclaw/status');
+  async getStatus(ctx?: RequestContext): Promise<PlatformStatusResponse> {
+    return this.request('/api/kiloclaw/status', undefined, ctx);
   }
 
-  async restartMachine(options?: { imageTag?: string }): Promise<RestartMachineResponse> {
-    return this.request('/api/admin/machine/restart', {
-      method: 'POST',
-      body: options?.imageTag ? JSON.stringify({ imageTag: options.imageTag }) : undefined,
-    });
+  async restartMachine(
+    options?: { imageTag?: string },
+    ctx?: RequestContext
+  ): Promise<RestartMachineResponse> {
+    return this.request(
+      '/api/admin/machine/restart',
+      {
+        method: 'POST',
+        body: options?.imageTag ? JSON.stringify({ imageTag: options.imageTag }) : undefined,
+      },
+      ctx
+    );
   }
 }

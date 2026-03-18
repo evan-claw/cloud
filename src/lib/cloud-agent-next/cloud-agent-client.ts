@@ -98,10 +98,13 @@ export type PrepareSessionInput = {
   createdOnPlatform?: string;
   /** PR gate threshold — when not 'off', the agent reports gateResult in its callback */
   gateThreshold?: 'off' | 'all' | 'warning' | 'critical';
+  /** When true, return immediately and run preparation asynchronously */
+  autoInitiate?: boolean;
 };
 
 /** Output from prepareSession procedure */
 export type PrepareSessionOutput = {
+  /** The Kilo CLI session ID */
   kiloSessionId: string;
   cloudAgentSessionId: string;
 };

@@ -480,6 +480,20 @@ export class SessionIngestDO extends DurableObject<Env> {
     }
   }
 
+  /** Returns true when no ingest data has been stored for this session. */
+  isEmpty(): boolean {
+    const row = this.db.select({ id: ingestItems.id }).from(ingestItems).limit(1).get();
+    return !row;
+  }
+
+  /** Atomically check emptiness and clear within a single DO request,
+   *  preventing TOCTOU races where data arrives between isEmpty() and clear(). */
+  async clearIfEmpty(): Promise<boolean> {
+    if (!this.isEmpty()) return false;
+    await this.clear();
+    return true;
+  }
+
   async clear(): Promise<void> {
     // Delete any R2-backed item blobs before wiping SQLite
     const r2Rows = this.db

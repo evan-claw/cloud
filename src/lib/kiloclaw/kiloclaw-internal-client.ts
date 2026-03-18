@@ -45,6 +45,8 @@ export class KiloClawApiError extends Error {
   }
 }
 
+type RequestContext = { userId: string };
+
 /**
  * KiloClaw worker client for platform (internal) routes.
  * Uses x-internal-api-key auth. Server-only.
@@ -64,7 +66,7 @@ export class KiloClawInternalClient {
     this.apiSecret = KILOCLAW_INTERNAL_API_SECRET;
   }
 
-  private async request<T>(path: string, options?: RequestInit): Promise<T> {
+  private async request<T>(path: string, options?: RequestInit, ctx?: RequestContext): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       headers: {
@@ -78,7 +80,8 @@ export class KiloClawInternalClient {
       const body = await res.text();
       console.error(
         `KiloClaw API error (${res.status}) ${options?.method ?? 'GET'} ${path}:`,
-        body
+        body,
+        ...(ctx ? [`userId=${ctx.userId}`] : [])
       );
       throw new KiloClawApiError(res.status, body);
     }
@@ -104,77 +107,119 @@ export class KiloClawInternalClient {
   }
 
   async provision(userId: string, config: ProvisionInput): Promise<{ sandboxId: string }> {
-    return this.request('/api/platform/provision', {
-      method: 'POST',
-      body: JSON.stringify({ userId, ...config }),
-    });
+    return this.request(
+      '/api/platform/provision',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, ...config }),
+      },
+      { userId }
+    );
   }
 
   async start(userId: string): Promise<{ ok: true }> {
-    return this.request('/api/platform/start', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/start',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async stop(userId: string): Promise<{ ok: true }> {
-    return this.request('/api/platform/stop', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/stop',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async destroy(userId: string): Promise<{ ok: true }> {
-    return this.request('/api/platform/destroy', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/destroy',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async getStatus(userId: string): Promise<PlatformStatusResponse> {
-    return this.request(`/api/platform/status?userId=${encodeURIComponent(userId)}`);
+    return this.request(`/api/platform/status?userId=${encodeURIComponent(userId)}`, undefined, {
+      userId,
+    });
   }
 
   async getDebugStatus(userId: string): Promise<PlatformDebugStatusResponse> {
-    return this.request(`/api/platform/debug-status?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/debug-status?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async getGatewayToken(userId: string): Promise<{ gatewayToken: string }> {
-    return this.request(`/api/platform/gateway-token?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/gateway-token?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async patchKiloCodeConfig(
     userId: string,
     patch: KiloCodeConfigPatchInput
   ): Promise<KiloCodeConfigResponse> {
-    return this.request('/api/platform/kilocode-config', {
-      method: 'PATCH',
-      body: JSON.stringify({ userId, ...patch }),
-    });
+    return this.request(
+      '/api/platform/kilocode-config',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ userId, ...patch }),
+      },
+      { userId }
+    );
   }
 
   async patchChannels(userId: string, input: ChannelsPatchInput): Promise<ChannelsPatchResponse> {
-    return this.request('/api/platform/channels', {
-      method: 'PATCH',
-      body: JSON.stringify({ userId, ...input }),
-    });
+    return this.request(
+      '/api/platform/channels',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ userId, ...input }),
+      },
+      { userId }
+    );
   }
 
   async patchSecrets(userId: string, input: SecretsPatchInput): Promise<SecretsPatchResponse> {
-    return this.request('/api/platform/secrets', {
-      method: 'PATCH',
-      body: JSON.stringify({ userId, ...input }),
-    });
+    return this.request(
+      '/api/platform/secrets',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ userId, ...input }),
+      },
+      { userId }
+    );
   }
 
   async listVolumeSnapshots(userId: string): Promise<VolumeSnapshotsResponse> {
-    return this.request(`/api/platform/volume-snapshots?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/volume-snapshots?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async listPairingRequests(userId: string, refresh = false): Promise<PairingListResponse> {
     const params = new URLSearchParams({ userId });
     if (refresh) params.set('refresh', 'true');
-    return this.request(`/api/platform/pairing?${params.toString()}`);
+    return this.request(`/api/platform/pairing?${params.toString()}`, undefined, { userId });
   }
 
   async approvePairingRequest(
@@ -182,10 +227,14 @@ export class KiloClawInternalClient {
     channel: string,
     code: string
   ): Promise<PairingApproveResponse> {
-    return this.request('/api/platform/pairing/approve', {
-      method: 'POST',
-      body: JSON.stringify({ userId, channel, code }),
-    });
+    return this.request(
+      '/api/platform/pairing/approve',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, channel, code }),
+      },
+      { userId }
+    );
   }
 
   async listDevicePairingRequests(
@@ -194,64 +243,100 @@ export class KiloClawInternalClient {
   ): Promise<DevicePairingListResponse> {
     const params = new URLSearchParams({ userId });
     if (refresh) params.set('refresh', 'true');
-    return this.request(`/api/platform/device-pairing?${params.toString()}`);
+    return this.request(`/api/platform/device-pairing?${params.toString()}`, undefined, { userId });
   }
 
   async approveDevicePairingRequest(
     userId: string,
     requestId: string
   ): Promise<DevicePairingApproveResponse> {
-    return this.request('/api/platform/device-pairing/approve', {
-      method: 'POST',
-      body: JSON.stringify({ userId, requestId }),
-    });
+    return this.request(
+      '/api/platform/device-pairing/approve',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, requestId }),
+      },
+      { userId }
+    );
   }
 
   async runDoctor(userId: string): Promise<DoctorResponse> {
-    return this.request('/api/platform/doctor', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/doctor',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async getGatewayStatus(userId: string): Promise<GatewayProcessStatusResponse> {
-    return this.request(`/api/platform/gateway/status?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/gateway/status?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async getControllerVersion(userId: string): Promise<ControllerVersionResponse> {
-    return this.request(`/api/platform/controller-version?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/controller-version?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async startGateway(userId: string): Promise<GatewayProcessActionResponse> {
-    return this.request('/api/platform/gateway/start', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/gateway/start',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async stopGateway(userId: string): Promise<GatewayProcessActionResponse> {
-    return this.request('/api/platform/gateway/stop', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/gateway/stop',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async restartGatewayProcess(userId: string): Promise<GatewayProcessActionResponse> {
-    return this.request('/api/platform/gateway/restart', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/gateway/restart',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async restoreConfig(userId: string, version = 'base'): Promise<ConfigRestoreResponse> {
-    return this.request('/api/platform/config/restore', {
-      method: 'POST',
-      body: JSON.stringify({ userId, version }),
-    });
+    return this.request(
+      '/api/platform/config/restore',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, version }),
+      },
+      { userId }
+    );
   }
 
   async getOpenclawConfig(userId: string): Promise<OpenclawConfigResponse> {
-    return this.request(`/api/platform/openclaw-config?userId=${encodeURIComponent(userId)}`);
+    return this.request(
+      `/api/platform/openclaw-config?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
   }
 
   async replaceOpenclawConfig(
@@ -259,38 +344,58 @@ export class KiloClawInternalClient {
     config: Record<string, unknown>,
     etag?: string
   ): Promise<{ ok: true }> {
-    return this.request('/api/platform/openclaw-config', {
-      method: 'POST',
-      body: JSON.stringify({ userId, config, ...(etag !== undefined && { etag }) }),
-    });
+    return this.request(
+      '/api/platform/openclaw-config',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, config, ...(etag !== undefined && { etag }) }),
+      },
+      { userId }
+    );
   }
 
   async updateGoogleCredentials(
     userId: string,
     input: GoogleCredentialsInput
   ): Promise<GoogleCredentialsResponse> {
-    return this.request('/api/platform/google-credentials', {
-      method: 'POST',
-      body: JSON.stringify({ userId, ...input }),
-    });
+    return this.request(
+      '/api/platform/google-credentials',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, ...input }),
+      },
+      { userId }
+    );
   }
 
   async clearGoogleCredentials(userId: string): Promise<GoogleCredentialsResponse> {
-    return this.request(`/api/platform/google-credentials?userId=${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-    });
+    return this.request(
+      `/api/platform/google-credentials?userId=${encodeURIComponent(userId)}`,
+      {
+        method: 'DELETE',
+      },
+      { userId }
+    );
   }
 
   async enableGmailNotifications(userId: string): Promise<GmailNotificationsResponse> {
-    return this.request('/api/platform/gmail-notifications', {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
-    });
+    return this.request(
+      '/api/platform/gmail-notifications',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
   }
 
   async disableGmailNotifications(userId: string): Promise<GmailNotificationsResponse> {
-    return this.request(`/api/platform/gmail-notifications?userId=${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-    });
+    return this.request(
+      `/api/platform/gmail-notifications?userId=${encodeURIComponent(userId)}`,
+      {
+        method: 'DELETE',
+      },
+      { userId }
+    );
   }
 }

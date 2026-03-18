@@ -4,7 +4,7 @@ import { NEXTAUTH_SECRET } from '@/lib/config.server';
 
 export type StreamTicketPayload = {
   userId: string;
-  kiloSessionId: string;
+  kiloSessionId?: string;
   cloudAgentSessionId: string;
   organizationId?: string;
 };

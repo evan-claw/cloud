@@ -195,7 +195,12 @@ export function createWebSocketManager(config: WebSocketManagerConfig): {
       }
 
       const event = parsed.event;
-      lastEventId = event.eventId;
+      // Only advance the cursor for persisted events (positive IDs).
+      // Volatile events (e.g. preparing progress) use id 0; allowing them
+      // to regress the cursor causes a full replay on the next reconnect.
+      if (event.eventId > lastEventId) {
+        lastEventId = event.eventId;
+      }
 
       // Reset ticket refresh flag on successful message
       ticketRefreshAttempted = false;

@@ -2,22 +2,20 @@
 
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Cloud, Download, Sparkles } from 'lucide-react';
+import { Cloud, Download } from 'lucide-react';
 import { motion } from 'motion/react';
 import Link from 'next/link';
+import KiloCrabIcon from '@/components/KiloCrabIcon';
 
 type WelcomeContentProps = {
   isAuthenticated: boolean;
 };
 
 export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps) {
-  // For Cloud and App Builder, redirect to sign-in with callback if not authenticated
   const cloudHref = isAuthenticated
     ? '/integrations/github'
     : '/users/sign_in?callbackPath=/integrations/github';
-  const appBuilderHref = isAuthenticated
-    ? '/app-builder'
-    : '/users/sign_in?callbackPath=/app-builder';
+  const clawHref = isAuthenticated ? '/claw' : '/users/sign_in?callbackPath=/claw';
   const profileHref = isAuthenticated ? '/profile' : '/users/sign_in?callbackPath=/profile';
 
   return (
@@ -26,11 +24,11 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <CardContent className="space-y-6 pt-6">
-        <div className="space-y-8">
+      <CardContent className="space-y-4 p-4 pt-4">
+        <div className="space-y-5">
           <h1 className="text-center text-2xl font-bold">Kilo works where you work</h1>
 
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <motion.div
               whileHover={{ scale: 1.02, y: -4 }}
               whileTap={{ scale: 0.98 }}
@@ -40,8 +38,8 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
                 className="group/card ring-border bg-card hover:ring-brand-primary hover:shadow-brand-primary/10 flex h-full cursor-pointer flex-col rounded-none ring-2 transition-all duration-300 ring-inset hover:shadow-xl"
                 href="/welcome"
               >
-                <CardHeader className="gap-2 pb-4 text-center">
-                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-300">
+                <CardHeader className="gap-1.5 p-4 pb-2 text-center">
+                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300">
                     <Download className="text-brand-primary h-8 w-8 transition-transform duration-300 group-hover/card:scale-110" />
                   </div>
                   <CardTitle className="text-xl font-bold tracking-tight">Install Kilo</CardTitle>
@@ -49,9 +47,9 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
                     Use in VS Code, JetBrains, or directly from your terminal with the CLI.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-1 flex-col justify-end">
+                <CardContent className="flex flex-1 flex-col justify-end p-4 pt-0">
                   <Button
-                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-4 w-full text-black hover:bg-black hover:ring-2"
+                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-2 w-full text-black hover:bg-black hover:ring-2"
                     size="lg"
                   >
                     Install Kilo
@@ -69,8 +67,8 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
                 className="group/card ring-border bg-card hover:ring-brand-primary hover:shadow-brand-primary/10 flex h-full cursor-pointer flex-col rounded-none ring-2 transition-all duration-300 ring-inset hover:shadow-xl"
                 href={cloudHref}
               >
-                <CardHeader className="gap-2 pb-4 text-center">
-                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-300">
+                <CardHeader className="gap-1.5 p-4 pb-2 text-center">
+                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300">
                     <Cloud className="text-brand-primary h-8 w-8 transition-transform duration-300 group-hover/card:scale-110" />
                   </div>
                   <CardTitle className="text-xl font-bold tracking-tight">Cloud</CardTitle>
@@ -78,9 +76,9 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
                     Run Kilo from any device, no local machine required.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-1 flex-col justify-end">
+                <CardContent className="flex flex-1 flex-col justify-end p-4 pt-0">
                   <Button
-                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-4 w-full text-black hover:bg-black hover:ring-2"
+                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-2 w-full text-black hover:bg-black hover:ring-2"
                     size="lg"
                   >
                     Connect GitHub Repo
@@ -96,23 +94,23 @@ export default function WelcomeContent({ isAuthenticated }: WelcomeContentProps)
             >
               <Link
                 className="group/card ring-border bg-card hover:ring-brand-primary hover:shadow-brand-primary/10 flex h-full cursor-pointer flex-col rounded-none ring-2 transition-all duration-300 ring-inset hover:shadow-xl"
-                href={appBuilderHref}
+                href={clawHref}
               >
-                <CardHeader className="gap-2 pb-4 text-center">
-                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-16 w-16 items-center justify-center rounded-full transition-all duration-300">
-                    <Sparkles className="text-brand-primary h-8 w-8 transition-transform duration-300 group-hover/card:scale-110" />
+                <CardHeader className="gap-1.5 p-4 pb-2 text-center">
+                  <div className="bg-brand-primary/10 group-hover/card:bg-brand-primary/20 mx-auto flex h-12 w-12 items-center justify-center rounded-full transition-all duration-300">
+                    <KiloCrabIcon className="text-brand-primary h-8 w-8 transition-transform duration-300 group-hover/card:scale-110" />
                   </div>
-                  <CardTitle className="text-xl font-bold tracking-tight">App Builder</CardTitle>
+                  <CardTitle className="text-xl font-bold tracking-tight">KiloClaw</CardTitle>
                   <CardDescription className="text-muted-foreground text-sm text-balance">
-                    Go from idea to deployed app, entirely in your browser.
+                    Your own AI assistant, managed and hosted in the cloud.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="flex flex-1 flex-col justify-end">
+                <CardContent className="flex flex-1 flex-col justify-end p-4 pt-0">
                   <Button
-                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-4 w-full text-black hover:bg-black hover:ring-2"
+                    className="bg-brand-primary hover:text-brand-primary hover:ring-brand-primary mt-2 w-full text-black hover:bg-black hover:ring-2"
                     size="lg"
                   >
-                    Start Building
+                    Try KiloClaw
                   </Button>
                 </CardContent>
               </Link>

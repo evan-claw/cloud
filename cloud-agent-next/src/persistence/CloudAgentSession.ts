@@ -7,7 +7,12 @@
 import { DurableObject } from 'cloudflare:workers';
 import { TRPCError } from '@trpc/server';
 import type { CloudAgentSessionState, OperationResult, MCPServerConfig } from './types.js';
-import { MetadataSchema, type Images } from './schemas.js';
+import {
+  MetadataSchema,
+  PreparationInputSchema,
+  type Images,
+  type PreparationInput,
+} from './schemas.js';
 import type { EncryptedSecrets } from '../router/schemas.js';
 import type { CallbackJob, CallbackTarget } from '../callbacks/index.js';
 import { drizzle } from 'drizzle-orm/durable-sqlite';
@@ -26,7 +31,7 @@ import {
   type LeaseAcquireError,
 } from '../session/queries/index.js';
 import { createExecutionId } from '../types/ids.js';
-import type { ExecutionId, SessionId, UserId } from '../types/ids.js';
+import type { ExecutionId, EventSourceId, EventId, SessionId, UserId } from '../types/ids.js';
 import type {
   ExecutionMetadata,
   AddExecutionParams,
@@ -46,7 +51,7 @@ import {
   type IngestDOContext,
 } from '../websocket/ingest.js';
 import type { StoredEvent } from '../websocket/types.js';
-import type { WrapperCommand } from '../shared/protocol.js';
+import type { WrapperCommand, PreparingStep } from '../shared/protocol.js';
 import { STALE_THRESHOLD_MS, SANDBOX_SLEEP_AFTER_SECONDS } from '../core/lease.js';
 import { ExecutionOrchestrator, type OrchestratorDeps } from '../execution/orchestrator.js';
 import type {
@@ -65,6 +70,8 @@ import { GitHubTokenService } from '../services/github-token-service.js';
 import { validateStreamTicket } from '../auth.js';
 import { getSandbox } from '@cloudflare/sandbox';
 import { stopWrapper } from '../kilo/wrapper-manager.js';
+import { SessionService } from '../session-service.js';
+import { executePreparationSteps } from './async-preparation.js';
 
 // ---------------------------------------------------------------------------
 // Alarm Constants
@@ -97,6 +104,9 @@ const DISCONNECT_GRACE_MS = 10_000;
 
 /** DO storage key for persisting disconnect grace state across hibernation. */
 const DISCONNECT_GRACE_KEY = 'disconnect_grace';
+
+/** DO storage key for pending async preparation input. */
+const PENDING_PREPARATION_KEY = 'pending_preparation';
 
 /** Stored in DO storage under DISCONNECT_GRACE_KEY while a grace period is active. */
 type DisconnectGraceState = {
@@ -468,7 +478,7 @@ export class CloudAgentSession extends DurableObject {
   }
 
   private insertAndBroadcastEvent(params: {
-    executionId: ExecutionId;
+    executionId: EventSourceId;
     sessionId: string;
     streamEventType: string;
     payload: string;
@@ -483,6 +493,28 @@ export class CloudAgentSession extends DurableObject {
     });
     this.broadcastEvent({
       id: eventId,
+      execution_id: params.executionId,
+      session_id: params.sessionId,
+      stream_event_type: params.streamEventType,
+      payload: params.payload,
+      timestamp: params.timestamp,
+    });
+  }
+
+  /**
+   * Broadcast an event to connected /stream clients without persisting it.
+   * Used for transient progress events (e.g. `preparing`) that have no
+   * replay value — avoids stale indicators on WebSocket reconnect.
+   */
+  private broadcastVolatileEvent(params: {
+    executionId: EventSourceId;
+    sessionId: string;
+    streamEventType: string;
+    payload: string;
+    timestamp: number;
+  }): void {
+    this.broadcastEvent({
+      id: 0 as EventId,
       execution_id: params.executionId,
       session_id: params.sessionId,
       stream_event_type: params.streamEventType,
@@ -791,6 +823,222 @@ export class CloudAgentSession extends DurableObject {
   }
 
   /**
+   * Lightweight registration for async preparation flow.
+   * Stores minimal metadata WITHOUT setting preparedAt.
+   * Makes getMetadata() return non-null so the chat page can distinguish
+   * "async prep in progress" from "no DO at all".
+   */
+  async registerSession(input: {
+    sessionId: string;
+    userId: string;
+    orgId?: string;
+    botId?: string;
+    prompt: string;
+    mode: string;
+    model: string;
+    variant?: string;
+    kiloSessionId?: string;
+  }): Promise<OperationResult> {
+    await this.requireSessionId(input.sessionId as SessionId);
+    const existing = await this.ctx.storage.get<CloudAgentSessionState>('metadata');
+    if (existing) {
+      return { success: false, error: 'Session already registered' };
+    }
+
+    const now = Date.now();
+    const metadata: CloudAgentSessionState = {
+      sessionId: input.sessionId,
+      userId: input.userId,
+      orgId: input.orgId,
+      botId: input.botId,
+      prompt: input.prompt,
+      mode: input.mode,
+      model: input.model,
+      variant: input.variant,
+      kiloSessionId: input.kiloSessionId,
+      version: now,
+      timestamp: now,
+      // NOTE: preparedAt is NOT set — this is the key difference from prepare()
+    };
+
+    const parseResult = MetadataSchema.safeParse(metadata);
+    if (!parseResult.success) {
+      return {
+        success: false,
+        error: `Invalid metadata: ${JSON.stringify(parseResult.error.format())}`,
+      };
+    }
+
+    await this.ctx.storage.put('metadata', parseResult.data);
+    await this.updateLastActivity();
+    await this.ensureAlarmScheduled();
+
+    return { success: true };
+  }
+
+  /**
+   * Schedule async preparation via alarm.
+   * Stores the preparation input in DO storage and schedules an immediate
+   * alarm. The alarm handler will pick it up and run the expensive work.
+   * This approach is safe regardless of caller lifetime — the DO wakes
+   * itself up via the alarm even if the original worker request has ended.
+   */
+  async startPreparationAsync(input: PreparationInput): Promise<void> {
+    await this.ctx.storage.put(PENDING_PREPARATION_KEY, input);
+    // Schedule an immediate alarm to run the preparation.
+    // If an alarm is already pending (e.g. reaper), setAlarm replaces it —
+    // the reaper will self-reschedule when it next runs.
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  /**
+   * Internal: run all expensive preparation steps, emitting progress events.
+   * Workspace orchestration (clone, setup, wrapper start) is delegated to
+   * executePreparationSteps(); this method handles the DO-specific bookkeeping
+   * (metadata, progress events, auto-initiate, error cleanup).
+   */
+  private async runPreparationAsync(input: PreparationInput): Promise<void> {
+    const sessionId = input.sessionId as SessionId;
+    const prepExecutionId: EventSourceId = `prep_${input.sessionId}`;
+    const env = this.env as unknown as WorkerEnv;
+
+    const emitProgress = (step: PreparingStep, message: string) => {
+      this.broadcastVolatileEvent({
+        executionId: prepExecutionId,
+        sessionId: input.sessionId,
+        streamEventType: 'preparing',
+        payload: JSON.stringify({ step, message }),
+        timestamp: Date.now(),
+      });
+    };
+
+    let createdKiloSessionId: string | undefined = input.kiloSessionId;
+
+    const cleanupCliSession = async () => {
+      if (!createdKiloSessionId) return;
+      const svc = new SessionService();
+      try {
+        await svc.deleteCliSessionViaSessionIngest(createdKiloSessionId, input.userId, env, {
+          onlyIfEmpty: true,
+        });
+      } catch (cleanupError) {
+        logger
+          .withFields({
+            sessionId,
+            error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          })
+          .warn('Failed to clean up cli_sessions_v2 record (onlyIfEmpty)');
+      }
+    };
+
+    try {
+      // Steps 1–9: workspace orchestration (token, disk, clone, branch, setup, wrapper)
+      const result = await executePreparationSteps(input, env, emitProgress);
+      if (!result) {
+        // executePreparationSteps already emitted 'failed' — clean up DO metadata
+        await this.ctx.storage.delete('metadata');
+        await cleanupCliSession();
+        return;
+      }
+
+      createdKiloSessionId = result.kiloSessionId;
+
+      // 10. Store full metadata via prepare() — sets preparedAt
+      const prepareResult = await this.prepare({
+        sessionId: input.sessionId,
+        userId: input.userId,
+        orgId: input.orgId,
+        botId: input.botId,
+        kiloSessionId: result.kiloSessionId,
+        prompt: input.prompt,
+        mode: input.mode,
+        model: input.model,
+        variant: input.variant,
+        kilocodeToken: input.authToken,
+        githubRepo: input.githubRepo,
+        githubToken: input.githubToken,
+        githubInstallationId: result.resolvedInstallationId,
+        githubAppType: result.resolvedGithubAppType,
+        gitUrl: input.gitUrl,
+        gitToken: input.gitToken,
+        platform: input.platform,
+        envVars: input.envVars,
+        encryptedSecrets: input.encryptedSecrets,
+        setupCommands: input.setupCommands,
+        mcpServers: input.mcpServers,
+        upstreamBranch: input.upstreamBranch,
+        autoCommit: input.autoCommit,
+        condenseOnComplete: input.condenseOnComplete,
+        appendSystemPrompt: input.appendSystemPrompt,
+        callbackTarget: input.callbackTarget,
+        images: input.images,
+        createdOnPlatform: input.createdOnPlatform,
+        gateThreshold: input.gateThreshold,
+        workspacePath: result.workspacePath,
+        sessionHome: result.sessionHome,
+        branchName: result.branchName,
+        sandboxId: result.sandboxId,
+      });
+
+      if (!prepareResult.success) {
+        emitProgress('failed', prepareResult.error ?? 'Failed to prepare session');
+        await this.ctx.storage.delete('metadata');
+        await cleanupCliSession();
+        return;
+      }
+
+      await this.recordKiloServerActivity();
+
+      // 11. Auto-initiate if requested, then emit ready only on success.
+      // Emitting 'ready' before startExecutionV2 would let the client
+      // unlock chat input for a session that may fail to initiate.
+      if (input.autoInitiate) {
+        const initiateResult = await this.startExecutionV2({
+          kind: 'initiatePrepared',
+          userId: input.userId as UserId,
+          botId: input.botId,
+          authToken: input.authToken,
+        });
+
+        if (!initiateResult.success) {
+          logger
+            .withFields({ sessionId, error: initiateResult.error })
+            .error('Auto-initiate failed after async preparation');
+
+          // startExecutionV2 persists initiatedAt via tryInitiate() before
+          // attempting execution. Roll it back so the session doesn't appear
+          // initiated with no running execution (stuck state).
+          const staleMetadata = await this.ctx.storage.get<CloudAgentSessionState>('metadata');
+          if (staleMetadata?.initiatedAt) {
+            const { initiatedAt: _, ...rest } = staleMetadata;
+            await this.ctx.storage.put('metadata', { ...rest, version: Date.now() });
+          }
+
+          emitProgress('failed', `Auto-initiate failed: ${initiateResult.error}`);
+          return;
+        }
+      }
+
+      // 12. Emit ready — session is prepared (and initiated, if autoInitiate)
+      emitProgress('ready', 'Session ready');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger
+        .withFields({
+          sessionId,
+          error: message,
+          stack: error instanceof Error ? error.stack : undefined,
+        })
+        .error('Async preparation failed');
+
+      await cleanupCliSession();
+
+      emitProgress('failed', message);
+      await this.ctx.storage.delete('metadata');
+    }
+  }
+
+  /**
    * Atomically update a prepared session - only succeeds if prepared but not initiated.
    * Single DO request ensures atomicity.
    * Validates updated metadata against MetadataSchema before storing.
@@ -910,6 +1158,55 @@ export class CloudAgentSession extends DurableObject {
       .info('Alarm fired');
 
     try {
+      // Run pending async preparation if scheduled.
+      // This must run before other alarm duties because it can take minutes
+      // (git clone, setup commands, etc.). The reaper self-reschedules at the end.
+      const pendingPrep = await this.ctx.storage.get(PENDING_PREPARATION_KEY);
+      if (pendingPrep) {
+        await this.ctx.storage.delete(PENDING_PREPARATION_KEY);
+        const parsed = PreparationInputSchema.safeParse(pendingPrep);
+        if (parsed.success) {
+          await this.runPreparationAsync(parsed.data);
+        } else {
+          logger
+            .withFields({ error: JSON.stringify(parsed.error.format()) })
+            .error('Invalid pending preparation data in storage');
+
+          // Clean up resources left behind by registerSession/createCliSession
+          // so the session doesn't sit in a zombie preparing state forever.
+          const metadata = await this.ctx.storage.get<CloudAgentSessionState>('metadata');
+          await this.ctx.storage.delete('metadata');
+
+          if (metadata?.kiloSessionId && metadata?.userId) {
+            const svc = new SessionService();
+            try {
+              await svc.deleteCliSessionViaSessionIngest(
+                metadata.kiloSessionId,
+                metadata.userId,
+                this.env as unknown as WorkerEnv,
+                { onlyIfEmpty: true }
+              );
+            } catch {
+              // Best-effort — already logged the root cause above
+            }
+          }
+
+          if (this.sessionId) {
+            const prepId: EventSourceId = `prep_${this.sessionId}`;
+            this.broadcastVolatileEvent({
+              executionId: prepId,
+              sessionId: this.sessionId,
+              streamEventType: 'preparing',
+              payload: JSON.stringify({
+                step: 'failed',
+                message: 'Internal error: invalid preparation data',
+              }),
+              timestamp: Date.now(),
+            });
+          }
+        }
+      }
+
       // Check disconnect grace period first — this alarm may have been
       // rescheduled specifically for the grace deadline.
       await this.checkDisconnectGrace();
@@ -991,7 +1288,7 @@ export class CloudAgentSession extends DurableObject {
     logger
       .withFields({ sessionId: this.sessionId, nextInterval, elapsedMs: Date.now() - now })
       .info('Rescheduling alarm');
-    await this.ctx.storage.setAlarm(now + nextInterval);
+    await this.ctx.storage.setAlarm(Date.now() + nextInterval);
   }
 
   /**
@@ -2229,7 +2526,18 @@ export class CloudAgentSession extends DurableObject {
     // Execute via orchestrator
     try {
       const orchestrator = this.getOrCreateOrchestrator();
-      const result = await orchestrator.execute(plan);
+
+      const emitProgress = (step: string, message: string) => {
+        this.broadcastVolatileEvent({
+          executionId,
+          sessionId,
+          streamEventType: 'preparing',
+          payload: JSON.stringify({ step, message }),
+          timestamp: Date.now(),
+        });
+      };
+
+      const result = await orchestrator.execute(plan, { onProgress: emitProgress });
 
       logger
         .withFields({ sessionId, executionId, kiloSessionId: result.kiloSessionId })

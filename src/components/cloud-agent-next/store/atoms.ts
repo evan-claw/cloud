@@ -98,7 +98,7 @@ export const autocommitStatusMapAtom = atom<Map<string, AutocommitStatus>>(new M
  * Non-recoverable errors still go through `errorAtom` → `ErrorBanner`.
  */
 export type SessionStatusIndicator = {
-  type: 'error' | 'warning' | 'info';
+  type: 'error' | 'warning' | 'info' | 'progress';
   message: string;
   timestamp: number;
 };

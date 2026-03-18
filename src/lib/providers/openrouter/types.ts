@@ -115,6 +115,7 @@ export type OpenRouterGeneration = {
     native_tokens_completion?: number | null;
     native_tokens_reasoning?: number | null;
     native_tokens_cached?: number | null; //missing from docs
+    native_tokens_cache_creation?: number | null; //vercel specific
     num_media_prompt?: number | null;
     num_media_completion?: number | null;
     num_search_results?: number | null;

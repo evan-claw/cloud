@@ -6,6 +6,7 @@ import { findPepperByUserId, getWorkerDb } from '../../db';
 import { KILOCODE_API_KEY_EXPIRY_SECONDS } from '../../config';
 import type { InstanceMutableState } from './types';
 import { storageUpdate } from './state';
+import { doWarn, toLoggable } from './log';
 
 const MINT_TIMEOUT_MS = 5_000;
 
@@ -119,7 +120,9 @@ export async function buildUserEnvVars(
         console.log('[DO] buildUserEnvVars: minted fresh API key, expires:', freshKey.expiresAt);
       }
     } catch (err) {
-      console.warn('[DO] buildUserEnvVars: failed to mint fresh API key, using stored key:', err);
+      doWarn(state, 'buildUserEnvVars: failed to mint fresh API key, using stored key', {
+        error: toLoggable(err),
+      });
     }
   }
 

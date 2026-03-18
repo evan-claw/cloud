@@ -6,7 +6,7 @@
  *   autocommit_started, autocommit_completed
  *
  * From DO -> /stream clients:
- *   All of the above, plus wrapper_disconnected, wrapper_reconnected
+ *   All of the above, plus wrapper_disconnected, wrapper_reconnected, preparing
  */
 export type StreamEventType =
   // Wrapper -> DO (execution lifecycle)
@@ -24,7 +24,9 @@ export type StreamEventType =
   | 'autocommit_completed' // Auto-commit finished (success, skip, or failure)
   // DO -> /stream clients (connection status)
   | 'wrapper_disconnected' // Wrapper WebSocket closed unexpectedly
-  | 'wrapper_reconnected'; // Wrapper reconnected successfully
+  | 'wrapper_reconnected' // Wrapper reconnected successfully
+  // DO -> /stream clients (async preparation progress)
+  | 'preparing'; // Async preparation step progress (autoInitiate flow)
 
 /**
  * Event envelope sent by wrapper to DO via /ingest WebSocket.
@@ -76,6 +78,29 @@ export type AutocommitCompletedData = {
   skipped?: boolean;
   commitHash?: string;
   commitMessage?: string;
+};
+
+/**
+ * Preparation step identifiers for async preparation progress events.
+ */
+export type PreparingStep =
+  | 'disk_check'
+  | 'workspace_setup'
+  | 'cloning'
+  | 'branch'
+  | 'setup_commands'
+  | 'kilo_server'
+  | 'kilo_session'
+  | 'ready'
+  | 'failed';
+
+/**
+ * Data included in 'preparing' events (async preparation progress).
+ * Emitted by the DO during startPreparationAsync to report progress to /stream clients.
+ */
+export type PreparingEventData = {
+  step: PreparingStep;
+  message: string;
 };
 
 /**

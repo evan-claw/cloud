@@ -17,7 +17,7 @@ import type {
   GoogleCredentials,
   MachineSize,
 } from '../../schemas/instance-config';
-import { DEFAULT_INSTANCE_FEATURES } from '../../schemas/instance-config';
+import { DEFAULT_INSTANCE_FEATURES, PersistedStateSchema } from '../../schemas/instance-config';
 import type { FlyVolumeSnapshot } from '../../fly/types';
 import * as fly from '../../fly/client';
 import { sandboxIdFromUserId } from '../../auth/sandbox-id';
@@ -46,7 +46,8 @@ import type { GatewayProcessStatus } from '../gateway-controller-types';
 import type { InstanceMutableState, InstanceStatus, DestroyResult } from './types';
 import { getFlyConfig } from './types';
 import { createMutableState, loadState, storageUpdate } from './state';
-import { reconcileLog, nextAlarmTime } from './log';
+import { nextAlarmTime, doError, doWarn, toLoggable } from './log';
+import { attemptMetadataRecovery } from './reconcile';
 import { resolveImageTag, getRegistryApp, buildUserEnvVars } from './config';
 import * as gateway from './gateway';
 import * as pairing from './pairing';
@@ -57,6 +58,7 @@ import {
   tryDeleteMachine,
   tryDeleteVolume,
   finalizeDestroyIfComplete,
+  reconcileMachineMount,
 } from './reconcile';
 import { restoreFromPostgres, markDestroyedInPostgresHelper } from './postgres';
 
@@ -72,6 +74,7 @@ const CHANNEL_ENV_VARS = new Set(
 
 export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   private s: InstanceMutableState = createMutableState();
+  private startInProgress = false;
 
   // Kept as `loadState` for backward compat with tests that cast to access private methods.
   private async loadState(): Promise<void> {
@@ -145,10 +148,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       let pinned = await resolveVersionByTag(this.env.KV_CLAW_CACHE, config.pinnedImageTag);
 
       if (!pinned && !this.env.HYPERDRIVE?.connectionString) {
-        console.error(
-          '[DO] HYPERDRIVE not configured — cannot look up pinned tag in Postgres:',
-          config.pinnedImageTag
-        );
+        doError(this.s, 'HYPERDRIVE not configured — cannot look up pinned tag in Postgres', {
+          pinnedImageTag: config.pinnedImageTag,
+        });
       }
       if (!pinned && this.env.HYPERDRIVE?.connectionString) {
         try {
@@ -159,14 +161,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           if (catalogEntry) {
             const variantParse = ImageVariantSchema.safeParse(catalogEntry.variant);
             if (!variantParse.success) {
-              console.error(
-                '[DO] Invalid variant from Postgres catalog, skipping:',
-                catalogEntry.variant,
-                'for tag:',
-                config.pinnedImageTag,
-                'error:',
-                variantParse.error.flatten()
-              );
+              doError(this.s, 'Invalid variant from Postgres catalog, skipping', {
+                variant: catalogEntry.variant,
+                pinnedImageTag: config.pinnedImageTag,
+                validationErrors: variantParse.error.flatten(),
+              });
             } else {
               pinned = {
                 openclawVersion: catalogEntry.openclawVersion,
@@ -182,10 +181,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
             }
           }
         } catch (err) {
-          console.warn(
-            '[DO] Failed to look up pinned tag in Postgres:',
-            err instanceof Error ? err.message : err
-          );
+          doWarn(this.s, 'Failed to look up pinned tag in Postgres', {
+            error: toLoggable(err),
+          });
         }
       }
 
@@ -196,10 +194,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         this.s.trackedImageDigest = pinned.imageDigest;
         console.debug('[DO] Using pinned version:', pinned.openclawVersion, '→', pinned.imageTag);
       } else {
-        console.warn(
-          '[DO] Pinned tag not found in KV or Postgres, using tag directly:',
-          config.pinnedImageTag
-        );
+        doWarn(this.s, 'Pinned tag not found in KV or Postgres, using tag directly', {
+          pinnedImageTag: config.pinnedImageTag,
+        });
         this.s.openclawVersion = null;
         this.s.imageVariant = null;
         this.s.trackedImageTag = config.pinnedImageTag;
@@ -586,6 +583,23 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   // ── Lifecycle ───────────────────────────────────────────────────────
 
   async start(userId?: string): Promise<void> {
+    // Guard against concurrent start() calls — two overlapping invocations
+    // (e.g. startAsync via waitUntil + a direct RPC start) can both see
+    // flyMachineId as null and each create a Fly machine, orphaning one.
+    if (this.startInProgress) {
+      doWarn(this.s, 'start: already in progress, skipping duplicate call');
+      return;
+    }
+    this.startInProgress = true;
+
+    try {
+      await this._startInner(userId);
+    } finally {
+      this.startInProgress = false;
+    }
+  }
+
+  private async _startInner(userId?: string): Promise<void> {
     await this.loadState();
 
     if (this.s.status === 'destroying') {
@@ -610,25 +624,39 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     const flyConfig = getFlyConfig(this.env, this.s);
 
+    // If the DO has identity but lost its machine ID, try to recover it
+    // from Fly metadata before creating a duplicate machine.
+    if (!this.s.flyMachineId) {
+      const recovered = await attemptMetadataRecovery(
+        flyConfig,
+        this.ctx,
+        this.s,
+        'start_recovery'
+      );
+      if (!recovered && !this.s.flyMachineId) {
+        throw new Error(
+          'Metadata recovery failed; aborting start to avoid creating a duplicate machine'
+        );
+      }
+    }
+
     await flyMachines.ensureVolume(flyConfig, this.ctx, this.s, this.env, 'start');
 
     // Verify volume region matches cached flyRegion
-    if (this.s.flyVolumeId && !this.s.flyMachineId) {
+    if (this.s.flyVolumeId) {
       try {
         const volume = await fly.getVolume(flyConfig, this.s.flyVolumeId);
         if (volume.region !== this.s.flyRegion) {
-          console.warn(
-            '[DO] flyRegion drift detected:',
-            this.s.flyRegion,
-            '-> actual:',
-            volume.region
-          );
+          doWarn(this.s, 'flyRegion drift detected', {
+            cachedRegion: this.s.flyRegion,
+            actualRegion: volume.region,
+          });
           this.s.flyRegion = volume.region;
           await this.persist({ flyRegion: volume.region });
         }
       } catch (err) {
         if (fly.isFlyNotFound(err)) {
-          console.warn('[DO] Volume not found during region check, clearing');
+          doWarn(this.s, 'Volume not found during region check, clearing');
           this.s.flyVolumeId = null;
           this.s.flyRegion = null;
           await this.persist({ flyVolumeId: null, flyRegion: null });
@@ -642,31 +670,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       try {
         const machine = await fly.getMachine(flyConfig, this.s.flyMachineId);
         if (machine.state === 'started') {
-          // Inline mount reconciliation — reconcileMachineMount is internal to reconcile.ts
-          if (this.s.flyVolumeId) {
-            const mounts = machine.config?.mounts ?? [];
-            const hasCorrectMount = mounts.some(
-              m => m.volume === this.s.flyVolumeId && m.path === '/root'
-            );
-            if (!hasCorrectMount && this.s.flyMachineId) {
-              reconcileLog('start', 'repair_mount', {
-                machine_id: this.s.flyMachineId,
-                volume_id: this.s.flyVolumeId,
-              });
-              await fly.stopMachineAndWait(flyConfig, this.s.flyMachineId);
-              await fly.updateMachine(flyConfig, this.s.flyMachineId, {
-                ...machine.config,
-                mounts: [{ volume: this.s.flyVolumeId, path: '/root' }],
-              });
-              await fly.waitForState(
-                flyConfig,
-                this.s.flyMachineId,
-                'started',
-                STARTUP_TIMEOUT_SECONDS
-              );
-            }
-          }
+          await reconcileMachineMount(flyConfig, this.ctx, this.s, machine, 'start');
           console.log('[DO] Machine already running, mount verified');
+          await this.scheduleAlarm();
           return;
         }
         console.log('[DO] Status is running but machine state is:', machine.state, '-- restarting');
@@ -725,9 +731,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       if (!fly.isFlyInsufficientResources(err)) throw err;
 
       const code = err instanceof fly.FlyApiError ? err.status : 0;
-      console.error(
-        `[DO] Insufficient resources (${code}) in ${this.s.flyRegion ?? 'unknown'}, replacing stranded volume`
-      );
+      doError(this.s, 'Insufficient resources, replacing stranded volume', {
+        statusCode: code,
+        region: this.s.flyRegion ?? 'unknown',
+      });
       await flyMachines.replaceStrandedVolume(
         flyConfig,
         this.ctx,
@@ -762,8 +769,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // start() was running in the background (via startAsync/waitUntil), bail out
     // so teardown wins. We bypass loadState() because it no-ops when already loaded.
     const currentStatus = await this.ctx.storage.get('status');
-    if (currentStatus === 'destroying') {
-      console.warn('[DO] start: instance was destroyed while starting, aborting');
+    if (!currentStatus || currentStatus === 'destroying') {
+      doWarn(this.s, 'start: instance was destroyed while starting, aborting');
       return;
     }
 
@@ -771,12 +778,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.s.startingAt = null;
     this.s.lastStartedAt = Date.now();
     this.s.healthCheckFailCount = 0;
+    this.s.lastStartErrorMessage = null;
+    this.s.lastStartErrorAt = null;
     await this.persist({
       status: 'running',
       startingAt: null,
       lastStartedAt: this.s.lastStartedAt,
       healthCheckFailCount: 0,
       flyMachineId: this.s.flyMachineId,
+      lastStartErrorMessage: null,
+      lastStartErrorAt: null,
     });
 
     await this.scheduleAlarm();
@@ -805,8 +816,39 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // Run the actual start in the background; the reconcile alarm will
     // pick up the result and transition to 'running' (or fall back on error).
     this.ctx.waitUntil(
-      this.start(userId).catch(err => {
-        console.error('[DO] startAsync: background start failed:', err);
+      this.start(userId).catch(async err => {
+        doError(this.s, 'startAsync: background start failed', {
+          error: toLoggable(err),
+        });
+        // Read from storage rather than this.s — waitUntil runs after the
+        // originating request context completes and other handlers may have
+        // mutated in-memory state in the interim.
+        const storedMachineId = await this.ctx.storage.get('flyMachineId');
+        const currentStatus = await this.ctx.storage.get('status');
+        if (!storedMachineId && currentStatus !== 'destroying') {
+          // start() threw before persisting a machine ID. Reconcile cannot
+          // distinguish this from "still in progress", so write the terminal
+          // state explicitly to avoid the 5-min stuck window.
+          // Skip if destroy() has taken ownership — writing 'stopped' would
+          // clobber the 'destroying' state and strand cleanup.
+          const now = Date.now();
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          this.s.status = 'stopped';
+          this.s.startingAt = null;
+          this.s.lastStoppedAt = now;
+          this.s.lastStartErrorMessage = errorMessage;
+          this.s.lastStartErrorAt = now;
+          await this.persist({
+            status: 'stopped',
+            startingAt: null,
+            lastStoppedAt: now,
+            lastStartErrorMessage: errorMessage,
+            lastStartErrorAt: now,
+          });
+        }
+        // If storedMachineId exists the machine was created — reconcileStarting
+        // will pick up its Fly state via getMachine + syncStatusWithFly. Writing
+        // 'stopped' here would race with a machine that is still booting.
       })
     );
   }
@@ -874,12 +916,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       markDestroyedInPostgresHelper(this.env, this.ctx, this.s, userId, sandboxId)
     );
     if (!finalized.finalized) {
-      console.warn(
-        '[DO] Destroy incomplete, alarm will retry. pending machine:',
-        this.s.pendingDestroyMachineId,
-        'volume:',
-        this.s.pendingDestroyVolumeId
-      );
+      doWarn(this.s, 'Destroy incomplete, alarm will retry', {
+        pendingMachineId: this.s.pendingDestroyMachineId,
+        pendingVolumeId: this.s.pendingDestroyVolumeId,
+      });
       await this.scheduleAlarm();
     }
 
@@ -981,6 +1021,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     lastDestroyErrorStatus: number | null;
     lastDestroyErrorMessage: string | null;
     lastDestroyErrorAt: number | null;
+    lastStartErrorMessage: string | null;
+    lastStartErrorAt: number | null;
   }> {
     await this.loadState();
     const alarmScheduledAt = await this.ctx.storage.getAlarm();
@@ -1018,6 +1060,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastDestroyErrorStatus: this.s.lastDestroyErrorStatus,
       lastDestroyErrorMessage: this.s.lastDestroyErrorMessage,
       lastDestroyErrorAt: this.s.lastDestroyErrorAt,
+      lastStartErrorMessage: this.s.lastStartErrorMessage,
+      lastStartErrorAt: this.s.lastStartErrorAt,
     };
   }
 
@@ -1108,6 +1152,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       return { success: false, error: 'Instance is not running' };
     }
 
+    this.s.restartingAt = Date.now();
+
     const action = options?.imageTag
       ? options.imageTag === 'latest'
         ? 'upgrade-to-latest'
@@ -1166,7 +1212,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       } catch (stopErr) {
         const isTimeout = stopErr instanceof fly.FlyApiError && stopErr.status === 408;
         if (!isTimeout) throw stopErr;
-        console.warn('[DO] restartMachine: stop timed out, will update in-place:', stopErr.message);
+        doWarn(this.s, 'restartMachine: stop timed out, will update in-place', {
+          error: stopErr,
+        });
       }
 
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
@@ -1194,10 +1242,21 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       await fly.waitForState(flyConfig, this.s.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
 
+      // Restore in-memory status from persisted state, in case a concurrent
+      // live check mutated it while the machine was temporarily stopped.
+      // Only restore on success — on failure the machine may actually be
+      // stopped, so let the next live check see the real Fly state.
+      const persisted = await this.ctx.storage.get('status');
+      const parsed = PersistedStateSchema.shape.status.safeParse(persisted);
+      if (parsed.success) {
+        this.s.status = parsed.data;
+      }
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       return { success: false, error: errorMessage };
+    } finally {
+      this.s.restartingAt = null;
     }
   }
 
@@ -1223,7 +1282,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           markDestroyedInPostgresHelper(this.env, this.ctx, this.s, userId, sandboxId)
       );
     } catch (err) {
-      console.error('[alarm] reconcileWithFly failed:', err);
+      doError(this.s, 'reconcileWithFly failed', {
+        error: toLoggable(err),
+      });
     }
 
     if (this.s.status) {

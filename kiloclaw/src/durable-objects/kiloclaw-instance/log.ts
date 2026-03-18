@@ -1,4 +1,4 @@
-import type { InstanceStatus } from './types';
+import type { InstanceMutableState, InstanceStatus } from './types';
 import {
   ALARM_INTERVAL_RUNNING_MS,
   ALARM_INTERVAL_STARTING_MS,
@@ -24,6 +24,114 @@ export function reconcileLog(
       ...details,
     })
   );
+}
+
+// ── Structured error/warn logging ────────────────────────────────────
+
+/**
+ * Coerce an unknown caught value into an Error or string for structured logging.
+ * Call sites can pass `toLoggable(err)` instead of repeating the instanceof check.
+ */
+export function toLoggable(err: unknown): Error | string {
+  return err instanceof Error ? err : String(err);
+}
+
+function serializeError(err: Error): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {
+    name: err.name,
+    message: err.message,
+    stack: err.stack,
+  };
+  // Preserve own enumerable properties (e.g. FlyApiError.status,
+  // GatewayControllerError.code) that JSON.stringify would otherwise drop.
+  for (const [k, v] of Object.entries(err)) {
+    if (!(k in serialized)) {
+      serialized[k] = v;
+    }
+  }
+  return serialized;
+}
+
+/**
+ * Walk a details record and convert Error instances into plain objects
+ * so JSON.stringify doesn't lose the message and stack.
+ */
+function serializeDetails(details: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (value instanceof Error) {
+      out[key] = serializeError(value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Extract the 5 standard context fields from InstanceMutableState.
+ */
+function instanceContext(state: InstanceMutableState): Record<string, unknown> {
+  return {
+    userId: state.userId,
+    sandboxId: state.sandboxId,
+    flyMachineId: state.flyMachineId,
+    flyRegion: state.flyRegion,
+    flyAppName: state.flyAppName,
+  };
+}
+
+/**
+ * Emit a structured JSON log line. Falls back to plain console output
+ * if JSON.stringify throws (e.g. circular references, BigInt values)
+ * so that logging never crashes the surrounding error-handling path.
+ */
+function emitStructuredLog(
+  logFn: (...args: unknown[]) => void,
+  level: 'error' | 'warn',
+  state: InstanceMutableState,
+  message: string,
+  details: Record<string, unknown>
+): void {
+  try {
+    logFn(
+      JSON.stringify({
+        tag: 'kiloclaw_do',
+        level,
+        message,
+        ...serializeDetails(details),
+        ...instanceContext(state),
+      })
+    );
+  } catch {
+    // Serialization failed — fall back to plain multi-arg logging so the
+    // message and context are still captured in the log stream.
+    logFn(`[kiloclaw_do] [${level}]`, message, details, instanceContext(state));
+  }
+}
+
+/**
+ * Structured error log for DO modules. Instance context fields always
+ * take precedence over caller details to prevent accidental shadowing.
+ */
+export function doError(
+  state: InstanceMutableState,
+  message: string,
+  details: Record<string, unknown> = {}
+): void {
+  emitStructuredLog(console.error, 'error', state, message, details);
+}
+
+/**
+ * Structured warn log for DO modules. Instance context fields always
+ * take precedence over caller details to prevent accidental shadowing.
+ */
+export function doWarn(
+  state: InstanceMutableState,
+  message: string,
+  details: Record<string, unknown> = {}
+): void {
+  emitStructuredLog(console.warn, 'warn', state, message, details);
 }
 
 /**

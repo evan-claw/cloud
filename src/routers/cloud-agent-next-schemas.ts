@@ -87,6 +87,7 @@ export const basePrepareSessionNextSchema = z
     mcpServers: z.record(z.string(), mcpServerConfigNextSchema).optional(),
     upstreamBranch: z.string().optional(),
     autoCommit: z.boolean().optional(),
+    autoInitiate: z.boolean().optional(),
   })
   .refine(
     data => (data.githubRepo || data.gitlabProject) && !(data.githubRepo && data.gitlabProject),

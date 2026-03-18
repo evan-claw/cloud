@@ -6,6 +6,10 @@ import { Button } from '@/components/ui/button';
 import type { ClawBannerState, ClawBillingStatus } from './billing-types';
 import { deriveBannerState, formatBillingDate } from './billing-types';
 
+function pluralizeDays(n: number | undefined): string {
+  return n === 1 ? '1 day' : `${n} days`;
+}
+
 type BillingBannerProps = {
   billing: ClawBillingStatus;
   onSubscribeClick: () => void;
@@ -68,21 +72,21 @@ function getBannerContent(state: ClawBannerState, billing: ClawBillingStatus) {
   switch (state) {
     case 'trial_active':
       return {
-        title: `Free Trial — ${billing.trial?.daysRemaining} days remaining`,
+        title: `Free Trial — ${pluralizeDays(billing.trial?.daysRemaining)} remaining`,
         message: `Your trial expires on ${formatBillingDate(billing.trial?.endsAt ?? '')}.`,
         cta: 'Subscribe Now',
         action: 'subscribe' as const,
       };
     case 'trial_ending_soon':
       return {
-        title: `Free Trial Ending Soon — ${billing.trial?.daysRemaining} days left`,
+        title: `Free Trial Ending Soon — ${pluralizeDays(billing.trial?.daysRemaining)} left`,
         message: `Your trial expires on ${formatBillingDate(billing.trial?.endsAt ?? '')}. Subscribe now to avoid interruption.`,
         cta: 'Subscribe Now',
         action: 'subscribe' as const,
       };
     case 'trial_ending_very_soon':
       return {
-        title: `Free Trial Ending Very Soon — ${billing.trial?.daysRemaining} days left`,
+        title: `Free Trial Ending Very Soon — ${pluralizeDays(billing.trial?.daysRemaining)} left`,
         message: 'Your KiloClaw will be stopped when the trial ends. Subscribe to keep it running.',
         cta: 'Subscribe Now',
         action: 'subscribe' as const,
@@ -103,7 +107,7 @@ function getBannerContent(state: ClawBannerState, billing: ClawBillingStatus) {
       };
     case 'earlybird_ending_soon':
       return {
-        title: `Earlybird Hosting Expiring Soon — ${billing.earlybird?.daysRemaining} days left`,
+        title: `Earlybird Hosting Expiring Soon — ${pluralizeDays(billing.earlybird?.daysRemaining)} left`,
         message: `Your earlybird hosting expires on ${formatBillingDate(billing.earlybird?.expiresAt ?? '')}. Subscribe to continue.`,
         cta: 'Subscribe',
         action: 'subscribe' as const,

@@ -8,7 +8,7 @@ import path from 'node:path';
 export type RestoreResult =
   | {
       ok: true;
-      downloaded: true;
+      downloaded: boolean;
       imported: true;
       diffs: { applied: number; skipped: number; total: number };
     }
@@ -83,47 +83,54 @@ export async function extractDiffs(snapshotPath: string): Promise<SnapshotDiff[]
 
 export async function restoreSession(
   kiloSessionId: string,
-  workspacePath: string
+  workspacePath: string,
+  filePath?: string
 ): Promise<RestoreResult> {
-  const ingestUrl = process.env.KILO_SESSION_INGEST_URL;
-  const token = process.env.KILOCODE_TOKEN;
-  const tmpPath = `/tmp/kilo-session-export-${kiloSessionId}.json`;
+  const tmpPath = filePath ?? `/tmp/kilo-session-export-${kiloSessionId}.json`;
+  const downloaded = !filePath;
 
   log(`starting kiloSessionId=${kiloSessionId} workspace=${workspacePath}`);
 
-  if (!ingestUrl || !token) {
-    const missing = [!ingestUrl && 'KILO_SESSION_INGEST_URL', !token && 'KILOCODE_TOKEN']
-      .filter(Boolean)
-      .join(', ');
-    return fail(`missing env vars: ${missing}`, null, 'download');
-  }
+  if (!filePath) {
+    const ingestUrl = process.env.KILO_SESSION_INGEST_URL;
+    const token = process.env.KILOCODE_TOKEN;
 
-  log(`ingestUrl=${ingestUrl}`);
-
-  // ---- Step 1: Download snapshot (stream directly to disk) ----
-  log('downloading snapshot');
-  try {
-    const url = `${ingestUrl}/api/session/${encodeURIComponent(kiloSessionId)}/export`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(300_000),
-    });
-
-    if (!res.ok) {
-      if (res.status === 404) {
-        log('snapshot not found (404)');
-        return fail('snapshot not found (404)', 404, 'download');
-      }
-      log(`download failed status=${res.status}`);
-      return fail(`download failed status=${res.status}`, 502, 'download');
+    if (!ingestUrl || !token) {
+      const missing = [!ingestUrl && 'KILO_SESSION_INGEST_URL', !token && 'KILOCODE_TOKEN']
+        .filter(Boolean)
+        .join(', ');
+      return fail(`missing env vars: ${missing}`, null, 'download');
     }
 
-    const bytesWritten = await Bun.write(tmpPath, res);
-    log(`snapshot downloaded bytes=${bytesWritten}`);
-  } catch (err) {
-    tryUnlink(tmpPath);
-    const message = err instanceof Error ? err.message : String(err);
-    return fail(message, null, 'download');
+    log(`ingestUrl=${ingestUrl}`);
+
+    // ---- Step 1: Download snapshot (stream directly to disk) ----
+    log('downloading snapshot');
+    try {
+      const url = `${ingestUrl}/api/session/${encodeURIComponent(kiloSessionId)}/export`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(300_000),
+      });
+
+      if (!res.ok) {
+        if (res.status === 404) {
+          log('snapshot not found (404)');
+          return fail('snapshot not found (404)', 404, 'download');
+        }
+        log(`download failed status=${res.status}`);
+        return fail(`download failed status=${res.status}`, 502, 'download');
+      }
+
+      const bytesWritten = await Bun.write(tmpPath, res);
+      log(`snapshot downloaded bytes=${bytesWritten}`);
+    } catch (err) {
+      tryUnlink(tmpPath);
+      const message = err instanceof Error ? err.message : String(err);
+      return fail(message, null, 'download');
+    }
+  } else {
+    log(`using provided file=${filePath}`);
   }
 
   try {
@@ -155,7 +162,7 @@ export async function restoreSession(
       log('no diffs to apply');
       return {
         ok: true,
-        downloaded: true,
+        downloaded,
         imported: true,
         diffs: { applied: 0, skipped: 0, total: 0 },
       };
@@ -200,7 +207,7 @@ export async function restoreSession(
     log(`diffs applied=${applied} skipped=${skipped} total=${total}`);
     log('completed successfully');
 
-    return { ok: true, downloaded: true, imported: true, diffs: { applied, skipped, total } };
+    return { ok: true, downloaded, imported: true, diffs: { applied, skipped, total } };
   } finally {
     tryUnlink(tmpPath);
   }
@@ -211,19 +218,31 @@ export async function restoreSession(
 // ---------------------------------------------------------------------------
 
 if (import.meta.main) {
-  const [kiloSessionId, workspacePath] = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  let filePath: string | undefined;
+  const positional: string[] = [];
+
+  for (let i = 0; i < rawArgs.length; i++) {
+    if (rawArgs[i] === '--file') {
+      filePath = rawArgs[++i];
+    } else {
+      positional.push(rawArgs[i]);
+    }
+  }
+
+  const [kiloSessionId, workspacePath] = positional;
   if (!kiloSessionId || !workspacePath) {
     console.log(
       JSON.stringify({
         ok: false,
-        error: 'Usage: kilo-restore-session <kiloSessionId> <workspacePath>',
+        error: 'Usage: kilo-restore-session [--file <path>] <kiloSessionId> <workspacePath>',
         code: null,
         step: 'download',
       })
     );
     process.exit(1);
   }
-  void restoreSession(kiloSessionId, workspacePath).then(result => {
+  void restoreSession(kiloSessionId, workspacePath, filePath).then(result => {
     console.log(JSON.stringify(result));
     process.exit(result.ok ? 0 : 1);
   });

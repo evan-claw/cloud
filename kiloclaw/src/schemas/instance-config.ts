@@ -164,6 +164,10 @@ export const PersistedStateSchema = z.object({
   lastDestroyErrorStatus: z.number().nullable().default(null),
   lastDestroyErrorMessage: z.string().nullable().default(null),
   lastDestroyErrorAt: z.number().nullable().default(null),
+  // Structured last-error from background start() failures, for admin observability.
+  // Populated by the startAsync() catch handler when start() throws before creating a machine.
+  lastStartErrorMessage: z.string().nullable().default(null),
+  lastStartErrorAt: z.number().nullable().default(null),
   // Cooldown for bound-machine recovery during destroy: avoids repeated getVolume
   // calls when the volume consistently reports no attached machine.
   lastBoundMachineRecoveryAt: z.number().nullable().default(null),

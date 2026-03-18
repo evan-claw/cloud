@@ -49,6 +49,8 @@ import {
   parseResponsesMicrodollarUsageFromString,
 } from '@/lib/processUsage.responses';
 import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
+import { isAnthropicModel } from '@/lib/providers/anthropic';
+import { isMinimaxModel } from '@/lib/providers/minimax';
 
 const posthogClient = PostHogClient();
 
@@ -814,7 +816,9 @@ async function processTokenData(
     const genStats = mapToUsageStats(
       generation,
       usageStats.responseContent,
-      usageContext.kiloUserId
+      usageContext.kiloUserId,
+      usageContext.requested_model,
+      usageContext.provider
     );
 
     genStats.model = usageStats.model; // openrouter bug?
@@ -828,9 +832,10 @@ async function processTokenData(
         [genStats.cacheDiscount_mUsd, usageStats.cacheDiscount_mUsd]
       );
     }
-    if (usageStats.inputTokens) {
-      // retain because of vercel bug: https://kilo-code.slack.com/archives/C08UR25T02V/p1773140435733259
-      genStats.inputTokens = usageStats.inputTokens;
+    if (genStats.inputTokens < usageStats.inputTokens) {
+      console.warn(
+        'Suspicious: fewer input tokens in generation data compared to usage stats. Did provider return Anthropic-style token counts?'
+      );
     }
     usageStats = genStats;
   }
@@ -866,10 +871,18 @@ async function processTokenData(
   await logMicrodollarUsage(usageStats, usageContext);
 }
 
+function useAnthropicStyleTokenCounting(requestedModel: string, provider: ProviderId) {
+  return (
+    provider === 'vercel' && (isAnthropicModel(requestedModel) || isMinimaxModel(requestedModel))
+  );
+}
+
 export const mapToUsageStats = (
   { data }: OpenRouterGeneration,
   responseContent: string,
-  kiloUserId: string
+  kiloUserId: string,
+  requestedModel: string,
+  provider: ProviderId
 ): MicrodollarUsageStats => {
   let llmCostUsd;
   if (!data.is_byok) {
@@ -891,10 +904,16 @@ export const mapToUsageStats = (
     hasError: false,
     model: data.model,
     responseContent,
-    inputTokens: data.native_tokens_prompt ?? 0,
+    inputTokens: useAnthropicStyleTokenCounting(requestedModel, provider)
+      ? (data.native_tokens_prompt ?? 0) +
+        (data.native_tokens_cached ?? 0) +
+        (data.native_tokens_cache_creation ?? 0)
+      : (data.native_tokens_prompt ?? 0),
     cacheHitTokens: data.native_tokens_cached ?? 0,
-    cacheWriteTokens: 0,
-    outputTokens: data.native_tokens_completion ?? 0,
+    cacheWriteTokens: data.native_tokens_cache_creation ?? 0,
+    outputTokens: useAnthropicStyleTokenCounting(requestedModel, provider)
+      ? (data.native_tokens_completion ?? 0) + (data.native_tokens_reasoning ?? 0)
+      : (data.native_tokens_completion ?? 0),
     cost_mUsd: toMicrodollars(llmCostUsd),
     is_byok: data.is_byok ?? null,
     cacheDiscount_mUsd:

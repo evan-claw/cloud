@@ -91,16 +91,18 @@ export async function POST(request: Request) {
         user.id,
         cloudAgentSessionId
       );
+
       if (!sessionOwnership) {
         return NextResponse.json(
           { error: 'Organization does not own this session' },
           { status: 403 }
         );
       }
+      const kiloSessionId: string | undefined = sessionOwnership.kiloSessionId;
 
       const result = signStreamTicket({
         userId: user.id,
-        kiloSessionId: sessionOwnership.kiloSessionId,
+        kiloSessionId,
         cloudAgentSessionId,
         organizationId,
       });
@@ -112,13 +114,15 @@ export async function POST(request: Request) {
         user.id,
         cloudAgentSessionId
       );
+
       if (!sessionOwnership) {
         return NextResponse.json({ error: 'Session not found or access denied' }, { status: 403 });
       }
+      const kiloSessionId: string | undefined = sessionOwnership.kiloSessionId;
 
       const result = signStreamTicket({
         userId: user.id,
-        kiloSessionId: sessionOwnership.kiloSessionId,
+        kiloSessionId,
         cloudAgentSessionId,
       });
       return NextResponse.json(result);
