@@ -28,6 +28,7 @@ export const templates = {
   clawInstanceDestroyed: '28',
   clawEarlybirdEndingSoon: '29',
   clawEarlybirdExpiresTomorrow: '30',
+  firstTopupBonus: '31',
 } as const;
 
 export type TemplateName = keyof typeof templates;
@@ -55,6 +56,7 @@ export const subjects: Record<TemplateName, string> = {
   clawInstanceDestroyed: 'Your KiloClaw Instance Has Been Deleted',
   clawEarlybirdEndingSoon: 'Your KiloClaw Earlybird Access Ends Soon',
   clawEarlybirdExpiresTomorrow: 'Your KiloClaw Earlybird Access Expires Tomorrow',
+  firstTopupBonus: 'You just got a bonus! 🎉',
 };
 
 function escapeHtml(str: string): string {
@@ -375,4 +377,21 @@ export async function sendOssExistingOrgProvisionedEmail(data: OssProvisionEmail
   await Promise.all(
     data.to.map(to => send({ to, templateName: 'ossExistingOrgProvisioned', templateVars }))
   );
+}
+
+type SendFirstTopupBonusEmailProps = {
+  to: string;
+  bonus_amount: string;
+  total_amount: string;
+};
+
+export async function sendFirstTopupBonusEmail(props: SendFirstTopupBonusEmailProps) {
+  return send({
+    to: props.to,
+    templateName: 'firstTopupBonus',
+    templateVars: {
+      bonus_amount: props.bonus_amount,
+      total_amount: props.total_amount,
+    },
+  });
 }

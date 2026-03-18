@@ -36,6 +36,7 @@ const templateNames: [TemplateName, ...TemplateName[]] = [
   'clawInstanceDestroyed',
   'clawEarlybirdEndingSoon',
   'clawEarlybirdExpiresTomorrow',
+  'firstTopupBonus',
 ];
 
 const TemplateNameSchema = z.enum(templateNames);
@@ -153,6 +154,8 @@ function fixtureTemplateVars(template: TemplateName): Record<string, string | Ra
       return { days_remaining: '14', expiry_date: '2026-09-26', claw_url: `${NEXTAUTH_URL}/claw` };
     case 'clawEarlybirdExpiresTomorrow':
       return { expiry_date: '2026-09-26', claw_url: `${NEXTAUTH_URL}/claw` };
+    case 'firstTopupBonus':
+      return { bonus_amount: '20.00', total_amount: '30.00' };
   }
   throw new Error(`Unknown template: ${template}`);
 }
