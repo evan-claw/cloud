@@ -154,7 +154,28 @@ export async function handleMergeRequestCodeReview(
       return NextResponse.json({ message: 'No head commit found' }, { status: 400 });
     }
 
-    // 3b. Skip merge commits on update (e.g. merging base branch into feature branch)
+    // 4. Cancel any existing reviews for this MR (different SHA)
+    // This prevents spam when user pushes multiple commits quickly
+    const oldReviewIds = await findActiveReviewsForPR(project.path_with_namespace, mr.iid, headSha);
+
+    if (oldReviewIds.length > 0) {
+      logExceptInTest(
+        `Cancelling ${oldReviewIds.length} old review(s) for ${project.path_with_namespace}!${mr.iid}`
+      );
+
+      // Cancel each review via the orchestrator (fire-and-forget, don't block new review)
+      await Promise.allSettled(
+        oldReviewIds.map(reviewId =>
+          codeReviewWorkerClient.cancelReview(reviewId, 'Superseded by new push').catch(err => {
+            logExceptInTest(`Failed to cancel review ${reviewId}:`, err);
+            return { success: false, reviewId };
+          })
+        )
+      );
+    }
+
+    // 4b. Skip merge commits on update (e.g. merging base branch into feature branch)
+    // Placed after step 4 so old reviews are still cancelled before we bail out.
     if (mr.action === GITLAB_ACTION.UPDATE) {
       try {
         const integrationForCheck = await getIntegrationById(integration.id);
@@ -184,26 +205,6 @@ export async function handleMergeRequestCodeReview(
         // Fail-open: if we can't check, proceed with the review
         logExceptInTest('Failed to check for merge commit, proceeding with review:', error);
       }
-    }
-
-    // 4. Cancel any existing reviews for this MR (different SHA)
-    // This prevents spam when user pushes multiple commits quickly
-    const oldReviewIds = await findActiveReviewsForPR(project.path_with_namespace, mr.iid, headSha);
-
-    if (oldReviewIds.length > 0) {
-      logExceptInTest(
-        `Cancelling ${oldReviewIds.length} old review(s) for ${project.path_with_namespace}!${mr.iid}`
-      );
-
-      // Cancel each review via the orchestrator (fire-and-forget, don't block new review)
-      await Promise.allSettled(
-        oldReviewIds.map(reviewId =>
-          codeReviewWorkerClient.cancelReview(reviewId, 'Superseded by new push').catch(err => {
-            logExceptInTest(`Failed to cancel review ${reviewId}:`, err);
-            return { success: false, reviewId };
-          })
-        )
-      );
     }
 
     // 5. Check for duplicate review (same project, MR, SHA)
