@@ -835,6 +835,24 @@ describe('createSubscriptionCheckout — concurrent checkout guard', () => {
     expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
   });
 
+  it('rejects when expire fails for a non-expired reason (e.g. session completed concurrently)', async () => {
+    stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
+    stripeMock.checkout.sessions.list.mockResolvedValue({
+      data: [{ id: 'cs_completed', metadata: { type: 'kiloclaw' } }],
+    });
+    stripeMock.checkout.sessions.expire.mockRejectedValue(
+      new stripeMock.errors.StripeInvalidRequestError({
+        type: 'invalid_request_error',
+        message: 'This Session is not in an expirable state.',
+      })
+    );
+
+    const caller = await createCallerForUser(user.id);
+    await expect(caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' })).rejects.toThrow(
+      'not in an expirable state'
+    );
+  });
+
   it('rejects when an active Stripe subscription already exists', async () => {
     const activeSub = makeStripeSubscription({
       id: 'sub_stripe_active',

@@ -1160,12 +1160,19 @@ export const kiloclawRouter = createTRPCRouter({
       // and came back to try again.
       // Concurrent requests may race: two requests list the same session,
       // the first expires it, and the second gets an error from Stripe.
-      // We treat "already expired" as success to keep this idempotent.
+      // We only swallow "already expired" errors to stay idempotent — other
+      // StripeInvalidRequestError reasons (e.g. a session that was completed
+      // between list() and expire()) must propagate so we don't silently
+      // create a duplicate checkout.
       const staleKiloClawSessions = openSessions.data.filter(s => s.metadata?.type === 'kiloclaw');
       await Promise.all(
         staleKiloClawSessions.map(s =>
           stripe.checkout.sessions.expire(s.id).catch(err => {
-            if (err instanceof stripe.errors.StripeInvalidRequestError) return;
+            if (
+              err instanceof stripe.errors.StripeInvalidRequestError &&
+              /already expired/i.test(err.message)
+            )
+              return;
             throw err;
           })
         )
