@@ -1,113 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import { AlertCircle, Check, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { toast } from 'sonner';
-import { useReadFile, type useKiloClawMutations } from '@/hooks/useKiloClaw';
-import { Button } from '@/components/ui/button';
+import { AlertCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-
-type ExecPreset = 'always-ask' | 'never-ask';
-
-function execPresetToConfig(preset: ExecPreset): { security: string; ask: string } {
-  switch (preset) {
-    case 'never-ask':
-      return { security: 'full', ask: 'off' };
-    case 'always-ask':
-    default:
-      return { security: 'allowlist', ask: 'on-miss' };
-  }
-}
-
-function mergeExecPreset(
-  currentConfig: Record<string, unknown>,
-  preset: ExecPreset
-): Record<string, unknown> {
-  const tools = (currentConfig.tools ?? {}) as Record<string, unknown>;
-  const exec = (tools.exec ?? {}) as Record<string, unknown>;
-  return {
-    ...currentConfig,
-    tools: {
-      ...tools,
-      exec: { ...exec, ...execPresetToConfig(preset) },
-    },
-  };
-}
-
-const OPENCLAW_CONFIG_PATH = 'openclaw.json';
-
-type ClawMutations = ReturnType<typeof useKiloClawMutations>;
+import type { ExecPreset } from './claw.types';
 
 export function PermissionStep({
   instanceRunning,
-  mutations,
-  onComplete,
+  onSelect,
 }: {
   instanceRunning: boolean;
-  mutations: ClawMutations;
-  onComplete: () => void;
+  onSelect: (preset: ExecPreset) => void;
 }) {
-  const [preset, setPreset] = useState<ExecPreset | null>(null);
-
-  // Only fetch config when the instance is running AND user picked "never-ask"
-  // (the only case where we need to patch).
-  const needsPatch = preset === 'never-ask';
-  const { data: fileData, refetch } = useReadFile(
-    OPENCLAW_CONFIG_PATH,
-    instanceRunning && needsPatch
-  );
-
-  const isApplying = mutations.writeFile.isPending;
-  const canContinue = instanceRunning && preset !== null && !isApplying;
-
-  function handleContinue() {
-    if (!preset) return;
-
-    // "always-ask" is the default — no patch needed
-    if (preset === 'always-ask') {
-      onComplete();
-      return;
-    }
-
-    // "never-ask" — patch the config
-    if (!fileData) {
-      toast.error('Config not loaded yet — please try again in a moment');
-      return;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(fileData.content);
-    } catch {
-      toast.error('Failed to parse config — please try again');
-      return;
-    }
-
-    const currentConfig = (
-      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {}
-    ) as Record<string, unknown>;
-
-    const merged = mergeExecPreset(currentConfig, preset);
-    mutations.writeFile.mutate(
-      { path: OPENCLAW_CONFIG_PATH, content: JSON.stringify(merged, null, 2), etag: fileData.etag },
-      {
-        onSuccess: () => onComplete(),
-        onError: (err: {
-          message: string;
-          data?: { code?: string; upstreamCode?: string } | null;
-        }) => {
-          if (err.data?.code === 'CONFLICT') {
-            void refetch();
-            toast.error('Config was modified externally — please try again');
-          } else {
-            toast.error(err.message);
-          }
-        },
-      }
-    );
-  }
-
   return (
     <Card className="mt-6">
       <CardContent className="flex flex-col gap-6 p-6 sm:p-8">
@@ -132,8 +36,7 @@ export function PermissionStep({
         {/* Permission cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <PresetCard
-            selected={preset === 'never-ask'}
-            onClick={() => setPreset('never-ask')}
+            onClick={() => onSelect('never-ask')}
             icon={<ShieldAlert className="h-5 w-5 text-amber-400" />}
             iconBg="bg-amber-900/50"
             title="Allow everything"
@@ -141,8 +44,7 @@ export function PermissionStep({
             caution="Use with caution"
           />
           <PresetCard
-            selected={preset === 'always-ask'}
-            onClick={() => setPreset('always-ask')}
+            onClick={() => onSelect('always-ask')}
             icon={<ShieldCheck className="h-5 w-5 text-emerald-400" />}
             iconBg="bg-emerald-900/50"
             title="Ask for permission"
@@ -166,24 +68,12 @@ export function PermissionStep({
             </div>
           </div>
         )}
-
-        <Button className="w-full py-6 text-base" disabled={!canContinue} onClick={handleContinue}>
-          {isApplying ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Applying...
-            </>
-          ) : (
-            'Continue'
-          )}
-        </Button>
       </CardContent>
     </Card>
   );
 }
 
 function PresetCard({
-  selected,
   onClick,
   icon,
   iconBg,
@@ -192,7 +82,6 @@ function PresetCard({
   badge,
   caution,
 }: {
-  selected: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   iconBg: string;
@@ -207,21 +96,15 @@ function PresetCard({
       onClick={onClick}
       className={cn(
         'relative flex cursor-pointer flex-col gap-4 rounded-xl border p-5 text-left transition-colors',
-        selected
-          ? 'border-blue-500 bg-blue-950/40'
-          : 'border-border hover:border-muted-foreground/40'
+        'border-border hover:border-muted-foreground/40'
       )}
     >
-      {/* Top row: icon + badge/checkmark */}
+      {/* Top row: icon + badge */}
       <div className="flex items-start justify-between">
         <div className={cn('flex h-10 w-10 items-center justify-center rounded-lg', iconBg)}>
           {icon}
         </div>
-        {selected ? (
-          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500">
-            <Check className="h-3.5 w-3.5 text-white" />
-          </div>
-        ) : badge ? (
+        {badge ? (
           <span className="rounded-full border border-emerald-700 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-emerald-400 uppercase">
             {badge}
           </span>

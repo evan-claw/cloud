@@ -22,6 +22,8 @@ import { SettingsTab } from './SettingsTab';
 import { ChangelogCard } from './ChangelogCard';
 import { PairingCard } from './PairingCard';
 import { PermissionStep } from './PermissionStep';
+import { ProvisioningStep } from './ProvisioningStep';
+import type { ExecPreset } from './claw.types';
 import { BillingWrapper } from './billing/BillingWrapper';
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
@@ -62,7 +64,10 @@ export function ClawDashboard({
     Date.now() - instanceStatus.provisionedAt < SEVEN_DAYS_MS;
   const configServiceNudgeVisible = !instanceStatus || instanceYoung;
 
-  const [onboardingStep, setOnboardingStep] = useState<'permissions' | 'done'>('permissions');
+  const [onboardingStep, setOnboardingStep] = useState<'permissions' | 'provisioning' | 'done'>(
+    'permissions'
+  );
+  const [selectedPreset, setSelectedPreset] = useState<ExecPreset | null>(null);
 
   const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
@@ -144,6 +149,15 @@ export function ClawDashboard({
           />
         ) : isNewSetup && onboardingStep === 'permissions' ? (
           <PermissionStep
+            instanceRunning={isRunning && gatewayStatus?.state === 'running'}
+            onSelect={preset => {
+              setSelectedPreset(preset);
+              setOnboardingStep('provisioning');
+            }}
+          />
+        ) : isNewSetup && onboardingStep === 'provisioning' && selectedPreset ? (
+          <ProvisioningStep
+            preset={selectedPreset}
             instanceRunning={isRunning && gatewayStatus?.state === 'running'}
             mutations={mutations}
             onComplete={() => setOnboardingStep('done')}

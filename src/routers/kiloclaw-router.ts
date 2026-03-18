@@ -966,7 +966,7 @@ export const kiloclawRouter = createTRPCRouter({
       z.object({
         path: z.string().min(1),
         content: z.string(),
-        etag: z.string().min(1),
+        etag: z.string().min(1).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
