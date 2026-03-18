@@ -4,7 +4,7 @@
  *
  * The set of credits to expire is defined by (credit_category, description)
  * pairs copied from the reviewed spreadsheet. Each row must match both fields
- * (empty description matches any).
+ * (empty description matches NULL or empty).
  *
  * The script queries by credit_category first (much faster than scanning all
  * users), then processes each affected user.
@@ -310,14 +310,17 @@ async function main() {
   console.log();
 
   // Build the OR condition matching all (category, description) pairs.
-  // Empty description means "match any description for this category".
+  // Empty description means "match NULL or empty string description".
   const rowConditions = rows.map(row =>
     row.description
       ? and(
           eq(credit_transactions.credit_category, row.category),
           eq(credit_transactions.description, row.description)
         )
-      : eq(credit_transactions.credit_category, row.category)
+      : and(
+          eq(credit_transactions.credit_category, row.category),
+          or(isNull(credit_transactions.description), eq(credit_transactions.description, ''))
+        )
   );
   const categoryFilter = rowConditions.length === 1 ? rowConditions[0] : or(...rowConditions);
 
@@ -333,11 +336,26 @@ async function main() {
 
   const limit = pLimit(concurrency);
 
+  // Per-(category, description) stats
+  type PairKey = string;
+  const pairKey = (cat: string, desc: string | null): PairKey =>
+    desc ? `${cat} | ${desc}` : `${cat} | (empty)`;
+  const pairStats = new Map<
+    PairKey,
+    { credits: number; amount: number; projectedExpiration: number }
+  >();
+  for (const row of rows) {
+    pairStats.set(pairKey(row.category, row.description), {
+      credits: 0,
+      amount: 0,
+      projectedExpiration: 0,
+    });
+  }
+
   let lastId = '';
   let totalCredits = 0;
-  let totalCreditsAffected = 0;
   let totalProjectedExpiration = 0;
-  let usersAffected = 0;
+  let usersProcessed = 0;
   let totalErrors = 0;
 
   while (true) {
@@ -359,6 +377,18 @@ async function main() {
 
     if (batch.length === 0) break;
     totalCredits += batch.length;
+
+    // Track per-pair stats from raw batch
+    for (const credit of batch) {
+      // Find the matching row (specific description match first, then any-description)
+      const specificKey = pairKey(credit.credit_category ?? '', credit.description);
+      const anyKey = pairKey(credit.credit_category ?? '', null);
+      const stats = pairStats.get(specificKey) ?? pairStats.get(anyKey);
+      if (stats) {
+        stats.credits++;
+        stats.amount += credit.amount_microdollars;
+      }
+    }
 
     // Group by user
     const byUser = new Map<string, typeof batch>();
@@ -387,29 +417,38 @@ async function main() {
           settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
         errorLog.write(JSON.stringify({ error }) + '\n');
       } else {
-        usersAffected++;
-        totalCreditsAffected += settled.value.result.creditsAffected;
+        usersProcessed++;
         totalProjectedExpiration += settled.value.result.projectedExpiration;
       }
     }
 
     lastId = batch[batch.length - 1].kilo_user_id;
     console.log(
-      `Processed ${totalCredits} credits, ${usersAffected} users so far (${totalCreditsAffected} credits tagged, ${totalErrors} errors)...`
+      `  ${totalCredits} credits fetched, ${usersProcessed} users processed, ${totalErrors} errors`
     );
   }
 
   output.end();
   errorLog.end();
 
+  const fmt = (microdollars: number) =>
+    `$${(microdollars / 1_000_000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  console.log('\n--- Per-category breakdown ---');
+  for (const [key, stats] of pairStats) {
+    if (stats.credits === 0) {
+      console.log(`  ${key}: no matching credits found`);
+    } else {
+      console.log(`  ${key}: ${stats.credits} credits, ${fmt(stats.amount)} total`);
+    }
+  }
+
   console.log('\n--- Summary ---');
-  console.log(`Rows:                        ${rows.length}`);
-  console.log(`Total credits found:         ${totalCredits}`);
-  console.log(`Users affected:              ${usersAffected}`);
-  console.log(`Total credits tagged:        ${totalCreditsAffected}`);
   console.log(
-    `Projected expiration total:  ${totalProjectedExpiration} microdollars ($${(totalProjectedExpiration / 1_000_000).toFixed(2)})`
+    `Total credits:               ${totalCredits} (${fmt(totalCredits > 0 ? [...pairStats.values()].reduce((s, v) => s + v.amount, 0) : 0)})`
   );
+  console.log(`Users processed:             ${usersProcessed}`);
+  console.log(`Projected expiration:        ${fmt(totalProjectedExpiration)}`);
   console.log(`Errors:                      ${totalErrors}`);
   console.log(`Mode:                        ${execute ? 'EXECUTED' : 'DRY RUN'}`);
 }
