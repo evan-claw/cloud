@@ -10,6 +10,8 @@
     "local_protocol": "http",
     "ip": "0.0.0.0",
   },
+  "logpush": true,
+  "upload_source_maps": true,
   "observability": {
     "enabled": true,
   },

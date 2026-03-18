@@ -12,6 +12,7 @@
     "ip": "0.0.0.0",
   },
   "logpush": true,
+  "upload_source_maps": true,
   "vars": {
     "BUILDER_HOSTNAME": "builder.kiloapps.io",
     "BACKEND_PUSH_NOTIFICATION_URL": "https://app.kilo.ai/api/app-builder/push-notification",

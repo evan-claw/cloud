@@ -5,6 +5,7 @@
   "compatibility_date": "2025-01-20",
   "compatibility_flags": ["nodejs_compat"],
   // Production features
+  "logpush": true,
   "upload_source_maps": true,
   "observability": {
     "enabled": true,

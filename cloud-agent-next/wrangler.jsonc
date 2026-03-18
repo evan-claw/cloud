@@ -33,6 +33,7 @@
     },
   },
   "logpush": true,
+  "upload_source_maps": true,
   "routes": [
     {
       "pattern": "cloud-agent-next.kilosessions.ai",

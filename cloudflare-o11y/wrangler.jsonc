@@ -12,6 +12,7 @@
 		"enabled": true,
 	},
 	"logpush": true,
+	"upload_source_maps": true,
 	"compatibility_flags": ["nodejs_compat"],
 	"rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 	/**
