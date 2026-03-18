@@ -33,6 +33,7 @@ import {
   RpcConvoyDetailOutput,
   RpcAlarmStatusOutput,
   RpcOrgTownOutput,
+  RpcRigAgentEventOutput,
 } from './schemas';
 import type { TRPCContext } from './init';
 
@@ -902,6 +903,25 @@ export const gastownRouter = router({
       return townStub.listBeadEvents({
         since: input.since,
         limit: input.limit,
+      });
+    }),
+
+  getAgentEvents: gastownProcedure
+    .input(
+      z.object({
+        rigId: z.string().uuid(),
+        agentId: z.string().uuid(),
+        limit: z.number().int().positive().max(500).optional(),
+        afterId: z.number().int().nonnegative().optional(),
+      })
+    )
+    .output(z.array(RpcRigAgentEventOutput))
+    .query(async ({ ctx, input }) => {
+      const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
+      const townStub = getTownDOStub(ctx.env, rig.town_id);
+      return townStub.getAgentEvents(input.agentId, {
+        limit: input.limit,
+        afterId: input.afterId,
       });
     }),
 

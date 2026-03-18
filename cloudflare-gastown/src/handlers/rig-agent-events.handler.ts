@@ -60,11 +60,10 @@ export async function handleGetAgentEvents(
   const townId = c.get('townId');
   const town = getTownDOStub(c.env, townId);
   // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
-  const events = await town.getAgentEvents(
-    params.agentId,
-    queryParsed.data.after_id,
-    queryParsed.data.limit
-  );
+  const events = await town.getAgentEvents(params.agentId, {
+    afterId: queryParsed.data.after_id,
+    limit: queryParsed.data.limit,
+  });
 
   return c.json(resSuccess(events));
 }

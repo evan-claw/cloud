@@ -236,3 +236,13 @@ export const OrgTownOutput = z.object({
   updated_at: z.string(),
 });
 export const RpcOrgTownOutput = rpcSafe(OrgTownOutput);
+
+// Agent event record (from AgentDO via TownDO)
+export const RigAgentEventOutput = z.object({
+  id: z.number(),
+  agent_id: z.string(),
+  event_type: z.string(),
+  data: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+export const RpcRigAgentEventOutput = rpcSafe(RigAgentEventOutput);

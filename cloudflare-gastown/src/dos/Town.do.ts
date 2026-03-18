@@ -49,6 +49,7 @@ import {
 } from '../db/tables/agent-nudges.table';
 import { query } from '../util/query.util';
 import { getAgentDOStub } from './Agent.do';
+import type { RigAgentEventRecord } from '../db/tables/rig-agent-events.table';
 import { getTownContainerStub } from './TownContainer.do';
 
 import { writeEvent, type GastownEventData } from '../util/analytics.util';
@@ -988,9 +989,12 @@ export class TownDO extends DurableObject<Env> {
     return agentDO.appendEvent(eventType, data);
   }
 
-  async getAgentEvents(agentId: string, afterId?: number, limit?: number): Promise<unknown[]> {
+  async getAgentEvents(
+    agentId: string,
+    opts?: { limit?: number; afterId?: number }
+  ): Promise<RigAgentEventRecord[]> {
     const agentDO = getAgentDOStub(this.env, agentId);
-    return agentDO.getEvents(afterId, limit);
+    return agentDO.getEvents(opts?.afterId ?? 0, opts?.limit ?? 500);
   }
 
   // ── Prime & Checkpoint ────────────────────────────────────────────
