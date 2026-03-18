@@ -48,9 +48,6 @@ RUN npm install -g openclaw@2026.3.13 \
 # Install ClawHub CLI
 RUN npm install -g clawhub
 
-# Install QMD
-RUN npm install -g @tobilu/qmd
-
 # Install mcporter (MCP server tooling)
 RUN npm install -g mcporter@0.7.3
 
