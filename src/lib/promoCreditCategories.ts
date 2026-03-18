@@ -8,6 +8,7 @@ import {
   FIRST_TOPUP_BONUS_AMOUNT,
   REFERRAL_BONUS_AMOUNT,
   PROMO_CREDIT_EXPIRY_HRS,
+  WELCOME_CREDIT_EXPIRY_HRS,
 } from '@/lib/constants';
 import { promoCategoriesOld } from '@/lib/promoCreditCategoriesOld';
 import {
@@ -172,9 +173,9 @@ const nonSelfServicePromos: readonly NonSelfServicePromoCreditCategoryConfig[] =
   {
     credit_category: 'automatic-welcome-credits',
     description: 'Free credits for new users who pass both Turnstile and Stytch validation',
-    amount_usd: 5,
+    amount_usd: 2.5,
     is_idempotent: true,
-    expiry_hours: PROMO_CREDIT_EXPIRY_HRS,
+    expiry_hours: WELCOME_CREDIT_EXPIRY_HRS,
   },
   {
     credit_category: 'autocomplete-rollout-2025-11',
