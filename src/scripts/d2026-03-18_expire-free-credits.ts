@@ -88,9 +88,20 @@ async function processUser(
       )
     );
 
-  // 2. Find affected: free, non-expiring, positive credits
+  // 2. Find affected: free, non-expiring, positive credits (excluding categories we don't want to expire)
+  const excludedCategories = new Set([
+    'orb_migration_accounting_adjustment',
+    'credits_expired',
+    'custom',
+    'usage_issue',
+    'feedback',
+  ]);
   const affected = allTransactions.filter(
-    t => t.is_free && t.expiry_date == null && t.amount_microdollars > 0
+    t =>
+      t.is_free &&
+      t.expiry_date == null &&
+      t.amount_microdollars > 0 &&
+      !excludedCategories.has(t.credit_category ?? '')
   );
   if (affected.length === 0) return null;
 
