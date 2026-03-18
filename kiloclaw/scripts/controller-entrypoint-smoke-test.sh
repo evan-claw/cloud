@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Full entrypoint smoke test — runs the default CMD (controller with bootstrap).
+# Tests the complete startup path: bootstrap → onboard/doctor → config patch → gateway.
+# For quick controller-only testing, use controller-smoke-test.sh.
+
 IMAGE="${IMAGE:-kiloclaw:controller}"
 TOKEN="${TOKEN:-smoke-token}"
 PORT="${PORT:-18790}"
@@ -37,13 +41,19 @@ CID=$(docker run -d --rm \
   "$IMAGE")
 
 echo "waiting for /_kilo/health on port $PORT ..."
-for _ in $(seq 1 40); do
-  if curl -fsS "http://127.0.0.1:${PORT}/_kilo/health" >/dev/null 2>&1; then
+for _ in $(seq 1 60); do
+  RESP=$(curl -sS "http://127.0.0.1:${PORT}/_kilo/health" 2>/dev/null) || true
+  if echo "$RESP" | grep -q '"state":"ready"'; then
+    echo "Controller is ready"
     break
   fi
+  # Show bootstrap progress
+  STATE=$(echo "$RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('state','?'), d.get('phase',''))" 2>/dev/null || echo "waiting...")
+  echo "  $STATE"
   sleep 1
 done
 
+echo
 echo "health:"
 curl -sS "http://127.0.0.1:${PORT}/_kilo/health"
 
@@ -59,5 +69,6 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 echo "user traffic without proxy token (REQUIRE_PROXY_TOKEN=true) -> expect 401:"
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${PORT}/"
 
+echo
 echo "container logs:"
 docker logs --tail 120 "$CID"

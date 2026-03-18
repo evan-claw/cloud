@@ -409,6 +409,9 @@ export function buildGatewayArgs(env: EnvLike): string[] {
  * so /_kilo/health can report the current phase. If any step throws,
  * the error propagates to the controller which enters degraded mode.
  */
+/** Yield to the event loop so the HTTP server can process pending requests. */
+const yieldToEventLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
 export async function bootstrap(
   env: EnvLike,
   setPhase: (phase: string) => void,
@@ -416,21 +419,26 @@ export async function bootstrap(
 ): Promise<void> {
   setPhase('decrypting');
   decryptEnvVars(env);
+  await yieldToEventLoop();
 
   setPhase('directories');
   setupDirectories(env, deps);
+  await yieldToEventLoop();
 
   setPhase('feature-flags');
   applyFeatureFlags(env, deps);
 
   generateHooksToken(env);
+  await yieldToEventLoop();
 
   setPhase('github');
   configureGitHub(env, deps);
+  await yieldToEventLoop();
 
   const configExists = deps.existsSync(CONFIG_PATH);
   setPhase(configExists ? 'doctor' : 'onboard');
   runOnboardOrDoctor(env, deps);
+  await yieldToEventLoop();
 
   env.KILOCLAW_GATEWAY_ARGS = JSON.stringify(buildGatewayArgs(env));
 }
