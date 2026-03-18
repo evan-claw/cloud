@@ -249,9 +249,8 @@ export type GmailNotificationsResponse = {
   gmailNotificationsEnabled: boolean;
 };
 
-/** Combined status + gateway token returned by tRPC getStatus */
+/** Combined status returned by tRPC getStatus */
 export type KiloClawDashboardStatus = PlatformStatusResponse & {
-  gatewayToken: string | null;
   /** Worker base URL for constructing the "Open" link. Falls back to claw.kilo.ai. */
   workerUrl: string;
 };

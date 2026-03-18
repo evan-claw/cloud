@@ -1,4 +1,4 @@
-import { adminProcedure, createTRPCRouter } from '@/lib/trpc/init';
+import { adminProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/init';
 import { db } from '@/lib/drizzle';
 import { kiloclaw_instances, kilocode_users } from '@kilocode/db/schema';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
@@ -447,6 +447,58 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       throwKiloclawAdminError(err, fallbackMessage);
     }
   }),
+
+  fileTree: adminProcedure
+    .input(z.object({ userId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+        const result = await client.getFileTree(input.userId);
+        return result.tree;
+      } catch (err) {
+        throwKiloclawAdminError(err, 'Failed to fetch file tree');
+      }
+    }),
+
+  readFile: adminProcedure
+    .input(z.object({ userId: z.string().min(1), path: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+        return await client.readFile(input.userId, input.path);
+      } catch (err) {
+        throwKiloclawAdminError(err, 'Failed to read file');
+      }
+    }),
+
+  writeFile: adminProcedure
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        path: z.string().min(1),
+        content: z.string(),
+        etag: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+        return await client.writeFile(input.userId, input.path, input.content, input.etag);
+      } catch (err) {
+        // Propagate file_etag_conflict with UpstreamApiError so the UI can detect it
+        if (err instanceof KiloClawApiError && err.statusCode === 409) {
+          const parsed = JSON.parse(err.responseBody || '{}') as { code?: string; error?: string };
+          if (parsed.code === 'file_etag_conflict') {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: parsed.error ?? 'File was modified externally',
+              cause: new UpstreamApiError('file_etag_conflict'),
+            });
+          }
+        }
+        throwKiloclawAdminError(err, 'Failed to write file');
+      }
+    }),
 
   machineStart: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
     const fallbackMessage = 'Failed to start machine';

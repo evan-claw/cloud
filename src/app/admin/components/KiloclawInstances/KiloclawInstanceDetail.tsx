@@ -57,6 +57,7 @@ import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
+import { AdminFileEditor } from './AdminFileEditor';
 
 function formatRelativeTime(timestamp: string | null): string {
   if (!timestamp) return '—';
@@ -1116,6 +1117,22 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
 
         {/* Version Pin Card */}
         {data.user_id && <VersionPinCard userId={data.user_id} />}
+
+        {/* Workspace File Editor */}
+        {!data.destroyed_at && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Workspace Files</CardTitle>
+              <CardDescription>
+                Browse and edit all files in /root/.openclaw/ — no filtering applied. Machine must
+                be running for file operations to succeed.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AdminFileEditor userId={data.user_id} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Destroy Confirmation Dialog */}
         <Dialog open={destroyDialogOpen} onOpenChange={setDestroyDialogOpen}>
