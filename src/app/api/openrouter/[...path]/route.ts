@@ -460,7 +460,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       path,
       search: url.search,
       method: request.method,
-      body: requestBodyParsed.body,
+      body: { ...requestBodyParsed.body, ...customLlm?.extra_body },
       extraHeaders,
       provider,
       signal: request.signal,
