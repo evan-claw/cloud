@@ -419,7 +419,7 @@ export declare const gastownRouter: import('@trpc/server').TRPCBuiltRouter<
       output: void;
       meta: object;
     }>;
-     getTownConfig: import('@trpc/server').TRPCQueryProcedure<{
+    getTownConfig: import('@trpc/server').TRPCQueryProcedure<{
       input: {
         townId: string;
       };

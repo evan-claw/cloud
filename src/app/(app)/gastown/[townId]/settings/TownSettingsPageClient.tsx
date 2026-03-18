@@ -249,7 +249,9 @@ export function TownSettingsPageClient({ townId, readOnly = false }: Props) {
           </Button>
         )}
         {effectiveReadOnly && (
-          <span className="text-xs text-white/30">View only — only town creators and org owners can edit</span>
+          <span className="text-xs text-white/30">
+            View only — only town creators and org owners can edit
+          </span>
         )}
       </div>
 
