@@ -685,8 +685,8 @@ importers:
   cloud-agent-next/wrapper:
     dependencies:
       '@kilocode/sdk':
-        specifier: 7.0.47
-        version: 7.0.47
+        specifier: 7.0.50
+        version: 7.0.50
     devDependencies:
       '@types/bun':
         specifier: latest
@@ -3767,8 +3767,8 @@ packages:
   '@kilocode/sdk@7.0.37':
     resolution: {integrity: sha512-t7HEjYpAuW3IdbEp+2VYQPFLhidYFSmWK3nl6vWri0QBNh+spQcotdMYENNmv/HQOAXr84pXgOFtc8YCEOz5wQ==}
 
-  '@kilocode/sdk@7.0.47':
-    resolution: {integrity: sha512-Zuj/rmiIkhyb7tR2U5DOCILozuc6xIu53iFpuz/Du+a+6DxrJBB2/DR8Yt0osDavJwdHGTsmELI22kUuPQYAuw==}
+  '@kilocode/sdk@7.0.50':
+    resolution: {integrity: sha512-3d2mILMuqSNr8Csi2d9feNY8gC/bYqlErNyfMfyVxth8qYMMq1a9PvkdpoAK3FGiYs1jj4o3eixXNKhWdhUL2g==}
 
   '@lottiefiles/dotlottie-react@0.17.7':
     resolution: {integrity: sha512-A6wO3zqkDx/t0ULfctcr1Bmb1f1hc4zUV3NcbKQOsBGAOIx1vABV/fRabFYElvbJl9lmOR24yMh//Z0fvvJV+Q==}
@@ -14907,7 +14907,7 @@ snapshots:
 
   '@kilocode/sdk@7.0.37': {}
 
-  '@kilocode/sdk@7.0.47': {}
+  '@kilocode/sdk@7.0.50': {}
 
   '@lottiefiles/dotlottie-react@0.17.7(react@19.2.0)':
     dependencies:
@@ -18285,7 +18285,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 2.0.0
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@25.2.0)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)
 
   '@vitest/utils@3.2.4':
     dependencies:
