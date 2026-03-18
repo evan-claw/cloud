@@ -1147,16 +1147,11 @@ export const kiloclawRouter = createTRPCRouter({
           message: 'You already have an active subscription.',
         });
       }
-      const hasPendingKiloClawCheckout = openSessions.data.some(
-        s => s.metadata?.type === 'kiloclaw'
-      );
-      if (hasPendingKiloClawCheckout) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message:
-            'A checkout is already in progress. Please complete or cancel the existing checkout.',
-        });
-      }
+      // Expire any stale open checkout sessions so the user can start fresh.
+      // This handles the case where a user started checkout, closed the tab,
+      // and came back to try again.
+      const staleKiloClawSessions = openSessions.data.filter(s => s.metadata?.type === 'kiloclaw');
+      await Promise.all(staleKiloClawSessions.map(s => stripe.checkout.sessions.expire(s.id)));
 
       const priceId = getStripePriceIdForClawPlan(input.plan);
 
