@@ -42,6 +42,7 @@ import {
   KiloClawScheduledBy,
   KiloClawSubscriptionStatus,
 } from './schema-types';
+import type { KiloClawAdminAuditAction } from './schema-types';
 import type {
   OrganizationModeConfig,
   OrganizationPlan,
@@ -3321,6 +3322,32 @@ export const kiloclaw_instances = pgTable(
 );
 
 export type KiloClawInstance = typeof kiloclaw_instances.$inferSelect;
+
+// KiloClaw Admin Audit Log — tracks admin actions on KiloClaw instances
+export const kiloclaw_admin_audit_logs = pgTable(
+  'kiloclaw_admin_audit_logs',
+  {
+    id: uuid()
+      .default(sql`gen_random_uuid()`)
+      .primaryKey()
+      .notNull(),
+    action: text().$type<KiloClawAdminAuditAction>().notNull(),
+    actor_id: text(),
+    actor_email: text(),
+    actor_name: text(),
+    target_user_id: text().notNull(),
+    message: text().notNull(),
+    metadata: jsonb().$type<Record<string, unknown>>(),
+    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  },
+  table => [
+    index('IDX_kiloclaw_admin_audit_logs_target_user_id').on(table.target_user_id),
+    index('IDX_kiloclaw_admin_audit_logs_action').on(table.action),
+    index('IDX_kiloclaw_admin_audit_logs_created_at').on(table.created_at),
+  ]
+);
+
+export type KiloClawAdminAuditLog = typeof kiloclaw_admin_audit_logs.$inferSelect;
 
 // KiloClaw Access Codes — one-time codes for authenticating browser sessions to the worker
 export const kiloclaw_access_codes = pgTable(

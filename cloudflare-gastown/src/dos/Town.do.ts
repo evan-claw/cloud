@@ -833,6 +833,72 @@ export class TownDO extends DurableObject<Env> {
     return bead;
   }
 
+  // ── Bead Dependency Editing ──────────────────────────────────────────
+
+  /**
+   * Add a dependency edge between two beads.
+   * Validates, detects cycles, and logs a bead event.
+   */
+  async addBeadDependency(
+    beadId: string,
+    dependsOnBeadId: string,
+    type: 'blocks' | 'tracks' | 'parent-child'
+  ): Promise<void> {
+    await this.ensureInitialized();
+    beadOps.addBeadDependency(this.sql, beadId, dependsOnBeadId, type);
+    beadOps.logBeadEvent(this.sql, {
+      beadId,
+      agentId: null,
+      eventType: 'dependency_added',
+      metadata: { depends_on_bead_id: dependsOnBeadId, dependency_type: type },
+    });
+  }
+
+  /**
+   * Remove a dependency edge between two beads.
+   * After removal, checks if any beads are now unblocked and arms the
+   * alarm so they get dispatched promptly.
+   */
+  async removeBeadDependency(beadId: string, dependsOnBeadId: string): Promise<boolean> {
+    await this.ensureInitialized();
+    const deleted = beadOps.removeBeadDependency(this.sql, beadId, dependsOnBeadId);
+    if (deleted) {
+      beadOps.logBeadEvent(this.sql, {
+        beadId,
+        agentId: null,
+        eventType: 'dependency_removed',
+        metadata: { depends_on_bead_id: dependsOnBeadId },
+      });
+      // If beadId has no remaining unresolved blockers, arm the alarm so
+      // it gets dispatched promptly.
+      if (!beadOps.hasUnresolvedBlockers(this.sql, beadId)) {
+        await this.ctx.storage.setAlarm(Date.now());
+      }
+    }
+    return deleted;
+  }
+
+  // ── Convoy Membership ────────────────────────────────────────────────
+
+  /**
+   * Add a bead to an existing convoy. Creates the 'tracks' dependency,
+   * merges convoy metadata into the bead, and increments total_beads.
+   */
+  async addBeadToConvoy(beadId: string, convoyId: string): Promise<void> {
+    await this.ensureInitialized();
+    beadOps.addBeadToConvoy(this.sql, beadId, convoyId);
+  }
+
+  /**
+   * Remove a bead from its convoy. Deletes the 'tracks' dependency,
+   * strips convoy metadata, and decrements total_beads.
+   * Returns the convoy ID the bead was removed from, or null if not in a convoy.
+   */
+  async removeBeadFromConvoy(beadId: string): Promise<string | null> {
+    await this.ensureInitialized();
+    return beadOps.removeBeadFromConvoy(this.sql, beadId);
+  }
+
   /**
    * Force-reset an agent to idle, unhooking from its current bead if any.
    * Sets the bead status back to 'open' so it can be re-dispatched.
@@ -1631,8 +1697,20 @@ export class TownDO extends DurableObject<Env> {
     body?: string;
     priority?: string;
     metadata?: Record<string, unknown>;
+    dependsOn?: string[];
+    convoyId?: string;
   }): Promise<{ bead: Bead; agent: Agent }> {
     await this.ensureInitialized();
+
+    // Validate the convoy exists before creating the bead so a bad
+    // convoy_id doesn't leave behind an orphan bead row.
+    if (input.convoyId) {
+      const convoyBead = beadOps.getBead(this.sql, input.convoyId);
+      if (!convoyBead) throw new Error(`Convoy ${input.convoyId} not found`);
+      if (convoyBead.type !== 'convoy') {
+        throw new Error(`Bead ${input.convoyId} is not a convoy (type: ${convoyBead.type})`);
+      }
+    }
 
     const createdBead = beadOps.createBead(this.sql, {
       type: 'issue',
@@ -1643,6 +1721,21 @@ export class TownDO extends DurableObject<Env> {
       metadata: input.metadata,
     });
 
+    // If a convoy_id was provided, add the bead to the convoy (tracks dep + metadata + counter).
+    // The convoy was already validated above, so addBeadToConvoy won't throw for a missing convoy.
+    if (input.convoyId) {
+      beadOps.addBeadToConvoy(this.sql, createdBead.bead_id, input.convoyId);
+    }
+
+    // Insert dependency rows before hooking/dispatching so the bead's
+    // blocker set is complete before any agent can start work on it.
+    // This is atomic within the DO's synchronous SQLite transaction.
+    if (input.dependsOn && input.dependsOn.length > 0) {
+      for (const depBeadId of input.dependsOn) {
+        beadOps.addBeadDependency(this.sql, createdBead.bead_id, depBeadId, 'blocks');
+      }
+    }
+
     const agent = agents.getOrCreateAgent(this.sql, 'polecat', input.rigId, this.townId);
     agents.hookBead(this.sql, agent.id, createdBead.bead_id);
 
@@ -1650,11 +1743,18 @@ export class TownDO extends DurableObject<Env> {
     const bead = beadOps.getBead(this.sql, createdBead.bead_id) ?? createdBead;
     const hookedAgent = agents.getAgent(this.sql, agent.id) ?? agent;
 
-    // Fire-and-forget dispatch so the sling call returns immediately.
-    // The alarm loop retries if this fails.
-    this.dispatchAgent(hookedAgent, bead).catch(err =>
-      console.error(`${TOWN_LOG} slingBead: fire-and-forget dispatchAgent failed:`, err)
-    );
+    // Only dispatch if the bead has no unresolved blockers. Mirror the
+    // slingConvoy() guard so a bead with depends_on is not started before
+    // its blockers close.
+    if (!beadOps.hasUnresolvedBlockers(this.sql, bead.bead_id)) {
+      this.dispatchAgent(hookedAgent, bead).catch(err =>
+        console.error(`${TOWN_LOG} slingBead: fire-and-forget dispatchAgent failed:`, err)
+      );
+    } else {
+      console.log(
+        `${TOWN_LOG} slingBead: bead=${bead.bead_id} blocked, deferring dispatch until deps close`
+      );
+    }
     await this.armAlarmIfNeeded();
     return { bead, agent: hookedAgent };
   }

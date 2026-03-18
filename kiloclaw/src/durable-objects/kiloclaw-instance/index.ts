@@ -18,7 +18,7 @@ import type {
   MachineSize,
 } from '../../schemas/instance-config';
 import { DEFAULT_INSTANCE_FEATURES, PersistedStateSchema } from '../../schemas/instance-config';
-import type { FlyVolumeSnapshot } from '../../fly/types';
+import type { FlyVolume, FlyVolumeSnapshot } from '../../fly/types';
 import * as fly from '../../fly/client';
 import { sandboxIdFromUserId } from '../../auth/sandbox-id';
 import { resolveLatestVersion, resolveVersionByTag } from '../../lib/image-version';
@@ -1086,6 +1086,78 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (!this.s.flyVolumeId) return [];
     const flyConfig = getFlyConfig(this.env, this.s);
     return fly.listVolumeSnapshots(flyConfig, this.s.flyVolumeId);
+  }
+
+  // ── Volume reassociation (admin) ───────────────────────────────────
+
+  async listCandidateVolumes(): Promise<{
+    currentVolumeId: string | null;
+    volumes: (FlyVolume & { isCurrent: boolean })[];
+  }> {
+    await this.loadState();
+    const flyConfig = getFlyConfig(this.env, this.s);
+    const allVolumes = await fly.listVolumes(flyConfig);
+    // Filter out destroyed/destroying volumes
+    const usable = allVolumes.filter(v => v.state !== 'destroyed' && v.state !== 'destroying');
+    return {
+      currentVolumeId: this.s.flyVolumeId,
+      volumes: usable.map(v => ({ ...v, isCurrent: v.id === this.s.flyVolumeId })),
+    };
+  }
+
+  async reassociateVolume(
+    newVolumeId: string,
+    reason: string
+  ): Promise<{
+    previousVolumeId: string | null;
+    newVolumeId: string;
+    newRegion: string;
+  }> {
+    await this.loadState();
+
+    if (!this.s.userId) {
+      throw new Error('Instance is not provisioned');
+    }
+
+    if (this.s.status !== 'stopped') {
+      throw new Error('Instance must be stopped before reassociating volume');
+    }
+
+    if (this.s.flyVolumeId === newVolumeId) {
+      throw new Error('New volume ID is the same as the current volume');
+    }
+
+    // Validate that the volume exists in this app
+    const flyConfig = getFlyConfig(this.env, this.s);
+    let volume: FlyVolume;
+    try {
+      volume = await fly.getVolume(flyConfig, newVolumeId);
+    } catch {
+      throw new Error(`Volume ${newVolumeId} not found in this Fly app`);
+    }
+
+    if (volume.state === 'destroyed' || volume.state === 'destroying') {
+      throw new Error(`Volume ${newVolumeId} is in state "${volume.state}" and cannot be used`);
+    }
+
+    const previousVolumeId = this.s.flyVolumeId;
+
+    console.log(
+      `[admin-volume-reassociate] userId=${this.s.userId} ` +
+        `previous=${previousVolumeId} new=${newVolumeId} region=${volume.region} ` +
+        `reason="${reason}"`
+    );
+
+    // Persist the new volume ID and region
+    this.s.flyVolumeId = newVolumeId;
+    this.s.flyRegion = volume.region;
+    await this.persist({ flyVolumeId: newVolumeId, flyRegion: volume.region });
+
+    return {
+      previousVolumeId,
+      newVolumeId,
+      newRegion: volume.region,
+    };
   }
 
   // ── Gateway controller ─────────────────────────────────────────────

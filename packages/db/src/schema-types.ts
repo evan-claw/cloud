@@ -148,6 +148,21 @@ export const KiloClawSubscriptionStatus = {
 export type KiloClawSubscriptionStatus =
   (typeof KiloClawSubscriptionStatus)[keyof typeof KiloClawSubscriptionStatus];
 
+// NOTE: Do not change these action names. Use present tense for consistency.
+export const KiloClawAdminAuditAction = z.enum([
+  'kiloclaw.volume.reassociate',
+  'kiloclaw.machine.start',
+  'kiloclaw.machine.stop',
+  'kiloclaw.instance.destroy',
+  'kiloclaw.gateway.start',
+  'kiloclaw.gateway.stop',
+  'kiloclaw.gateway.restart',
+  'kiloclaw.config.restore',
+  'kiloclaw.doctor.run',
+]);
+
+export type KiloClawAdminAuditAction = z.infer<typeof KiloClawAdminAuditAction>;
+
 // =============================================================================
 // B. Type-Only Definitions (used in $type<T>())
 // =============================================================================

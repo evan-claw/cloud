@@ -26,6 +26,8 @@ import type {
   GoogleCredentialsInput,
   GoogleCredentialsResponse,
   GmailNotificationsResponse,
+  CandidateVolumesResponse,
+  ReassociateVolumeResponse,
 } from './types';
 
 /** Keep in sync with: kiloclaw/controller/src/routes/files.ts, kiloclaw/src/.../gateway.ts (Zod) */
@@ -416,6 +418,29 @@ export class KiloClawInternalClient {
       `/api/platform/gmail-notifications?userId=${encodeURIComponent(userId)}`,
       {
         method: 'DELETE',
+      },
+      { userId }
+    );
+  }
+
+  async listCandidateVolumes(userId: string): Promise<CandidateVolumesResponse> {
+    return this.request(
+      `/api/platform/candidate-volumes?userId=${encodeURIComponent(userId)}`,
+      undefined,
+      { userId }
+    );
+  }
+
+  async reassociateVolume(
+    userId: string,
+    newVolumeId: string,
+    reason: string
+  ): Promise<ReassociateVolumeResponse> {
+    return this.request(
+      '/api/platform/reassociate-volume',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId, newVolumeId, reason }),
       },
       { userId }
     );

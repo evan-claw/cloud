@@ -53,6 +53,7 @@ import {
   security_analysis_owner_state,
   kiloclaw_subscriptions,
   kiloclaw_email_log,
+  kiloclaw_admin_audit_logs,
 } from '@kilocode/db/schema';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { allow_fake_login } from './constants';
@@ -435,6 +436,7 @@ export class SoftDeletePreconditionError extends Error {
  * - organization_invitations (sent by user + addressed to user's email)
  * - organization_user_limits/usage
  * - organization_audit_logs (actor PII nulled)
+ * - kiloclaw_admin_audit_logs (actor PII nulled, target_user_id anonymized)
  * - payment_methods (soft-deleted, address/name/IP fields nulled)
  * - user_feedback / app_builder_feedback / free_model_usage (FK nulled)
  * - Various user-owned resources (platform_integrations, byok_api_keys,
@@ -603,6 +605,18 @@ export async function softDeleteUser(userId: string) {
       .update(security_audit_log)
       .set({ actor_email: null, actor_name: null })
       .where(eq(security_audit_log.actor_id, userId));
+
+    // KiloClaw admin audit logs: strip PII where user is the actor
+    await tx
+      .update(kiloclaw_admin_audit_logs)
+      .set({ actor_email: null, actor_name: null })
+      .where(eq(kiloclaw_admin_audit_logs.actor_id, userId));
+
+    // KiloClaw admin audit logs: strip PII where user is the target
+    await tx
+      .update(kiloclaw_admin_audit_logs)
+      .set({ target_user_id: 'deleted-user' })
+      .where(eq(kiloclaw_admin_audit_logs.target_user_id, userId));
 
     // Payment methods: soft-delete and strip address/name/IP fields
     await tx
