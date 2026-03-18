@@ -1231,14 +1231,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 try {
                   await this.updateStatus('running', { sessionId });
                 } catch (updateError) {
-                  logger.error(
-                    '[CodeReviewOrchestrator] Failed to update status with sessionId:',
-                    {
-                      reviewId: this.state.reviewId,
-                      sessionId,
-                      error: updateError instanceof Error ? updateError.message : String(updateError),
-                    }
-                  );
+                  logger.error('[CodeReviewOrchestrator] Failed to update status with sessionId:', {
+                    reviewId: this.state.reviewId,
+                    sessionId,
+                    error: updateError instanceof Error ? updateError.message : String(updateError),
+                  });
                   // Continue processing even if status update fails
                 }
               }
@@ -1266,7 +1263,8 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                       {
                         reviewId: this.state.reviewId,
                         cliSessionId,
-                        error: updateError instanceof Error ? updateError.message : String(updateError),
+                        error:
+                          updateError instanceof Error ? updateError.message : String(updateError),
                       }
                     );
                     // Continue processing even if status update fails
