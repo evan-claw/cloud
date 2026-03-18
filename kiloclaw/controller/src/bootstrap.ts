@@ -1,7 +1,7 @@
 /**
  * Bootstrap: performs all pre-gateway startup logic.
  *
- * Previously this lived in start-openclaw.sh. Moving it into TypeScript means
+ * Previously this lived in a shell script (start-openclaw.sh). Moving it here means
  * the controller's HTTP server can start first (so /_kilo/health is always
  * reachable), then run bootstrap steps internally with phase-by-phase progress
  * reporting. If any step fails, the controller stays up in degraded mode.
@@ -87,7 +87,7 @@ export type ControllerStateRef = { current: ControllerState };
 /**
  * Decrypt KILOCLAW_ENC_* environment variables using the KILOCLAW_ENV_KEY.
  *
- * Port of the inline Node.js heredoc in start-openclaw.sh. Mutates `env`
+ * Decrypt KILOCLAW_ENC_* environment variables in place. Mutates `env`
  * in place: strips the KILOCLAW_ENC_ prefix, sets the plaintext value,
  * then deletes the encrypted var and the key.
  *
@@ -100,7 +100,7 @@ export function decryptEnvVars(env: EnvLike): void {
     // No encrypted vars — just clean up the key if present
     delete env.KILOCLAW_ENV_KEY;
     // Still validate critical env vars exist even without encryption
-    // (matches the standalone check at line 131 of the old start-openclaw.sh)
+    // Required even without encryption — these are critical for the controller.
     if (!env.KILOCODE_API_KEY) {
       throw new Error('KILOCODE_API_KEY is required');
     }

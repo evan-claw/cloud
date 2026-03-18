@@ -588,7 +588,7 @@ describe('buildGatewayArgs', () => {
     expect(args).toContain('--port');
   });
 
-  it('matches the args that start-openclaw.sh used to build', () => {
+  it('builds the expected gateway args array', () => {
     const args = buildGatewayArgs({ OPENCLAW_GATEWAY_TOKEN: 'tok-123' });
 
     expect(args).toEqual([

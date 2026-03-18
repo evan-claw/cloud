@@ -142,7 +142,7 @@ The existing categories are: `channel`, `tool`, `provider`, `custom`.
 3. `decryptChannelTokens()` decrypts `channels` (keyed by field keys, mapped via `FIELD_KEY_TO_ENV_VAR`)
 4. Both feed into the `sensitive` bucket
 5. Sensitive values are re-encrypted with the per-app env key and prefixed `KILOCLAW_ENC_`
-6. `start-openclaw.sh` decrypts at boot and patches `openclaw.json`
+6. The controller's bootstrap decrypts at boot and patches `openclaw.json`
 
 ### Backward compatibility
 

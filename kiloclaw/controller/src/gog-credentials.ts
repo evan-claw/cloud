@@ -169,8 +169,8 @@ export async function writeGogCredentials(
   // GOG_KEYRING_PASSWORD is NOT a secret. The 99designs/keyring file backend
   // requires a password to operate, but gog runs inside a single-tenant VM
   // with no shared access. The value is arbitrary — it just needs to be
-  // consistent across setup (google-setup/setup.mjs), container startup
-  // (start-openclaw.sh), and here.
+  // consistent across setup (google-setup/setup.mjs), container bootstrap
+  // (bootstrap.ts), and here.
   env.GOG_KEYRING_BACKEND = 'file';
   env.GOG_KEYRING_PASSWORD = 'kiloclaw';
   if (env.KILOCLAW_GOOGLE_ACCOUNT_EMAIL) {

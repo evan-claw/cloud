@@ -6,11 +6,11 @@ This runbook walks you through the full cycle: making a change to the Docker ima
 
 ### Files you'll typically change
 
-| File                           | Purpose                                                   |
-| ------------------------------ | --------------------------------------------------------- |
-| `kiloclaw/Dockerfile`          | Base image, dependencies, OpenClaw version                |
-| `kiloclaw/start-openclaw.sh`   | Container entrypoint (config generation, process startup) |
-| `kiloclaw/scripts/push-dev.sh` | Dev image build and push script                           |
+| File                                   | Purpose                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `kiloclaw/Dockerfile`                  | Base image, dependencies, OpenClaw version                              |
+| `kiloclaw/controller/src/bootstrap.ts` | Controller bootstrap (config generation, env decryption, feature flags) |
+| `kiloclaw/scripts/push-dev.sh`         | Dev image build and push script                                         |
 
 ### Workflow at a glance
 
@@ -80,18 +80,18 @@ curl http://localhost:8795
 Edit the relevant files in `kiloclaw/`:
 
 - **Dockerfile** — Change the base image, add packages, update the OpenClaw version, modify directory structure
-- **start-openclaw.sh** — Change config generation, startup order, environment variable handling
+- **controller/src/bootstrap.ts** — Change config generation, startup order, environment variable handling
 
-To debug a startup script change interactively:
+To debug a bootstrap change interactively:
 
 ```bash
 docker build -t kiloclaw:test -f Dockerfile .
 
+# Run the controller directly — bootstrap logs will appear on stdout
 docker run --rm \
   -e KILOCODE_API_KEY=test-key \
   -e OPENCLAW_GATEWAY_TOKEN=test-token \
-  kiloclaw:test \
-  bash -c 'bash -x /usr/local/bin/start-openclaw.sh 2>&1 | head -50'
+  kiloclaw:test
 ```
 
 ## Step 2: Build and Test Locally
@@ -149,7 +149,7 @@ docker run --rm kiloclaw:test ls -la /root/clawd
 
 # Check OpenClaw doctor
 # Note: Warnings about missing config, session dirs, and gateway not running
-# are expected — the entrypoint (start-openclaw.sh) handles onboarding and
+# are expected — the controller's bootstrap handles onboarding and
 # config generation at runtime, not during a standalone `openclaw doctor` run.
 docker run --rm \
   -e KILOCODE_API_KEY=test-key \
@@ -520,7 +520,7 @@ fly logs --app $FLY_DEV_APP --no-tail
 # Common causes:
 # - Missing KILOCODE_API_KEY (check encrypted env var flow)
 # - Image tag mismatch (check FLY_IMAGE_TAG in .dev.vars)
-# - Old image without decryption support in start-openclaw.sh
+# - Old image without decryption support in the controller bootstrap
 # - KILOCLAW_ENV_KEY stuck in "Staged" (no machine to deploy to)
 ```
 

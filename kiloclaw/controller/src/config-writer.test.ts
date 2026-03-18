@@ -477,7 +477,7 @@ describe('writeBaseConfig', () => {
     expect(config.tools.exec.host).toBe('gateway');
   });
 
-  it('passes all onboard flags matching start-openclaw.sh', () => {
+  it('passes all required onboard flags for non-interactive setup', () => {
     const { deps, execCalls } = fakeDeps();
     writeBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
 

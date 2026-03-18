@@ -150,7 +150,7 @@ export function mergeEnvVarsWithSecrets(
  * Decrypt encrypted channel tokens and map to container env var names.
  *
  * Uses FIELD_KEY_TO_ENV_VAR from the secret catalog to map channel config keys
- * to the container env var names expected by start-openclaw.sh.
+ * to the container env var names expected by the controller's bootstrap.
  *
  * Example: channels.telegramBotToken -> TELEGRAM_BOT_TOKEN
  *

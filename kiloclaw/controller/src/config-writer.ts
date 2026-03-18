@@ -1,7 +1,7 @@
 /**
  * Generates the base openclaw.json config from environment variables.
  *
- * This is a TypeScript port of the EOFPATCH block in start-openclaw.sh.
+ * Config patching for openclaw.json — channels, gateway auth, exec policy, etc.
  * Both this module and the shell script must produce identical config for the
  * same set of env vars. When updating one, update the other.
  */
@@ -39,7 +39,7 @@ function pruneOldConfigBackups(dir: string, base: string, deps: ConfigWriterDeps
   }
 }
 
-/** Flags passed to `openclaw onboard`, matching start-openclaw.sh. */
+/** Flags passed to `openclaw onboard` for non-interactive first-boot setup. */
 const ONBOARD_FLAGS = [
   'onboard',
   '--non-interactive',
@@ -87,7 +87,7 @@ const defaultDeps: ConfigWriterDeps = {
 /**
  * Generate the base config object from environment variables.
  * Reads the existing config file (if any) as the starting point, then
- * applies all the same patches as start-openclaw.sh's EOFPATCH block.
+ * applies all env-var-derived patches (channels, gateway auth, exec policy, etc.).
  */
 export function generateBaseConfig(
   env: EnvLike,
