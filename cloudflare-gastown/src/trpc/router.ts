@@ -483,7 +483,11 @@ export const gastownRouter = router({
         input.townId,
         ctx.orgMemberships
       );
-      return withDORetry(() => ownerStub, stub => stub.listRigs(input.townId), 'OwnerDO.listRigs');
+      return withDORetry(
+        () => ownerStub,
+        stub => stub.listRigs(input.townId),
+        'OwnerDO.listRigs'
+      );
     }),
 
   getRig: gastownProcedure
@@ -1039,7 +1043,8 @@ export const gastownRouter = router({
       const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
       return withDORetry(
         () => getTownDOStub(ctx.env, rig.town_id),
-        stub => stub.listBeadEvents({ beadId: input.beadId, since: input.since, limit: input.limit }),
+        stub =>
+          stub.listBeadEvents({ beadId: input.beadId, since: input.since, limit: input.limit }),
         'TownDO.listBeadEvents(getBeadEvents)'
       );
     }),
