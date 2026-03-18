@@ -305,7 +305,7 @@ async function main() {
   console.log(`Concurrency: ${concurrency}\n`);
 
   for (const row of rows) {
-    console.log(`  ${row.category} | ${row.description ?? '(any description)'}`);
+    console.log(`  ${row.category} | ${row.description ?? '(empty)'}`);
   }
   console.log();
 
