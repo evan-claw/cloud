@@ -21,6 +21,7 @@ import { SSEStreamProcessor } from './services/sse-stream-processor';
 import { CloudAgentClient } from './services/cloud-agent-client';
 import { buildClassificationPrompt } from './services/prompt-builder';
 import { fetchRepoLabels, DEFAULT_LABELS } from './services/github-labels-service';
+import { logger } from './logger';
 
 export class TriageOrchestrator extends DurableObject<Env> {
   private state!: TriageTicket;
@@ -63,7 +64,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     await this.loadState();
 
     if (this.state.status !== 'pending') {
-      console.log('[TriageOrchestrator] Skipping - already processed', {
+      logger.info('[TriageOrchestrator] Skipping - already processed', {
         ticketId: this.state.ticketId,
         status: this.state.status,
       });
@@ -103,7 +104,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
           classification.selectedLabels
         );
         if (!labelsApplied) {
-          console.error('[TriageOrchestrator] kilo-auto-fix label may not have been applied', {
+          logger.error('[TriageOrchestrator] kilo-auto-fix label may not have been applied', {
             ticketId: this.state.ticketId,
           });
         }
@@ -125,7 +126,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
         error instanceof Error && error.message.includes('Classification timed out');
       const isPRTimeout = error instanceof Error && error.message.includes('PR creation timed out');
 
-      console.error('[TriageOrchestrator] Error:', {
+      logger.error('[TriageOrchestrator] Error:', {
         ticketId: this.state.ticketId,
         error: errorMessage,
         isTimeout,
@@ -138,7 +139,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
           errorMessage: errorMessage,
         });
       } catch (statusError) {
-        console.error('[TriageOrchestrator] Failed to update status to failed via API:', {
+        logger.error('[TriageOrchestrator] Failed to update status to failed via API:', {
           ticketId: this.state.ticketId,
           statusError: statusError instanceof Error ? statusError.message : String(statusError),
         });
@@ -170,7 +171,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
       return;
     }
 
-    console.error('[TriageOrchestrator] Alarm fired - ticket stuck in analyzing', {
+    logger.error('[TriageOrchestrator] Alarm fired - ticket stuck in analyzing', {
       ticketId: this.state.ticketId,
       startedAt: this.state.startedAt,
     });
@@ -180,7 +181,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
         errorMessage: 'Triage timed out (alarm recovery)',
       });
     } catch (e) {
-      console.error('[TriageOrchestrator] Alarm recovery: failed to update status via API', {
+      logger.error('[TriageOrchestrator] Alarm recovery: failed to update status via API', {
         ticketId: this.state.ticketId,
         error: e instanceof Error ? e.message : String(e),
       });
@@ -229,7 +230,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
    * Now handles Cloud Agent session directly (like PR creation)
    */
   private async classifyIssue(): Promise<ClassificationResult> {
-    console.log('[TriageOrchestrator] Classifying issue', {
+    logger.info('[TriageOrchestrator] Classifying issue', {
       ticketId: this.state.ticketId,
     });
 
@@ -265,7 +266,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     const excludedLabels = new Set(configData.excluded_labels ?? []);
 
     if (!githubToken) {
-      console.log(
+      logger.info(
         '[auto-triage:labels] No githubToken in classify-config response, will use default labels',
         {
           ticketId: this.state.ticketId,
@@ -281,7 +282,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     const availableLabels =
       excludedLabels.size > 0 ? repoLabels.filter(label => !excludedLabels.has(label)) : repoLabels;
 
-    console.log('[auto-triage:labels] Available labels for prompt', {
+    logger.info('[auto-triage:labels] Available labels for prompt', {
       ticketId: this.state.ticketId,
       count: availableLabels.length,
       availableLabels,
@@ -341,7 +342,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
    * Close issue as duplicate
    */
   private async closeDuplicate(result: DuplicateResult): Promise<void> {
-    console.log('[TriageOrchestrator] Closing as duplicate', {
+    logger.info('[TriageOrchestrator] Closing as duplicate', {
       ticketId: this.state.ticketId,
       duplicateOf: result.duplicateOfTicketId,
     });
@@ -379,7 +380,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
    * Answer a question
    */
   private async answerQuestion(classification: ClassificationResult): Promise<void> {
-    console.log('[TriageOrchestrator] Answering question', {
+    logger.info('[TriageOrchestrator] Answering question', {
       ticketId: this.state.ticketId,
     });
 
@@ -396,7 +397,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
    * Request clarification
    */
   private async requestClarification(classification: ClassificationResult): Promise<void> {
-    console.log('[TriageOrchestrator] Requesting clarification', {
+    logger.info('[TriageOrchestrator] Requesting clarification', {
       ticketId: this.state.ticketId,
     });
 
@@ -427,7 +428,10 @@ export class TriageOrchestrator extends DurableObject<Env> {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Failed to post comment: ${response.status} ${errorText}`);
+      logger.error('Failed to post comment', {
+        status: response.status,
+        error: errorText,
+      });
     }
   }
 
@@ -441,7 +445,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     selectedLabels: string[] = []
   ): Promise<boolean> {
     const labels = [...new Set([...fixedLabels, ...selectedLabels])];
-    console.log('[auto-triage:labels] Applying labels', {
+    logger.info('[auto-triage:labels] Applying labels', {
       ticketId: this.state.ticketId,
       labels,
     });
@@ -469,7 +473,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
 
       if (!addLabelResponse.ok) {
         const errorText = await addLabelResponse.text();
-        console.error('[TriageOrchestrator] Failed to apply labels:', {
+        logger.error('[TriageOrchestrator] Failed to apply labels:', {
           ticketId: this.state.ticketId,
           status: addLabelResponse.status,
           error: errorText,
@@ -481,7 +485,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
       // response.ok is true for all 2xx, so we must check the body explicitly.
       const body: { success: boolean } = await addLabelResponse.json();
       if (!body.success) {
-        console.error('[TriageOrchestrator] Partial label failure (207):', {
+        logger.error('[TriageOrchestrator] Partial label failure (207):', {
           ticketId: this.state.ticketId,
         });
         return false;
@@ -489,7 +493,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
 
       return true;
     } catch (error) {
-      console.error('[TriageOrchestrator] Error applying labels:', {
+      logger.error('[TriageOrchestrator] Error applying labels:', {
         ticketId: this.state.ticketId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -583,7 +587,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
         }
       },
       onComplete: () => {
-        console.log('[TriageOrchestrator] Classification stream completed', {
+        logger.info('[TriageOrchestrator] Classification stream completed', {
           ticketId: this.state.ticketId,
           sayTextLength: sayText.length,
           fullTextLength: fullText.length,
@@ -592,14 +596,14 @@ export class TriageOrchestrator extends DurableObject<Env> {
       onError: (error: Error) => {
         // Error events are informational warnings, not fatal errors
         // The stream continues processing after these events
-        console.warn('[TriageOrchestrator] Classification warning event', {
+        logger.warn('[TriageOrchestrator] Classification warning event', {
           ticketId: this.state.ticketId,
           error: error.message,
         });
       },
     });
 
-    console.log('[TriageOrchestrator] Classification stream ended', {
+    logger.info('[TriageOrchestrator] Classification stream ended', {
       ticketId: this.state.ticketId,
       sayTextLength: sayText.length,
       fullTextLength: fullText.length,
@@ -624,7 +628,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
     fullText: string,
     availableLabels: string[]
   ): ClassificationResult {
-    console.log('[TriageOrchestrator] Parsing classification', {
+    logger.info('[TriageOrchestrator] Parsing classification', {
       ticketId: this.state.ticketId,
       sayTextLength: sayText.length,
       fullTextLength: fullText.length,
@@ -635,7 +639,7 @@ export class TriageOrchestrator extends DurableObject<Env> {
       try {
         return parseClassification(sayText, availableLabels);
       } catch (_e) {
-        console.warn('[TriageOrchestrator] Failed to parse from sayText, trying fullText', {
+        logger.warn('[TriageOrchestrator] Failed to parse from sayText, trying fullText', {
           ticketId: this.state.ticketId,
           sayTextLength: sayText.length,
           fullTextLength: fullText.length,

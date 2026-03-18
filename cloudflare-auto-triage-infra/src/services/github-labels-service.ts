@@ -5,6 +5,8 @@
  * Falls back to default labels on error or empty result.
  */
 
+import { logger } from '../logger';
+
 export const DEFAULT_LABELS = ['bug', 'duplicate', 'question', 'needs clarification'];
 
 // Safety cap: stop paginating after this many pages (100 labels/page = 500 labels max).
@@ -32,7 +34,7 @@ export async function fetchRepoLabels(
   repoFullName: string,
   githubToken: string
 ): Promise<string[]> {
-  console.log('[auto-triage:labels] Fetching labels for repo:', repoFullName);
+  logger.info('[auto-triage:labels] Fetching labels for repo:', repoFullName);
 
   const headers = {
     Authorization: `Bearer ${githubToken}`,
@@ -49,14 +51,14 @@ export async function fetchRepoLabels(
       const response = await fetch(nextUrl, { headers });
       pagesFetched++;
 
-      console.log('[auto-triage:labels] GitHub API response status', {
+      logger.info('[auto-triage:labels] GitHub API response status', {
         repoFullName,
         page: pagesFetched,
         status: response.status,
       });
 
       if (!response.ok) {
-        console.warn(
+        logger.warn(
           '[auto-triage:labels] Non-2xx status from GitHub API, falling back to defaults',
           { repoFullName, status: response.status }
         );
@@ -66,7 +68,7 @@ export async function fetchRepoLabels(
       const body: unknown = await response.json();
 
       if (!Array.isArray(body)) {
-        console.warn('[auto-triage:labels] Unexpected response format, falling back to defaults', {
+        logger.warn('[auto-triage:labels] Unexpected response format, falling back to defaults', {
           repoFullName,
           type: typeof body,
         });
@@ -80,7 +82,7 @@ export async function fetchRepoLabels(
 
     if (nextUrl !== null) {
       // Still more pages after hitting the cap — warn but continue with what we have.
-      console.warn(
+      logger.warn(
         '[auto-triage:labels] Repo has more than expected labels; only first pages fetched',
         {
           repoFullName,
@@ -91,13 +93,13 @@ export async function fetchRepoLabels(
     }
 
     if (allLabels.length === 0) {
-      console.warn('[auto-triage:labels] Repo has no labels, falling back to defaults', {
+      logger.warn('[auto-triage:labels] Repo has no labels, falling back to defaults', {
         repoFullName,
       });
       return DEFAULT_LABELS;
     }
 
-    console.log('[auto-triage:labels] Labels fetched from repo', {
+    logger.info('[auto-triage:labels] Labels fetched from repo', {
       repoFullName,
       pagesFetched,
       count: allLabels.length,
@@ -106,7 +108,7 @@ export async function fetchRepoLabels(
 
     return allLabels;
   } catch (error) {
-    console.warn('[auto-triage:labels] Failed to fetch labels, falling back to defaults', {
+    logger.warn('[auto-triage:labels] Failed to fetch labels, falling back to defaults', {
       repoFullName,
       error: error instanceof Error ? error.message : String(error),
     });

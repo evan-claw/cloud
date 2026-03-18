@@ -5,6 +5,8 @@
  * Handles URL construction, fetch logic, and error handling.
  */
 
+import { logger } from '../logger';
+
 type SessionInput = {
   githubRepo: string;
   kilocodeOrganizationId?: string;
@@ -32,7 +34,7 @@ export class CloudAgentClient {
     const encodedInput = encodeURIComponent(inputJson);
     const url = `${this.baseUrl}/trpc/initiateSessionStream?input=${encodedInput}`;
 
-    console.log('[CloudAgentClient] Initiating streaming session', {
+    logger.info('[CloudAgentClient] Initiating streaming session', {
       ticketId,
       url: url.split('?')[0],
       timestamp: new Date().toISOString(),
@@ -47,7 +49,7 @@ export class CloudAgentClient {
         },
       });
 
-      console.log('[CloudAgentClient] Fetch response received', {
+      logger.info('[CloudAgentClient] Fetch response received', {
         ticketId,
         httpStatus: response.status,
         contentType: response.headers.get('content-type'),
@@ -62,7 +64,7 @@ export class CloudAgentClient {
       return response;
     } catch (fetchError) {
       const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
-      console.error('[CloudAgentClient] Failed to fetch from Cloud Agent', {
+      logger.error('[CloudAgentClient] Failed to fetch from Cloud Agent', {
         ticketId,
         error: errorMessage,
         url: url.split('?')[0],
@@ -79,7 +81,7 @@ export class CloudAgentClient {
     const encodedInput = encodeURIComponent(inputJson);
     const url = `${this.baseUrl}/trpc/initiateSessionAsync?input=${encodedInput}`;
 
-    console.log('[CloudAgentClient] Initiating async session', {
+    logger.info('[CloudAgentClient] Initiating async session', {
       ticketId,
       url: url.split('?')[0],
       timestamp: new Date().toISOString(),
@@ -94,7 +96,7 @@ export class CloudAgentClient {
         },
       });
 
-      console.log('[CloudAgentClient] Fetch response received', {
+      logger.info('[CloudAgentClient] Fetch response received', {
         ticketId,
         httpStatus: response.status,
         contentType: response.headers.get('content-type'),
@@ -109,7 +111,7 @@ export class CloudAgentClient {
       return response;
     } catch (fetchError) {
       const errorMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
-      console.error('[CloudAgentClient] Failed to fetch from Cloud Agent', {
+      logger.error('[CloudAgentClient] Failed to fetch from Cloud Agent', {
         ticketId,
         error: errorMessage,
         url: url.split('?')[0],

@@ -18,7 +18,8 @@
  * - Fire-and-forget from Next.js dispatch
  */
 
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { useWorkersLogger } from 'workers-tagged-logger';
 import type { Env, CodeReviewRequest, CodeReviewResponse } from './types';
 import {
   withDORetry,
@@ -26,6 +27,7 @@ import {
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+import { logger } from './logger';
 
 // Import base Durable Object
 import { CodeReviewOrchestrator as CodeReviewOrchestratorBase } from './code-review-orchestrator';
@@ -36,6 +38,9 @@ export const CodeReviewOrchestrator = CodeReviewOrchestratorBase;
 // Create Hono app with Env type
 type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
+
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+app.use('*', useWorkersLogger('code-review-worker') as unknown as MiddlewareHandler);
 
 // Authentication middleware
 app.use(
@@ -63,7 +68,7 @@ app.post('/review', async (c: Context<HonoEnv>) => {
     );
   }
 
-  console.log('[POST /review] Received review request', {
+  logger.info('[POST /review] Received review request', {
     reviewId: body.reviewId,
     owner: body.owner,
     agentVersion: body.agentVersion,
@@ -72,7 +77,7 @@ app.post('/review', async (c: Context<HonoEnv>) => {
   // Create DO name from reviewId (concurrency controlled by Next.js dispatch)
   const doName = body.reviewId;
 
-  console.log('[POST /review] Creating DO', {
+  logger.info('[POST /review] Creating DO', {
     reviewId: body.reviewId,
     doName,
   });
@@ -104,14 +109,14 @@ app.post('/review', async (c: Context<HonoEnv>) => {
       stub => stub.runReview(),
       'runReview'
     ).catch((error: Error) => {
-      console.error('[POST /review] runReview failed:', {
+      logger.error('[POST /review] runReview failed:', {
         reviewId: body.reviewId,
         error: error.message,
       });
     })
   );
 
-  console.log('[POST /review] Review started', {
+  logger.info('[POST /review] Review started', {
     reviewId: body.reviewId,
     owner: body.owner,
     status: result.status,
@@ -134,7 +139,7 @@ app.get('/reviews/:reviewId/events', async (c: Context<HonoEnv>) => {
     return c.json({ error: 'reviewId parameter required' }, 400);
   }
 
-  console.log('[GET /reviews/:reviewId/events] Fetching events', { reviewId });
+  logger.info('[GET /reviews/:reviewId/events] Fetching events', { reviewId });
 
   // Get Durable Object ID
   const id = c.env.CODE_REVIEW_ORCHESTRATOR.idFromName(reviewId);
@@ -165,7 +170,7 @@ app.post('/reviews/:reviewId/cancel', async (c: Context<HonoEnv>) => {
   }
   const reason = body.reason;
 
-  console.log('[POST /reviews/:reviewId/cancel] Cancelling review', { reviewId, reason });
+  logger.info('[POST /reviews/:reviewId/cancel] Cancelling review', { reviewId, reason });
 
   // Get Durable Object ID
   const id = c.env.CODE_REVIEW_ORCHESTRATOR.idFromName(reviewId);
@@ -186,7 +191,7 @@ app.get('/health', (c: Context<HonoEnv>) => {
 });
 
 // Global error handler
-app.onError(createErrorHandler());
+app.onError(createErrorHandler(logger));
 
 // 404 handler
 app.notFound(createNotFoundHandler());
