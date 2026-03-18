@@ -179,20 +179,6 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
   'kilo/auto-small': KILO_AUTO_SMALL_MODEL,
 };
 
-export function deprecatedAutoModelsToPreventNewExtensionModelPickerFromGettingStuck(): AutoModel[] {
-  return Object.entries(legacyMapping)
-    .map(([legacyId, model]) => {
-      if (!model) return null;
-      return {
-        ...model,
-        id: legacyId,
-        name: 'Deprecated ' + model.name,
-        description: `${legacyId} is deprecated, use ${model.id} instead`,
-      };
-    })
-    .filter(m => m !== null);
-}
-
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
   const mappedModel = legacyMapping[model]?.id ?? model;
   if (mappedModel === KILO_AUTO_FREE_MODEL.id) {
