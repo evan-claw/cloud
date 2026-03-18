@@ -2,7 +2,7 @@ FROM oven/bun:1-slim
 
 # Install git, gh CLI, and Node.js (required by @kilocode/cli which uses #!/usr/bin/env node)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl ca-certificates && \
+    apt-get install -y --no-install-recommends git git-lfs curl ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -13,6 +13,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gh && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+RUN git lfs install
 
 # Install Kilo CLI globally via npm (needs real Node.js runtime).
 # npm's global install does not resolve optionalDependencies, so we must
