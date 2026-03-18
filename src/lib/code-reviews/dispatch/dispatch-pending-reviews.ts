@@ -111,7 +111,7 @@ export async function tryDispatchPendingReviews(owner: Owner): Promise<DispatchR
 
     // 5. Dispatch all pending reviews in parallel
     const results = await Promise.allSettled(
-      pendingReviews.map(review => dispatchReview(review, owner))
+      pendingReviews.map(review => dispatchReview(review, owner, staleCutoff))
     );
 
     let dispatched = 0;
@@ -173,7 +173,11 @@ export async function tryDispatchPendingReviews(owner: Owner): Promise<DispatchR
  * Returns true if the review was dispatched, false if it was already claimed
  * by another concurrent dispatcher.
  */
-async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promise<boolean> {
+async function dispatchReview(
+  review: CloudAgentCodeReview,
+  owner: Owner,
+  staleCutoff: ReturnType<typeof sql>
+): Promise<boolean> {
   // Get platform from review (defaults to 'github' for backward compatibility)
   const platform = (review.platform || 'github') as CodeReviewPlatform;
 
@@ -214,7 +218,7 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
   // 4. Atomically claim the review to prevent concurrent dispatchers from
   //    picking the same review. Done as late as possible (after all prep work)
   //    to minimise the crash window between claim and dispatch.
-  //    Accepts both 'pending' (normal) and 'queued' (stale claim recovery).
+  //    Accepts 'pending' (normal) or stale 'queued' (abandoned claim recovery).
   const claimed = await db
     .update(cloud_agent_code_reviews)
     .set({ status: 'queued' })
@@ -223,7 +227,10 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
         eq(cloud_agent_code_reviews.id, review.id),
         or(
           eq(cloud_agent_code_reviews.status, 'pending'),
-          eq(cloud_agent_code_reviews.status, 'queued')
+          and(
+            eq(cloud_agent_code_reviews.status, 'queued'),
+            lt(cloud_agent_code_reviews.updated_at, staleCutoff)
+          )
         )
       )
     )
@@ -246,12 +253,22 @@ async function dispatchReview(review: CloudAgentCodeReview, owner: Owner): Promi
       agentVersion,
     });
   } catch (dispatchError) {
-    // Revert claim — review goes back to pending for the next dispatch cycle
+    // Revert claim — review goes back to pending for the next dispatch cycle.
+    // Don't re-throw: the review is retriable and the caller should not mark
+    // it as permanently failed.
     await db
       .update(cloud_agent_code_reviews)
       .set({ status: 'pending' })
       .where(eq(cloud_agent_code_reviews.id, review.id));
-    throw dispatchError;
+    errorExceptInTest('[dispatchReview] Worker dispatch failed, reverted to pending', {
+      reviewId: review.id,
+      error: dispatchError,
+    });
+    captureException(dispatchError, {
+      tags: { operation: 'dispatch-review-worker-call' },
+      extra: { reviewId: review.id, owner },
+    });
+    return false;
   }
 
   // 6. Record which agent version was dispatched
