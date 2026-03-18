@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { FolderOpen } from 'lucide-react';
 import { useTRPC } from '@/lib/trpc/utils';
+import { Button } from '@/components/ui/button';
 import { FileEditorShell } from '@/app/(app)/claw/components/FileEditorShell';
 import { FileEditorPane, type FileSaveError } from '@/app/(app)/claw/components/FileEditorPane';
 import { validateOpenclawJsonForSave } from '@/app/(app)/claw/components/validateOpenclawJson';
@@ -62,6 +64,7 @@ function AdminFileEditorPaneInner({
 export function AdminFileEditor({ userId }: { userId: string }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [enabled, setEnabled] = useState(false);
 
   const {
     data: tree,
@@ -69,7 +72,10 @@ export function AdminFileEditor({ userId }: { userId: string }) {
     error,
     refetch,
   } = useQuery(
-    trpc.admin.kiloclawInstances.fileTree.queryOptions({ userId }, { refetchOnWindowFocus: false })
+    trpc.admin.kiloclawInstances.fileTree.queryOptions(
+      { userId },
+      { refetchOnWindowFocus: false, enabled }
+    )
   );
 
   const writeFileMutation = useMutation(
@@ -84,6 +90,15 @@ export function AdminFileEditor({ userId }: { userId: string }) {
       },
     })
   );
+
+  if (!enabled) {
+    return (
+      <Button variant="outline" size="sm" onClick={() => setEnabled(true)}>
+        <FolderOpen className="mr-2 h-4 w-4" />
+        Load File Tree
+      </Button>
+    );
+  }
 
   return (
     <FileEditorShell

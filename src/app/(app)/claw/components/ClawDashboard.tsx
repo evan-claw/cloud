@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Settings, TriangleAlert, Zap } from 'lucide-react';
+import { Check, Loader2, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import {
   useKiloClawGatewayStatus,
@@ -143,23 +143,57 @@ export function ClawDashboard({
           (instanceStatus.status !== 'running' || gatewayStatus?.state !== 'running') ? (
           <ProvisioningSpinner onViewDashboard={() => onNewSetupChange(false)} />
         ) : isNewSetup ? (
-          <Card className="mt-6">
-            <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
-              <p className="text-foreground text-lg font-semibold">Your instance is ready!</p>
-              <div className="flex gap-3">
+          <Card className="mt-6 overflow-hidden">
+            <CardContent className="flex flex-col items-center justify-center gap-6 pt-12">
+              <div className="relative">
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-emerald-700/30 bg-emerald-900/50">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-emerald-500">
+                    <Check className="h-6 w-6 text-emerald-500" />
+                  </div>
+                </div>
+                <div className="absolute -top-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full bg-[#09090b] text-amber-400">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+              </div>
+
+              <div className="flex flex-col items-center gap-2">
+                <h2 className="text-2xl font-bold">Your instance is ready!</h2>
+                <p className="text-muted-foreground max-w-md text-center">
+                  KiloClaw has been provisioned and configured with your settings. You&apos;re all
+                  set to start.
+                </p>
+              </div>
+
+              {instanceStatus?.flyRegion && (
+                <div className="border-border/50 flex items-center gap-2 rounded-full border px-4 py-2">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  </span>
+                  <span className="text-muted-foreground flex items-center gap-2 text-sm">
+                    Active ·{' '}
+                    <span className="text-foreground font-bold">
+                      {instanceStatus.flyRegion.toUpperCase()}
+                    </span>{' '}
+                    region
+                  </span>
+                </div>
+              )}
+              <div className="flex w-full flex-col gap-3">
                 <OpenClawButton
                   canShow={gatewayStatus?.state === 'running'}
                   gatewayUrl={gatewayUrl}
                   look="hero"
                   label="Open KiloClaw"
+                  className="w-full py-6 text-base"
                 />
                 <Button
-                  className="min-w-[180px]"
+                  className="w-full py-6 text-base"
                   variant="outline"
                   onClick={() => onNewSetupChange(false)}
                 >
-                  <Settings className="mr-2 h-4 w-4" />
-                  Configure Instance
+                  <X className="mr-2 h-4 w-4" />
+                  Close Wizard
                 </Button>
               </div>
             </CardContent>

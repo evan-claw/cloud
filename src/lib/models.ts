@@ -37,7 +37,7 @@ export const preferredModels = [
   CLAUDE_SONNET_CURRENT_MODEL_ID,
   'openai/gpt-5.4',
   'google/gemini-3.1-pro-preview',
-  'minimax/minimax-m2.5',
+  'minimax/minimax-m2.7',
   'moonshotai/kimi-k2.5',
   'z-ai/glm-5',
   'x-ai/grok-code-fast-1',

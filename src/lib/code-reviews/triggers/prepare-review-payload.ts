@@ -322,7 +322,16 @@ export async function prepareReviewPayload(
     // continuation) are derived from the same review row to avoid mismatches.
     let previousHeadSha: string | null = null;
     let previousCloudAgentSessionId: string | undefined;
-    const incrementalEnabled = await isFeatureFlagEnabled(FEATURE_FLAG_INCREMENTAL_REVIEW);
+    const incrementalEnabled = await isFeatureFlagEnabled(
+      FEATURE_FLAG_INCREMENTAL_REVIEW,
+      owner.userId
+    );
+
+    logExceptInTest('[prepareReviewPayload] Incremental review flag evaluated', {
+      reviewId,
+      incrementalEnabled,
+      ownerId: owner.userId,
+    });
 
     if (incrementalEnabled) {
       try {
@@ -344,6 +353,11 @@ export async function prepareReviewPayload(
               currentHeadSha: review.head_sha.substring(0, 8),
               previousCloudAgentSessionId,
             }
+          );
+        } else {
+          logExceptInTest(
+            '[prepareReviewPayload] No previous completed review found, using full review',
+            { reviewId }
           );
         }
       } catch (error) {

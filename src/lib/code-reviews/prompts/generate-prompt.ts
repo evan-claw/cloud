@@ -273,8 +273,22 @@ export async function generateReviewPrompt(
       .replace(/{PREVIOUS_SUMMARY}/g, existingReviewState.summaryComment.body)
       .replace(/{ACTIVE_COMMENT_COUNT}/g, String(activeCount));
     prompt += replacePlaceholders(incrementalWorkflow) + '\n\n';
+    logExceptInTest('[generateReviewPrompt] Using incremental workflow', {
+      reviewId,
+      previousHeadSha: previousHeadSha.substring(0, 8),
+    });
   } else {
     prompt += replacePlaceholders(template.workflow) + '\n\n';
+    if (previousHeadSha) {
+      logExceptInTest(
+        '[generateReviewPrompt] Falling back to full workflow despite previousHeadSha',
+        {
+          reviewId,
+          hasIncrementalTemplate: !!template.incrementalReviewWorkflow,
+          hasSummaryComment: !!existingReviewState?.summaryComment,
+        }
+      );
+    }
   }
 
   // 6. What to review

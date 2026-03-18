@@ -1,5 +1,5 @@
 import { eq, desc, and, isNull, gt, notExists } from 'drizzle-orm';
-import { db, sql } from './drizzle';
+import { db, readDb, sql } from './drizzle';
 import type { Organization } from '@kilocode/db/schema';
 import { credit_transactions, kilo_pass_issuance_items } from '@kilocode/db/schema';
 
@@ -42,9 +42,9 @@ export type CreditInfo = {
 };
 
 export type UserPaymentsSummary = Awaited<ReturnType<typeof summarizeUserPayments>>;
-export async function summarizeUserPayments(kiloUserId: string) {
+export async function summarizeUserPayments(kiloUserId: string, fromDb: typeof db = readDb) {
   return (
-    await db
+    await fromDb
       .select({
         payments_count: sql<number>`count(*)::int`,
         payments_total_microdollars: sql<number>`coalesce(sum(${credit_transactions.amount_microdollars}), 0)::float`,
@@ -56,7 +56,7 @@ export async function summarizeUserPayments(kiloUserId: string) {
           eq(credit_transactions.is_free, false),
           gt(credit_transactions.amount_microdollars, 0),
           notExists(
-            db
+            fromDb
               .select({ id: kilo_pass_issuance_items.id })
               .from(kilo_pass_issuance_items)
               .where(eq(kilo_pass_issuance_items.credit_transaction_id, credit_transactions.id))
