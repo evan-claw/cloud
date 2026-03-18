@@ -9,6 +9,7 @@
 import { Hono, type Context } from 'hono';
 import type { Env, TriageRequest, TriageResponse } from './types';
 import {
+  withDORetry,
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
@@ -63,22 +64,29 @@ app.post('/triage', async (c: Context<HonoEnv>) => {
     doName,
   });
 
-  // Get Durable Object stub
+  // Get Durable Object ID
   const id = c.env.TRIAGE_ORCHESTRATOR.idFromName(doName);
-  const stub = c.env.TRIAGE_ORCHESTRATOR.get(id);
 
-  // Start the triage via RPC (saves state, returns immediately)
-  const result = await stub.start({
-    ticketId: body.ticketId,
-    authToken: body.authToken,
-    sessionInput: body.sessionInput,
-    owner: body.owner,
-  });
+  // Start the triage via RPC with retry (saves state, returns immediately)
+  const result = await withDORetry(
+    () => c.env.TRIAGE_ORCHESTRATOR.get(id),
+    stub => stub.start({
+      ticketId: body.ticketId,
+      authToken: body.authToken,
+      sessionInput: body.sessionInput,
+      owner: body.owner,
+    }),
+    'start'
+  );
 
   // Fire-and-forget: trigger triage execution via HTTP context (no 15-min wall time limit)
   // This runs the triage processing without blocking the response
   c.executionCtx.waitUntil(
-    stub.runTriage().catch((error: Error) => {
+    withDORetry(
+      () => c.env.TRIAGE_ORCHESTRATOR.get(id),
+      stub => stub.runTriage(),
+      'runTriage'
+    ).catch((error: Error) => {
       console.error('[POST /triage] runTriage failed:', {
         ticketId: body.ticketId,
         error: error.message,
@@ -111,12 +119,15 @@ app.get('/tickets/:ticketId/events', async (c: Context<HonoEnv>) => {
 
   console.log('[GET /tickets/:ticketId/events] Fetching events', { ticketId });
 
-  // Get Durable Object stub
+  // Get Durable Object ID
   const id = c.env.TRIAGE_ORCHESTRATOR.idFromName(ticketId);
-  const stub = c.env.TRIAGE_ORCHESTRATOR.get(id);
 
-  // Get events via RPC
-  const result = stub.getEvents();
+  // Get events via RPC with retry
+  const result = await withDORetry(
+    () => c.env.TRIAGE_ORCHESTRATOR.get(id),
+    stub => stub.getEvents(),
+    'getEvents'
+  );
 
   return c.json(result);
 });
