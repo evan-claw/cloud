@@ -1,5 +1,4 @@
 import type { BYOKResult } from '@/lib/byok';
-import { getEnvVariable } from '@/lib/dotenvx';
 import { kiloFreeModels } from '@/lib/models';
 import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { getGatewayErrorRate } from '@/lib/providers/gateway-error-rate';
@@ -32,11 +31,6 @@ const ENABLE_UNIVERSAL_VERCEL_ROUTING = false;
 
 const ERROR_RATE_THRESHOLD = 0.5;
 
-function getVercelRoutingPercentageFromEnvironmentVariable() {
-  const percentage = parseInt(getEnvVariable('VERCEL_AI_GATEWAY_PERCENTAGE'));
-  return isFinite(percentage) && percentage >= 0 && percentage <= 100 ? percentage : 10;
-}
-
 function getRandomNumberLessThan100(randomSeed: string) {
   return crypto.createHash('sha256').update(randomSeed).digest().readUInt32BE(0) % 100;
 }
@@ -55,7 +49,7 @@ async function getVercelRoutingPercentage() {
     console.error(`[getVercelRoutingPercentage] Vercel error rate is high: ${errorRate.vercel}`);
     return 10;
   }
-  return getVercelRoutingPercentageFromEnvironmentVariable();
+  return 10;
 }
 
 function isLikelyAvailableOnAllGateways(requestedModel: string) {
