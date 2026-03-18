@@ -75,11 +75,16 @@ export function ProvisioningStep({
     );
   }, [instanceRunning, preset]);
 
+  return <ProvisioningStepView />;
+}
+
+/** Pure visual shell — extracted so Storybook can render it without wiring up mutations. */
+export function ProvisioningStepView() {
   return (
     <Card className="mt-6">
       <CardContent className="flex flex-col items-center gap-8 p-6 pt-10 sm:p-10 sm:pt-12">
         {/* Step indicator */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 self-start">
           <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
             Almost there...
           </span>
@@ -115,9 +120,9 @@ export function ProvisioningStep({
               strokeDasharray="132 264"
               className="provisioning-spinner-arc text-blue-500"
             />
-            {/* Blue dot at the leading edge of the arc */}
-            <circle cx="48" cy="6" r="4" fill="currentColor" className="text-blue-500" />
           </svg>
+          {/* Pulsing center dot */}
+          <span className="absolute inset-0 m-auto h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
           <style>{`
             .provisioning-spinner svg {
               animation: provisioning-rotate 1.4s linear infinite;
