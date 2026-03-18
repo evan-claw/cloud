@@ -36,7 +36,7 @@ jobs:
       # Files included (must match what the Dockerfile COPYs):
       #   - Dockerfile itself (base image, apt packages, npm versions)
       #   - controller/        (COPY controller/ → compiled to controller.js)
-      #   - start-openclaw.sh  (COPY → entrypoint script)
+      #   - container/         (COPY container/TOOLS.md → /usr/local/share/kiloclaw/)
       #   - openclaw-pairing-list.js, openclaw-device-pairing-list.js (COPY)
       #   - skills/            (COPY skills/ → /root/clawd/skills/)
       #
@@ -49,7 +49,7 @@ jobs:
         working-directory: kiloclaw
         run: |
           # Validate all expected paths exist before hashing
-          for path in Dockerfile start-openclaw.sh controller skills \
+          for path in Dockerfile controller container skills \
                       openclaw-pairing-list.js openclaw-device-pairing-list.js; do
             if [ ! -e "$path" ]; then
               echo "::error::Required path not found: $path"
@@ -58,7 +58,7 @@ jobs:
           done
 
           CONTENT_HASH=$(
-            find Dockerfile start-openclaw.sh controller/ skills/ \
+            find Dockerfile controller/ container/ skills/ \
               openclaw-pairing-list.js openclaw-device-pairing-list.js \
               -type f \
               | sort \
