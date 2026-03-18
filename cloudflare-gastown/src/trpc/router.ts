@@ -776,10 +776,12 @@ export const gastownRouter = router({
       const townStub = getTownDOStub(ctx.env, input.townId);
       const config = await townStub.getTownConfig();
 
-      // Mask secrets for non-owner org members
+      // Mask secrets for non-owner, non-creator org members
       if (ownership.type === 'org') {
         const membership = getOrgMembership(ctx.orgMemberships, ownership.orgId);
-        if (membership?.role !== 'owner') {
+        const isOrgOwner = membership?.role === 'owner';
+        const isTownCreator = ctx.userId === config.created_by_user_id;
+        if (!isOrgOwner && !isTownCreator) {
           const mask = (s?: string) => (s ? '****' + s.slice(-4) : undefined);
           return {
             ...config,
@@ -826,18 +828,21 @@ export const gastownRouter = router({
         ...safeConfig
       } = input.config;
 
-      // For org towns, only owners can update config
+      const townStub = getTownDOStub(ctx.env, input.townId);
+
+      // For org towns, only owners or the town creator can update config
       if (ownership.type === 'org') {
         const membership = getOrgMembership(ctx.orgMemberships, ownership.orgId);
-        if (!membership || membership.role !== 'owner') {
+        const isOrgOwner = membership?.role === 'owner';
+        const existingConfig = await townStub.getTownConfig();
+        const isTownCreator = ctx.userId === existingConfig.created_by_user_id;
+        if (!isOrgOwner && !isTownCreator) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Only org owners can update town config',
+            message: 'Only town creators and org owners can update town config',
           });
         }
       }
-
-      const townStub = getTownDOStub(ctx.env, input.townId);
       const result = await townStub.updateTownConfig(safeConfig);
 
       // Push updated env vars to the running container so changes
