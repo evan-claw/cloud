@@ -5,7 +5,6 @@
  * The worker validates Kilo JWTs directly, resolves user data from
  * Hyperdrive, and calls DO methods without an HTTP intermediary.
  */
-/* eslint-disable @typescript-eslint/await-thenable -- DO RPC stubs return Rpc.Promisified which is thenable at runtime */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { router, gastownProcedure, adminProcedure } from './init';
