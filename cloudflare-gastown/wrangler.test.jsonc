@@ -3,7 +3,7 @@
   // Test configuration - stripped down for vitest-pool-workers
   "name": "gastown-test",
   "main": "src/gastown.worker.ts",
-  "compatibility_date": "2026-01-27",
+  "compatibility_date": "2026-02-24",
   "compatibility_flags": ["nodejs_compat", "service_binding_extra_handlers"],
 
   "durable_objects": {

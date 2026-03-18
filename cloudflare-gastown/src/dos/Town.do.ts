@@ -2561,6 +2561,17 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async alarm(): Promise<void> {
+    // Exit condition: if this DO was destroyed, don't re-arm.
+    // After destroy(), deleteAll() wipes storage but may not clear
+    // the alarm (compat date < 2026-02-24). A resurrected alarm
+    // will find no town:id — stop the loop immediately.
+    const storedId = await this.ctx.storage.get<string>('town:id');
+    if (!storedId) {
+      console.log(`${TOWN_LOG} alarm: no town:id — town was destroyed, not re-arming`);
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
     await this.ensureInitialized();
     const townId = this.townId;
     console.log(`${TOWN_LOG} alarm: fired for town=${townId}`);
@@ -3801,6 +3812,11 @@ export class TownDO extends DurableObject<Env> {
   // ── Alarm helpers ─────────────────────────────────────────────────
 
   private async armAlarmIfNeeded(): Promise<void> {
+    // Don't resurrect the alarm on a destroyed DO. After destroy(),
+    // town:id is wiped — if it's missing, the town was deleted.
+    const storedId = await this.ctx.storage.get<string>('town:id');
+    if (!storedId) return;
+
     const current = await this.ctx.storage.getAlarm();
     if (!current || current < Date.now()) {
       await this.ctx.storage.setAlarm(Date.now() + ACTIVE_ALARM_INTERVAL_MS);
@@ -4044,13 +4060,22 @@ export class TownDO extends DurableObject<Env> {
   async destroy(): Promise<void> {
     console.log(`${TOWN_LOG} destroy: clearing all storage and alarms`);
 
+    // Destroy all AgentDOs (clears agent_events tables)
     try {
       const allAgents = agents.listAgents(this.sql);
       await Promise.allSettled(
         allAgents.map(agent => getAgentDOStub(this.env, agent.id).destroy())
       );
-    } catch {
-      // Best-effort
+    } catch (err) {
+      console.warn(`${TOWN_LOG} destroy: agent cleanup failed`, err);
+    }
+
+    // Destroy TownContainerDO (sends SIGKILL to container process, clears state)
+    try {
+      const containerStub = getTownContainerStub(this.env, this.townId);
+      await containerStub.destroy();
+    } catch (err) {
+      console.warn(`${TOWN_LOG} destroy: container cleanup failed`, err);
     }
 
     await this.ctx.storage.deleteAlarm();

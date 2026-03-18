@@ -157,6 +157,14 @@ export const gastownRouter = router({
     .input(z.object({ townId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       await verifyTownOwnership(ctx.env, ctx.userId, input.townId);
+
+      // Destroy the Town DO (agents, container, alarms, storage).
+      // Let failures propagate — if cleanup fails, don't delete the
+      // user record (that's the only reference for recovering the
+      // leaked resources).
+      const townDOStub = getTownDOStub(ctx.env, input.townId);
+      await townDOStub.destroy();
+
       const userStub = getGastownUserStub(ctx.env, ctx.userId);
       await userStub.deleteTown(input.townId);
     }),
