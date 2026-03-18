@@ -229,7 +229,9 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
             if (!Number.isFinite(createdAtMs)) return false; // garbage timestamp → expired
             return nowMs - createdAtMs <= CHANNEL_PAIRING_TTL_MS;
           });
-        console.log(`[pairing-cache] channel ${channel}: read ok, ${filtered.length} request(s) after filtering`);
+        console.log(
+          `[pairing-cache] channel ${channel}: read ok, ${filtered.length} request(s) after filtering`
+        );
         return filtered;
       })
     );
@@ -359,7 +361,9 @@ export function createPairingCache(options?: PairingCacheOptions): PairingCache 
     if (stopped) return;
     const remaining = nextAllowedRefreshAt - Date.now();
     if (remaining > 0) {
-      console.log(`[pairing-cache] debounced refresh skipped (backoff, ${Math.ceil(remaining / 1000)}s remaining)`);
+      console.log(
+        `[pairing-cache] debounced refresh skipped (backoff, ${Math.ceil(remaining / 1000)}s remaining)`
+      );
       return;
     }
     console.log('[pairing-cache] debounced refresh');

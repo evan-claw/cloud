@@ -1173,7 +1173,11 @@ describe('createPairingCache', () => {
         channels: { telegram: { enabled: true, botToken: 'tok' } },
       }));
 
-      const { cache } = createTestHarness({ readChannelPairingImpl, readDevicePairingImpl, readConfigImpl });
+      const { cache } = createTestHarness({
+        readChannelPairingImpl,
+        readDevicePairingImpl,
+        readConfigImpl,
+      });
       cache.start();
 
       // First refresh fires immediately and succeeds, populating stale data into cache.
