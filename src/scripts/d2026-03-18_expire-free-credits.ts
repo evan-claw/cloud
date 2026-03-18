@@ -1,6 +1,10 @@
 /**
- * Adds expiry dates to free, non-expiring credit transactions for a single
- * category so they expire on 2026-04-15.
+ * Adds expiry dates to free, non-expiring credit transactions so they expire
+ * 30 days from when the script is run.
+ *
+ * The set of credits to expire is defined by (credit_category, description)
+ * pairs copied from the reviewed spreadsheet. Each row must match both fields
+ * (empty description matches any).
  *
  * The script queries by credit_category first (much faster than scanning all
  * users), then processes each affected user.
@@ -14,10 +18,10 @@
  *      affected transactions and updates the user's next_credit_expiration_at.
  *
  * Usage:
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --execute
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --batch-size=1000
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --concurrency=20
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --execute
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --batch-size=1000
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --concurrency=20
  */
 
 import '../lib/load-env';
@@ -28,18 +32,103 @@ import path from 'node:path';
 import pLimit from 'p-limit';
 import { db, closeAllDrizzleConnections } from '@/lib/drizzle';
 import { credit_transactions, kilocode_users } from '@kilocode/db/schema';
-import { and, eq, gt, isNull, sql, inArray } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql, inArray, or } from 'drizzle-orm';
 import { computeExpiration, type ExpiringTransaction } from '@/lib/creditExpiration';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const EXPIRY_DATE = '2026-04-15T00:00:00.000Z';
-const EXPIRY_DATE_OBJ = new Date(EXPIRY_DATE);
+const EXPIRY_DATE_OBJ = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+EXPIRY_DATE_OBJ.setUTCHours(0, 0, 0, 0);
+const EXPIRY_DATE = EXPIRY_DATE_OBJ.toISOString();
+
+// ── Excel data ───────────────────────────────────────────────────────────────
+// https://docs.google.com/spreadsheets/d/1G8EAUD39Hn3C01qNnjvWSEQpG3te0HIgiSi0yMD-AZk/edit?gid=458053126#gid=458053126
+// set the should expire filter to true
+// copy credit category name column (without the header)
+// same for credit category description
+
+const creditCategoryNames = `
+orb_free_credits
+card-validation-upgrade
+stytch-validation
+automatic-welcome-credits
+XCURSOR-W92X91
+XCURSOR-REF-W92X91
+card-validation-no-stytch
+in-app-5usd
+payment-tripled
+THEO
+referral-referring-bonus
+referral-redeeming-bonus
+windsurf-promo-2025-07-12
+orb_free_credits
+THEOKILO
+orb_free_credits
+orb_free_credits
+POWER-OF-EUROPE
+windsurf-promo-2025-07-12
+orb_free_credits
+windsurf-promo-2025-07-12
+windsurf-promo-2025-07-12
+orb_free_credits
+custom
+custom
+custom
+custom`;
+
+const creditCategoryDescriptions = `
+
+Upgrade credits for passing card validation after having already passed Stytch validation.
+Free credits for passing Stytch fraud detection.
+Free credits for new users, obtained by stych approval, card validation, or maybe some other method
+Cursor promo 2025-07-17
+Cursor promo 2025-07-17 (referral)
+Free credits for passing card validation without prior Stytch validation.
+In-app survey completion
+
+Influencer: Theo T3
+
+
+Windsurf promo 2025-07-12 (Brendan O'Leary)
+
+Influencer: Theo T3
+Cohort B - Automated May 1-time early adopter credit
+Cohort 100A - Automated May 1-time early adopter credit
+Hackathon: Power of Europe Amsterdam 2025
+Windsurf promo 2025-07-12 (Olesya Elfimova)
+Email 100 non-expire (via script)
+Windsurf promo 2025-07-12 (Tirumari Jothi)
+Windsurf promo 2025-07-12
+2025-05-24 JP gives stragglers $100
+Dev (Catriel Müller)
+workwork (Eamon Nerbonne)
+Darko: I thought he's a leecher. He paid us in Stripe..a lot (verified in Orb) (Darko Gjorgjievski)
+Part-time UX hire, providing tokens to use product and be productive (Joshua Lambert)`;
+
+// ── Parse excel rows into (category, description) pairs ─────────────────────
+
+type CreditCategoryRow = { category: string; description: string | null };
+
+function parseCreditCategoryRows(): CreditCategoryRow[] {
+  // Split on newlines, dropping the first empty line from the template literal
+  const names = creditCategoryNames.split('\n').slice(1);
+  const descriptions = creditCategoryDescriptions.split('\n').slice(1);
+
+  if (names.length !== descriptions.length) {
+    throw new Error(
+      `Mismatch: ${names.length} category names vs ${descriptions.length} descriptions`
+    );
+  }
+
+  return names.map((name, i) => ({
+    category: name.trim(),
+    description: descriptions[i].trim() || null,
+  }));
+}
 
 // ── Arg parsing ──────────────────────────────────────────────────────────────
 
 function parseArgs(): {
-  category: string;
   execute: boolean;
   batchSize: number;
   concurrency: number;
@@ -48,13 +137,10 @@ function parseArgs(): {
   let execute = false;
   let batchSize = 10_000;
   let concurrency = 50;
-  let category: string | undefined;
 
   for (const arg of args) {
     if (arg === '--execute') {
       execute = true;
-    } else if (arg.startsWith('--category=')) {
-      category = arg.split('=')[1];
     } else if (arg.startsWith('--batch-size=')) {
       const value = parseInt(arg.split('=')[1], 10);
       if (isNaN(value) || value <= 0) {
@@ -72,12 +158,7 @@ function parseArgs(): {
     }
   }
 
-  if (!category) {
-    console.error('Missing required --category=<category> argument');
-    process.exit(1);
-  }
-
-  return { category, execute, batchSize, concurrency };
+  return { execute, batchSize, concurrency };
 }
 
 // ── Process a single user ────────────────────────────────────────────────────
@@ -147,7 +228,7 @@ async function processUser(
 
   const simulationInput = [...existingExpiring, ...modifiedAffected];
 
-  // 5. Run simulation — use EXPIRY_DATE_OBJ as `now` to project what would happen on 2026-04-15
+  // 5. Run simulation — use EXPIRY_DATE_OBJ as `now` to project what would happen at expiry
   const entity = { id: user.id, microdollars_used: user.microdollars_used };
   const { newTransactions } = computeExpiration(simulationInput, entity, EXPIRY_DATE_OBJ, user.id);
 
@@ -214,18 +295,37 @@ async function processUser(
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { category, execute, batchSize, concurrency } = parseArgs();
+  const { execute, batchSize, concurrency } = parseArgs();
+  const rows = parseCreditCategoryRows();
 
-  console.log(`Category: ${category}`);
   console.log(`Mode: ${execute ? 'EXECUTE' : 'DRY RUN'}`);
+  console.log(`Expiry date: ${EXPIRY_DATE}`);
+  console.log(`Rows: ${rows.length} (category, description) pairs`);
   console.log(`Batch size: ${batchSize}`);
   console.log(`Concurrency: ${concurrency}\n`);
+
+  for (const row of rows) {
+    console.log(`  ${row.category} | ${row.description ?? '(any description)'}`);
+  }
+  console.log();
+
+  // Build the OR condition matching all (category, description) pairs.
+  // Empty description means "match any description for this category".
+  const rowConditions = rows.map(row =>
+    row.description
+      ? and(
+          eq(credit_transactions.credit_category, row.category),
+          eq(credit_transactions.description, row.description)
+        )
+      : eq(credit_transactions.credit_category, row.category)
+  );
+  const categoryFilter = rowConditions.length === 1 ? rowConditions[0] : or(...rowConditions);
 
   const outputDir = path.join(__dirname, 'output');
   await mkdir(outputDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/:/g, '-');
-  const outputFile = `expire-free-credits-${category}-${timestamp}.jsonl`;
-  const errorsFile = `expire-free-credits-${category}-${timestamp}.errors.jsonl`;
+  const outputFile = `expire-free-credits-${timestamp}.jsonl`;
+  const errorsFile = `expire-free-credits-${timestamp}.errors.jsonl`;
   const output = createWriteStream(path.join(outputDir, outputFile));
   const errorLog = createWriteStream(path.join(outputDir, errorsFile));
   console.log(`Output:  ${path.join(outputDir, outputFile)}`);
@@ -241,13 +341,13 @@ async function main() {
   let totalErrors = 0;
 
   while (true) {
-    // Query credits by category directly — much faster than scanning all users
+    // Query credits matching any (category, description) pair
     const batch = await db
       .select()
       .from(credit_transactions)
       .where(
         and(
-          eq(credit_transactions.credit_category, category),
+          categoryFilter,
           eq(credit_transactions.is_free, true),
           isNull(credit_transactions.expiry_date),
           isNull(credit_transactions.organization_id),
@@ -303,7 +403,7 @@ async function main() {
   errorLog.end();
 
   console.log('\n--- Summary ---');
-  console.log(`Category:                    ${category}`);
+  console.log(`Rows:                        ${rows.length}`);
   console.log(`Total credits found:         ${totalCredits}`);
   console.log(`Users affected:              ${usersAffected}`);
   console.log(`Total credits tagged:        ${totalCreditsAffected}`);
