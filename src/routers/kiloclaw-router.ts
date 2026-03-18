@@ -1178,6 +1178,27 @@ export const kiloclawRouter = createTRPCRouter({
         )
       );
 
+      // Re-check for open kiloclaw sessions after expiring stale ones.
+      // If a concurrent request created a new session between our initial
+      // list() and now, we'll see it here and reject to prevent duplicates.
+      if (staleKiloClawSessions.length > 0) {
+        const recheckSessions = await stripe.checkout.sessions.list({
+          customer: stripeCustomerId,
+          status: 'open',
+          limit: 10,
+        });
+        const hasConcurrentKiloClawCheckout = recheckSessions.data.some(
+          s => s.metadata?.type === 'kiloclaw'
+        );
+        if (hasConcurrentKiloClawCheckout) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message:
+              'A checkout is already in progress. Please complete or cancel the existing checkout.',
+          });
+        }
+      }
+
       const priceId = getStripePriceIdForClawPlan(input.plan);
 
       const rewardfulReferral = await getRewardfulReferral();

@@ -796,9 +796,9 @@ describe('reactivateSubscription', () => {
 describe('createSubscriptionCheckout — concurrent checkout guard', () => {
   it('expires stale open checkout sessions and creates a new one', async () => {
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list.mockResolvedValue({
-      data: [{ id: 'cs_existing', metadata: { type: 'kiloclaw' } }],
-    });
+    stripeMock.checkout.sessions.list
+      .mockResolvedValueOnce({ data: [{ id: 'cs_existing', metadata: { type: 'kiloclaw' } }] })
+      .mockResolvedValueOnce({ data: [] }); // re-check after expire
     stripeMock.checkout.sessions.create.mockResolvedValue({
       id: 'cs_new',
       url: 'https://checkout.stripe.com/new',
@@ -814,9 +814,9 @@ describe('createSubscriptionCheckout — concurrent checkout guard', () => {
 
   it('tolerates already-expired sessions from concurrent expire calls', async () => {
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
-    stripeMock.checkout.sessions.list.mockResolvedValue({
-      data: [{ id: 'cs_racy', metadata: { type: 'kiloclaw' } }],
-    });
+    stripeMock.checkout.sessions.list
+      .mockResolvedValueOnce({ data: [{ id: 'cs_racy', metadata: { type: 'kiloclaw' } }] })
+      .mockResolvedValueOnce({ data: [] }); // re-check after expire
     stripeMock.checkout.sessions.expire.mockRejectedValue(
       new stripeMock.errors.StripeInvalidRequestError({
         type: 'invalid_request_error',
@@ -833,6 +833,22 @@ describe('createSubscriptionCheckout — concurrent checkout guard', () => {
 
     expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_racy');
     expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
+  });
+
+  it('rejects when a concurrent request created a new session between expire and create', async () => {
+    stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
+    stripeMock.checkout.sessions.list
+      .mockResolvedValueOnce({ data: [{ id: 'cs_stale', metadata: { type: 'kiloclaw' } }] })
+      .mockResolvedValueOnce({
+        data: [{ id: 'cs_concurrent', metadata: { type: 'kiloclaw' } }],
+      }); // re-check shows a new session from a concurrent request
+
+    const caller = await createCallerForUser(user.id);
+    await expect(caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' })).rejects.toThrow(
+      'A checkout is already in progress'
+    );
+    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_stale');
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it('rejects when expire fails for a non-expired reason (e.g. session completed concurrently)', async () => {
