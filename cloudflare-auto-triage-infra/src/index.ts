@@ -7,12 +7,26 @@
  */
 
 import { Hono, type Context } from 'hono';
-import type { Env, TriageRequest, TriageResponse } from './types';
+import { z } from 'zod';
+import type { Env, TriageResponse, SessionInput } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const triageRequestSchema = z.object({
+  ticketId: z.string(),
+  authToken: z.string(),
+  sessionInput: z.custom<SessionInput>(val => typeof val === 'object' && val !== null),
+  owner: ownerSchema,
+});
 
 // Import base Durable Object
 import { TriageOrchestrator as TriageOrchestratorBase } from './triage-orchestrator';
@@ -32,23 +46,11 @@ app.use(
 
 // Route: POST /triage
 app.post('/triage', async (c: Context<HonoEnv>) => {
-  let body: TriageRequest;
-
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const parsed = triageRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.format() }, 400);
   }
-
-  // Validate required fields
-  if (!body.ticketId || !body.authToken || !body.sessionInput || !body.owner) {
-    return c.json(
-      {
-        error: 'Missing required fields: ticketId, authToken, sessionInput, owner',
-      },
-      400
-    );
-  }
+  const body = parsed.data;
 
   console.log('[POST /triage] Received triage request', {
     ticketId: body.ticketId,

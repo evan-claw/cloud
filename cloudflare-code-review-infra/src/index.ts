@@ -19,13 +19,34 @@
  */
 
 import { Hono, type Context } from 'hono';
-import type { Env, CodeReviewRequest, CodeReviewResponse } from './types';
+import { z } from 'zod';
+import type { Env, CodeReviewResponse, SessionInput } from './types';
 import {
   withDORetry,
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const codeReviewRequestSchema = z.object({
+  reviewId: z.string(),
+  authToken: z.string(),
+  sessionInput: z.custom<SessionInput>(val => typeof val === 'object' && val !== null),
+  owner: ownerSchema,
+  skipBalanceCheck: z.boolean().optional(),
+  agentVersion: z.string().optional(),
+  previousCloudAgentSessionId: z.string().optional(),
+});
+
+const cancelRequestSchema = z.object({
+  reason: z.string().optional(),
+});
 
 // Import base Durable Object
 import { CodeReviewOrchestrator as CodeReviewOrchestratorBase } from './code-review-orchestrator';
@@ -45,23 +66,11 @@ app.use(
 
 // Route: POST /review
 app.post('/review', async (c: Context<HonoEnv>) => {
-  let body: CodeReviewRequest;
-
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const parsed = codeReviewRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.format() }, 400);
   }
-
-  // Validate required fields
-  if (!body.reviewId || !body.authToken || !body.sessionInput || !body.owner) {
-    return c.json(
-      {
-        error: 'Missing required fields: reviewId, authToken, sessionInput, owner',
-      },
-      400
-    );
-  }
+  const body = parsed.data;
 
   console.log('[POST /review] Received review request', {
     reviewId: body.reviewId,
@@ -157,13 +166,11 @@ app.post('/reviews/:reviewId/cancel', async (c: Context<HonoEnv>) => {
     return c.json({ error: 'reviewId parameter required' }, 400);
   }
 
-  let body: { reason?: string };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const parsed = cancelRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.format() }, 400);
   }
-  const reason = body.reason;
+  const reason = parsed.data.reason;
 
   console.log('[POST /reviews/:reviewId/cancel] Cancelling review', { reviewId, reason });
 
