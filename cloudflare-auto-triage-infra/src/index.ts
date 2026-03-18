@@ -70,12 +70,13 @@ app.post('/triage', async (c: Context<HonoEnv>) => {
   // Start the triage via RPC with retry (saves state, returns immediately)
   const result = await withDORetry(
     () => c.env.TRIAGE_ORCHESTRATOR.get(id),
-    stub => stub.start({
-      ticketId: body.ticketId,
-      authToken: body.authToken,
-      sessionInput: body.sessionInput,
-      owner: body.owner,
-    }),
+    stub =>
+      stub.start({
+        ticketId: body.ticketId,
+        authToken: body.authToken,
+        sessionInput: body.sessionInput,
+        owner: body.owner,
+      }),
     'start'
   );
 
