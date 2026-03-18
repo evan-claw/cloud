@@ -189,11 +189,11 @@ are auto-managed and which require manual setup.
 
 ### Auth (required)
 
-| Variable               | Description                                                                                                                          | How to generate        | Auto-managed |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ------------ |
-| `NEXTAUTH_SECRET`      | JWT signing key (HS256). Must match the Next.js app's secret.                                                                        | `openssl rand -hex 32` | Yes (Vercel) |
-| `INTERNAL_API_SECRET`  | Shared key for platform API routes (`x-internal-api-key` header). Must match Next.js `KILOCLAW_INTERNAL_API_SECRET`.                 | `openssl rand -hex 32` | Yes (Vercel) |
-| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens. Worker-only (Next.js reads derived tokens from the API). Can be any arbitrary value in dev. | `openssl rand -hex 32` | No           |
+| Variable               | Description                                                                                                                          | How to generate        | Source  | Auto-managed |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- | ------- | ------------ |
+| `NEXTAUTH_SECRET`      | JWT signing key (HS256). Must match the Next.js app's secret.                                                                        | `openssl rand -hex 32` | Vercel  | Yes          |
+| `INTERNAL_API_SECRET`  | Shared key for platform API routes (`x-internal-api-key` header). Must match Next.js `KILOCLAW_INTERNAL_API_SECRET`.                 | `openssl rand -hex 32` | Vercel  | Yes          |
+| `GATEWAY_TOKEN_SECRET` | HMAC key for per-sandbox gateway tokens. Worker-only (Next.js reads derived tokens from the API). Can be any arbitrary value in dev. | `openssl rand -hex 32` | Example | No           |
 
 For local dev, any placeholder values work (the example file has defaults).
 For production, generate real secrets and keep `NEXTAUTH_SECRET` and
@@ -263,9 +263,9 @@ user-provided encrypted secrets and channel tokens are silently skipped.
 
 ### Development Flags
 
-| Variable     | Description                                                                                                                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WORKER_ENV` | Defaults to `"production"` in `wrangler.jsonc`. **Set to `"development"` in `.dev.vars` for local dev.** Controls JWT `env` claim matching and Fly app name prefixes (`dev-` vs `acct-`). |
+| Variable     | Description                                                                                                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WORKER_ENV` | Defaults to `"production"` in `wrangler.jsonc`. **Set to `"development"` in `.dev.vars` for local dev** so JWT `env` claims match and Fly app names use the `dev-` prefix instead of `acct-`. Leave it unset in production unless you intentionally need a different override. |
 
 ### Optional
 
@@ -451,21 +451,25 @@ To test the full flow locally without browser auth,
 use the platform API routes to provision and start an instance:
 
 ```bash
+# Read the real platform API secret from .dev.vars instead of hardcoding a sample.
+# This keeps examples aligned with your local setup and avoids copying placeholder secrets into shell history.
+export API_KEY="$(grep '^INTERNAL_API_SECRET=' .dev.vars | cut -d= -f2-)"
+
 # Provision an instance (replace with a test user ID)
 curl -X POST http://localhost:8795/api/platform/provision \
-  -H "x-internal-api-key: dev-internal-secret" \
+  -H "x-internal-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"userId": "test-user-123"}'
 
 # Start it
-curl -X POST http://localhost:8787/api/platform/start \
-  -H "x-internal-api-key: dev-internal-secret" \
+curl -X POST http://localhost:8795/api/platform/start \
+  -H "x-internal-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"userId": "test-user-123"}'
 
 # Check status
-curl http://localhost:8787/api/platform/status?userId=test-user-123 \
-  -H "x-internal-api-key: dev-internal-secret"
+curl http://localhost:8795/api/platform/status?userId=test-user-123 \
+  -H "x-internal-api-key: $API_KEY"
 ```
 
 ## Controller Smoke Tests (Docker)
