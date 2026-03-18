@@ -66,7 +66,8 @@ import { customLlmRequest } from '@/lib/custom-llm/customLlmRequest';
 import { normalizeModelId } from '@/lib/model-utils';
 import { isRateLimitedToDeath } from '@/lib/rate-limited-models';
 import { isActiveReviewPromo } from '@/lib/code-reviews/core/constants';
-import { applyResolvedAutoModel, isKiloAutoModel } from '@/lib/kilo-auto-model';
+import { applyResolvedAutoModel, isKiloAutoModel, KILO_AUTO_SMALL_MODEL } from '@/lib/kilo-auto-model';
+import { gpt_oss_20b_free_model } from '@/lib/providers/openai';
 import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplicateReasoning';
 import type { MicrodollarUsageContext, PromptInfo } from '@/lib/processUsage.types';
 import { extractResponsesPromptInfo } from '@/lib/processUsage.responses';
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     applyResolvedAutoModel(requestedModelLowerCased, requestBodyParsed, modeHeader, feature);
   }
 
-  const originalModelIdLowerCased = requestBodyParsed.body.model.toLowerCase();
+  let originalModelIdLowerCased = requestBodyParsed.body.model.toLowerCase();
 
   // Extract IP for all requests (needed for free model rate limiting)
   const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -216,7 +217,26 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   let tokenSource: string | undefined = authTokenSource;
 
   if (authFailedResponse) {
-    // No valid auth
+    // No valid auth — switch kilo-auto/small to its free fallback before the free-model check
+    if (autoModel === KILO_AUTO_SMALL_MODEL.id) {
+      requestBodyParsed.body.model = gpt_oss_20b_free_model.public_id;
+      originalModelIdLowerCased = gpt_oss_20b_free_model.public_id;
+      const rateLimitResult = await checkFreeModelRateLimit(ipAddress);
+      if (!rateLimitResult.allowed) {
+        console.warn(
+          `Free model rate limit exceeded, ip address: ${ipAddress}, model: ${originalModelIdLowerCased}, request count: ${rateLimitResult.requestCount}`
+        );
+        return NextResponse.json(
+          {
+            error: 'Rate limit exceeded',
+            message:
+              'Free model usage limit reached. Please try again later or upgrade to a paid model.',
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     if (!isFreeModel(originalModelIdLowerCased)) {
       // Paid model requires authentication
       return NextResponse.json(
@@ -371,7 +391,28 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       !userByok &&
       !isActiveReviewPromo(botId, originalModelIdLowerCased)
     ) {
-      return await usageLimitExceededResponse(user, balance);
+      if (autoModel === KILO_AUTO_SMALL_MODEL.id) {
+        // Route to the free fallback instead of rejecting
+        requestBodyParsed.body.model = gpt_oss_20b_free_model.public_id;
+        originalModelIdLowerCased = gpt_oss_20b_free_model.public_id;
+        const rateLimitResult = await checkFreeModelRateLimit(ipAddress);
+        if (!rateLimitResult.allowed) {
+          console.warn(
+            `Free model rate limit exceeded, ip address: ${ipAddress}, model: ${originalModelIdLowerCased}, request count: ${rateLimitResult.requestCount}`
+          );
+          return NextResponse.json(
+            {
+              error: 'Rate limit exceeded',
+              message:
+                'Free model usage limit reached. Please try again later or upgrade to a paid model.',
+            },
+            { status: 429 }
+          );
+        }
+        await logFreeModelRequest(ipAddress, originalModelIdLowerCased, user.id);
+      } else {
+        return await usageLimitExceededResponse(user, balance);
+      }
     }
 
     // Organization model/provider restrictions check
