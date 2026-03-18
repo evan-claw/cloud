@@ -1,21 +1,23 @@
 /**
- * Adds expiry dates to free, non-expiring credit transactions so they expire
- * on 2026-04-15.
+ * Adds expiry dates to free, non-expiring credit transactions for a single
+ * category so they expire on 2026-04-15.
  *
- * For each user the script:
+ * The script queries by credit_category first (much faster than scanning all
+ * users), then processes each affected user.
+ *
+ * For each affected user the script:
  *   1. Fetches all personal credit transactions (excluding org-scoped).
- *   2. Identifies free, positive credits that have no expiry_date.
- *   3. Simulates what would expire on 2026-04-15 using computeExpiration().
- *   4. Writes a JSONL log line with the user's current/projected balance and
+ *   2. Simulates what would expire on 2026-04-15 using computeExpiration().
+ *   3. Writes a JSONL log line with the user's current/projected balance and
  *      per-credit projected expired amounts.
- *   5. In --execute mode, sets expiry_date and expiration_baseline on the
+ *   4. In --execute mode, sets expiry_date and expiration_baseline on the
  *      affected transactions and updates the user's next_credit_expiration_at.
  *
  * Usage:
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --execute
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --batch-size=1000
- *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --concurrency=20
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --execute
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --batch-size=1000
+ *   pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --category=stytch-validation --concurrency=20
  */
 
 import '../lib/load-env';
@@ -36,15 +38,23 @@ const EXPIRY_DATE_OBJ = new Date(EXPIRY_DATE);
 
 // ── Arg parsing ──────────────────────────────────────────────────────────────
 
-function parseArgs(): { execute: boolean; batchSize: number; concurrency: number } {
+function parseArgs(): {
+  category: string;
+  execute: boolean;
+  batchSize: number;
+  concurrency: number;
+} {
   const args = process.argv.slice(2);
   let execute = false;
   let batchSize = 10_000;
   let concurrency = 50;
+  let category: string | undefined;
 
   for (const arg of args) {
     if (arg === '--execute') {
       execute = true;
+    } else if (arg.startsWith('--category=')) {
+      category = arg.split('=')[1];
     } else if (arg.startsWith('--batch-size=')) {
       const value = parseInt(arg.split('=')[1], 10);
       if (isNaN(value) || value <= 0) {
@@ -62,48 +72,42 @@ function parseArgs(): { execute: boolean; batchSize: number; concurrency: number
     }
   }
 
-  return { execute, batchSize, concurrency };
+  if (!category) {
+    console.error('Missing required --category=<category> argument');
+    process.exit(1);
+  }
+
+  return { category, execute, batchSize, concurrency };
 }
 
 // ── Process a single user ────────────────────────────────────────────────────
 
 async function processUser(
-  user: {
-    id: string;
-    microdollars_used: number;
-    total_microdollars_acquired: number;
-    next_credit_expiration_at: string | null;
-  },
+  userId: string,
+  affectedCredits: (typeof credit_transactions.$inferSelect)[],
   execute: boolean,
   output: ReturnType<typeof createWriteStream>
-): Promise<{ creditsAffected: number; projectedExpiration: number } | null> {
-  // 1. Fetch all user credit transactions (excluding org-scoped)
+): Promise<{ creditsAffected: number; projectedExpiration: number }> {
+  // 1. Fetch user info
+  const [user] = await db
+    .select({
+      id: kilocode_users.id,
+      microdollars_used: kilocode_users.microdollars_used,
+      total_microdollars_acquired: kilocode_users.total_microdollars_acquired,
+      next_credit_expiration_at: kilocode_users.next_credit_expiration_at,
+    })
+    .from(kilocode_users)
+    .where(eq(kilocode_users.id, userId));
+
+  if (!user) throw new Error(`User ${userId} not found`);
+
+  // 2. Fetch all user credit transactions (excluding org-scoped) for simulation context
   const allTransactions = await db
     .select()
     .from(credit_transactions)
     .where(
-      and(
-        eq(credit_transactions.kilo_user_id, user.id),
-        isNull(credit_transactions.organization_id)
-      )
+      and(eq(credit_transactions.kilo_user_id, userId), isNull(credit_transactions.organization_id))
     );
-
-  // 2. Find affected: free, non-expiring, positive credits (excluding categories we don't want to expire)
-  const excludedCategories = new Set([
-    'orb_migration_accounting_adjustment',
-    'credits_expired',
-    'custom',
-    'usage_issue',
-    'feedback',
-  ]);
-  const affected = allTransactions.filter(
-    t =>
-      t.is_free &&
-      t.expiry_date == null &&
-      t.amount_microdollars > 0 &&
-      !excludedCategories.has(t.credit_category ?? '')
-  );
-  if (affected.length === 0) return null;
 
   // 3. Build already-processed set (expiration records that exist)
   const processedOriginalIds = new Set(
@@ -121,8 +125,7 @@ async function processUser(
   // 4. Build simulation input: existing unprocessed expiring credits + modified affected credits
   const existingExpiring: ExpiringTransaction[] = allTransactions
     .filter(
-      t =>
-        t.expiry_date != null && t.amount_microdollars > 0 && !processedOriginalIds.has(t.id)
+      t => t.expiry_date != null && t.amount_microdollars > 0 && !processedOriginalIds.has(t.id)
     )
     .map(t => ({
       id: t.id,
@@ -133,7 +136,7 @@ async function processUser(
       is_free: t.is_free,
     }));
 
-  const modifiedAffected: ExpiringTransaction[] = affected.map(t => ({
+  const modifiedAffected: ExpiringTransaction[] = affectedCredits.map(t => ({
     id: t.id,
     amount_microdollars: t.amount_microdollars,
     expiration_baseline_microdollars_used: t.original_baseline_microdollars_used ?? 0,
@@ -160,7 +163,7 @@ async function processUser(
   );
   const projectedBalance = currentBalance - totalExpiredAll;
 
-  const creditsAffectedWithProjection = affected.map(t => ({
+  const creditsAffectedWithProjection = affectedCredits.map(t => ({
     ...t,
     projected_expired_amount_microdollars: expiredByOriginalId.get(t.id) ?? 0,
   }));
@@ -176,7 +179,7 @@ async function processUser(
 
   // 8. Execute mode: write DB changes
   if (execute) {
-    const affectedIds = affected.map(t => t.id);
+    const affectedIds = affectedCredits.map(t => t.id);
     await db.transaction(async tx => {
       await tx
         .update(credit_transactions)
@@ -197,19 +200,23 @@ async function processUser(
   }
 
   // 9. Return total projected expiration only for the newly-tagged credits
-  const projectedExpirationForAffected = affected.reduce(
+  const projectedExpirationForAffected = affectedCredits.reduce(
     (sum, t) => sum + (expiredByOriginalId.get(t.id) ?? 0),
     0
   );
 
-  return { creditsAffected: affected.length, projectedExpiration: projectedExpirationForAffected };
+  return {
+    creditsAffected: affectedCredits.length,
+    projectedExpiration: projectedExpirationForAffected,
+  };
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { execute, batchSize, concurrency } = parseArgs();
+  const { category, execute, batchSize, concurrency } = parseArgs();
 
+  console.log(`Category: ${category}`);
   console.log(`Mode: ${execute ? 'EXECUTE' : 'DRY RUN'}`);
   console.log(`Batch size: ${batchSize}`);
   console.log(`Concurrency: ${concurrency}\n`);
@@ -217,19 +224,17 @@ async function main() {
   const outputDir = path.join(__dirname, 'output');
   await mkdir(outputDir, { recursive: true });
   const timestamp = new Date().toISOString().replace(/:/g, '-');
-  const output = createWriteStream(
-    path.join(outputDir, `expire-free-credits-${timestamp}.jsonl`)
-  );
-  const errorLog = createWriteStream(
-    path.join(outputDir, `expire-free-credits-${timestamp}.errors.jsonl`)
-  );
-  console.log(`Output:  ${path.join(outputDir, `expire-free-credits-${timestamp}.jsonl`)}`);
-  console.log(`Errors:  ${path.join(outputDir, `expire-free-credits-${timestamp}.errors.jsonl`)}\n`);
+  const outputFile = `expire-free-credits-${category}-${timestamp}.jsonl`;
+  const errorsFile = `expire-free-credits-${category}-${timestamp}.errors.jsonl`;
+  const output = createWriteStream(path.join(outputDir, outputFile));
+  const errorLog = createWriteStream(path.join(outputDir, errorsFile));
+  console.log(`Output:  ${path.join(outputDir, outputFile)}`);
+  console.log(`Errors:  ${path.join(outputDir, errorsFile)}\n`);
 
   const limit = pLimit(concurrency);
 
   let lastId = '';
-  let totalUsers = 0;
+  let totalCredits = 0;
   let totalCreditsAffected = 0;
   let totalProjectedExpiration = 0;
   let usersAffected = 0;
@@ -237,46 +242,61 @@ async function main() {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    // Query credits by category directly — much faster than scanning all users
     const batch = await db
-      .select({
-        id: kilocode_users.id,
-        microdollars_used: kilocode_users.microdollars_used,
-        total_microdollars_acquired: kilocode_users.total_microdollars_acquired,
-        next_credit_expiration_at: kilocode_users.next_credit_expiration_at,
-      })
-      .from(kilocode_users)
-      .where(gt(kilocode_users.id, lastId))
-      .orderBy(kilocode_users.id)
+      .select()
+      .from(credit_transactions)
+      .where(
+        and(
+          eq(credit_transactions.credit_category, category),
+          eq(credit_transactions.is_free, true),
+          isNull(credit_transactions.expiry_date),
+          isNull(credit_transactions.organization_id),
+          gt(credit_transactions.kilo_user_id, lastId)
+        )
+      )
+      .orderBy(credit_transactions.kilo_user_id)
       .limit(batchSize);
 
     if (batch.length === 0) break;
+    totalCredits += batch.length;
+
+    // Group by user
+    const byUser = new Map<string, typeof batch>();
+    for (const credit of batch) {
+      const existing = byUser.get(credit.kilo_user_id);
+      if (existing) {
+        existing.push(credit);
+      } else {
+        byUser.set(credit.kilo_user_id, [credit]);
+      }
+    }
 
     const results = await Promise.allSettled(
-      batch.map((user, i) =>
+      [...byUser.entries()].map(([userId, credits]) =>
         limit(async () => {
-          const result = await processUser(user, execute, output);
-          return { index: i, result };
+          const result = await processUser(userId, credits, execute, output);
+          return { userId, result };
         })
       )
     );
 
-    for (let i = 0; i < results.length; i++) {
-      const settled = results[i];
-      totalUsers++;
+    for (const settled of results) {
       if (settled.status === 'rejected') {
         totalErrors++;
-        const error = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
-        errorLog.write(JSON.stringify({ user_id: batch[i].id, error }) + '\n');
-      } else if (settled.value.result) {
+        const error =
+          settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+        errorLog.write(JSON.stringify({ error }) + '\n');
+      } else {
         usersAffected++;
         totalCreditsAffected += settled.value.result.creditsAffected;
         totalProjectedExpiration += settled.value.result.projectedExpiration;
       }
     }
 
-    lastId = batch[batch.length - 1].id;
+    lastId = batch[batch.length - 1].kilo_user_id;
     console.log(
-      `Processed ${totalUsers} users so far (${usersAffected} affected, ${totalCreditsAffected} credits tagged, ${totalErrors} errors)...`
+      `Processed ${totalCredits} credits, ${usersAffected} users so far (${totalCreditsAffected} credits tagged, ${totalErrors} errors)...`
     );
   }
 
@@ -284,8 +304,9 @@ async function main() {
   errorLog.end();
 
   console.log('\n--- Summary ---');
-  console.log(`Total users scanned:        ${totalUsers}`);
-  console.log(`Users with affected credits: ${usersAffected}`);
+  console.log(`Category:                    ${category}`);
+  console.log(`Total credits found:         ${totalCredits}`);
+  console.log(`Users affected:              ${usersAffected}`);
   console.log(`Total credits tagged:        ${totalCreditsAffected}`);
   console.log(
     `Projected expiration total:  ${totalProjectedExpiration} microdollars ($${(totalProjectedExpiration / 1_000_000).toFixed(2)})`
