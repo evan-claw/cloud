@@ -2,252 +2,176 @@
 
 ## Goal
 
-Merge the separate "Cloud Agent" (`/cloud`) and "Sessions" (`/cloud/sessions`) pages into a single unified interface. Eliminate the 3-column layout problem. Make sessions easy to browse, group by project/branch, and view inline without pop-ups.
+Improve the session browsing experience in the existing ChatSidebar. Keep the current 3-column layout (AppSidebar + ChatSidebar + Chat) and route structure intact. Focus on making sessions discoverable — groupable by project/branch, searchable, and filterable — within the existing sidebar.
 
 ## Current State
 
-- **3 separate pages**: `/cloud` (new session form), `/cloud/chat?sessionId=X` (chat view with its own ChatSidebar), `/cloud/sessions` (flat session list with "Open Session" dialog)
-- **3-column problem**: AppSidebar (256px) + ChatSidebar (320px) + Chat area on the chat page
-- **Session list is flat**: no grouping by repository or branch
-- **Sessions page uses a modal dialog** to open/fork sessions — cumbersome
-- **ChatSidebar** only shows 10 most recent sessions with no filtering/search
+- **ChatSidebar** (`src/components/cloud-agent-next/ChatSidebar.tsx`): flat list of 10 most recent sessions, no search, no filtering, no grouping. Each card shows title, repo, and time.
+- **Sessions page** (`/cloud/sessions`): separate page with search, platform filter, and sub-session toggle — but uses a modal dialog to open sessions.
+- Sessions have `git_url` and `git_branch` (V2 only) fields that are unused for grouping.
 
-## Design Decisions
+## Scope
 
-1. **Hide AppSidebar entirely** on all `/cloud/*` pages — accessible via hamburger menu or overlay
-2. **Inline "New Session" form** — clicking "New Session" replaces the chat content area (Claude-like)
-3. **Flexible session grouping** — sidebar supports multiple view modes (recent, by-repo, by-branch)
-4. **Single page** — everything under `/cloud` with session selection via query param
+**In scope**: Upgrade ChatSidebar with grouping, search, filtering, and more sessions.
+**Out of scope**: Removing the AppSidebar, changing route structure, merging pages, removing the Sessions page.
 
 ---
 
-## Architecture
+## Design
 
-### Layout: 2-Column (Sidebar + Content)
+### Layout (unchanged)
 
 ```
-┌──────────────────────────────────────────────────────┐
-│ CloudAgentSidebar (320px)  │  Content Area            │
-│ ┌────────────────────────┐ │  ┌──────────────────────┐│
-│ │ [≡ Menu] Cloud Agent   │ │  │ ChatHeader / Form    ││
-│ │ [+ New Session]        │ │  │                      ││
-│ │                        │ │  │ Messages / New       ││
-│ │ View: [Recent ▾]      │ │  │ Session Form         ││
-│ │ [🔍 Search...]        │ │  │                      ││
-│ │                        │ │  │                      ││
-│ │ ── owner/repo ──       │ │  │                      ││
-│ │   ├ main               │ │  │                      ││
-│ │   │  Session title...  │ │  │                      ││
-│ │   │  Session title...  │ │  │                      ││
-│ │   └ feature-branch     │ │  │                      ││
-│ │      Session title...  │ │  │                      ││
-│ │                        │ │  │ ChatInput            ││
-│ │ ── other/repo ──       │ │  └──────────────────────┘│
-│ │   Session title...     │ │                          │
-│ └────────────────────────┘ │                          │
-└──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│ AppSidebar │ ChatSidebar (320px)    │  Chat Area           │
+│ (main nav) │ ┌────────────────────┐ │  ┌─────────────────┐ │
+│            │ │ [+ New Session]    │ │  │ ChatHeader      │ │
+│            │ │ [🔍 Search...]    │ │  │                 │ │
+│            │ │ View: [Recent ▾]  │ │  │ Messages        │ │
+│            │ │                    │ │  │                 │ │
+│            │ │ ── owner/repo ──  │ │  │                 │ │
+│            │ │  ▸ main (3)       │ │  │                 │ │
+│            │ │  ▾ feat-x (1)     │ │  │                 │ │
+│            │ │    Session title   │ │  │                 │ │
+│            │ │                    │ │  │ ChatInput       │ │
+│            │ │ ── Ungrouped ──   │ │  └─────────────────┘ │
+│            │ │    Session title   │ │                      │
+│            │ └────────────────────┘ │                      │
+└───────────────────────────────────────────────────────────┘
 ```
 
-- No AppSidebar visible. A hamburger icon in the sidebar header opens the main nav as an overlay/sheet.
-- Sidebar is the session browser with filtering and grouping.
-- Content area shows either the chat view or the new session form.
+### ChatSidebar Enhancements
 
-### Route Structure
+#### 1. More sessions + infinite scroll
 
-Keep existing routes but unify behavior:
+Current: hardcoded `limit: 10` in `useSidebarSessions`.
+After: increase initial fetch to 50, add cursor-based "load more" on scroll using the existing `unifiedSessions.list` endpoint (which already supports cursor pagination).
 
-| Route | Content Area | Sidebar |
-|---|---|---|
-| `/cloud` | New session form (inline) | CloudAgentSidebar |
-| `/cloud?sessionId=X` or `/cloud/chat?sessionId=X` | Chat view | CloudAgentSidebar (session X highlighted) |
+#### 2. Search
 
-Both routes render the same layout component. The presence of `sessionId` determines whether to show the form or the chat.
+Add a debounced search input at the top of the sidebar. When active, switch to `unifiedSessions.search` endpoint (already exists). Show flat results when searching, regardless of view mode.
 
-> **Note**: We can support both `/cloud?sessionId=X` and `/cloud/chat?sessionId=X` during migration, eventually deprecating the latter.
+#### 3. View mode toggle
+
+A small segmented control or dropdown to switch between view modes. Persisted in `localStorage`.
+
+- **Recent** (default) — flat chronological list, same as today but with more sessions
+- **By Repository** — sessions grouped under collapsible repo headers (extracted from `git_url`)
+- **By Branch** — two-level grouping: repo > branch > sessions
+
+#### 4. Session grouping (client-side)
+
+Grouping is done on the fetched session list. The `unifiedSessions.list` response already includes `git_url` and `git_branch` per session.
+
+```
+groupByRepo(sessions):
+  "owner/repo-a"
+    → [session1, session2, session3]
+  "owner/repo-b"
+    → [session4]
+  "Ungrouped"
+    → [session5]  // sessions with no git_url
+
+groupByBranch(sessions):
+  "owner/repo-a"
+    "main"       → [session1, session2]
+    "feat-x"     → [session3]
+  "owner/repo-b"
+    "main"       → [session4]
+  "Ungrouped"
+    ""           → [session5]
+```
+
+Repo groups and branch groups are collapsible. Each group header shows the count. Groups are sorted by most recent session within the group.
+
+#### 5. Richer session cards
+
+Current card: title + repo + time.
+After: title + branch badge (if available) + platform badge (Cloud/CLI/etc.) + relative time. Keep it compact since sidebar space is limited.
+
+#### 6. Platform filter (optional, lightweight)
+
+A small filter icon/dropdown in the header area. Options: All / Cloud / CLI / Extension. Uses the existing `createdOnPlatform` param on `unifiedSessions.list`. Only show if user has sessions from multiple platforms.
 
 ---
 
-## Detailed Changes
+## Implementation Plan
 
-### Phase 1: Hide AppSidebar on Cloud Pages
+### Phase 1: Expand session loading
 
-**Files**: `src/app/(app)/components/AppSidebar.tsx`, `src/app/(app)/layout.tsx`
+**File**: `src/components/cloud-agent-next/hooks/useSidebarSessions.ts`
 
-1. In `AppSidebar.tsx`, detect `/cloud` pathname prefix (similar to the Gastown `extractGastownTownId` pattern).
-2. When on a `/cloud/*` route, return `null` from `AppSidebar` — this removes the main nav sidebar entirely.
-3. In the `(app)/layout.tsx`, the `SidebarInset` wrapper will naturally fill the space since there's no sidebar.
-4. Add a "hamburger" trigger in the `CloudAgentSidebar` header that opens the main nav as a `Sheet` overlay (similar to mobile pattern already used).
+- Increase `limit` from 10 to 50
+- Return `nextCursor` from the hook
+- Add a `fetchMore` function that loads the next page and appends results
+- Add the `git_url`, `git_branch`, and `created_on_platform` fields to the sidebar session type (they're already returned by the API but currently mapped out in `convertToStoredSession`)
 
-```tsx
-// AppSidebar.tsx addition
-function isCloudRoute(pathname: string): boolean {
-  return pathname === '/cloud' || pathname.startsWith('/cloud/');
-}
+**File**: `src/components/cloud-agent-next/types.ts` or a new type
 
-export default function AppSidebar(props) {
-  const pathname = usePathname();
-  
-  // Cloud pages manage their own sidebar
-  if (isCloudRoute(pathname)) return null;
-  
-  // ... existing gastown/org/personal logic
-}
-```
+- Extend `StoredSession` (or create a `SidebarSession` type) to include `gitUrl`, `gitBranch`, `createdOnPlatform` fields
 
-Also handle org-scoped cloud routes: `/organizations/[id]/cloud/*`.
+### Phase 2: Add search to sidebar
 
-### Phase 2: New CloudAgentSidebar Component
+**File**: `src/components/cloud-agent-next/ChatSidebar.tsx`
 
-**New file**: `src/components/cloud-agent-next/CloudAgentSidebar.tsx`
+- Add search input with debounce (300ms)
+- When search is active, call `trpc.unifiedSessions.search` instead of using the list data
+- Show flat results during search, ignoring view mode
+- Clear search button
 
-This replaces the current `ChatSidebar.tsx` with a full-featured session browser.
+### Phase 3: Add view mode toggle and grouping
 
-**Header section**:
-- Hamburger icon → opens main nav as Sheet overlay
-- "Cloud Agent" title
-- "+ New Session" button (navigates to `/cloud` or sets internal state to show form)
+**File**: `src/components/cloud-agent-next/ChatSidebar.tsx`
 
-**View mode toggle** (stored in localStorage):
-- **Recent** — flat chronological list (current behavior, default)
-- **By Repository** — grouped by `git_url`, collapsible repo sections
-- **By Branch** — within each repo group, further grouped by `git_branch`
+- Add a view mode state: `'recent' | 'by-repo' | 'by-branch'`, persisted in localStorage
+- Small toggle UI (segmented control or dropdown) below the search bar
+- Implement `groupSessionsByRepo()` and `groupSessionsByBranch()` utility functions
+- Render grouped sessions with collapsible headers (use `Collapsible` from shadcn/ui or a simple toggle)
+- Group headers show: repo name (shortened from git_url), session count, most recent time
+- Branch sub-headers show: branch name, session count
 
-**Search bar**: 
-- Debounced search input (reuse existing `trpc.unifiedSessions.search`)
-- When searching, always show flat results regardless of view mode
+### Phase 4: Richer session cards
 
-**Session list**:
-- Loads more sessions than the current 10 limit (paginated, load-more on scroll)
-- Each session card shows: title (truncated), branch badge, relative time, platform badge
-- Clicking a session navigates to `/cloud/chat?sessionId=X` (or updates query param)
-- Hover-reveal delete button (existing `InlineDeleteConfirmation` pattern)
-- Active session highlighted
+**File**: `src/components/cloud-agent-next/ChatSidebar.tsx`
 
-**Platform filter** (optional, collapsed under a filter icon):
-- All / Cloud / CLI / Agent Manager / Extension
-- Replaces the current Sessions page filter dropdowns
+- Add branch badge (small tag with `GitBranch` icon) when `gitBranch` is available
+- Add platform badge (tiny colored dot or icon) — reuse the platform badge logic from `SessionsList.tsx`
+- Keep cards compact: max 2-3 lines
 
-**Grouping logic** (client-side, from fetched sessions):
+### Phase 5: Infinite scroll
 
-```tsx
-type GroupedSessions = {
-  // key: repo full name (e.g., "owner/repo"), or "No Repository" for null git_url
-  [repoName: string]: {
-    // key: branch name, or "default" for null git_branch
-    [branchName: string]: UnifiedSession[];
-  };
-};
-```
+**File**: `src/components/cloud-agent-next/ChatSidebar.tsx`
 
-Sessions are fetched via the existing `trpc.unifiedSessions.list` endpoint (increase limit to 100 or use cursor-based infinite scroll). Grouping is done client-side since the data already contains `git_url` and `git_branch`.
+- Add an `IntersectionObserver` sentinel at the bottom of the session list
+- When visible, call `fetchMore` from the hook
+- Show a loading spinner while fetching
+- Stop when `nextCursor` is null
 
-### Phase 3: Unified Cloud Layout
+### Phase 6: Platform filter (optional)
 
-**New file**: `src/app/(app)/cloud/layout.tsx` (replace current minimal auth-only layout)
+**File**: `src/components/cloud-agent-next/ChatSidebar.tsx`
 
-This layout wraps all `/cloud/*` pages with the 2-column structure:
-
-```tsx
-export default function CloudLayout({ children }) {
-  return (
-    <div className="flex h-dvh w-full overflow-hidden">
-      <CloudAgentSidebar />
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {children}
-      </div>
-    </div>
-  );
-}
-```
-
-The `children` slot receives either:
-- The new session form (`/cloud` page)
-- The chat view (`/cloud/chat` page)
-
-### Phase 4: Inline New Session Form
-
-**Modified file**: `src/components/cloud-agent-next/CloudNextSessionsPage.tsx`
-
-- Remove `PageLayout` wrapper (no longer needed — the cloud layout provides structure)
-- Style as an inline content view that fits within the chat content area
-- Keep all existing functionality (repo picker, prompt, mode/model, profiles, etc.)
-- After session creation, navigate to `/cloud/chat?sessionId=X` — the sidebar automatically reflects the new session
-
-### Phase 5: Remove Old Sessions Page & Dialog
-
-**Remove/deprecate**:
-- `src/app/(app)/cloud/sessions/SessionsPageContent.tsx` — functionality moved to CloudAgentSidebar
-- `src/app/(app)/cloud/sessions/page.tsx` — no longer needed as separate page
-- The "Open Session" `Dialog` in SessionsPageContent — replaced by direct inline navigation
-- Remove `Sessions` entry from PersonalAppSidebar and OrganizationAppSidebar menu lists
-
-**Keep** (referenced by sidebar):
-- `src/components/cloud-agent/SessionsList.tsx` — may be reused or adapted for sidebar cards
-- `src/routers/unified-sessions-router.ts` — backend stays the same
-
-### Phase 6: Remove ChatSidebar from CloudChatPresentation
-
-**Modified file**: `src/components/cloud-agent-next/CloudChatPresentation.tsx`
-
-- Remove the desktop `ChatSidebar` div (`<div className="hidden w-80 border-r lg:block">`)
-- Remove the mobile `Sheet` wrapping `ChatSidebar`
-- Remove `ChatSidebar` import and all related props (`sessions`, `onNewSession`, `onSelectSession`, `onDeleteSession`, `mobileSheetOpen`, `onMobileSheetOpenChange`, `onMenuClick`)
-- The chat presentation becomes purely about the chat — header, messages, input
-- The sidebar is now handled by the layout, not the chat component
-
-**Modified file**: `src/components/cloud-agent-next/CloudChatContainer.tsx`
-- Remove `useSidebarSessions` hook usage
-- Remove sidebar-related state management
-- Simplify props passed to `CloudChatPresentation`
-
-### Phase 7: Mobile Responsive
-
-- On mobile (`< lg`), the sidebar becomes a Sheet (slide-out drawer) — same pattern as current mobile ChatSidebar
-- The hamburger icon in the content header toggles the sidebar Sheet
-- This mirrors how the current AppSidebar becomes a Sheet on mobile
-
-### Phase 8: Organization-Scoped Routes
-
-Apply the same changes to `/organizations/[id]/cloud/*` routes:
-- Same sidebar hiding logic in AppSidebar for org cloud routes
-- Same CloudLayout applied to org cloud routes
-- CloudAgentSidebar receives `organizationId` prop for scoped queries
+- Add a filter icon button next to the search bar
+- Dropdown with platform options
+- Pass `createdOnPlatform` to the `useSidebarSessions` hook
+- Re-fetch when filter changes
 
 ---
 
 ## API Changes
 
-### Unified Sessions Router
+**None required.** The existing `unifiedSessions.list` endpoint already supports:
+- `limit` up to 50 (already validated, just need to pass a larger value)
+- `cursor` for pagination
+- `createdOnPlatform` filter
+- Returns `git_url`, `git_branch`, `created_on_platform` per session
 
-**Existing endpoint enhancements** (`src/routers/unified-sessions-router.ts`):
+The `unifiedSessions.search` endpoint already supports:
+- `search_string` with ILIKE matching
+- `createdOnPlatform` filter
+- Pagination via `limit`/`offset`
 
-1. **Increase default page size** for sidebar: allow `limit` up to 100 for the sidebar use case
-2. **No new grouping endpoint needed** — grouping by `git_url`/`git_branch` is done client-side from the flat list
-3. The existing `list` and `search` endpoints already return `git_url`, `git_branch`, `created_on_platform` — all data needed for grouping and filtering
-
-No backend changes required for the core functionality.
-
----
-
-## Component Dependency Graph (After)
-
-```
-(app)/layout.tsx
-  └─ AppSidebar (returns null on /cloud/*)
-  └─ SidebarInset > main
-       └─ cloud/layout.tsx
-            ├─ CloudAgentSidebar (new, always visible)
-            │   ├─ MainNavSheet (hamburger → overlay with main nav)
-            │   ├─ NewSessionButton
-            │   ├─ ViewModeToggle (recent / by-repo / by-branch)
-            │   ├─ SearchInput
-            │   ├─ PlatformFilter
-            │   └─ SessionList (grouped or flat based on view mode)
-            │
-            └─ Content area (children)
-                 ├─ /cloud → CloudNextSessionsPage (inline form, no PageLayout)
-                 └─ /cloud/chat → CloudChatPresentation (no internal sidebar)
-```
+Only change: the client needs to preserve `git_url` and `git_branch` from the API response instead of discarding them during the `convertToStoredSession` mapping.
 
 ---
 
@@ -255,31 +179,24 @@ No backend changes required for the core functionality.
 
 | File | Change |
 |---|---|
-| `src/app/(app)/components/AppSidebar.tsx` | Return `null` for `/cloud/*` and `/organizations/*/cloud/*` routes |
-| `src/app/(app)/cloud/layout.tsx` | New unified layout with CloudAgentSidebar + content area |
-| `src/components/cloud-agent-next/CloudAgentSidebar.tsx` | **New** — full session browser sidebar |
-| `src/components/cloud-agent-next/CloudChatPresentation.tsx` | Remove internal sidebar, mobile sheet, related props |
-| `src/components/cloud-agent-next/CloudChatContainer.tsx` | Remove sidebar session fetching, simplify |
-| `src/components/cloud-agent-next/CloudNextSessionsPage.tsx` | Remove PageLayout wrapper, adapt for inline display |
-| `src/components/cloud-agent-next/ChatSidebar.tsx` | **Delete** — replaced by CloudAgentSidebar |
-| `src/app/(app)/cloud/sessions/SessionsPageContent.tsx` | **Delete** — functionality in sidebar |
-| `src/app/(app)/cloud/sessions/page.tsx` | Redirect to `/cloud` or delete |
-| `src/app/(app)/components/PersonalAppSidebar.tsx` | Remove "Sessions" menu item (optional: keep as link to `/cloud`) |
-| `src/app/(app)/components/OrganizationAppSidebar.tsx` | Remove "Sessions" menu item |
-| Org-scoped cloud routes (`organizations/[id]/cloud/*`) | Apply same layout pattern |
+| `src/components/cloud-agent-next/ChatSidebar.tsx` | Major rewrite: add search, view mode toggle, grouping, richer cards, infinite scroll |
+| `src/components/cloud-agent-next/hooks/useSidebarSessions.ts` | Increase limit, expose `fetchMore`/`nextCursor`, preserve git_url/git_branch fields |
+| `src/components/cloud-agent-next/types.ts` | Add `gitUrl`, `gitBranch`, `createdOnPlatform` to session type (or new `SidebarSession` type) |
+| `src/components/cloud-agent-next/CloudChatContainer.tsx` | Pass new sidebar props (search, view mode, filter state) if managed at container level |
+| `src/components/cloud-agent-next/CloudChatPresentation.tsx` | Pass through new sidebar props |
+
+No files deleted. No route changes. No layout changes.
 
 ---
 
-## Open Questions / Risks
+## Open Questions
 
-1. **Session list performance**: Loading 100+ sessions for client-side grouping could be slow. Mitigation: start with cursor-based pagination, load first 50 eagerly, lazy-load more on scroll.
+1. **Group collapse state**: Should expanded/collapsed state of repo/branch groups persist across navigations? Simplest: default all collapsed except the group containing the active session. Could persist in localStorage if needed.
 
-2. **V1 sessions without git_branch**: These appear under a "No branch" sub-group within their repo group, or directly under the repo header in "By Repository" view mode.
+2. **Mixed V1/V2 in branch view**: V1 sessions have `git_branch: null`. In "By Branch" view, these appear under a "(no branch)" sub-group within their repo. Alternatively, skip the branch level for V1 sessions and show them directly under the repo header.
 
-3. **Sessions without git_url**: Grouped under an "Ungrouped" or "No Repository" section at the bottom.
+3. **Search scope**: Search currently matches title and session ID. Could extend to match repo name or branch name for better discoverability. This would be a backend change (add `git_url ILIKE` and `git_branch ILIKE` to the search query).
 
-4. **Main nav accessibility**: With AppSidebar hidden, users need the hamburger → Sheet overlay to access other areas. This is acceptable since cloud agent is a focused workflow, similar to how Gastown works. The hamburger is always visible in the sidebar header.
+4. **Sidebar width**: The current 320px (`w-80`) may feel tight with grouped content. Monitor in practice. Could consider making it slightly wider (e.g., `w-84` / 336px) if grouping headers feel cramped.
 
-5. **Deep links**: `/cloud/sessions` should redirect to `/cloud` to avoid dead links. `/cloud/chat?sessionId=X` continues to work.
-
-6. **"Cloud Agent" vs "Sessions" sidebar entry**: The PersonalAppSidebar currently has separate entries for "Cloud Agent" and "Sessions". After unification, only "Cloud Agent" is needed (pointing to `/cloud`). Consider renaming to just "Sessions" or keeping "Cloud Agent" depending on branding preference.
+5. **Performance with 50+ sessions**: Client-side grouping of 50-100 sessions is cheap. If users have thousands of sessions, the cursor-based pagination ensures we never load them all at once. The grouping only operates on currently-loaded sessions.
