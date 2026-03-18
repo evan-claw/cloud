@@ -452,7 +452,7 @@ use the platform API routes to provision and start an instance:
 
 ```bash
 # Provision an instance (replace with a test user ID)
-curl -X POST http://localhost:8787/api/platform/provision \
+curl -X POST http://localhost:8795/api/platform/provision \
   -H "x-internal-api-key: dev-internal-secret" \
   -H "Content-Type: application/json" \
   -d '{"userId": "test-user-123"}'
