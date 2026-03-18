@@ -1479,6 +1479,59 @@ describe('createEventProcessor', () => {
       if (erroredPart.state.status !== 'error') throw new Error('Expected error status');
       expect(erroredPart.state.error).toBe('original error');
     });
+
+    it('should force-complete stuck tool parts on already-completed messages via onMessageUpdated', () => {
+      let updatedMessage: ProcessedMessage | undefined;
+      const callbacks: EventProcessorCallbacks = {
+        onMessageUpdated: jest.fn((_, __, message) => {
+          updatedMessage = message;
+        }),
+        onMessageCompleted: jest.fn(),
+        onPartUpdated: jest.fn(),
+      };
+      const processor = createEventProcessor({ callbacks });
+
+      // Create an assistant message that is already completed (server sent time.completed)
+      processor.processEvent(
+        createKilocodeEvent('message.updated', {
+          info: createAssistantInfo('msg-1', 'session-123', Date.now()),
+        })
+      );
+
+      // Add a tool part still in running state (arrived after message completion)
+      processor.processEvent(
+        createKilocodeEvent('message.part.updated', {
+          part: {
+            id: 'tool-1',
+            sessionID: 'session-123',
+            messageID: 'msg-1',
+            type: 'tool',
+            callID: 'call-1',
+            tool: 'some_tool',
+            state: { status: 'running', input: { arg: 'value' }, time: { start: 2000 } },
+          },
+        })
+      );
+
+      // onMessageCompleted already fired from message.updated
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+      (callbacks.onMessageUpdated as jest.Mock).mockClear();
+
+      processor.forceCompleteAll();
+
+      // Should NOT re-fire onMessageCompleted for already-completed message
+      expect(callbacks.onMessageCompleted).toHaveBeenCalledTimes(1);
+
+      // Should fire onMessageUpdated so the UI re-renders cleaned-up parts
+      expect(callbacks.onMessageUpdated).toHaveBeenCalledTimes(1);
+
+      const toolPart = updatedMessage?.parts.find(p => p.type === 'tool');
+      if (!toolPart || toolPart.type !== 'tool') throw new Error('Expected tool part');
+      expect(toolPart.state.status).toBe('error');
+      if (toolPart.state.status !== 'error') throw new Error('Expected error status');
+      expect(toolPart.state.error).toBe('Connection lost');
+      expect(toolPart.state.time.start).toBe(2000);
+    });
   });
 
   describe('question events', () => {
