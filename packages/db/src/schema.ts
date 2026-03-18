@@ -936,16 +936,6 @@ export const custom_llm = pgTable('custom_llm', {
 
 export type CustomLlm = typeof custom_llm.$inferSelect;
 
-export const temp_phase = pgTable(
-  'temp_phase',
-  {
-    key: text().notNull().primaryKey(),
-    created_at: timestamp({ withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-    value: text().notNull(),
-  },
-  table => [index('IDX_temp_phase_created_at').on(table.created_at)]
-);
-
 export const user_admin_notes = pgTable(
   'user_admin_notes',
   {
