@@ -203,7 +203,8 @@ export async function rewriteFreeModelResponse_Messages(response: Response, mode
             }
           }
 
-          controller.enqueue('data: ' + JSON.stringify(json) + '\n\n');
+          const eventLine = event.event ? 'event: ' + event.event + '\n' : '';
+          controller.enqueue(eventLine + 'data: ' + JSON.stringify(json) + '\n\n');
         },
         onComment() {
           controller.enqueue(': KILO PROCESSING\n\n');
