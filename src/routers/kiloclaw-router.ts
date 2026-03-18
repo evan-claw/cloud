@@ -39,7 +39,6 @@ import {
 import { client as stripe } from '@/lib/stripe-client';
 import { APP_URL } from '@/lib/constants';
 import { getRewardfulReferral } from '@/lib/rewardful';
-import { redactOpenclawConfig, restoreRedactedSecrets } from '@/lib/kiloclaw/config-redaction';
 import { clawAccessProcedure } from '@/lib/kiloclaw/access-gate';
 import { getStripePriceIdForClawPlan } from '@/lib/kiloclaw/stripe-price-ids.server';
 import {
@@ -53,6 +52,49 @@ import type { ClawBillingStatus } from '@/app/(app)/claw/components/billing/bill
  * paths) and should NOT be forwarded to the client.
  */
 const UNSAFE_ERROR_CODES = new Set(['config_read_failed', 'config_replace_failed']);
+
+/**
+ * Map KiloClawApiError responses to TRPCErrors for file operations.
+ * Always throws — call as `handleFileOperationError(err, 'read file')`.
+ */
+function handleFileOperationError(err: unknown, operation: string): never {
+  if (err instanceof TRPCError) throw err;
+  if (err instanceof KiloClawApiError && err.statusCode === 404) {
+    const { code, message } = getKiloClawApiErrorPayload(err);
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message:
+        code === 'controller_route_unavailable'
+          ? `Instance needs redeploy to support ${operation}`
+          : (message ?? `Failed to ${operation}`),
+    });
+  }
+  if (err instanceof KiloClawApiError && err.statusCode === 400) {
+    const { message, code } = getKiloClawApiErrorPayload(err);
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        code && UNSAFE_ERROR_CODES.has(code)
+          ? `Failed to ${operation}`
+          : (message ?? `Failed to ${operation}`),
+    });
+  }
+  if (err instanceof KiloClawApiError && err.statusCode === 409) {
+    const { message, code } = getKiloClawApiErrorPayload(err);
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: message ?? 'File was modified externally',
+      cause: code ? new UpstreamApiError(code) : undefined,
+    });
+  }
+  throw new TRPCError({
+    code: 'INTERNAL_SERVER_ERROR',
+    message:
+      err instanceof KiloClawApiError
+        ? (getKiloClawApiErrorPayload(err).message ?? `Failed to ${operation}`)
+        : `Failed to ${operation}`,
+  });
+}
 
 function getKiloClawApiErrorPayload(err: KiloClawApiError): { message?: string; code?: string } {
   if (!err.responseBody) return {};
@@ -338,27 +380,12 @@ export const kiloclawRouter = createTRPCRouter({
     return client.getLatestVersion();
   }),
 
-  // Status + gateway token (two internal client calls, merged for the dashboard)
   getStatus: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     const status = await client.getStatus(ctx.user.id);
-
-    let gatewayToken: string | null = null;
-    if (status.sandboxId) {
-      try {
-        const tokenResp = await client.getGatewayToken(ctx.user.id);
-        gatewayToken = tokenResp.gatewayToken;
-      } catch (err) {
-        console.warn(
-          `[kiloclaw] getGatewayToken failed (non-fatal) userId=${ctx.user.id}:`,
-          err instanceof Error ? err.message : String(err)
-        );
-      }
-    }
-
     const workerUrl = KILOCLAW_API_URL || 'https://claw.kilo.ai';
 
-    return { ...status, gatewayToken, workerUrl } satisfies KiloClawDashboardStatus;
+    return { ...status, workerUrl } satisfies KiloClawDashboardStatus;
   }),
 
   // Instance lifecycle
@@ -913,81 +940,62 @@ export const kiloclawRouter = createTRPCRouter({
     return { success: true };
   }),
 
-  openclawConfig: baseProcedure.query(async ({ ctx }) => {
+  fileTree: clawAccessProcedure.query(async ({ ctx }) => {
     try {
       const client = new KiloClawInternalClient();
-      const response = await client.getOpenclawConfig(ctx.user.id);
-      return {
-        ...response,
-        config: redactOpenclawConfig(response.config),
-      };
+      const result = await client.getFileTree(ctx.user.id);
+      return result.tree;
     } catch (err) {
-      if (err instanceof KiloClawApiError && err.statusCode === 404) {
-        const { code, message } = getKiloClawApiErrorPayload(err);
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message:
-            code === 'controller_route_unavailable'
-              ? 'Instance needs redeploy to support fetching OpenClaw config'
-              : (message ?? 'Failed to fetch OpenClaw config'),
-        });
-      }
-      if (err instanceof KiloClawApiError && err.statusCode === 409) {
-        const { message, code } = getKiloClawApiErrorPayload(err);
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: message ?? 'Instance is not provisioned or not running',
-          cause: code ? new UpstreamApiError(code) : undefined,
-        });
-      }
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message:
-          err instanceof KiloClawApiError
-            ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to fetch OpenClaw config')
-            : 'Failed to fetch OpenClaw config',
-      });
+      handleFileOperationError(err, 'fetch file tree');
     }
   }),
 
-  replaceOpenclawConfig: clawAccessProcedure
-    .input(z.object({ config: z.record(z.string(), z.unknown()), etag: z.string().optional() }))
+  readFile: clawAccessProcedure
+    .input(z.object({ path: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const client = new KiloClawInternalClient();
+        return await client.readFile(ctx.user.id, input.path);
+      } catch (err) {
+        handleFileOperationError(err, 'read file');
+      }
+    }),
+
+  writeFile: clawAccessProcedure
+    .input(
+      z.object({
+        path: z.string().min(1),
+        content: z.string(),
+        etag: z.string().min(1),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       try {
         const client = new KiloClawInternalClient();
+        let content = input.content;
 
-        // Fetch the current config so we can restore any redacted secrets
-        // that the user didn't change (they'll still have the placeholder).
-        const current = await client.getOpenclawConfig(ctx.user.id);
-        const mergedConfig = restoreRedactedSecrets(input.config, current.config);
+        if (input.path === 'openclaw.json') {
+          let userConfig: unknown;
+          try {
+            userConfig = JSON.parse(content);
+          } catch {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'openclaw.json must be valid JSON',
+            });
+          }
+          if (typeof userConfig !== 'object' || userConfig === null || Array.isArray(userConfig)) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'openclaw.json must be a JSON object',
+            });
+          }
+          content = JSON.stringify(userConfig, null, 2);
+        }
 
-        return await client.replaceOpenclawConfig(ctx.user.id, mergedConfig, input.etag);
+        return await client.writeFile(ctx.user.id, input.path, content, input.etag);
       } catch (err) {
-        if (err instanceof KiloClawApiError && err.statusCode === 404) {
-          const { code, message } = getKiloClawApiErrorPayload(err);
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message:
-              code === 'controller_route_unavailable'
-                ? 'Instance cannot update OpenClaw config until redeployed'
-                : (message ?? 'Failed to replace openclaw config'),
-          });
-        }
-        if (err instanceof KiloClawApiError && err.statusCode === 409) {
-          const { message, code } = getKiloClawApiErrorPayload(err);
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: message ?? 'Instance is not provisioned or not running',
-            cause: code ? new UpstreamApiError(code) : undefined,
-          });
-        }
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message:
-            err instanceof KiloClawApiError
-              ? (getKiloClawApiErrorPayload(err).message ?? 'Failed to replace openclaw config')
-              : 'Failed to replace openclaw config',
-        });
+        handleFileOperationError(err, 'write file');
       }
     }),
 
@@ -1147,16 +1155,28 @@ export const kiloclawRouter = createTRPCRouter({
           message: 'You already have an active subscription.',
         });
       }
-      const hasPendingKiloClawCheckout = openSessions.data.some(
-        s => s.metadata?.type === 'kiloclaw'
+      // Best-effort cleanup: expire stale open checkout sessions so the user
+      // can start fresh (e.g. they started checkout, closed the tab, and came
+      // back to retry). Errors are swallowed because a session may already be
+      // expired or completed by the time we call expire() — either way the
+      // stale session is no longer open, which is the goal.
+      //
+      // NOTE: This does not prevent two concurrent requests from both reaching
+      // sessions.create(). That race is inherent to any read-then-write
+      // pattern against the Stripe API and cannot be closed without an
+      // external lock. Duplicate open checkout sessions are tolerable: each
+      // requires independent user action to complete, and the subscription-
+      // level guard above (hasActiveKiloClawSub) prevents the real harm —
+      // duplicate subscriptions.
+      const staleKiloClawSessions = openSessions.data.filter(s => s.metadata?.type === 'kiloclaw');
+      await Promise.all(
+        staleKiloClawSessions.map(s =>
+          stripe.checkout.sessions.expire(s.id).catch(() => {
+            // Swallow — session is already expired, completed, or otherwise
+            // no longer open. The goal (clearing stale sessions) is met.
+          })
+        )
       );
-      if (hasPendingKiloClawCheckout) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message:
-            'A checkout is already in progress. Please complete or cancel the existing checkout.',
-        });
-      }
 
       const priceId = getStripePriceIdForClawPlan(input.plan);
 

@@ -28,6 +28,14 @@ import type {
   GmailNotificationsResponse,
 } from './types';
 
+/** Keep in sync with: kiloclaw/controller/src/routes/files.ts, kiloclaw/src/.../gateway.ts (Zod) */
+export interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: FileNode[];
+}
+
 /**
  * Error thrown when the KiloClaw API returns a non-OK response.
  * Preserves the HTTP status code and response body for structured
@@ -159,14 +167,6 @@ export class KiloClawInternalClient {
   async getDebugStatus(userId: string): Promise<PlatformDebugStatusResponse> {
     return this.request(
       `/api/platform/debug-status?userId=${encodeURIComponent(userId)}`,
-      undefined,
-      { userId }
-    );
-  }
-
-  async getGatewayToken(userId: string): Promise<{ gatewayToken: string }> {
-    return this.request(
-      `/api/platform/gateway-token?userId=${encodeURIComponent(userId)}`,
       undefined,
       { userId }
     );
@@ -352,6 +352,28 @@ export class KiloClawInternalClient {
       },
       { userId }
     );
+  }
+
+  async getFileTree(userId: string): Promise<{ tree: FileNode[] }> {
+    const params = new URLSearchParams({ userId });
+    return this.request(`/api/platform/files/tree?${params.toString()}`);
+  }
+
+  async readFile(userId: string, filePath: string): Promise<{ content: string; etag: string }> {
+    const params = new URLSearchParams({ userId, path: filePath });
+    return this.request(`/api/platform/files/read?${params.toString()}`);
+  }
+
+  async writeFile(
+    userId: string,
+    filePath: string,
+    content: string,
+    etag?: string
+  ): Promise<{ etag: string }> {
+    return this.request('/api/platform/files/write', {
+      method: 'POST',
+      body: JSON.stringify({ userId, path: filePath, content, etag }),
+    });
   }
 
   async updateGoogleCredentials(

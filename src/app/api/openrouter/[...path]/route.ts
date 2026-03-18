@@ -136,12 +136,17 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   const requestedModel = requestBodyParsed.body.model.trim();
   const requestedModelLowerCased = requestedModel.toLowerCase();
+  const isLegacyOpenRouterPath = url.pathname.includes('/openrouter');
+
+  const feature = validateFeatureHeader(
+    request.headers.get(FEATURE_HEADER) || (isLegacyOpenRouterPath ? '' : 'direct-gateway')
+  );
 
   const modeHeader = extractHeaderAndLimitLength(request, 'x-kilocode-mode');
   let autoModel: string | null = null;
   if (isKiloAutoModel(requestedModelLowerCased)) {
     autoModel = requestedModelLowerCased;
-    applyResolvedAutoModel(requestedModelLowerCased, requestBodyParsed, modeHeader);
+    applyResolvedAutoModel(requestedModelLowerCased, requestBodyParsed, modeHeader, feature);
   }
 
   const originalModelIdLowerCased = requestBodyParsed.body.model.toLowerCase();
@@ -270,11 +275,6 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   );
 
   console.debug(`Routing request to ${provider.id}`);
-
-  const isLegacyOpenRouterPath = url.pathname.includes('/openrouter');
-  const feature = validateFeatureHeader(
-    request.headers.get(FEATURE_HEADER) || (isLegacyOpenRouterPath ? '' : 'direct-gateway')
-  );
 
   // Start abuse classification early (non-blocking) - we'll await it before creating usage context
   const classifyPromise = classifyAbuse(request, requestBodyParsed, {

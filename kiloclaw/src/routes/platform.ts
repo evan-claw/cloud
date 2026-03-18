@@ -110,6 +110,8 @@ function sanitizeError(err: unknown, operation: string): { message: string; stat
 const OPENCLAW_CONFIG_ERROR_CODES = new Set([
   'controller_route_unavailable',
   'config_etag_conflict',
+  'file_etag_conflict',
+  'file_not_found',
   'invalid_json_body',
   'invalid_request_body',
 ]);
@@ -664,6 +666,94 @@ platform.post('/openclaw-config', async c => {
     return c.json(response, 200);
   } catch (err) {
     const { message, status, code } = sanitizeOpenclawConfigError(err, 'openclaw-config replace');
+    return jsonError(message, status, code);
+  }
+});
+
+// GET /api/platform/files/tree?userId=...
+platform.get('/files/tree', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getFileTree(),
+      'getFileTree'
+    );
+    if (!result) {
+      return jsonError(
+        'File browsing not available (controller too old)',
+        404,
+        'controller_route_unavailable'
+      );
+    }
+    return c.json(result, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'files/tree');
+    return jsonError(message, status, code);
+  }
+});
+
+// GET /api/platform/files/read?userId=...&path=...
+platform.get('/files/read', async c => {
+  const userId = c.req.query('userId');
+  const filePath = c.req.query('path');
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+  if (!filePath) {
+    return c.json({ error: 'path query parameter is required' }, 400);
+  }
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.readFile(filePath),
+      'readFile'
+    );
+    if (!result) {
+      return jsonError(
+        'File reading not available (controller too old)',
+        404,
+        'controller_route_unavailable'
+      );
+    }
+    return c.json(result, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'files/read');
+    return jsonError(message, status, code);
+  }
+});
+
+const WriteFileSchema = z.object({
+  userId: z.string().min(1),
+  path: z.string().min(1),
+  content: z.string(),
+  etag: z.string().optional(),
+});
+
+// POST /api/platform/files/write
+platform.post('/files/write', async c => {
+  const result = await parseBody(c, WriteFileSchema);
+  if ('error' in result) return result.error;
+  const { userId, path: filePath, content, etag } = result.data;
+  try {
+    const response = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.writeFile(filePath, content, etag),
+      'writeFile'
+    );
+    if (!response) {
+      return jsonError(
+        'File writing not available (controller too old)',
+        404,
+        'controller_route_unavailable'
+      );
+    }
+    return c.json(response, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'files/write');
     return jsonError(message, status, code);
   }
 });

@@ -43,7 +43,7 @@ pushRoute.post('/user/:userId', async c => {
   }
 
   // Validate Google OIDC token: issuer, per-user audience, and SA email.
-  const perUserAudience = `${c.env.OIDC_AUDIENCE_BASE}/push/user/${userId}`;
+  const perUserAudience = `${c.env.OIDC_AUDIENCE_BASE}/push/user/${encodeURIComponent(userId)}`;
   const oidcResult = await validateOidcToken(
     c.req.header('authorization'),
     perUserAudience,

@@ -41,6 +41,12 @@ import { review_metadata } from '../db/tables/review-metadata.table';
 import { escalation_metadata } from '../db/tables/escalation-metadata.table';
 import { convoy_metadata } from '../db/tables/convoy-metadata.table';
 import { bead_dependencies } from '../db/tables/bead-dependencies.table';
+import {
+  agent_nudges,
+  AgentNudgeRecord,
+  createTableAgentNudges,
+  getIndexesAgentNudges,
+} from '../db/tables/agent-nudges.table';
 import { query } from '../util/query.util';
 import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
@@ -431,6 +437,12 @@ export class TownDO extends DurableObject<Env> {
     // Rig registry
     rigs.initRigTables(this.sql);
 
+    // Nudges
+    query(this.sql, createTableAgentNudges(), []);
+    for (const idx of getIndexesAgentNudges()) {
+      query(this.sql, idx, []);
+    }
+
     // Ensure the alarm loop is running. After a deploy/restart, the
     // Cloudflare runtime normally delivers missed alarms, but if the alarm
     // was never set or was deleted by destroy(), the loop is dead. Re-arm
@@ -497,6 +509,42 @@ export class TownDO extends DurableObject<Env> {
     const userId = townConfig.owner_user_id ?? townId;
     await dispatch.forceRefreshContainerToken(this.env, townId, userId);
     this.lastContainerTokenRefreshAt = Date.now();
+  }
+
+  /**
+   * Push config-derived env vars to the running container. Called after
+   * updateTownConfig so that settings changes take effect without a
+   * container restart. New agent processes inherit the updated values.
+   */
+  async syncConfigToContainer(): Promise<void> {
+    const townId = this.townId;
+    if (!townId) return;
+    const townConfig = await this.getTownConfig();
+    const container = getTownContainerStub(this.env, townId);
+
+    // Map config fields to their container env var equivalents.
+    // When a value is set, push it; when cleared, remove it.
+    const envMapping: Array<[string, string | undefined]> = [
+      ['GIT_TOKEN', townConfig.git_auth?.github_token],
+      ['GITLAB_TOKEN', townConfig.git_auth?.gitlab_token],
+      ['GITLAB_INSTANCE_URL', townConfig.git_auth?.gitlab_instance_url],
+      ['GITHUB_CLI_PAT', townConfig.github_cli_pat],
+      ['GASTOWN_GIT_AUTHOR_NAME', townConfig.git_author_name],
+      ['GASTOWN_GIT_AUTHOR_EMAIL', townConfig.git_author_email],
+      ['GASTOWN_DISABLE_AI_COAUTHOR', townConfig.disable_ai_coauthor ? '1' : undefined],
+    ];
+
+    for (const [key, value] of envMapping) {
+      try {
+        if (value) {
+          await container.setEnvVar(key, value);
+        } else {
+          await container.deleteEnvVar(key);
+        }
+      } catch (err) {
+        console.warn(`[Town.do] syncConfigToContainer: ${key} sync failed:`, err);
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -1008,6 +1056,169 @@ export class TownDO extends DurableObject<Env> {
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // Nudges
+  // ══════════════════════════════════════════════════════════════════
+
+  /**
+   * Queue a nudge for an agent. If mode is 'immediate', attempts to push
+   * the message directly via the container and marks it delivered on success.
+   * Returns the nudge_id.
+   */
+  async queueNudge(
+    agentId: string,
+    message: string,
+    options?: {
+      mode?: 'wait-idle' | 'immediate' | 'queue';
+      priority?: 'normal' | 'urgent';
+      source?: string;
+      ttlSeconds?: number;
+    }
+  ): Promise<string> {
+    await this.ensureInitialized();
+
+    const nudgeId = crypto.randomUUID();
+    const mode = options?.mode ?? 'wait-idle';
+    const priority = options?.priority ?? 'normal';
+    const source = options?.source ?? 'system';
+
+    let expiresAt: string | null = null;
+    if (mode === 'queue' && options?.ttlSeconds != null) {
+      // Use SQLite-compatible datetime format (space separator, no Z suffix) so
+      // comparisons against datetime('now') work correctly.
+      expiresAt = new Date(Date.now() + options.ttlSeconds * 1000)
+        .toISOString()
+        .replace('T', ' ')
+        .replace('Z', '');
+    }
+
+    query(
+      this.sql,
+      /* sql */ `
+        INSERT INTO ${agent_nudges} (
+          ${agent_nudges.columns.nudge_id},
+          ${agent_nudges.columns.agent_bead_id},
+          ${agent_nudges.columns.message},
+          ${agent_nudges.columns.mode},
+          ${agent_nudges.columns.priority},
+          ${agent_nudges.columns.source},
+          ${agent_nudges.columns.expires_at}
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [nudgeId, agentId, message, mode, priority, source, expiresAt]
+    );
+
+    console.log(
+      `${TOWN_LOG} queueNudge: nudge_id=${nudgeId} agent=${agentId} mode=${mode} priority=${priority} source=${source}`
+    );
+
+    if (mode === 'immediate') {
+      const sent = await dispatch.sendMessageToAgent(this.env, this.townId, agentId, message);
+      if (sent) {
+        query(
+          this.sql,
+          /* sql */ `
+            UPDATE ${agent_nudges}
+            SET ${agent_nudges.columns.delivered_at} = datetime('now')
+            WHERE ${agent_nudges.nudge_id} = ?
+          `,
+          [nudgeId]
+        );
+        console.log(`${TOWN_LOG} queueNudge: immediate nudge delivered to agent=${agentId}`);
+      } else {
+        console.warn(
+          `${TOWN_LOG} queueNudge: immediate delivery failed for agent=${agentId}, nudge queued for retry`
+        );
+      }
+    }
+
+    return nudgeId;
+  }
+
+  /**
+   * Return undelivered, non-expired nudges for an agent.
+   * Urgent nudges are returned first, then FIFO within same priority.
+   */
+  async getPendingNudges(
+    agentId: string
+  ): Promise<
+    { nudge_id: string; message: string; mode: string; priority: string; source: string }[]
+  > {
+    await this.ensureInitialized();
+
+    const rows = [
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT
+            ${agent_nudges.nudge_id},
+            ${agent_nudges.message},
+            ${agent_nudges.mode},
+            ${agent_nudges.priority},
+            ${agent_nudges.source}
+          FROM ${agent_nudges}
+          WHERE ${agent_nudges.agent_bead_id} = ?
+            AND ${agent_nudges.delivered_at} IS NULL
+            AND (${agent_nudges.expires_at} IS NULL OR ${agent_nudges.expires_at} > datetime('now'))
+          ORDER BY
+            CASE ${agent_nudges.priority} WHEN 'urgent' THEN 0 ELSE 1 END ASC,
+            ${agent_nudges.created_at} ASC
+        `,
+        [agentId]
+      ),
+    ];
+
+    return AgentNudgeRecord.pick({
+      nudge_id: true,
+      message: true,
+      mode: true,
+      priority: true,
+      source: true,
+    })
+      .array()
+      .parse(rows);
+  }
+
+  /** Mark a nudge as delivered. */
+  async markNudgeDelivered(nudgeId: string): Promise<void> {
+    await this.ensureInitialized();
+
+    query(
+      this.sql,
+      /* sql */ `
+        UPDATE ${agent_nudges}
+        SET ${agent_nudges.columns.delivered_at} = datetime('now')
+        WHERE ${agent_nudges.nudge_id} = ?
+      `,
+      [nudgeId]
+    );
+  }
+
+  /**
+   * Expire nudges whose expires_at has passed.
+   * Called from the alarm loop. Returns the count of nudges expired.
+   */
+  async expireStaleNudges(): Promise<number> {
+    await this.ensureInitialized();
+
+    const result = [
+      ...query(
+        this.sql,
+        /* sql */ `
+          UPDATE ${agent_nudges}
+          SET ${agent_nudges.columns.delivered_at} = datetime('now')
+          WHERE ${agent_nudges.expires_at} IS NOT NULL
+            AND ${agent_nudges.expires_at} < datetime('now')
+            AND ${agent_nudges.delivered_at} IS NULL
+          RETURNING ${agent_nudges.nudge_id}
+        `,
+        []
+      ),
+    ];
+
+    return result.length;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // Review Queue & Molecules
   // ══════════════════════════════════════════════════════════════════
 
@@ -1253,16 +1464,19 @@ export class TownDO extends DurableObject<Env> {
           break;
         }
         case 'NUDGE': {
-          // Send a nudge message to the stuck agent
-          if (targetAgent) {
-            mail.sendMail(this.sql, {
-              from_agent_id: 'patrol',
-              to_agent_id: targetAgentId,
-              subject: 'TRIAGE_NUDGE',
-              body:
-                input.resolution_notes ||
+          // Nudge the stuck agent — time-sensitive, deliver immediately
+          if (targetAgent && targetAgentId) {
+            this.queueNudge(
+              targetAgentId,
+              input.resolution_notes ||
                 'The triage system has flagged you as potentially stuck. Please report your status.',
-            });
+              { mode: 'immediate', source: 'triage', priority: 'urgent' }
+            ).catch(err =>
+              console.warn(
+                `${TOWN_LOG} resolveTriage: nudge failed for agent=${targetAgentId}:`,
+                err
+              )
+            );
             this.emitEvent({
               event: 'nudge.queued',
               townId: this.townId,
@@ -1606,7 +1820,8 @@ export class TownDO extends DurableObject<Env> {
     const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
       townId,
       rigId: `mayor-${townId}`,
-      userId: townConfig.owner_user_id ?? rigConfig?.userId ?? '',
+      userId:
+        townConfig.owner_user_id ?? rigConfig?.userId ?? townConfig.created_by_user_id ?? townId,
       agentId: mayor.id,
       agentName: 'mayor',
       role: 'mayor',
@@ -2561,6 +2776,17 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async alarm(): Promise<void> {
+    // Exit condition: if this DO was destroyed, don't re-arm.
+    // After destroy(), deleteAll() wipes storage but may not clear
+    // the alarm (compat date < 2026-02-24). A resurrected alarm
+    // will find no town:id — stop the loop immediately.
+    const storedId = await this.ctx.storage.get<string>('town:id');
+    if (!storedId) {
+      console.log(`${TOWN_LOG} alarm: no town:id — town was destroyed, not re-arming`);
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
     await this.ensureInitialized();
     const townId = this.townId;
     console.log(`${TOWN_LOG} alarm: fired for town=${townId}`);
@@ -2623,6 +2849,11 @@ export class TownDO extends DurableObject<Env> {
       await this.deliverPendingMail();
     } catch (err) {
       console.warn(`${TOWN_LOG} alarm: deliverPendingMail failed`, err);
+    }
+    try {
+      await this.expireStaleNudges();
+    } catch (err) {
+      console.warn(`${TOWN_LOG} alarm: expireStaleNudges failed`, err);
     }
     try {
       await this.reEscalateStaleEscalations();
@@ -3040,7 +3271,11 @@ export class TownDO extends DurableObject<Env> {
       ),
     ]);
 
-    const forceStopIds = patrol.detectGUPPViolations(this.sql, currentWorking);
+    const forceStopIds = patrol.detectGUPPViolations(
+      this.sql,
+      currentWorking,
+      (agentId, message, opts) => this.queueNudge(agentId, message, opts)
+    );
 
     // Force-stop agents in the container (best-effort)
     for (const agentId of forceStopIds) {
@@ -3801,6 +4036,11 @@ export class TownDO extends DurableObject<Env> {
   // ── Alarm helpers ─────────────────────────────────────────────────
 
   private async armAlarmIfNeeded(): Promise<void> {
+    // Don't resurrect the alarm on a destroyed DO. After destroy(),
+    // town:id is wiped — if it's missing, the town was deleted.
+    const storedId = await this.ctx.storage.get<string>('town:id');
+    if (!storedId) return;
+
     const current = await this.ctx.storage.getAlarm();
     if (!current || current < Date.now()) {
       await this.ctx.storage.setAlarm(Date.now() + ACTIVE_ALARM_INTERVAL_MS);
@@ -4044,13 +4284,22 @@ export class TownDO extends DurableObject<Env> {
   async destroy(): Promise<void> {
     console.log(`${TOWN_LOG} destroy: clearing all storage and alarms`);
 
+    // Destroy all AgentDOs (clears agent_events tables)
     try {
       const allAgents = agents.listAgents(this.sql);
       await Promise.allSettled(
         allAgents.map(agent => getAgentDOStub(this.env, agent.id).destroy())
       );
-    } catch {
-      // Best-effort
+    } catch (err) {
+      console.warn(`${TOWN_LOG} destroy: agent cleanup failed`, err);
+    }
+
+    // Destroy TownContainerDO (sends SIGKILL to container process, clears state)
+    try {
+      const containerStub = getTownContainerStub(this.env, this.townId);
+      await containerStub.destroy();
+    } catch (err) {
+      console.warn(`${TOWN_LOG} destroy: container cleanup failed`, err);
     }
 
     await this.ctx.storage.deleteAlarm();

@@ -35,17 +35,27 @@ const HEADLESS_PERMISSIONS = {
  * the Kilo LLM gateway. Both `model` and `smallModel` are OpenRouter-style
  * IDs (e.g. "anthropic/claude-sonnet-4.6") resolved from the town config.
  */
-function buildKiloConfigContent(kilocodeToken: string, model: string, smallModel: string): string {
+function buildKiloConfigContent(
+  kilocodeToken: string,
+  model: string,
+  smallModel: string,
+  organizationId?: string
+): string {
   const primaryModel = kiloModel(model);
   const smModel = kiloModel(smallModel);
+
+  const providerOptions: Record<string, string> = {
+    apiKey: kilocodeToken,
+    kilocodeToken,
+  };
+  if (organizationId) {
+    providerOptions.kilocodeOrganizationId = organizationId;
+  }
 
   return JSON.stringify({
     provider: {
       kilo: {
-        options: {
-          apiKey: kilocodeToken,
-          kilocodeToken,
-        },
+        options: providerOptions,
         // Register models so the kilo server doesn't reject them before
         // routing to the gateway.
         models: {
@@ -75,17 +85,34 @@ function buildKiloConfigContent(kilocodeToken: string, model: string, smallModel
 }
 
 function buildAgentEnv(request: StartAgentRequest): Record<string, string> {
+  // Custom git identity: when GASTOWN_GIT_AUTHOR_NAME is set, the user becomes
+  // the primary author and the AI agent name is used for co-authorship trailers.
+  const customAuthorName = resolveEnv(request, 'GASTOWN_GIT_AUTHOR_NAME');
+  const customAuthorEmail = resolveEnv(request, 'GASTOWN_GIT_AUTHOR_EMAIL');
+  const authorName = customAuthorName ?? `${request.name} (gastown)`;
+  const authorEmail = customAuthorEmail ?? `${request.name}@gastown.local`;
+
   const env: Record<string, string> = {
     GASTOWN_AGENT_ID: request.agentId,
     GASTOWN_RIG_ID: request.rigId,
     GASTOWN_TOWN_ID: request.townId,
     GASTOWN_AGENT_ROLE: request.role,
+    KILOCODE_FEATURE: 'gastown',
 
-    GIT_AUTHOR_NAME: `${request.name} (gastown)`,
-    GIT_AUTHOR_EMAIL: `${request.name}@gastown.local`,
-    GIT_COMMITTER_NAME: `${request.name} (gastown)`,
-    GIT_COMMITTER_EMAIL: `${request.name}@gastown.local`,
+    GIT_AUTHOR_NAME: authorName,
+    GIT_AUTHOR_EMAIL: authorEmail,
+    GIT_COMMITTER_NAME: authorName,
+    GIT_COMMITTER_EMAIL: authorEmail,
   };
+
+  // When custom author is set, provide the AI agent identity for co-authorship
+  if (customAuthorName) {
+    env.GASTOWN_AI_AGENT_NAME = `${request.name} (gastown)`;
+    env.GASTOWN_AI_AGENT_EMAIL = `${request.name}@gastown.local`;
+    if (resolveEnv(request, 'GASTOWN_DISABLE_AI_COAUTHOR') === '1') {
+      env.GASTOWN_DISABLE_AI_COAUTHOR = '1';
+    }
+  }
 
   // Conditionally set config vars — only when a value is available from
   // the request or the container's own environment.
@@ -132,7 +159,8 @@ GASTOWN_TOWN_ID="${env.GASTOWN_TOWN_ID}"`);
     const configJson = buildKiloConfigContent(
       kilocodeToken,
       request.model,
-      request.smallModel ?? 'anthropic/claude-haiku-4.5'
+      request.smallModel ?? 'anthropic/claude-haiku-4.5',
+      request.organizationId
     );
     env.KILO_CONFIG_CONTENT = configJson;
     env.OPENCODE_CONFIG_CONTENT = configJson;
@@ -143,12 +171,12 @@ GASTOWN_TOWN_ID="${env.GASTOWN_TOWN_ID}"`);
     console.warn('[buildAgentEnv] No KILOCODE_TOKEN available — KILO_CONFIG_CONTENT not set');
   }
 
-  // Authenticate the gh CLI via GH_TOKEN so agents can use `gh` commands.
-  // GIT_TOKEN is a GitHub access token set by the town config's git_auth.
-  // Set before the envVars loop so user-provided GH_TOKEN in town env vars
-  // cannot override the platform credential (intentional — prevents agents
-  // from being pointed at a different GitHub identity).
-  const ghToken = resolveEnv(request, 'GIT_TOKEN') ?? resolveEnv(request, 'GITHUB_TOKEN');
+  // Authenticate the gh CLI via GH_TOKEN. Prefer the user's GitHub CLI PAT
+  // (which makes PRs/issues appear under their identity) over the integration
+  // token (which appears as the GitHub App bot).
+  const ghCliPat = resolveEnv(request, 'GITHUB_CLI_PAT');
+  const ghToken =
+    ghCliPat ?? resolveEnv(request, 'GIT_TOKEN') ?? resolveEnv(request, 'GITHUB_TOKEN');
   if (ghToken) {
     env.GH_TOKEN = ghToken;
   }

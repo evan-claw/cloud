@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "gastown",
   "main": "src/gastown.worker.ts",
-  "compatibility_date": "2026-01-27",
+  "compatibility_date": "2026-02-24",
   "compatibility_flags": ["nodejs_compat"],
   "placement": { "mode": "smart" },
   "observability": { "enabled": true },
@@ -28,6 +28,7 @@
   "durable_objects": {
     "bindings": [
       { "name": "GASTOWN_USER", "class_name": "GastownUserDO" },
+      { "name": "GASTOWN_ORG", "class_name": "GastownOrgDO" },
       { "name": "AGENT_IDENTITY", "class_name": "AgentIdentityDO" },
       { "name": "TOWN", "class_name": "TownDO" },
       { "name": "TOWN_CONTAINER", "class_name": "TownContainerDO" },
@@ -46,6 +47,7 @@
         "AgentDO",
       ],
     },
+    { "tag": "v2", "new_sqlite_classes": ["GastownOrgDO"] },
   ],
 
   "vars": {
@@ -114,6 +116,7 @@
       "durable_objects": {
         "bindings": [
           { "name": "GASTOWN_USER", "class_name": "GastownUserDO" },
+          { "name": "GASTOWN_ORG", "class_name": "GastownOrgDO" },
           { "name": "AGENT_IDENTITY", "class_name": "AgentIdentityDO" },
           { "name": "TOWN", "class_name": "TownDO" },
           { "name": "TOWN_CONTAINER", "class_name": "TownContainerDO" },

@@ -7,6 +7,7 @@ export const OpenRouterInferenceProviderIdSchema = z.enum([
   'arcee-ai',
   'deepinfra',
   'fireworks',
+  'friendli',
   'google-ai-studio',
   'google-vertex',
   'inception',

@@ -8,23 +8,25 @@ import { useGastownTRPC, gastownWsUrl } from '@/lib/gastown/trpc';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useTerminalBar } from './TerminalBarContext';
 import { useDrawerStack } from './DrawerStack';
+import { useXtermPty } from './useXtermPty';
 import { ChevronDown, ChevronUp, Crown, Activity, Terminal as TerminalIcon, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import type { Terminal } from '@xterm/xterm';
-import type { FitAddon } from '@xterm/addon-fit';
 
 const COLLAPSED_HEIGHT = 38;
 const EXPANDED_HEIGHT = 300;
 
 type TerminalBarProps = {
   townId: string;
+  /** Override base path for org-scoped routes (e.g. /organizations/[id]/gastown/[townId]) */
+  basePath?: string;
 };
 
 /**
  * Unified bottom terminal bar. Always shows a Mayor tab (non-closeable).
  * Agent terminal tabs are opened/closed via TerminalBarContext.
  */
-export function TerminalBar({ townId }: TerminalBarProps) {
+export function TerminalBar({ townId, basePath: basePathOverride }: TerminalBarProps) {
+  const townBasePath = basePathOverride ?? `/gastown/${townId}`;
   const { state: sidebarState, isMobile } = useSidebar();
   const {
     tabs: agentTabs,
@@ -82,11 +84,11 @@ export function TerminalBar({ townId }: TerminalBarProps) {
         case 'navigate':
           if (action.page) {
             const pageMap: Record<string, string> = {
-              'town-overview': `/gastown/${townId}`,
-              beads: `/gastown/${townId}/beads`,
-              agents: `/gastown/${townId}/agents`,
-              rigs: `/gastown/${townId}`,
-              settings: `/gastown/${townId}/settings`,
+              'town-overview': townBasePath,
+              beads: `${townBasePath}/beads`,
+              agents: `${townBasePath}/agents`,
+              rigs: townBasePath,
+              settings: `${townBasePath}/settings`,
             };
             const path = pageMap[action.page];
             if (path) {
@@ -606,20 +608,35 @@ function eventTypeColor(type: string): string {
   }
 }
 
+// ── Terminal Status Badge ─────────────────────────────────────────────────
+
+function TerminalStatusBadge({
+  connectionStatus,
+  status,
+}: {
+  connectionStatus: 'connected' | 'reconnecting' | 'disconnected';
+  status: string;
+}) {
+  const dotColor =
+    connectionStatus === 'connected'
+      ? 'bg-emerald-400'
+      : connectionStatus === 'reconnecting'
+        ? 'animate-pulse bg-yellow-400'
+        : 'bg-white/20';
+
+  return (
+    <div className="absolute top-1.5 right-3 z-10 flex items-center gap-1.5">
+      <span className={`size-1.5 rounded-full ${dotColor}`} />
+      <span className="text-[10px] text-white/35">{status}</span>
+    </div>
+  );
+}
+
 // ── Mayor Terminal Pane ──────────────────────────────────────────────────
 
 function MayorTerminalPane({ townId, collapsed }: { townId: string; collapsed: boolean }) {
   const trpc = useGastownTRPC();
   const queryClient = useQueryClient();
-  const [connected, setConnected] = useState(false);
-  const [status, setStatus] = useState('Initializing...');
-
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const ptyRef = useRef<{ id: string } | null>(null);
 
   const ensureMayor = useMutation(
     trpc.gastown.ensureMayor.mutationOptions({
@@ -650,166 +667,12 @@ function MayorTerminalPane({ townId, collapsed }: { townId: string; collapsed: b
 
   const mayorAgentId = statusQuery.data?.session?.agentId ?? null;
 
-  const createPty = useMutation(
-    trpc.gastown.createPtySession.mutationOptions({
-      onError: err => setStatus(`Error: ${err.message}`),
-    })
-  );
-
-  const resizePty = useMutation(trpc.gastown.resizePtySession.mutationOptions({}));
-  const resizeMutateRef = useRef(resizePty.mutate);
-  resizeMutateRef.current = resizePty.mutate;
-
-  const connectedAgentRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!mayorAgentId || mayorAgentId === connectedAgentRef.current) return;
-    const agentId = mayorAgentId;
-    connectedAgentRef.current = agentId;
-
-    let disposed = false;
-
-    async function init() {
-      const container = terminalRef.current;
-      if (!container) return;
-
-      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
-        import('@xterm/xterm'),
-        import('@xterm/addon-fit'),
-        import('@xterm/addon-web-links'),
-      ]);
-
-      if (disposed) return;
-
-      xtermRef.current?.dispose();
-
-      const fitAddon = new FitAddon();
-      const webLinksAddon = new WebLinksAddon();
-
-      const term = new Terminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-        theme: {
-          background: '#0a0a0a',
-          foreground: '#e0e0e0',
-          cursor: '#e0e0e0',
-          selectionBackground: '#3a3a5a',
-        },
-        allowProposedApi: true,
-        // Disable xterm's scrollback so kilo's TUI handles all scrolling.
-        // Without this, xterm's viewport captures mouse wheel events and
-        // prevents the TUI's own scroll from working.
-        scrollback: 0,
-      });
-
-      term.loadAddon(fitAddon);
-      term.loadAddon(webLinksAddon);
-      term.open(container);
-      fitAddon.fit();
-
-      xtermRef.current = term;
-      fitAddonRef.current = fitAddon;
-
-      setStatus('Connecting to mayor...');
-
-      function doResize(cols: number, rows: number) {
-        if (!ptyRef.current) return;
-        resizeMutateRef.current({
-          townId,
-          agentId,
-          ptyId: ptyRef.current.id,
-          cols,
-          rows,
-        });
-      }
-
-      let result: { pty: { id: string }; wsUrl: string } | null = null;
-      for (let attempt = 0; attempt < 10 && !disposed; attempt++) {
-        try {
-          result = await new Promise<{ pty: { id: string }; wsUrl: string }>((resolve, reject) => {
-            createPty.mutate({ townId, agentId }, { onSuccess: resolve, onError: reject });
-          });
-          break;
-        } catch {
-          if (disposed) return;
-          setStatus(`Waiting for mayor... (${attempt + 1})`);
-          await new Promise(r => setTimeout(r, 3_000));
-        }
-      }
-
-      if (disposed || !result) {
-        if (!disposed && !result) setStatus('Failed to connect to mayor');
-        return;
-      }
-
-      ptyRef.current = result.pty;
-      setStatus('Connecting...');
-
-      const ws = new WebSocket(gastownWsUrl(result.wsUrl));
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (disposed) return;
-        setConnected(true);
-        setStatus('Connected');
-        const dims = fitAddon.proposeDimensions();
-        if (dims) doResize(dims.cols, dims.rows);
-      };
-
-      ws.onmessage = (e: MessageEvent) => {
-        if (e.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(e.data));
-        } else if (typeof e.data === 'string') {
-          if (e.data.startsWith('{')) {
-            try {
-              JSON.parse(e.data);
-              return;
-            } catch {
-              // not JSON control message
-            }
-          }
-          term.write(e.data);
-        }
-      };
-
-      ws.onclose = () => {
-        if (disposed) return;
-        setConnected(false);
-        setStatus('Disconnected');
-      };
-
-      ws.onerror = () => {
-        if (disposed) return;
-        setStatus('Connection error');
-      };
-
-      term.onData(data => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(data);
-      });
-
-      term.onResize(({ cols, rows }) => doResize(cols, rows));
-
-      const observer = new ResizeObserver(() => fitAddon.fit());
-      observer.observe(container);
-      resizeObserverRef.current = observer;
-    }
-
-    void init();
-
-    return () => {
-      disposed = true;
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
-      wsRef.current?.close(1000, 'Mayor terminal unmount');
-      wsRef.current = null;
-      xtermRef.current?.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
-      ptyRef.current = null;
-      connectedAgentRef.current = null;
-    };
-  }, [mayorAgentId, townId]);
+  const { terminalRef, connectionStatus, status, fitAddonRef } = useXtermPty({
+    townId,
+    agentId: mayorAgentId,
+    retries: 10,
+    retryDelay: 3_000,
+  });
 
   const { state: sidebarState } = useSidebar();
 
@@ -822,11 +685,7 @@ function MayorTerminalPane({ townId, collapsed }: { townId: string; collapsed: b
 
   return (
     <div className="relative h-full">
-      {/* Status indicator overlaid top-right */}
-      <div className="absolute top-1.5 right-3 z-10 flex items-center gap-1.5">
-        <span className={`size-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-white/20'}`} />
-        <span className="text-[10px] text-white/35">{status}</span>
-      </div>
+      <TerminalStatusBadge connectionStatus={connectionStatus} status={status} />
       <div ref={terminalRef} className="h-full overflow-hidden px-1" />
     </div>
   );
@@ -835,163 +694,14 @@ function MayorTerminalPane({ townId, collapsed }: { townId: string; collapsed: b
 // ── Agent Terminal Pane ──────────────────────────────────────────────────
 
 function AgentTerminalPane({ townId, agentId }: { townId: string; agentId: string }) {
-  const trpc = useGastownTRPC();
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const ptyRef = useRef<{ id: string } | null>(null);
-  const [status, setStatus] = useState<string>('Initializing...');
-  const [connected, setConnected] = useState(false);
-
-  const createPty = useMutation(
-    trpc.gastown.createPtySession.mutationOptions({
-      onError: err => setStatus(`Error: ${err.message}`),
-    })
-  );
-
-  const resizePty = useMutation(trpc.gastown.resizePtySession.mutationOptions({}));
-  const resizeMutateRef = useRef(resizePty.mutate);
-  resizeMutateRef.current = resizePty.mutate;
-
-  useEffect(() => {
-    let disposed = false;
-
-    async function init() {
-      const container = terminalRef.current;
-      if (!container) return;
-
-      const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
-        import('@xterm/xterm'),
-        import('@xterm/addon-fit'),
-        import('@xterm/addon-web-links'),
-      ]);
-
-      if (disposed) return;
-
-      const fitAddon = new FitAddon();
-      const webLinksAddon = new WebLinksAddon();
-
-      const term = new Terminal({
-        cursorBlink: true,
-        fontSize: 13,
-        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-        theme: {
-          background: '#0a0a0a',
-          foreground: '#e0e0e0',
-          cursor: '#e0e0e0',
-          selectionBackground: '#3a3a5a',
-        },
-        allowProposedApi: true,
-        scrollback: 0,
-      });
-
-      term.loadAddon(fitAddon);
-      term.loadAddon(webLinksAddon);
-      term.open(container);
-      fitAddon.fit();
-
-      xtermRef.current = term;
-      fitAddonRef.current = fitAddon;
-
-      setStatus('Creating PTY session...');
-
-      function doResize(cols: number, rows: number) {
-        if (!ptyRef.current) return;
-        resizeMutateRef.current({ townId, agentId, ptyId: ptyRef.current.id, cols, rows });
-      }
-
-      let result: { pty: { id: string }; wsUrl: string };
-      try {
-        result = await new Promise<{ pty: { id: string }; wsUrl: string }>((resolve, reject) => {
-          createPty.mutate({ townId, agentId }, { onSuccess: resolve, onError: reject });
-        });
-      } catch (err) {
-        if (!disposed) {
-          setStatus(
-            `Error: ${err instanceof Error ? err.message : 'Failed to create PTY session'}`
-          );
-        }
-        return;
-      }
-
-      if (disposed) return;
-
-      ptyRef.current = result.pty;
-      setStatus('Connecting...');
-
-      const ws = new WebSocket(gastownWsUrl(result.wsUrl));
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (disposed) return;
-        setConnected(true);
-        setStatus('Connected');
-        const dims = fitAddon.proposeDimensions();
-        if (dims) doResize(dims.cols, dims.rows);
-      };
-
-      ws.onmessage = (e: MessageEvent) => {
-        if (e.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(e.data));
-        } else if (typeof e.data === 'string') {
-          if (e.data.startsWith('{')) {
-            try {
-              JSON.parse(e.data);
-              return;
-            } catch {
-              // not JSON
-            }
-          }
-          term.write(e.data);
-        }
-      };
-
-      ws.onclose = () => {
-        if (disposed) return;
-        setConnected(false);
-        setStatus('Disconnected');
-      };
-
-      ws.onerror = () => {
-        if (disposed) return;
-        setStatus('Connection error');
-      };
-
-      term.onData(data => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(data);
-      });
-
-      term.onResize(({ cols, rows }) => doResize(cols, rows));
-
-      const observer = new ResizeObserver(() => fitAddon.fit());
-      observer.observe(container);
-      resizeObserverRef.current = observer;
-    }
-
-    void init();
-
-    return () => {
-      disposed = true;
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
-      wsRef.current?.close(1000, 'Agent terminal unmount');
-      wsRef.current = null;
-      xtermRef.current?.dispose();
-      xtermRef.current = null;
-      fitAddonRef.current = null;
-      ptyRef.current = null;
-    };
-  }, [townId, agentId]);
+  const { terminalRef, connectionStatus, status } = useXtermPty({
+    townId,
+    agentId,
+  });
 
   return (
     <div className="relative h-full">
-      <div className="absolute top-1.5 right-3 z-10 flex items-center gap-1.5">
-        <span className={`size-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-white/20'}`} />
-        <span className="text-[10px] text-white/35">{status}</span>
-      </div>
+      <TerminalStatusBadge connectionStatus={connectionStatus} status={status} />
       <div ref={terminalRef} className="h-full overflow-hidden px-1" />
     </div>
   );

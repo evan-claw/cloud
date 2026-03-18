@@ -214,10 +214,7 @@ if (projectChoice === '2') {
     projectId = await ask('\nEnter your project ID: ');
   }
 } else {
-  // Generate a project ID based on date
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const defaultId = `kiloclaw-${dateStr}`;
+  const defaultId = `kiloclaw-${crypto.randomBytes(4).toString('hex')}`;
   const inputId = await ask(`Project ID [${defaultId}]: `);
   projectId = inputId || defaultId;
 
@@ -229,7 +226,7 @@ if (projectChoice === '2') {
     console.log('Project created.\n');
   } catch (err) {
     const errOutput = err.stderr?.toString() ?? err.message;
-    if (errOutput.includes('Terms of Service')) {
+    if (/terms/i.test(errOutput)) {
       console.log('');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log('  You need to accept the Google Cloud Terms of Service first.');
@@ -250,7 +247,9 @@ if (projectChoice === '2') {
       }
     } else {
       console.error(`Failed to create project "${projectId}". It may already exist.`);
+      console.error('You may also need to accept the Google Cloud Terms of Service at https://console.cloud.google.com');
       console.error('Try a different name, or choose option 2 to use an existing project.');
+      console.error(`\nRaw error:\n${errOutput}`);
       process.exit(1);
     }
   }
@@ -594,12 +593,13 @@ if (pushUserId && pushSetupOk) {
 
   // Create or update push subscription
   if (pushSetupOk) {
-    const subscriptionName = `gog-gmail-push-${pushUserId.slice(0, 8)}`;
-    const pushEndpoint = `${gmailPushWorkerUrl}/push/user/${pushUserId}`;
+    const safeId = pushUserId.replaceAll(/[^a-zA-Z0-9_-]/g, '-');
+    const subscriptionName = `gog-gmail-push-${safeId.slice(0, 8)}`;
+    const pushEndpoint = `${gmailPushWorkerUrl}/push/user/${encodeURIComponent(pushUserId)}`;
     // The OIDC audience must always use the production domain so the worker's
     // OIDC_AUDIENCE_BASE validation matches, even when the push endpoint
     // targets a different environment (e.g. tunnel, dev).
-    const pushAudience = `https://kiloclaw-gmail.kiloapps.io/push/user/${pushUserId}`;
+    const pushAudience = `https://kiloclaw-gmail.kiloapps.io/push/user/${encodeURIComponent(pushUserId)}`;
     console.log(`Creating push subscription ${subscriptionName} → ${pushEndpoint}`);
     try {
       execSync(
@@ -707,7 +707,7 @@ console.log('');
 console.log('  Next steps:');
 console.log('  1. Redeploy your kiloclaw instance to activate Google services');
 if (pushSetupOk) {
-  console.log('  2. Enable Gmail notifications in Settings → Google Account');
+  console.log('  2. Gmail push notifications have been enabled automatically.');
 } else {
   console.log('  2. Gmail push notifications could not be set up (see errors above).');
   console.log('     Google Workspace access will still work. Re-run setup to retry.');

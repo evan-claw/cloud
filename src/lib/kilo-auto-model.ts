@@ -1,3 +1,4 @@
+import type { FeatureValue } from '@/lib/feature-detection';
 import {
   CLAUDE_OPUS_CURRENT_MODEL_ID,
   CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -27,7 +28,7 @@ type AutoModel = {
 export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
   id: 'kilo-auto/frontier',
   name: 'Kilo Auto Frontier',
-  description: 'Automatically routes your request to the best model for the task.',
+  description: 'Highest performance and capability for any task.',
   context_length: 1_000_000,
   max_completion_tokens: 128_000,
   prompt_price: '0.000005',
@@ -43,7 +44,7 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
 export const KILO_AUTO_FREE_MODEL: AutoModel = {
   id: 'kilo-auto/free',
   name: 'Kilo Auto Free',
-  description: 'Automatically routes your request to a free model.',
+  description: 'Free with limited capability. No credits required.',
   context_length: minimax_m25_free_model.context_length,
   max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
   prompt_price: '0',
@@ -59,7 +60,7 @@ export const KILO_AUTO_FREE_MODEL: AutoModel = {
 export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
   id: 'kilo-auto/balanced',
   name: 'Kilo Auto Balanced',
-  description: 'Automatically routes your request for a balanced mix of price and performance.',
+  description: 'Great balance of price and capability.',
   context_length: 204800,
   max_completion_tokens: 131072,
   prompt_price: '0.0000006',
@@ -210,9 +211,10 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
 export function applyResolvedAutoModel(
   model: string,
   request: GatewayRequest,
-  modeHeader: string | null
+  modeHeader: string | null,
+  featureHeader: FeatureValue | null
 ) {
-  const resolved = resolveAutoModel(model, modeHeader);
+  const resolved = resolveAutoModel(model, featureHeader === 'kiloclaw' ? 'plan' : modeHeader);
   request.body.model = resolved.model;
   if (resolved.reasoning) request.body.reasoning = resolved.reasoning;
   if (resolved.verbosity) {

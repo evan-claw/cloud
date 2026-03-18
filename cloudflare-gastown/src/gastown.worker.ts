@@ -15,7 +15,7 @@ import {
   type AuthVariables,
 } from './middleware/auth.middleware';
 import { kiloAuthMiddleware } from './middleware/kilo-auth.middleware';
-import { townOwnershipMiddleware } from './middleware/town-ownership.middleware';
+
 import { trpcServer } from '@hono/trpc-server';
 import { wrappedGastownRouter } from './trpc/router';
 import {
@@ -42,6 +42,9 @@ import {
   handleGetOrCreateAgent,
   handleDeleteAgent,
   handleUpdateAgentStatusMessage,
+  handleGetPendingNudges,
+  handleNudgeDelivered,
+  handleNudge,
 } from './handlers/rig-agents.handler';
 import { handleSendMail } from './handlers/rig-mail.handler';
 import { handleAppendAgentEvent, handleGetAgentEvents } from './handlers/rig-agent-events.handler';
@@ -73,6 +76,16 @@ import {
   handleDeleteRig,
 } from './handlers/towns.handler';
 import {
+  handleCreateOrgTown,
+  handleListOrgTowns,
+  handleGetOrgTown,
+  handleCreateOrgRig,
+  handleListOrgRigs,
+  handleGetOrgRig,
+  handleDeleteOrgTown,
+  handleDeleteOrgRig,
+} from './handlers/org-towns.handler';
+import {
   handleConfigureMayor,
   handleSendMayorMessage,
   handleGetMayorStatus,
@@ -100,8 +113,11 @@ import {
   handleMayorEscalationAcknowledge,
   handleMayorConvoyStart,
   handleMayorUiAction,
+  handleMayorGetPendingNudges,
 } from './handlers/mayor-tools.handler';
 import { mayorAuthMiddleware } from './middleware/mayor-auth.middleware';
+import { townAuthMiddleware } from './middleware/town-auth.middleware';
+import { orgAuthMiddleware } from './middleware/org-auth.middleware';
 import { timingMiddleware, instrumented } from './middleware/analytics.middleware';
 import { handleGetTownConfig, handleUpdateTownConfig } from './handlers/town-config.handler';
 import {
@@ -116,6 +132,7 @@ import {
 } from './handlers/town-escalations.handler';
 
 export { GastownUserDO } from './dos/GastownUser.do';
+export { GastownOrgDO } from './dos/GastownOrg.do';
 export { AgentIdentityDO } from './dos/AgentIdentity.do';
 export { TownDO } from './dos/Town.do';
 export { TownContainerDO } from './dos/TownContainer.do';
@@ -312,6 +329,15 @@ app.post('/api/towns/:townId/rigs/:rigId/agents/:agentId/status', c =>
     handleUpdateAgentStatusMessage(c, c.req.param())
   )
 );
+app.get('/api/towns/:townId/rigs/:rigId/agents/:agentId/pending-nudges', c =>
+  handleGetPendingNudges(c, c.req.param())
+);
+app.post('/api/towns/:townId/rigs/:rigId/agents/:agentId/nudge-delivered', c =>
+  handleNudgeDelivered(c, c.req.param())
+);
+
+// Agent-to-agent nudge: any authenticated agent can nudge another agent in the rig
+app.post('/api/towns/:townId/rigs/:rigId/nudge', c => handleNudge(c, c.req.param()));
 
 // ── Agent Events ─────────────────────────────────────────────────────────
 
@@ -386,19 +412,61 @@ app.post('/api/towns/:townId/rigs/:rigId/triage/resolve', c =>
 
 // ── Kilo User Auth ──────────────────────────────────────────────────────
 // Validate Kilo user JWT (signed with NEXTAUTH_SECRET) for dashboard/user
-// routes. Skip in development. Container→worker routes use the agent JWT
-// middleware instead (authMiddleware above).
+// routes. Container→worker routes use the agent JWT middleware instead
+// (authMiddleware above).
 
 app.use('/api/users/*', async (c: Context<GastownEnv, string>, next) =>
-  c.env.ENVIRONMENT === 'development' ? next() : kiloAuthMiddleware(c, next)
+  kiloAuthMiddleware(c, next)
 );
-// Town routes: kilo auth + town ownership check (skipped in dev for auth only)
-app.use('/api/towns/:townId/*', async (c: Context<GastownEnv, string>, next) => {
-  if (c.env.ENVIRONMENT === 'development') return next();
-  return kiloAuthMiddleware(c, async () => {
-    await townOwnershipMiddleware(c, next);
-  });
-});
+// Town routes: kilo auth + town ownership check (supports both personal and org-owned towns).
+app.use('/api/towns/:townId/*', async (c: Context<GastownEnv, string>, next) =>
+  kiloAuthMiddleware(c, async () => {
+    await townAuthMiddleware(c, next);
+  })
+);
+
+// ── Org Auth ────────────────────────────────────────────────────────────
+// Kilo user auth + org membership check for all org routes.
+
+app.use('/api/orgs/:orgId/*', async (c: Context<GastownEnv, string>, next) =>
+  kiloAuthMiddleware(c, next)
+);
+app.use('/api/orgs/:orgId/*', async (c: Context<GastownEnv, string>, next) =>
+  orgAuthMiddleware(c, next)
+);
+
+// ── Org Towns & Rigs ─────────────────────────────────────────────────────
+// GastownOrgDO instances are keyed by orgId. One DO instance per org stores
+// all towns and rigs the org owns.
+
+app.post('/api/orgs/:orgId/towns', c =>
+  instrumented(c, 'POST /api/orgs/:orgId/towns', () => handleCreateOrgTown(c, c.req.param()))
+);
+app.get('/api/orgs/:orgId/towns', c =>
+  instrumented(c, 'GET /api/orgs/:orgId/towns', () => handleListOrgTowns(c, c.req.param()))
+);
+app.get('/api/orgs/:orgId/towns/:townId', c =>
+  instrumented(c, 'GET /api/orgs/:orgId/towns/:townId', () => handleGetOrgTown(c, c.req.param()))
+);
+app.post('/api/orgs/:orgId/rigs', c =>
+  instrumented(c, 'POST /api/orgs/:orgId/rigs', () => handleCreateOrgRig(c, c.req.param()))
+);
+app.get('/api/orgs/:orgId/towns/:townId/rigs', c =>
+  instrumented(c, 'GET /api/orgs/:orgId/towns/:townId/rigs', () =>
+    handleListOrgRigs(c, c.req.param())
+  )
+);
+app.get('/api/orgs/:orgId/rigs/:rigId', c =>
+  instrumented(c, 'GET /api/orgs/:orgId/rigs/:rigId', () => handleGetOrgRig(c, c.req.param()))
+);
+app.delete('/api/orgs/:orgId/towns/:townId', c =>
+  instrumented(c, 'DELETE /api/orgs/:orgId/towns/:townId', () =>
+    handleDeleteOrgTown(c, c.req.param())
+  )
+);
+app.delete('/api/orgs/:orgId/rigs/:rigId', c =>
+  instrumented(c, 'DELETE /api/orgs/:orgId/rigs/:rigId', () => handleDeleteOrgRig(c, c.req.param()))
+);
 
 // ── Towns & Rigs ────────────────────────────────────────────────────────
 // Town DO instances are keyed by owner_user_id. The userId path param routes
@@ -468,6 +536,9 @@ app.patch('/api/towns/:townId/config', c =>
 
 // ── Town Events ─────────────────────────────────────────────────────────
 
+app.use('/api/users/:userId/towns/:townId/events', async (c: Context<GastownEnv, string>, next) =>
+  townAuthMiddleware(c, next)
+);
 app.get('/api/users/:userId/towns/:townId/events', c =>
   instrumented(c, 'GET /api/users/:userId/towns/:townId/events', () =>
     handleListTownEvents(c, c.req.param())
@@ -600,6 +671,9 @@ app.post('/api/mayor/:townId/tools/ui-action', c =>
     handleMayorUiAction(c, c.req.param())
   )
 );
+app.get('/api/mayor/:townId/tools/rigs/:rigId/agents/:agentId/pending-nudges', c =>
+  handleMayorGetPendingNudges(c, c.req.param())
+);
 
 app.post('/api/mayor/:townId/tools/sling', c =>
   instrumented(c, 'POST /api/mayor/:townId/tools/sling', () => handleMayorSling(c, c.req.param()))
@@ -689,6 +763,7 @@ app.use(
       isAdmin: c.get('kiloIsAdmin') ?? false,
       apiTokenPepper: c.get('kiloApiTokenPepper') ?? null,
       gastownAccess: c.get('kiloGastownAccess') ?? false,
+      orgMemberships: c.get('kiloOrgMemberships') ?? [],
     }),
     onError: ({ error, path }: { error: Error; path?: string }) => {
       console.error(`[gastown-trpc] error on ${path ?? 'unknown'}:`, error.message);

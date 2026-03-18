@@ -386,7 +386,63 @@ export function runOnboardOrDoctor(env: EnvLike, deps: BootstrapDeps = defaultDe
   }
 }
 
-// ---- Step 7: Gateway args ----
+// ---- Step 7: TOOLS.md Google Workspace section ----
+
+const GOG_MARKER_BEGIN = '<!-- BEGIN:google-workspace -->';
+const GOG_MARKER_END = '<!-- END:google-workspace -->';
+
+const GOG_TOOLS_SECTION = `
+${GOG_MARKER_BEGIN}
+## Google Workspace
+
+The \`gog\` CLI is configured and ready for Google Workspace operations (Gmail, Calendar, Drive, Docs, Sheets, Slides, Tasks, Forms, Chat, Classroom).
+
+- List accounts: \`gog auth list\`
+- Gmail — search: \`gog gmail search --account <email> --query "from:X"\`
+- Gmail — read: \`gog gmail get --account <email> <message-id>\`
+- Gmail — send: \`gog gmail send --account <email> --to <addr> --subject "..." --body "..."\`
+- Calendar — list events: \`gog calendar events list --account <email>\`
+- Drive — list files: \`gog drive files list --account <email>\`
+- Docs — read: \`gog docs get --account <email> <doc-id>\`
+- Run \`gog --help\` and \`gog <service> --help\` for all available commands.
+${GOG_MARKER_END}`;
+
+/**
+ * Manage the Google Workspace section in TOOLS.md.
+ *
+ * When gog credentials are present, append a bounded section so the agent
+ * knows gog is available. When credentials are absent, remove any stale
+ * section. Idempotent: skips if the marker is already present.
+ */
+export function updateToolsMdGoogleSection(env: EnvLike, deps: BootstrapDeps): void {
+  if (!deps.existsSync(TOOLS_MD_DEST)) return;
+
+  const content = deps.readFileSync(TOOLS_MD_DEST, 'utf8');
+
+  if (env.KILOCLAW_GOG_CONFIG_TARBALL) {
+    // Google connected — add section if not already present
+    if (!content.includes(GOG_MARKER_BEGIN)) {
+      deps.writeFileSync(TOOLS_MD_DEST, content + GOG_TOOLS_SECTION);
+      console.log('TOOLS.md: added Google Workspace section');
+    } else {
+      console.log('TOOLS.md: Google Workspace section already present');
+    }
+  } else {
+    // Google not connected — remove stale section if present
+    if (content.includes(GOG_MARKER_BEGIN)) {
+      const beginIdx = content.indexOf(GOG_MARKER_BEGIN);
+      const endIdx = content.indexOf(GOG_MARKER_END);
+      if (beginIdx !== -1 && endIdx !== -1) {
+        const before = content.slice(0, beginIdx).replace(/\n+$/, '\n');
+        const after = content.slice(endIdx + GOG_MARKER_END.length).replace(/^\n+/, '');
+        deps.writeFileSync(TOOLS_MD_DEST, before + after);
+        console.log('TOOLS.md: removed stale Google Workspace section');
+      }
+    }
+  }
+}
+
+// ---- Step 8: Gateway args ----
 
 /**
  * Build the gateway CLI arguments array.
@@ -439,6 +495,8 @@ export async function bootstrap(
   setPhase(configExists ? 'doctor' : 'onboard');
   runOnboardOrDoctor(env, deps);
   await yieldToEventLoop();
+
+  updateToolsMdGoogleSection(env, deps);
 
   env.KILOCLAW_GATEWAY_ARGS = JSON.stringify(buildGatewayArgs(env));
 }

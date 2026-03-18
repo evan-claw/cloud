@@ -920,8 +920,13 @@ export const custom_llm = pgTable('custom_llm', {
   base_url: text().notNull(),
   api_key: text().notNull(),
   organization_ids: jsonb().notNull().$type<string[]>(),
+
+  /** @deprecated */
   included_tools: jsonb().$type<Tool[]>(),
+
+  /** @deprecated */
   excluded_tools: jsonb().$type<Tool[]>(),
+
   supports_image_input: boolean(),
   force_reasoning: boolean(),
   opencode_settings: jsonb().$type<OpenCodeSettings>(),
