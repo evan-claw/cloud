@@ -1,4 +1,6 @@
 export { withDORetry, DEFAULT_DO_RETRY_CONFIG } from './do-retry.js';
+
+export { timingSafeCompare } from './timing-safe-compare.js';
 export type { DORetryConfig } from './do-retry.js';
 
 export { backendAuthMiddleware } from './backend-auth-middleware.js';
