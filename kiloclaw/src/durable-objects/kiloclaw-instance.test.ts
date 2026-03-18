@@ -1744,6 +1744,54 @@ describe('start: metadata recovery re-arms alarm', () => {
 });
 
 // ============================================================================
+// start: Postgres restore + metadata recovery cooldown interaction
+// ============================================================================
+
+describe('start: Postgres restore does not poison metadata recovery cooldown', () => {
+  it('starts successfully when DO is wiped, Postgres has a record, and Fly has no machines', async () => {
+    // Simulate a wiped DO: empty storage (no seedProvisioned), but Postgres has the record.
+    // This is the DO-eviction or local-dev-restart scenario for a user who provisioned
+    // but has never had a Fly machine created yet.
+    const appStubWithGetName = {
+      ...createFakeAppStub(),
+      getAppName: vi.fn().mockResolvedValue(null), // falls back to appNameFromUserId
+    };
+    const env = {
+      ...createFakeEnv(),
+      KILOCLAW_APP: {
+        idFromName: vi.fn().mockReturnValue('fake-do-id'),
+        get: vi.fn().mockReturnValue(appStubWithGetName),
+      } as unknown,
+    };
+
+    (db.getWorkerDb as Mock).mockReturnValue({});
+    (db.getActiveInstance as Mock).mockResolvedValue({ sandboxId: 'sandbox-1' });
+
+    // Explicitly reset listMachines — previous tests may have overridden the default.
+    (flyClient.listMachines as Mock).mockResolvedValue([]);
+    // restoreFromPostgres restores flyVolumeId=null, so ensureVolume creates one.
+    (flyClient.createVolumeWithFallback as Mock).mockResolvedValue({
+      id: 'vol-new',
+      region: 'iad',
+    });
+    (flyClient.createMachine as Mock).mockResolvedValue({ id: 'new-machine', region: 'iad' });
+    (flyClient.waitForState as Mock).mockResolvedValue(undefined);
+
+    const { instance } = createInstance(undefined, env); // empty storage = DO wipe
+
+    // Bug: restoreFromPostgres calls attemptMetadataRecovery (setting cooldown),
+    // then _startInner calls it again immediately → cooldown → returns false → throws.
+    // Fix: remove attemptMetadataRecovery from restoreFromPostgres; let _startInner handle it.
+    await expect(instance.start('user-1')).resolves.toBeUndefined();
+
+    // Machine was created (not blocked by false "Metadata recovery failed" error).
+    expect(flyClient.createMachine).toHaveBeenCalledOnce();
+    // listMachines called exactly once — from _startInner's attemptMetadataRecovery only.
+    expect(flyClient.listMachines).toHaveBeenCalledOnce();
+  });
+});
+
+// ============================================================================
 // updateChannels
 // ============================================================================
 

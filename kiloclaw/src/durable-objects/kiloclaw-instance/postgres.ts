@@ -3,9 +3,7 @@ import type { EncryptedEnvelope } from '../../schemas/instance-config';
 import { getWorkerDb, getActiveInstance, markInstanceDestroyed } from '../../db';
 import { appNameFromUserId } from '../../fly/apps';
 import type { InstanceMutableState } from './types';
-import { getFlyConfig } from './types';
 import { storageUpdate } from './state';
-import { attemptMetadataRecovery } from './reconcile';
 import { doError, doWarn, toLoggable } from './log';
 
 /**
@@ -99,15 +97,10 @@ export async function restoreFromPostgres(
 
     console.log('[DO] Restored from Postgres: sandboxId =', instance.sandboxId);
 
-    // Attempt to recover machine/volume IDs via Fly metadata.
-    try {
-      const flyConfig = getFlyConfig(env, state);
-      await attemptMetadataRecovery(flyConfig, ctx, state, 'postgres_restore');
-    } catch (err) {
-      doWarn(state, 'Metadata recovery after Postgres restore failed', {
-        error: toLoggable(err),
-      });
-    }
+    // Machine/volume recovery is intentionally NOT done here.
+    // The caller (_startInner) already calls attemptMetadataRecovery after restore.
+    // Calling it here too would set the recovery cooldown, causing the caller's
+    // attempt to short-circuit and incorrectly abort machine creation.
   } catch (err) {
     doError(state, 'Postgres restore failed', { error: toLoggable(err) });
   }
