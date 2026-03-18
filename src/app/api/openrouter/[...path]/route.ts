@@ -403,10 +403,15 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
 
   const userId = generateProviderSpecificHash(user.id, provider);
   if (requestBodyParsed.kind === 'messages') {
-    requestBodyParsed.body.metadata = { user_id: userId };
-    requestBodyParsed.body.user = userId;
-    if (taskId) {
-      requestBodyParsed.body.session_id = generateProviderSpecificHash(user.id + taskId, provider);
+    requestBodyParsed.body.metadata = { ...requestBodyParsed.body.metadata, user_id: userId };
+    if (provider.id === 'openrouter') {
+      requestBodyParsed.body.user = userId;
+      if (taskId) {
+        requestBodyParsed.body.session_id = generateProviderSpecificHash(
+          user.id + taskId,
+          provider
+        );
+      }
     }
   } else {
     if (taskId) {
