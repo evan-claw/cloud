@@ -4044,6 +4044,28 @@ export class TownDO extends DurableObject<Env> {
     };
   }
 
+  // DEBUG: concise non-terminal bead summary — remove after debugging
+  async debugBeadSummary(): Promise<unknown[]> {
+    return [
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${beads.bead_id},
+                 ${beads.type},
+                 ${beads.status},
+                 ${beads.title},
+                 ${beads.assignee_agent_bead_id},
+                 ${beads.updated_at}
+          FROM ${beads}
+          WHERE ${beads.status} NOT IN ('closed', 'failed')
+            AND ${beads.type} != 'agent'
+          ORDER BY ${beads.type}, ${beads.status}
+        `,
+        []
+      ),
+    ];
+  }
+
   // DEBUG: raw agent_metadata dump — remove after debugging
   async debugAgentMetadata(): Promise<unknown[]> {
     return [

@@ -193,6 +193,18 @@ app.get('/', c => c.html(dashboardHtml()));
 
 app.get('/health', c => c.json({ status: 'ok' }));
 
+// ── DEBUG: unauthenticated town introspection — REMOVE after debugging ──
+app.get('/debug/towns/:townId/status', async c => {
+  const townId = c.req.param('townId');
+  const town = getTownDOStub(c.env, townId);
+  const alarmStatus = await town.getAlarmStatus();
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC returns promise at runtime
+  const agentMeta = await town.debugAgentMetadata();
+  // eslint-disable-next-line @typescript-eslint/await-thenable
+  const beadSummary = await town.debugBeadSummary();
+  return c.json({ alarmStatus, agentMeta, beadSummary });
+});
+
 // ── Town ID + Auth ──────────────────────────────────────────────────────
 // All rig routes live under /api/towns/:townId/rigs/:rigId so the townId
 // is always available from the URL path.
