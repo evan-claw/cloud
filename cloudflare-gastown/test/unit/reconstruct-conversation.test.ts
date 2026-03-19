@@ -9,10 +9,7 @@ import { type RigAgentEventRecord } from '../../src/db/tables/rig-agent-events.t
 
 let nextId = 1;
 
-function makeEvent(
-  event_type: string,
-  data: Record<string, unknown>
-): RigAgentEventRecord {
+function makeEvent(event_type: string, data: Record<string, unknown>): RigAgentEventRecord {
   return {
     id: nextId++,
     agent_id: 'test-agent',
@@ -22,21 +19,34 @@ function makeEvent(
   };
 }
 
-function messageUpdated(id: string, role: 'user' | 'assistant', extra: Record<string, unknown> = {}) {
+function messageUpdated(
+  id: string,
+  role: 'user' | 'assistant',
+  extra: Record<string, unknown> = {}
+) {
   return makeEvent('message.updated', {
     sessionID: 'sess-1',
     info: { id, role, sessionID: 'sess-1', ...extra },
   });
 }
 
-function messageCompleted(id: string, role: 'user' | 'assistant', extra: Record<string, unknown> = {}) {
+function messageCompleted(
+  id: string,
+  role: 'user' | 'assistant',
+  extra: Record<string, unknown> = {}
+) {
   return makeEvent('message.completed', {
     sessionID: 'sess-1',
     info: { id, role, sessionID: 'sess-1', ...extra },
   });
 }
 
-function textPartUpdated(messageID: string, partId: string, text: string, extra: Record<string, unknown> = {}) {
+function textPartUpdated(
+  messageID: string,
+  partId: string,
+  text: string,
+  extra: Record<string, unknown> = {}
+) {
   return makeEvent('message_part.updated', {
     sessionID: 'sess-1',
     part: { id: partId, messageID, type: 'text', text, ...extra },
@@ -52,7 +62,14 @@ function toolPartUpdated(messageID: string, partId: string) {
       type: 'tool',
       callID: 'call-1',
       tool: 'bash',
-      state: { status: 'completed', input: {}, output: 'ok', title: 'bash', metadata: {}, time: { start: 1, end: 2 } },
+      state: {
+        status: 'completed',
+        input: {},
+        output: 'ok',
+        title: 'bash',
+        metadata: {},
+        time: { start: 1, end: 2 },
+      },
     },
   });
 }
@@ -119,7 +136,12 @@ describe('reconstructConversation', () => {
 
       const turns = reconstructConversation(events);
 
-      expect(turns.map(t => t.content)).toEqual(['Question', 'Answer', 'Follow-up', 'Follow answer']);
+      expect(turns.map(t => t.content)).toEqual([
+        'Question',
+        'Answer',
+        'Follow-up',
+        'Follow answer',
+      ]);
     });
   });
 
