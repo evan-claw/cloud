@@ -573,12 +573,59 @@ export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInpu
   const agent = getAgent(sql, agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
   if (!agent.current_hook_bead_id) {
-    // The agent was unhooked by a recovery path (witnessPatrol, rehookOrphanedBeads)
-    // between when the agent finished work and when it called gt_done.
-    // This is expected during container restarts. Log and return gracefully
-    // rather than 500ing — the recovery paths will handle the bead lifecycle.
+    // The agent was unhooked by a recovery path (witnessPatrol,
+    // rehookOrphanedBeads) between when the agent finished work and
+    // when it called gt_done.
+    //
+    // For refineries, this is critical: the refinery successfully merged
+    // but the hook was cleared by zombie detection. We MUST still complete
+    // the review — otherwise the source bead stays open forever. Find the
+    // most recent non-closed MR bead assigned to this agent and complete it.
+    if (agent.role === 'refinery') {
+      const recentMrRows = [
+        ...query(
+          sql,
+          /* sql */ `
+            SELECT ${beads.bead_id}
+            FROM ${beads}
+            WHERE ${beads.type} = 'merge_request'
+              AND ${beads.assignee_agent_bead_id} = ?
+              AND ${beads.status} NOT IN ('closed', 'failed')
+            ORDER BY ${beads.updated_at} DESC
+            LIMIT 1
+          `,
+          [agentId]
+        ),
+      ];
+      if (recentMrRows.length > 0) {
+        const mrBeadId = z.object({ bead_id: z.string() }).parse(recentMrRows[0]).bead_id;
+        console.log(
+          `[review-queue] agentDone: unhooked refinery ${agentId} — recovering MR bead ${mrBeadId}`
+        );
+        if (input.pr_url) {
+          const stored = setReviewPrUrl(sql, mrBeadId, input.pr_url);
+          if (stored) {
+            markReviewInReview(sql, mrBeadId);
+          } else {
+            completeReviewWithResult(sql, {
+              entry_id: mrBeadId,
+              status: 'failed',
+              message: `Refinery provided invalid pr_url: ${input.pr_url}`,
+            });
+          }
+        } else {
+          completeReviewWithResult(sql, {
+            entry_id: mrBeadId,
+            status: 'merged',
+            message: input.summary ?? 'Merged by refinery agent (recovered from unhook)',
+          });
+        }
+        return;
+      }
+    }
+
     console.warn(
-      `[review-queue] agentDone: agent ${agentId} has no hooked bead (likely unhooked by recovery) — ignoring`
+      `[review-queue] agentDone: agent ${agentId} (role=${agent.role}) has no hooked bead — ignoring`
     );
     return;
   }
