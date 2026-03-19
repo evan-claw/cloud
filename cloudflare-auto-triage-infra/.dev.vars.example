@@ -9,5 +9,5 @@ BACKEND_AUTH_TOKEN=your-backend-auth-token
 
 # Cloud agent URL for triage execution
 # For local development: use http://127.0.0.1:8788
-# For production: use https://cloud-agent.kilosessions.ai
+# For production: use https://cloud-agent-next.kilosessions.ai
 CLOUD_AGENT_URL=http://127.0.0.1:8788
