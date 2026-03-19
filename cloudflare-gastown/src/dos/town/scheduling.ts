@@ -152,7 +152,10 @@ export async function dispatchAgent(
         role: agent.role,
       });
     } else {
-      // Container failed — roll back agent to idle, bead to open
+      // Container failed — roll back agent to idle, bead to open.
+      // Use bead.bead_id (the actual bead being dispatched) rather than
+      // agent.current_hook_bead_id which may be stale if the agent
+      // snapshot was taken before hookBead was called.
       query(
         ctx.sql,
         /* sql */ `
@@ -162,9 +165,7 @@ export async function dispatchAgent(
         `,
         [agent.id]
       );
-      if (agent.current_hook_bead_id) {
-        beadOps.updateBeadStatus(ctx.sql, agent.current_hook_bead_id, 'open', agent.id);
-      }
+      beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
       ctx.emitEvent({
         event: 'agent.dispatch_failed',
         townId: ctx.townId,
@@ -188,9 +189,7 @@ export async function dispatchAgent(
         `,
         [agent.id]
       );
-      if (agent.current_hook_bead_id) {
-        beadOps.updateBeadStatus(ctx.sql, agent.current_hook_bead_id, 'open', agent.id);
-      }
+      beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
     } catch (rollbackErr) {
       console.error(`${LOG} dispatchAgent: rollback also failed:`, rollbackErr);
     }
