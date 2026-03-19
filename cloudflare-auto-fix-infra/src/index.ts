@@ -5,13 +5,28 @@
  */
 
 import { Hono } from 'hono';
-import type { Env, FixRequest, FixResponse } from './types';
+import { z } from 'zod';
+import type { Env, FixRequest, FixResponse, SessionInput } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
 import { AutoFixOrchestrator } from './fix-orchestrator';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const fixRequestSchema = z.object({
+  ticketId: z.string(),
+  authToken: z.string(),
+  sessionInput: z.custom<SessionInput>(v => typeof v === 'object' && v !== null),
+  owner: ownerSchema,
+  triggerSource: z.enum(['label', 'review_comment']).optional(),
+}) satisfies z.ZodType<FixRequest>;
 
 // Export the Durable Object class
 export { AutoFixOrchestrator };
@@ -39,12 +54,11 @@ app.get('/health', c => {
  */
 app.post('/fix/dispatch', async c => {
   try {
-    const body = await c.req.json<FixRequest>();
-
-    // Validate required fields
-    if (!body.ticketId || !body.authToken || !body.sessionInput || !body.owner) {
-      return c.json({ error: 'Missing required fields' }, 400);
+    const parsed = fixRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return c.json({ success: false, error: parsed.error.format() }, 400);
     }
+    const body = parsed.data;
 
     // Get or create Durable Object instance
     const id = c.env.AUTO_FIX_ORCHESTRATOR.idFromName(body.ticketId);

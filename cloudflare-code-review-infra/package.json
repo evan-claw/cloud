@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@kilocode/worker-utils": "workspace:*",
-    "hono": "catalog:"
+    "hono": "catalog:",
+    "zod": "catalog:"
   }
 }
