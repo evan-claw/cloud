@@ -3,9 +3,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { toFetchResponse, toReqRes } from 'fetch-to-node';
 import { z } from 'zod';
 import { validateToken, type ImageMCPTokenClaims } from './auth/jwt';
+import { logger } from './logger';
 import { createR2Client } from './r2/client';
-import { transferImage } from './tools/transfer-image';
 import { getImage } from './tools/get-image';
+import { transferImage } from './tools/transfer-image';
 
 function createMCPServer(env: Env, claims: ImageMCPTokenClaims): McpServer {
   const server = new McpServer({
@@ -37,8 +38,13 @@ function createMCPServer(env: Env, claims: ImageMCPTokenClaims): McpServer {
         ),
     },
     async ({ sourcePath }) => {
-      const publicUrl = await transferImage({ sourcePath, claims, r2, bucketPublicUrls });
-      return { content: [{ type: 'text' as const, text: publicUrl }] };
+      try {
+        const publicUrl = await transferImage({ sourcePath, claims, r2, bucketPublicUrls });
+        return { content: [{ type: 'text' as const, text: publicUrl }] };
+      } catch (error) {
+        logger.error('transfer_image tool error', { error: error instanceof Error ? error.message : String(error), sourcePath });
+        throw error;
+      }
     }
   );
 
@@ -53,16 +59,21 @@ function createMCPServer(env: Env, claims: ImageMCPTokenClaims): McpServer {
         ),
     },
     async ({ sourcePath }) => {
-      const imageContent = await getImage({ sourcePath, claims, r2 });
-      return {
-        content: [
-          {
-            type: 'image' as const,
-            data: imageContent.data,
-            mimeType: imageContent.mimeType,
-          },
-        ],
-      };
+      try {
+        const imageContent = await getImage({ sourcePath, claims, r2 });
+        return {
+          content: [
+            {
+              type: 'image' as const,
+              data: imageContent.data,
+              mimeType: imageContent.mimeType,
+            },
+          ],
+        };
+      } catch (error) {
+        logger.error('get_image tool error', { error: error instanceof Error ? error.message : String(error), sourcePath });
+        throw error;
+      }
     }
   );
 
@@ -112,6 +123,7 @@ export default {
       claims = validateToken(authHeader, secret);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Authentication failed';
+      logger.warn('JWT validation failed', { error: message });
       return withCorsHeaders(
         new Response(JSON.stringify({ error: message }), {
           status: 401,
@@ -121,7 +133,18 @@ export default {
     }
 
     // Create a per-request MCP server scoped to this JWT's claims
-    const server = createMCPServer(env, claims);
+    let server: McpServer | undefined;
+    try {
+      server = createMCPServer(env, claims);
+    } catch (error) {
+      logger.error('Failed to create MCP server', { error: error instanceof Error ? error.message : String(error) });
+      return withCorsHeaders(
+        new Response(JSON.stringify({ error: 'Internal server error' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+    }
 
     // Use stateless StreamableHTTP transport (no session persistence needed)
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -129,7 +152,12 @@ export default {
 
     // Convert Fetch Request to Node-compatible req/res for the MCP SDK
     const { req, res } = toReqRes(request);
-    await transport.handleRequest(req, res);
+    try {
+      await transport.handleRequest(req, res);
+    } catch (error) {
+      logger.error('MCP transport handler error', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
     return withCorsHeaders(await toFetchResponse(res));
   },
 } satisfies ExportedHandler<Env>;

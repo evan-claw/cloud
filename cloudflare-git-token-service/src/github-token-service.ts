@@ -1,5 +1,6 @@
 import { createAppAuth } from '@octokit/auth-app';
 import * as z from 'zod';
+import { logger } from './logger.js';
 
 type Token = z.infer<typeof Token>;
 const Token = z.object({
@@ -51,9 +52,11 @@ export class GitHubTokenService {
     const cacheKey = `${installationId}:${appType}:${repoName}`;
     const cached = await this.getCachedToken(cacheKey);
     if (cached) {
+      logger.info('GitHub token cache hit', { installationId, appType, repoName });
       return cached;
     }
 
+    logger.info('GitHub token cache miss, generating new token', { installationId, appType, repoName });
     const credentials = this.getCredentials(appType);
     const { token, expiresAt } = await this.generateToken(numericId, credentials, [repoName]);
     await this.cacheToken(cacheKey, token, expiresAt);
@@ -71,9 +74,11 @@ export class GitHubTokenService {
     const cacheKey = `${installationId}:${appType}`;
     const cached = await this.getCachedToken(cacheKey);
     if (cached) {
+      logger.info('GitHub token cache hit', { installationId, appType });
       return cached;
     }
 
+    logger.info('GitHub token cache miss, generating new token', { installationId, appType });
     const credentials = this.getCredentials(appType);
     const { token, expiresAt } = await this.generateToken(numericId, credentials);
     await this.cacheToken(cacheKey, token, expiresAt);
@@ -156,7 +161,7 @@ export class GitHubTokenService {
         expiresAt: new Date(result.expiresAt).getTime(),
       };
     } catch (error) {
-      console.error('Failed to generate GitHub token:', error);
+      logger.error('Failed to generate GitHub token', { error: error instanceof Error ? error.message : String(error), installationId });
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to generate GitHub installation token: ${message}`);
     }

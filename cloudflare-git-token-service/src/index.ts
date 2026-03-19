@@ -3,6 +3,7 @@ import { GitHubTokenService, type GitHubAppType } from './github-token-service.j
 import { GitLabLookupService } from './gitlab-lookup-service.js';
 import { GitLabTokenService } from './gitlab-token-service.js';
 import { InstallationLookupService } from './installation-lookup-service.js';
+import { logger } from './logger.js';
 
 export type GetTokenForRepoParams = {
   githubRepo: string;
@@ -79,25 +80,33 @@ export class GitTokenRPCEntrypoint extends WorkerEntrypoint<CloudflareEnv> {
    * @returns Token and installation details, or a failure reason
    */
   async getTokenForRepo(params: GetTokenForRepoParams): Promise<GetTokenForRepoResult> {
+    logger.info('getTokenForRepo called', { githubRepo: params.githubRepo, userId: params.userId });
+
     // 1. Look up installation
     const installation = await this.installationLookupService.findInstallationId(params);
     if (!installation.success) {
+      logger.warn('getTokenForRepo: installation lookup failed', { reason: installation.reason, githubRepo: params.githubRepo });
       return installation;
     }
 
     // 2. Generate token for the installation (not scoped to specific repo)
-    const token = await this.githubService.getToken(
-      installation.installationId,
-      installation.githubAppType
-    );
+    try {
+      const token = await this.githubService.getToken(
+        installation.installationId,
+        installation.githubAppType
+      );
 
-    return {
-      success: true,
-      token,
-      installationId: installation.installationId,
-      accountLogin: installation.accountLogin,
-      appType: installation.githubAppType,
-    };
+      return {
+        success: true,
+        token,
+        installationId: installation.installationId,
+        accountLogin: installation.accountLogin,
+        appType: installation.githubAppType,
+      };
+    } catch (error) {
+      logger.error('getTokenForRepo: token generation failed', { error: error instanceof Error ? error.message : String(error), installationId: installation.installationId });
+      throw error;
+    }
   }
 
   /**
@@ -111,7 +120,13 @@ export class GitTokenRPCEntrypoint extends WorkerEntrypoint<CloudflareEnv> {
    * @returns The installation access token
    */
   async getToken(installationId: string, appType: GitHubAppType = 'standard'): Promise<string> {
-    return this.githubService.getToken(installationId, appType);
+    logger.info('getToken called', { installationId, appType });
+    try {
+      return await this.githubService.getToken(installationId, appType);
+    } catch (error) {
+      logger.error('getToken failed', { error: error instanceof Error ? error.message : String(error), installationId, appType });
+      throw error;
+    }
   }
 
   /**
@@ -124,12 +139,24 @@ export class GitTokenRPCEntrypoint extends WorkerEntrypoint<CloudflareEnv> {
    * @returns Token and instance URL, or a failure reason
    */
   async getGitLabToken(params: GetGitLabTokenParams): Promise<GetGitLabTokenResult> {
+    logger.info('getGitLabToken called', { userId: params.userId });
+
     const integration = await this.gitlabLookupService.findGitLabIntegration(params);
     if (!integration.success) {
+      logger.warn('getGitLabToken: integration lookup failed', { reason: integration.reason, userId: params.userId });
       return integration;
     }
 
-    return this.gitlabTokenService.getToken(integration.integrationId, integration.metadata);
+    try {
+      const result = await this.gitlabTokenService.getToken(integration.integrationId, integration.metadata);
+      if (!result.success) {
+        logger.warn('getGitLabToken: token retrieval failed', { reason: result.reason, integrationId: integration.integrationId });
+      }
+      return result;
+    } catch (error) {
+      logger.error('getGitLabToken: unexpected error', { error: error instanceof Error ? error.message : String(error), integrationId: integration.integrationId });
+      throw error;
+    }
   }
 }
 
