@@ -13,6 +13,9 @@
   "observability": {
     "enabled": true,
   },
+  "placement": {
+    "mode": "smart",
+  },
   "vars": {
     "BUCKET_PUBLIC_URLS": "{\"app-builder-assets\": \"https://assets.kiloapps.io\"}",
   },
