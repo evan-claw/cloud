@@ -383,7 +383,15 @@ async function reconcileRestarting(
   try {
     const machine = await fly.getMachine(flyConfig, state.flyMachineId);
     if (machine.state === 'started') {
-      await markRestartSuccessful(ctx, state);
+      if (!state.lastRestartErrorMessage) {
+        await markRestartSuccessful(ctx, state);
+        await reconcileVolume(flyConfig, ctx, state, env, reason);
+        return;
+      }
+      // Machine is started but background reported an error — the update
+      // may never have run, so started likely means old config. Don't let
+      // syncStatusWithFly() overwrite restarting → running. Let the
+      // timeout path surface the error to the user.
       await reconcileVolume(flyConfig, ctx, state, env, reason);
       return;
     }

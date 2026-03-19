@@ -4933,7 +4933,7 @@ describe('restartMachine restartingAt guard', () => {
     expect(storage._store.get('lastRestartErrorMessage')).toBeNull();
   });
 
-  it('records durable restart error on background failure and later reconcile recovers to running', async () => {
+  it('does not falsely recover when background failed but machine reports started', async () => {
     const { instance, storage, waitUntilPromises } = createInstance();
     await seedRunning(storage);
 
@@ -4948,7 +4948,7 @@ describe('restartMachine restartingAt guard', () => {
     expect(storage._store.get('status')).toBe('restarting');
     expect(storage._store.get('lastRestartErrorMessage')).toBe('Fly API error');
 
-    (flyClient.updateMachine as Mock).mockResolvedValue(undefined);
+    // Machine is still started with old config — update never ran.
     (flyClient.getMachine as Mock).mockResolvedValue({
       id: 'machine-1',
       state: 'started',
@@ -4957,9 +4957,10 @@ describe('restartMachine restartingAt guard', () => {
 
     await instance.alarm();
 
-    expect(storage._store.get('status')).toBe('running');
-    expect(storage._store.get('restartingAt')).toBeNull();
-    expect(storage._store.get('lastRestartErrorMessage')).toBeNull();
+    // Reconcile must NOT clear the error or declare success — the update
+    // never happened, so started means old config is still running.
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('Fly API error');
   });
 
   it('allows restart from stopped when a machine exists', async () => {
@@ -5099,6 +5100,25 @@ describe('restartMachine restartingAt guard', () => {
     expect(storage._store.get('status')).toBe('stopped');
     expect(storage._store.get('restartingAt')).toBeNull();
     expect(storage._store.get('lastRestartErrorMessage')).toBe('prior restart error');
+  });
+
+  it('does not falsely mark restart successful when background failed but machine is still started', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage, {
+      lastRestartErrorMessage: 'stopMachineAndWait failed: 500',
+      lastRestartErrorAt: Date.now() - 30_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'started',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('stopMachineAndWait failed: 500');
   });
 
   it('handles restart reconciliation after a fresh DO instance loads persisted state', async () => {
