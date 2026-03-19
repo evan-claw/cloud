@@ -52,6 +52,8 @@ import { getAgentDOStub } from './Agent.do';
 import { getTownContainerStub } from './TownContainer.do';
 
 import { writeEvent, type GastownEventData } from '../util/analytics.util';
+import { reconstructConversation } from '../util/reconstruct-conversation.util';
+import { RigAgentEventRecord } from '../db/tables/rig-agent-events.table';
 import { BeadPriority } from '../types';
 import type {
   TownConfig,
@@ -1834,6 +1836,17 @@ export class TownDO extends DurableObject<Env> {
         }
       }
 
+      // Reconstruct the prior conversation so the Mayor resumes with full context.
+      const rawEvents = await this.getAgentEvents(mayor.id);
+      const priorEvents = RigAgentEventRecord.array().safeParse(rawEvents);
+      const priorTurns = priorEvents.success ? reconstructConversation(priorEvents.data) : [];
+      const priorTranscript =
+        priorTurns.length > 0
+          ? priorTurns
+              .map(t => `[${t.role === 'user' ? 'User' : 'Assistant'}]: ${t.content}`)
+              .join('\n\n')
+          : '';
+
       const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
         townId,
         rigId: `mayor-${townId}`,
@@ -1844,8 +1857,10 @@ export class TownDO extends DurableObject<Env> {
         identity: mayor.identity,
         beadId: '',
         beadTitle: message,
-        beadBody: '',
-        checkpoint: null,
+        beadBody: priorTranscript
+          ? `Prior conversation:\n\n${priorTranscript}`
+          : '',
+        checkpoint: mayor.checkpoint,
         gitUrl: rigConfig?.gitUrl ?? '',
         defaultBranch: rigConfig?.defaultBranch ?? 'main',
         kilocodeToken,
