@@ -191,6 +191,11 @@ async function exec(cmd: string, args: string[], cwd?: string): Promise<string> 
       // Public repos clone without auth; private repos fail fast with
       // a clear error instead of hanging on a username prompt.
       GIT_TERMINAL_PROMPT: '0',
+      // Skip LFS smudge filter during checkout/worktree operations.
+      // Agents don't need binary assets (videos, images, etc.) and
+      // LFS downloads can fail when the credential helper doesn't
+      // cover the LFS batch endpoint, blocking worktree creation.
+      GIT_LFS_SKIP_SMUDGE: '1',
     },
   });
 
