@@ -7,8 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { DiscordIcon } from './icons/DiscordIcon';
 import { ChannelTokenInput } from './ChannelTokenInput';
-import SlackIcon from '@/app/(app)/claw/components/icons/SlackIcon';
-import TelegramIcon from '@/app/(app)/claw/components/icons/TelegramIcon';
+import { SlackIcon } from './icons/SlackIcon';
+import { TelegramIcon } from './icons/TelegramIcon';
 
 type ChannelId = 'telegram' | 'discord' | 'slack';
 
@@ -77,7 +77,7 @@ export function ChannelSelectionStep({
   onSelect,
   onSkip,
 }: {
-  onSelect: (channelId: ChannelId) => void;
+  onSelect: (channelId: ChannelId, tokens: Record<string, string>) => void;
   onSkip: () => void;
 }) {
   return <ChannelSelectionStepView onSelect={onSelect} onSkip={onSkip} />;
@@ -89,7 +89,7 @@ export function ChannelSelectionStepView({
   onSkip,
   defaultSelected = null,
 }: {
-  onSelect?: (channelId: ChannelId) => void;
+  onSelect?: (channelId: ChannelId, tokens: Record<string, string>) => void;
   onSkip?: () => void;
   defaultSelected?: ChannelId | null;
 }) {
@@ -178,7 +178,7 @@ export function ChannelSelectionStepView({
         <Button
           className="w-full bg-emerald-600 py-6 text-base text-white hover:bg-emerald-700"
           disabled={!isChannelValid(selected, tokens)}
-          onClick={() => selected && onSelect?.(selected)}
+          onClick={() => selected && onSelect?.(selected, tokens)}
         >
           Continue
           <ChevronRight className="ml-1 h-5 w-5" />
@@ -213,14 +213,17 @@ function ChannelCard({
     <div
       className={cn(
         'relative flex flex-col rounded-xl border transition-colors',
-        isSelected ? 'border-blue-500/60' : 'border-border hover:border-muted-foreground/40'
+        isSelected
+          ? 'border-blue-500/60 bg-blue-500/8'
+          : 'border-border hover:border-muted-foreground/40'
       )}
-      style={isSelected ? { backgroundColor: '#4f7fff14' } : undefined}
     >
       <button type="button" onClick={onSelect} className="flex cursor-pointer gap-4 p-5 text-left">
         <div
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: isSelected ? '#229ed933' : 'var(--color-muted)' }}
+          className={cn(
+            'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg',
+            isSelected ? 'bg-sky-600/20' : 'bg-muted'
+          )}
         >
           <Icon className="h-6 w-6" />
         </div>

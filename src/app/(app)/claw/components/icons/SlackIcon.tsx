@@ -1,4 +1,4 @@
-export default function SlackIcon({ className }: { className?: string }) {
+export function SlackIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 127 127" xmlns="http://www.w3.org/2000/svg">
       <path
