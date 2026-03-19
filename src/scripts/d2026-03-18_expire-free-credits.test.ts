@@ -13,7 +13,7 @@ import '../lib/load-env';
 import { execSync } from 'node:child_process';
 import { db, closeAllDrizzleConnections } from '@/lib/drizzle';
 import { credit_transactions, kilocode_users } from '@kilocode/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { defineTestUser } from '@/tests/helpers/user.helper';
 
 // ── Test user IDs (prefixed to avoid collisions) ────────────────────────────
@@ -557,7 +557,7 @@ async function main() {
 
     console.log('Running expire-free-credits script with --execute...\n');
     const output = execSync(
-      'pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --execute',
+      'pnpm script src/scripts/d2026-03-18_expire-free-credits.ts --execute --batch-size=1',
       {
         cwd: process.cwd(),
         encoding: 'utf-8',

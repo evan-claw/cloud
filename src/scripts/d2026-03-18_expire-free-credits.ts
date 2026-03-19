@@ -350,28 +350,34 @@ async function main() {
     });
   }
 
-  let lastId = '';
+  let lastUserId = '';
   let totalCredits = 0;
   let totalProjectedExpiration = 0;
   let usersProcessed = 0;
   let totalErrors = 0;
 
+  const baseFilter = and(
+    categoryFilter,
+    eq(credit_transactions.is_free, true),
+    isNull(credit_transactions.expiry_date),
+    isNull(credit_transactions.organization_id)
+  );
+
   while (true) {
-    // Query credits matching any (category, description) pair
+    // Fetch all matching credits for the next batch of users in one query.
+    // The subquery selects the next N distinct user IDs; the outer query
+    // fetches every matching credit row for those users.
+    const userIdSubquery = db
+      .selectDistinct({ kilo_user_id: credit_transactions.kilo_user_id })
+      .from(credit_transactions)
+      .where(and(baseFilter, gt(credit_transactions.kilo_user_id, lastUserId)))
+      .orderBy(credit_transactions.kilo_user_id)
+      .limit(batchSize);
+
     const batch = await db
       .select()
       .from(credit_transactions)
-      .where(
-        and(
-          categoryFilter,
-          eq(credit_transactions.is_free, true),
-          isNull(credit_transactions.expiry_date),
-          isNull(credit_transactions.organization_id),
-          gt(credit_transactions.kilo_user_id, lastId)
-        )
-      )
-      .orderBy(credit_transactions.kilo_user_id)
-      .limit(batchSize);
+      .where(and(baseFilter, inArray(credit_transactions.kilo_user_id, userIdSubquery)));
 
     if (batch.length === 0) break;
     totalCredits += batch.length;
@@ -420,7 +426,7 @@ async function main() {
       }
     }
 
-    lastId = batch[batch.length - 1].kilo_user_id;
+    lastUserId = [...byUser.keys()].sort().pop()!;
     console.log(
       `  ${totalCredits} credits fetched, ${usersProcessed} users processed, ${totalErrors} errors`
     );
