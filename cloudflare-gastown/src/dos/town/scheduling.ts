@@ -7,6 +7,7 @@
  */
 
 import * as Sentry from '@sentry/cloudflare';
+import { z } from 'zod';
 import { beads, AgentBeadRecord } from '../../db/tables/beads.table';
 import { agent_metadata } from '../../db/tables/agent-metadata.table';
 import { query } from '../../util/query.util';
@@ -260,7 +261,7 @@ export async function schedulePendingWork(ctx: SchedulingContext): Promise<void>
         SELECT ${beads}.*,
                ${agent_metadata.role}, ${agent_metadata.identity},
                ${agent_metadata.container_process_id},
-               ${agent_metadata.status} AS status,
+               ${agent_metadata.status} AS agent_status,
                ${agent_metadata.current_hook_bead_id},
                ${agent_metadata.dispatch_attempts}, ${agent_metadata.last_activity_at},
                ${agent_metadata.checkpoint},
@@ -275,23 +276,31 @@ export async function schedulePendingWork(ctx: SchedulingContext): Promise<void>
       [cooldownCutoff]
     ),
   ];
-  const pendingAgents: Agent[] = AgentBeadRecord.array()
-    .parse(rows)
-    .map(row => ({
-      id: row.bead_id,
-      rig_id: row.rig_id,
-      role: row.role,
-      name: row.title,
-      identity: row.identity,
-      status: row.status,
-      current_hook_bead_id: row.current_hook_bead_id,
-      dispatch_attempts: row.dispatch_attempts,
-      last_activity_at: row.last_activity_at,
-      checkpoint: row.checkpoint,
-      created_at: row.created_at,
-      agent_status_message: row.agent_status_message,
-      agent_status_updated_at: row.agent_status_updated_at,
-    }));
+  // Parse rows as AgentBeadRecord — the agent_metadata.status is aliased
+  // as agent_status (not status) to avoid overwriting beads.status which
+  // has a different enum (open/in_progress/... vs idle/working/...).
+  const parsed = z
+    .array(AgentBeadRecord.extend({ agent_status: z.string() }))
+    .safeParse(rows);
+  if (!parsed.success) {
+    console.error(`${LOG} schedulePendingWork: Zod parse failed:`, parsed.error.issues.slice(0, 3));
+    return;
+  }
+  const pendingAgents: Agent[] = parsed.data.map(row => ({
+    id: row.bead_id,
+    rig_id: row.rig_id,
+    role: row.role,
+    name: row.title,
+    identity: row.identity,
+    status: row.agent_status,
+    current_hook_bead_id: row.current_hook_bead_id,
+    dispatch_attempts: row.dispatch_attempts,
+    last_activity_at: row.last_activity_at,
+    checkpoint: row.checkpoint,
+    created_at: row.created_at,
+    agent_status_message: row.agent_status_message,
+    agent_status_updated_at: row.agent_status_updated_at,
+  }));
 
   console.log(`${LOG} schedulePendingWork: found ${pendingAgents.length} pending agents`);
   if (pendingAgents.length === 0) return;
