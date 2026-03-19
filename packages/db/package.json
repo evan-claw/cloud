@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
+    "lint": "pnpm run lint:oxlint && pnpm run lint:eslint:fallback",
+    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json packages/db/src",
+    "lint:eslint:fallback": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "exports": {
     ".": "./src/index.ts",

@@ -5,7 +5,12 @@ import { Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { type ExecPreset, type ClawMutations, execPresetToConfig } from './claw.types';
+import {
+  type ExecPreset,
+  type ClawMutations,
+  execPresetToConfig,
+  channelTokensToConfigPatch,
+} from './claw.types';
 
 /** Play a short chime via the Web Audio API. */
 function playChime() {
@@ -27,11 +32,13 @@ function playChime() {
 
 export function ProvisioningStep({
   preset,
+  channelTokens,
   instanceRunning,
   mutations,
   onComplete,
 }: {
   preset: ExecPreset;
+  channelTokens: Record<string, string> | null;
   instanceRunning: boolean;
   mutations: ClawMutations;
   onComplete: () => void;
@@ -45,23 +52,42 @@ export function ProvisioningStep({
   onCompleteRef.current = onComplete;
   const patchOpenclawConfigRef = useRef(mutations.patchOpenclawConfig.mutate);
   patchOpenclawConfigRef.current = mutations.patchOpenclawConfig.mutate;
+  const patchChannelsRef = useRef(mutations.patchChannels.mutate);
+  patchChannelsRef.current = mutations.patchChannels.mutate;
+  const channelTokensRef = useRef(channelTokens);
+  channelTokensRef.current = channelTokens;
 
   useEffect(() => {
     if (!instanceRunning || completedRef.current) return;
+    completedRef.current = true;
 
-    if (preset === 'always-ask') {
-      completedRef.current = true;
+    // Build the full openclaw.json patch: exec preset + channel config.
+    const configPatch: Record<string, unknown> = {};
+
+    if (preset !== 'always-ask') {
+      const { security, ask } = execPresetToConfig(preset);
+      configPatch.tools = { exec: { security, ask } };
+    }
+
+    const channelPatch = channelTokensToConfigPatch(channelTokensRef.current);
+    if (channelPatch) Object.assign(configPatch, channelPatch);
+
+    // Also persist channel tokens to durable storage so they survive
+    // machine restarts. Fire-and-forget — the live config patch above
+    // is what matters for the immediate user experience.
+    const tokens = channelTokensRef.current;
+    if (tokens && Object.keys(tokens).length > 0) {
+      patchChannelsRef.current(tokens);
+    }
+
+    if (Object.keys(configPatch).length === 0) {
       playChime();
       onCompleteRef.current();
       return;
     }
 
-    // "never-ask" — deep-merge the exec preset into the live config
-    completedRef.current = true;
-
-    const { security, ask } = execPresetToConfig(preset);
     patchOpenclawConfigRef.current(
-      { patch: { tools: { exec: { security, ask } } } },
+      { patch: configPatch },
       {
         onSuccess: () => {
           playChime();
@@ -89,6 +115,7 @@ export function ProvisioningStepView() {
             Almost there...
           </span>
           <div className="flex gap-1">
+            <span className="h-1.5 w-6 rounded-full bg-blue-500" />
             <span className="h-1.5 w-6 rounded-full bg-blue-500" />
             <span className="h-1.5 w-6 rounded-full bg-blue-500" />
             <span className="h-1.5 w-6 rounded-full bg-blue-500" />

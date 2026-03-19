@@ -19,11 +19,12 @@ export function PermissionStep({
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-              Step 2 of 3
+              Step 2 of 4
             </span>
             <div className="flex gap-1">
               <span className="h-1.5 w-6 rounded-full bg-blue-500" />
               <span className="h-1.5 w-6 rounded-full bg-blue-500" />
+              <span className="bg-muted h-1.5 w-6 rounded-full" />
               <span className="bg-muted h-1.5 w-6 rounded-full" />
             </div>
           </div>

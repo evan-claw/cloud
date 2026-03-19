@@ -17,6 +17,54 @@ export function execPresetToConfig(preset: ExecPreset): { security: string; ask:
   }
 }
 
+/**
+ * Build the openclaw.json config patch that enables a channel with its token(s).
+ * The shape must match what the controller writes in config-writer.ts.
+ *
+ * Returns `null` when the tokens record is empty or null (user skipped).
+ */
+export function channelTokensToConfigPatch(
+  tokens: Record<string, string> | null
+): Record<string, unknown> | null {
+  if (!tokens || Object.keys(tokens).length === 0) return null;
+
+  const patch: Record<string, unknown> = { channels: {}, plugins: { entries: {} } };
+  const channels = patch.channels as Record<string, unknown>;
+  const plugins = (patch.plugins as Record<string, unknown>).entries as Record<string, unknown>;
+
+  if (tokens.telegramBotToken) {
+    channels.telegram = {
+      botToken: tokens.telegramBotToken,
+      enabled: true,
+      dmPolicy: 'pairing',
+    };
+    plugins.telegram = { enabled: true };
+  }
+
+  if (tokens.discordBotToken) {
+    channels.discord = {
+      token: tokens.discordBotToken,
+      enabled: true,
+      dm: { policy: 'pairing' },
+    };
+    plugins.discord = { enabled: true };
+  }
+
+  if (tokens.slackBotToken && tokens.slackAppToken) {
+    channels.slack = {
+      botToken: tokens.slackBotToken,
+      appToken: tokens.slackAppToken,
+      enabled: true,
+    };
+    plugins.slack = { enabled: true };
+  }
+
+  // Nothing was actually mapped (e.g. tokens had unrecognized keys only)
+  if (Object.keys(channels).length === 0) return null;
+
+  return patch;
+}
+
 export const CLAW_STATUS_BADGE: Record<
   Exclude<ClawState, null>,
   { label: string; className: string }
