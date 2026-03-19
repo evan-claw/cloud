@@ -188,12 +188,34 @@ export function submitToReviewQueue(sql: SqlStorage, input: ReviewQueueInput): v
 }
 
 export function popReviewQueue(sql: SqlStorage): ReviewQueueEntry | null {
+  // Pop the oldest open MR bead, but skip any whose source bead already
+  // has another MR in_progress (i.e. a refinery is already reviewing it).
+  // This prevents popping stale MR beads and triggering failReviewWithRework
+  // while an active review is in flight for the same source.
+  //
+  // The source bead is linked via bead_dependencies (dependency_type='tracks'):
+  //   bead_dependencies.bead_id = MR bead
+  //   bead_dependencies.depends_on_bead_id = source bead
   const rows = [
     ...query(
       sql,
       /* sql */ `
         ${REVIEW_JOIN}
         WHERE ${beads.status} = 'open'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${bead_dependencies} AS my_dep
+            INNER JOIN ${bead_dependencies} AS sib_dep
+              ON sib_dep.${bead_dependencies.columns.depends_on_bead_id} = my_dep.${bead_dependencies.columns.depends_on_bead_id}
+              AND sib_dep.${bead_dependencies.columns.dependency_type} = 'tracks'
+            INNER JOIN ${beads} AS sibling
+              ON sibling.${beads.columns.bead_id} = sib_dep.${bead_dependencies.columns.bead_id}
+            WHERE my_dep.${bead_dependencies.columns.bead_id} = ${beads.bead_id}
+              AND my_dep.${bead_dependencies.columns.dependency_type} = 'tracks'
+              AND sibling.${beads.columns.type} = 'merge_request'
+              AND sibling.${beads.columns.status} = 'in_progress'
+              AND sibling.${beads.columns.bead_id} != ${beads.bead_id}
+          )
         ORDER BY ${beads.created_at} ASC
         LIMIT 1
       `,
