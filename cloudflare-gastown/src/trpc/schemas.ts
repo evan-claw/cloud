@@ -66,6 +66,15 @@ export const AgentOutput = z.object({
   agent_status_updated_at: z.string().nullable().optional().default(null),
 });
 
+// AgentEvent (output shape, after transforms)
+export const AgentEventOutput = z.object({
+  id: z.number(),
+  agent_id: z.string(),
+  event_type: z.string(),
+  data: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+
 // BeadEvent (output shape, after transforms)
 export const BeadEventOutput = z.object({
   bead_event_id: z.string(),
@@ -180,6 +189,7 @@ export const RpcRigOutput = rpcSafe(RigOutput);
 export const RpcBeadOutput = rpcSafe(BeadOutput);
 export const RpcAgentOutput = rpcSafe(AgentOutput);
 export const RpcBeadEventOutput = rpcSafe(BeadEventOutput);
+export const RpcAgentEventOutput = rpcSafe(AgentEventOutput);
 export const RpcMayorSendResultOutput = rpcSafe(MayorSendResultOutput);
 export const RpcMayorStatusOutput = rpcSafe(MayorStatusOutput);
 export const RpcStreamTicketOutput = rpcSafe(StreamTicketOutput);
