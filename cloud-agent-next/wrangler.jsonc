@@ -32,6 +32,7 @@
       "head_sampling_rate": 1,
     },
   },
+  "upload_source_maps": true,
   "logpush": true,
   "routes": [
     {
