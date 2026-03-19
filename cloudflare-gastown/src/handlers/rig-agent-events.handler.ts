@@ -64,8 +64,7 @@ export async function handleGetAgentEvents(
   const townId = c.get('townId');
   const events = await withDORetry(
     () => getTownDOStub(c.env, townId),
-    stub =>
-      stub.getAgentEvents(params.agentId, queryParsed.data.after_id, queryParsed.data.limit),
+    stub => stub.getAgentEvents(params.agentId, queryParsed.data.after_id, queryParsed.data.limit),
     'TownDO.getAgentEvents'
   );
 
