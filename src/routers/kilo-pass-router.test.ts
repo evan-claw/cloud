@@ -1299,7 +1299,7 @@ describe('kiloPassRouter', () => {
       expect(active[0]?.stripe_schedule_id).toBe(newScheduleId);
     });
 
-    it('yearly tier upgrade uses Stripe proration and does not reset billing cycle anchor', async () => {
+    it('yearly tier upgrade resets billing cycle anchor and does not prorate (remaining credits issued separately)', async () => {
       const stripeMock = getStripeMock();
       const now = new Date('2026-01-01T00:00:00.000Z');
       const nextYearlyIssueAt = new Date('2027-01-01T00:00:00.000Z').toISOString();
@@ -1342,15 +1342,12 @@ describe('kiloPassRouter', () => {
       const phases = updateCall?.[1]?.phases;
       const newPhase = phases?.[1];
 
-      // Yearly tier upgrades should use Stripe proration so the user is only charged the
-      // prorated difference for the remaining billing period, not a full new year.
+      // Yearly tier upgrades should NOT prorate — remaining credits at the old tier
+      // are issued via maybeIssueYearlyRemainingCredits when the new invoice is paid.
       expect(newPhase).toMatchObject({
-        proration_behavior: 'create_prorations',
+        proration_behavior: 'none',
+        billing_cycle_anchor: 'phase_start',
       });
-
-      // The billing cycle should NOT be reset — the upgrade should prorate within the
-      // existing yearly billing period.
-      expect(newPhase).not.toHaveProperty('billing_cycle_anchor');
     });
 
     it('monthly-to-yearly cadence change anchors billing to phase start so Stripe generates an invoice', async () => {
