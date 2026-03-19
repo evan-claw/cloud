@@ -28,8 +28,11 @@ import { getAgent, unhookBead } from './agents';
 import { getRig } from './rigs';
 import type { ReviewQueueInput, ReviewQueueEntry, AgentDoneInput, Molecule } from '../../types';
 
-// Review entries stuck in 'running' past this timeout are reset to 'pending'
-const REVIEW_RUNNING_TIMEOUT_MS = 5 * 60 * 1000;
+// Review entries stuck in 'running' past this timeout are reset to 'pending'.
+// Set slightly above the dispatch cooldown (2 min) so that zombie
+// detection + cooldown expiry have a chance to recover the agent
+// before we force-reset the MR bead.
+const REVIEW_RUNNING_TIMEOUT_MS = 2.5 * 60 * 1000;
 
 function generateId(): string {
   return crypto.randomUUID();

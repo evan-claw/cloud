@@ -26,13 +26,13 @@ import * as config from './town/config';
 import * as rigs from './town/rigs';
 import * as dispatch from './town/container-dispatch';
 import * as patrol from './town/patrol';
+import * as scheduling from './town/scheduling';
 import { GitHubPRStatusSchema, GitLabMRStatusSchema } from '../util/platform-pr.util';
 
 // Table imports for beads-centric operations
 import {
   beads,
   BeadRecord,
-  AgentBeadRecord,
   EscalationBeadRecord,
   ConvoyBeadRecord,
 } from '../db/tables/beads.table';
@@ -115,8 +115,6 @@ function formatEventMessage(row: Record<string, unknown>): string {
 // Alarm intervals
 const ACTIVE_ALARM_INTERVAL_MS = 5_000; // 5s when agents are active
 const IDLE_ALARM_INTERVAL_MS = 1 * 60_000; // 1m when idle
-const DISPATCH_COOLDOWN_MS = 2 * 60_000; // 2 min — skip agents with recent dispatch activity
-const MAX_DISPATCH_ATTEMPTS = 5;
 
 // Escalation constants
 const STALE_ESCALATION_THRESHOLD_MS = 4 * 60 * 60 * 1000;
@@ -238,6 +236,20 @@ export class TownDO extends DurableObject<Env> {
 
   private emitEvent(data: Omit<GastownEventData, 'userId' | 'delivery'>): void {
     writeEvent(this.env, { ...data, delivery: 'internal', userId: this._ownerUserId });
+  }
+
+  /** Build the context object used by the scheduling sub-module. */
+  private get schedulingCtx(): Parameters<typeof scheduling.dispatchAgent>[0] {
+    return {
+      sql: this.sql,
+      env: this.env,
+      storage: this.ctx.storage,
+      townId: this.townId,
+      getTownConfig: () => this.getTownConfig(),
+      getRigConfig: (rigId: string) => this.getRigConfig(rigId),
+      resolveKilocodeToken: () => this.resolveKilocodeToken(),
+      emitEvent: data => this.emitEvent(data),
+    };
   }
 
   // ── WebSocket: status broadcast ──────────────────────────────────────
@@ -2735,56 +2747,68 @@ export class TownDO extends DurableObject<Env> {
       }
     }
 
-    try {
-      await this.processReviewQueue();
-    } catch (err) {
-      console.error(`${TOWN_LOG} alarm: processReviewQueue failed`, err);
-      Sentry.captureException(err);
-    }
-    try {
-      await this.processConvoyLandings();
-    } catch (err) {
-      console.error(`${TOWN_LOG} alarm: processConvoyLandings failed`, err);
-      Sentry.captureException(err);
-    }
-    try {
-      await this.schedulePendingWork();
-    } catch (err) {
-      console.error(`${TOWN_LOG} alarm: schedulePendingWork failed`, err);
-      Sentry.captureException(err);
-    }
-    try {
-      await this.witnessPatrol();
-    } catch (err) {
-      console.error(`${TOWN_LOG} alarm: witnessPatrol failed`, err);
-      Sentry.captureException(err);
-    }
-    try {
-      this.deaconPatrol();
-    } catch (err) {
-      console.error(`${TOWN_LOG} alarm: deaconPatrol failed`, err);
-      Sentry.captureException(err);
-    }
-    try {
-      await this.deliverPendingMail();
-    } catch (err) {
-      console.warn(`${TOWN_LOG} alarm: deliverPendingMail failed`, err);
-    }
-    try {
-      await this.expireStaleNudges();
-    } catch (err) {
-      console.warn(`${TOWN_LOG} alarm: expireStaleNudges failed`, err);
-    }
-    try {
-      await this.reEscalateStaleEscalations();
-    } catch (err) {
-      console.warn(`${TOWN_LOG} alarm: reEscalation failed`, err);
-    }
-    try {
-      await this.maybeDispatchTriageAgent();
-    } catch (err) {
-      console.warn(`${TOWN_LOG} alarm: maybeDispatchTriageAgent failed`, err);
-    }
+    // ── Phase 1: Patrols (detect dead agents, recover stale state) ───
+    // Patrols run first so that zombie agents are reset to idle and
+    // stale hooks are cleared before the scheduler tries to dispatch.
+    // This lets recovered agents dispatch in the same alarm tick
+    // instead of waiting for the next one.
+    await Promise.allSettled([
+      this.witnessPatrol().catch(err => {
+        console.error(`${TOWN_LOG} alarm: witnessPatrol failed`, err);
+        Sentry.captureException(err);
+      }),
+      // deaconPatrol is sync — wrap in a resolved promise for allSettled
+      Promise.resolve().then(() => {
+        try {
+          this.deaconPatrol();
+        } catch (err) {
+          console.error(`${TOWN_LOG} alarm: deaconPatrol failed`, err);
+          Sentry.captureException(err);
+        }
+      }),
+    ]);
+
+    // ── Phase 2: Review pipeline + scheduling (dispatches agents) ──
+    // processReviewQueue and processConvoyLandings share the review
+    // queue, so they run sequentially. schedulePendingWork runs in
+    // parallel — it only handles non-refinery agents and reads
+    // disjoint state.
+    await Promise.allSettled([
+      (async () => {
+        try {
+          await this.processReviewQueue();
+        } catch (err) {
+          console.error(`${TOWN_LOG} alarm: processReviewQueue failed`, err);
+          Sentry.captureException(err);
+        }
+        try {
+          await this.processConvoyLandings();
+        } catch (err) {
+          console.error(`${TOWN_LOG} alarm: processConvoyLandings failed`, err);
+          Sentry.captureException(err);
+        }
+      })(),
+      scheduling.schedulePendingWork(this.schedulingCtx).catch(err => {
+        console.error(`${TOWN_LOG} alarm: schedulePendingWork failed`, err);
+        Sentry.captureException(err);
+      }),
+    ]);
+
+    // ── Phase 3: Housekeeping (independent, all parallelizable) ────
+    await Promise.allSettled([
+      this.deliverPendingMail().catch(err =>
+        console.warn(`${TOWN_LOG} alarm: deliverPendingMail failed`, err)
+      ),
+      this.expireStaleNudges().catch(err =>
+        console.warn(`${TOWN_LOG} alarm: expireStaleNudges failed`, err)
+      ),
+      this.reEscalateStaleEscalations().catch(err =>
+        console.warn(`${TOWN_LOG} alarm: reEscalation failed`, err)
+      ),
+      this.maybeDispatchTriageAgent().catch(err =>
+        console.warn(`${TOWN_LOG} alarm: maybeDispatchTriageAgent failed`, err)
+      ),
+    ]);
     // Re-arm: fast when active, slow when idle
     const active = this.hasActiveWork();
     const interval = active ? ACTIVE_ALARM_INTERVAL_MS : IDLE_ALARM_INTERVAL_MS;
@@ -2822,309 +2846,21 @@ export class TownDO extends DurableObject<Env> {
   }
 
   private hasActiveWork(): boolean {
-    const activeAgentRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${agent_metadata} WHERE ${agent_metadata.status} IN ('working', 'stalled')`,
-        []
-      ),
-    ];
-    const pendingBeadRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${agent_metadata} WHERE ${agent_metadata.status} = 'idle' AND ${agent_metadata.current_hook_bead_id} IS NOT NULL`,
-        []
-      ),
-    ];
-    const pendingReviewRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${beads} WHERE ${beads.type} = 'merge_request' AND ${beads.status} IN ('open', 'in_progress')`,
-        []
-      ),
-    ];
-    const pendingTriageRows = [
-      ...query(
-        this.sql,
-        /* sql */ `SELECT COUNT(*) as cnt FROM ${beads} WHERE ${beads.type} = 'issue' AND ${beads.labels} LIKE ? AND ${beads.status} = 'open'`,
-        [patrol.TRIAGE_LABEL_LIKE]
-      ),
-    ];
-    return (
-      Number(activeAgentRows[0]?.cnt ?? 0) > 0 ||
-      Number(pendingBeadRows[0]?.cnt ?? 0) > 0 ||
-      Number(pendingReviewRows[0]?.cnt ?? 0) > 0 ||
-      Number(pendingTriageRows[0]?.cnt ?? 0) > 0
-    );
+    return scheduling.hasActiveWork(this.sql);
   }
 
-  /**
-   * Dispatch a single agent to the container. Used for eager dispatch from
-   * slingBead (so agents start immediately) and from schedulePendingWork
-   * (periodic recovery). Returns true if the agent was started.
-   */
-  private async dispatchAgent(agent: Agent, bead: Bead): Promise<boolean> {
-    try {
-      const rigId = agent.rig_id ?? rigs.listRigs(this.sql)[0]?.id ?? '';
-      const rigConfig = rigId ? await this.getRigConfig(rigId) : null;
-      if (!rigConfig) {
-        console.warn(`${TOWN_LOG} dispatchAgent: no rig config for agent=${agent.id} rig=${rigId}`);
-        return false;
-      }
-
-      const townConfig = await this.getTownConfig();
-      const kilocodeToken = await this.resolveKilocodeToken();
-
-      // Check if this bead belongs to a convoy and resolve its feature branch.
-      // Convoy beads branch from the feature branch, not from defaultBranch.
-      const convoyId = beadOps.getConvoyForBead(this.sql, bead.bead_id);
-      const convoyFeatureBranch = convoyId
-        ? beadOps.getConvoyFeatureBranch(this.sql, convoyId)
-        : null;
-
-      // Transition the bead to in_progress BEFORE starting the container.
-      // This must happen synchronously within the DO's I/O gate — the
-      // fire-and-forget pattern used by slingBead/slingConvoy means the
-      // calling RPC may return before startAgentInContainer completes,
-      // closing the I/O gate and preventing further SQL writes.
-      const currentBead = beadOps.getBead(this.sql, bead.bead_id);
-      if (
-        currentBead &&
-        currentBead.status !== 'in_progress' &&
-        currentBead.status !== 'closed' &&
-        currentBead.status !== 'failed'
-      ) {
-        beadOps.updateBeadStatus(this.sql, bead.bead_id, 'in_progress', agent.id);
-      }
-
-      // Set status to 'working' BEFORE the async container start. This
-      // must happen synchronously so the SQL write executes while the I/O
-      // gate is still open. When dispatchAgent is called fire-and-forget
-      // (from slingBead, slingConvoy, dispatchUnblockedBeads), any SQL
-      // writes after the first `await` may be silently dropped because
-      // the DO's RPC response closes the I/O gate. If the container fails
-      // to start, we roll back to 'idle'.
-      const timestamp = now();
-      query(
-        this.sql,
-        /* sql */ `
-          UPDATE ${agent_metadata}
-          SET ${agent_metadata.columns.status} = 'working',
-              ${agent_metadata.columns.dispatch_attempts} = ${agent_metadata.columns.dispatch_attempts} + 1,
-              ${agent_metadata.columns.last_activity_at} = ?
-          WHERE ${agent_metadata.bead_id} = ?
-        `,
-        [timestamp, agent.id]
-      );
-
-      const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
-        townId: this.townId,
-        rigId,
-        userId: rigConfig.userId,
-        agentId: agent.id,
-        agentName: agent.name,
-        role: agent.role,
-        identity: agent.identity,
-        beadId: bead.bead_id,
-        beadTitle: bead.title,
-        beadBody: bead.body ?? '',
-        checkpoint: agent.checkpoint,
-        gitUrl: rigConfig.gitUrl,
-        defaultBranch: rigConfig.defaultBranch,
-        kilocodeToken,
-        townConfig,
-        platformIntegrationId: rigConfig.platformIntegrationId,
-        convoyFeatureBranch: convoyFeatureBranch ?? undefined,
-      });
-
-      if (started) {
-        // Reset dispatch_attempts on success (best-effort — may be
-        // dropped if the I/O gate is already closed, but that's fine
-        // because the agent is already 'working').
-        query(
-          this.sql,
-          /* sql */ `
-            UPDATE ${agent_metadata}
-            SET ${agent_metadata.columns.dispatch_attempts} = 0
-            WHERE ${agent_metadata.bead_id} = ?
-          `,
-          [agent.id]
-        );
-        console.log(`${TOWN_LOG} dispatchAgent: started agent=${agent.name}(${agent.id})`);
-        this.emitEvent({
-          event: 'agent.spawned',
-          townId: this.townId,
-          rigId,
-          agentId: agent.id,
-          beadId: bead.bead_id,
-          role: agent.role,
-        });
-      } else {
-        // Container failed to start — roll back agent to idle and bead
-        // to open so schedulePendingWork can retry on the next alarm.
-        query(
-          this.sql,
-          /* sql */ `
-            UPDATE ${agent_metadata}
-            SET ${agent_metadata.columns.status} = 'idle'
-            WHERE ${agent_metadata.bead_id} = ?
-          `,
-          [agent.id]
-        );
-        if (agent.current_hook_bead_id) {
-          beadOps.updateBeadStatus(this.sql, agent.current_hook_bead_id, 'open', agent.id);
-        }
-        this.emitEvent({
-          event: 'agent.dispatch_failed',
-          townId: this.townId,
-          rigId,
-          agentId: agent.id,
-          beadId: bead.bead_id,
-          role: agent.role,
-        });
-      }
-      return started;
-    } catch (err) {
-      console.error(`${TOWN_LOG} dispatchAgent: failed for agent=${agent.id}:`, err);
-      Sentry.captureException(err, { extra: { agentId: agent.id, beadId: bead.bead_id } });
-      // Roll back agent and bead to prevent them from being stuck in
-      // working/in_progress state when the container call throws.
-      try {
-        query(
-          this.sql,
-          /* sql */ `
-            UPDATE ${agent_metadata}
-            SET ${agent_metadata.columns.status} = 'idle'
-            WHERE ${agent_metadata.bead_id} = ?
-          `,
-          [agent.id]
-        );
-        if (agent.current_hook_bead_id) {
-          beadOps.updateBeadStatus(this.sql, agent.current_hook_bead_id, 'open', agent.id);
-        }
-      } catch (rollbackErr) {
-        console.error(`${TOWN_LOG} dispatchAgent: rollback also failed:`, rollbackErr);
-      }
-      this.emitEvent({
-        event: 'agent.dispatch_failed',
-        townId: this.townId,
-        agentId: agent.id,
-        beadId: bead.bead_id,
-        role: agent.role,
-      });
-      return false;
-    }
+  /** Dispatch a single agent to the container. Delegates to scheduling module. */
+  private dispatchAgent(
+    agent: Agent,
+    bead: Bead,
+    options?: { systemPromptOverride?: string }
+  ): Promise<boolean> {
+    return scheduling.dispatchAgent(this.schedulingCtx, agent, bead, options);
   }
 
-  /**
-   * When a bead closes, find beads that were blocked by it and are now
-   * fully unblocked (all 'blocks' dependencies resolved). Dispatch their
-   * assigned agents.
-   */
+  /** When a bead closes, dispatch any beads it was blocking. */
   private dispatchUnblockedBeads(closedBeadId: string): void {
-    const unblockedIds = beadOps.getNewlyUnblockedBeads(this.sql, closedBeadId);
-    if (unblockedIds.length === 0) return;
-
-    console.log(
-      `${TOWN_LOG} dispatchUnblockedBeads: ${unblockedIds.length} beads unblocked by ${closedBeadId}`
-    );
-
-    for (const beadId of unblockedIds) {
-      const bead = beadOps.getBead(this.sql, beadId);
-      if (!bead || bead.status === 'closed' || bead.status === 'failed') continue;
-
-      // Find the agent hooked to this bead
-      if (!bead.assignee_agent_bead_id) continue;
-      const agent = agents.getAgent(this.sql, bead.assignee_agent_bead_id);
-      if (!agent || agent.status !== 'idle') continue;
-
-      this.dispatchAgent(agent, bead).catch(err =>
-        console.error(
-          `${TOWN_LOG} dispatchUnblockedBeads: fire-and-forget dispatch failed for bead=${beadId}`,
-          err
-        )
-      );
-    }
-  }
-
-  /**
-   * Find idle agents with hooked beads and dispatch them to the container.
-   * Agents whose last_activity_at is within the dispatch cooldown are
-   * skipped — they have a fire-and-forget dispatch already in flight.
-   */
-  private async schedulePendingWork(): Promise<void> {
-    const cooldownCutoff = new Date(Date.now() - DISPATCH_COOLDOWN_MS).toISOString();
-    const rows = [
-      ...query(
-        this.sql,
-        /* sql */ `
-          SELECT ${beads}.*,
-                 ${agent_metadata.role}, ${agent_metadata.identity},
-                 ${agent_metadata.container_process_id},
-                 ${agent_metadata.status} AS status,
-                 ${agent_metadata.current_hook_bead_id},
-                 ${agent_metadata.dispatch_attempts}, ${agent_metadata.last_activity_at},
-                 ${agent_metadata.checkpoint},
-                 ${agent_metadata.agent_status_message}, ${agent_metadata.agent_status_updated_at}
-          FROM ${beads}
-          INNER JOIN ${agent_metadata} ON ${beads.bead_id} = ${agent_metadata.bead_id}
-          WHERE ${agent_metadata.status} = 'idle'
-            AND ${agent_metadata.current_hook_bead_id} IS NOT NULL
-            AND (${agent_metadata.last_activity_at} IS NULL OR ${agent_metadata.last_activity_at} < ?)
-        `,
-        [cooldownCutoff]
-      ),
-    ];
-    const pendingAgents: Agent[] = AgentBeadRecord.array()
-      .parse(rows)
-      .map(row => ({
-        id: row.bead_id,
-        rig_id: row.rig_id,
-        role: row.role,
-        name: row.title,
-        identity: row.identity,
-        status: row.status,
-        current_hook_bead_id: row.current_hook_bead_id,
-        dispatch_attempts: row.dispatch_attempts,
-        last_activity_at: row.last_activity_at,
-        checkpoint: row.checkpoint,
-        created_at: row.created_at,
-        agent_status_message: row.agent_status_message,
-        agent_status_updated_at: row.agent_status_updated_at,
-      }));
-
-    console.log(`${TOWN_LOG} schedulePendingWork: found ${pendingAgents.length} pending agents`);
-    if (pendingAgents.length === 0) return;
-
-    const dispatchTasks: Array<() => Promise<void>> = [];
-
-    for (const agent of pendingAgents) {
-      const beadId = agent.current_hook_bead_id;
-      if (!beadId) continue;
-      const bead = beadOps.getBead(this.sql, beadId);
-      if (!bead) continue;
-
-      if (agent.dispatch_attempts >= MAX_DISPATCH_ATTEMPTS) {
-        beadOps.updateBeadStatus(this.sql, beadId, 'failed', agent.id);
-        agents.unhookBead(this.sql, agent.id);
-        continue;
-      }
-
-      // Skip beads that still have unresolved 'blocks' dependencies —
-      // they'll be dispatched by dispatchUnblockedBeads when their
-      // blockers close.
-      if (beadOps.hasUnresolvedBlockers(this.sql, beadId)) {
-        continue;
-      }
-
-      dispatchTasks.push(async () => {
-        await this.dispatchAgent(agent, bead);
-      });
-    }
-
-    if (dispatchTasks.length > 0) {
-      await Promise.allSettled(dispatchTasks.map(fn => fn()));
-    }
+    scheduling.dispatchUnblockedBeads(this.schedulingCtx, closedBeadId);
   }
 
   /**
@@ -3156,10 +2892,18 @@ export class TownDO extends DurableObject<Env> {
       ),
     ]);
 
-    for (const working of workingAgents) {
+    // Check container status for all working agents in parallel to
+    // avoid serial network round-trips (one per agent).
+    const statusChecks = workingAgents.map(async working => {
       const agentId = working.bead_id;
-
       const containerInfo = await dispatch.checkAgentContainerStatus(this.env, townId, agentId);
+      return { agentId, containerInfo };
+    });
+    const statusResults = await Promise.allSettled(statusChecks);
+
+    for (const result of statusResults) {
+      if (result.status !== 'fulfilled') continue;
+      const { agentId, containerInfo } = result.value;
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
         if (containerInfo.exitReason === 'completed') {
@@ -3176,7 +2920,6 @@ export class TownDO extends DurableObject<Env> {
           `,
           [now(), agentId]
         );
-        continue;
       }
     }
 
@@ -3271,7 +3014,7 @@ export class TownDO extends DurableObject<Env> {
       patrol.TRIAGE_REQUEST_LABEL,
       patrol.TRIAGE_BATCH_LABEL
     );
-    const cooldownCutoff = new Date(Date.now() - DISPATCH_COOLDOWN_MS).toISOString();
+    const cooldownCutoff = new Date(Date.now() - scheduling.DISPATCH_COOLDOWN_MS).toISOString();
     const existingBatch = [
       ...query(
         this.sql,
