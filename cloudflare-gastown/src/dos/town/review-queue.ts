@@ -555,6 +555,46 @@ export function recoverStuckReviews(sql: SqlStorage): void {
       `[review-queue] recoverStuckReviews: reset MR bead=${row.bead_id} to open, unhooked idle agents`
     );
   }
+
+  // Fast recovery: MR beads in_progress with NO agent hooked at all are
+  // clearly abandoned (hookBead threw or the refinery was unhooked).
+  // Recover after 2 min instead of waiting for the 30-min timeout.
+  const abandonedCutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const abandonedRows = BeadRecord.pick({ bead_id: true })
+    .array()
+    .parse([
+      ...query(
+        sql,
+        /* sql */ `
+          SELECT ${beads.bead_id}
+          FROM ${beads}
+          WHERE ${beads.type} = 'merge_request'
+            AND ${beads.status} = 'in_progress'
+            AND ${beads.updated_at} < ?
+            AND NOT EXISTS (
+              SELECT 1 FROM ${agent_metadata}
+              WHERE ${agent_metadata.current_hook_bead_id} = ${beads.bead_id}
+            )
+        `,
+        [abandonedCutoff]
+      ),
+    ]);
+
+  for (const row of abandonedRows) {
+    query(
+      sql,
+      /* sql */ `
+        UPDATE ${beads}
+        SET ${beads.columns.status} = 'open',
+            ${beads.columns.updated_at} = ?
+        WHERE ${beads.bead_id} = ?
+      `,
+      [timestamp, row.bead_id]
+    );
+    console.log(
+      `[review-queue] recoverStuckReviews: fast-recovered abandoned MR bead=${row.bead_id} (no agent hooked)`
+    );
+  }
 }
 
 /**

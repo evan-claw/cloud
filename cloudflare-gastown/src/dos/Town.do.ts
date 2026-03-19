@@ -3283,6 +3283,11 @@ export class TownDO extends DurableObject<Env> {
     // Hook the refinery to the MR bead (entry.id), not the source bead
     // (entry.bead_id). The source bead stays closed with its original
     // polecat assignee preserved.
+    // If the refinery is still hooked to a previous MR bead (agentCompleted
+    // preserves hooks for refineries), unhook first.
+    if (refineryAgent.current_hook_bead_id && refineryAgent.current_hook_bead_id !== entry.id) {
+      agents.unhookBead(this.sql, refineryAgent.id);
+    }
     agents.hookBead(this.sql, refineryAgent.id, entry.id);
 
     // Mark as working before the async container start (same I/O gate
