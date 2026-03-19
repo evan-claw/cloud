@@ -1857,9 +1857,7 @@ export class TownDO extends DurableObject<Env> {
         identity: mayor.identity,
         beadId: '',
         beadTitle: message,
-        beadBody: priorTranscript
-          ? `Prior conversation:\n\n${priorTranscript}`
-          : '',
+        beadBody: priorTranscript ? `Prior conversation:\n\n${priorTranscript}` : '',
         checkpoint: mayor.checkpoint,
         gitUrl: rigConfig?.gitUrl ?? '',
         defaultBranch: rigConfig?.defaultBranch ?? 'main',
