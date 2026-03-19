@@ -1349,6 +1349,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[DO] restartMachine failed:', errorMessage, err);
       return { success: false, error: errorMessage };
     } finally {
       this.s.restartingAt = null;
