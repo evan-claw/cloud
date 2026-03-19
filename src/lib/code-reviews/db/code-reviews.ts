@@ -16,6 +16,15 @@ import { captureException } from '@sentry/nextjs';
 import type { CreateReviewParams, CodeReviewStatus, ListReviewsParams, Owner } from '../core';
 import type { CloudAgentCodeReview } from '@kilocode/db/schema';
 
+type CodeReviewTerminalReason =
+  | 'billing'
+  | 'user_cancelled'
+  | 'superseded'
+  | 'interrupted'
+  | 'timeout'
+  | 'upstream_error'
+  | 'unknown';
+
 /**
  * Creates a new code review record
  * Returns the created review ID
@@ -86,6 +95,7 @@ export async function updateCodeReviewStatus(
     sessionId?: string;
     cliSessionId?: string;
     errorMessage?: string;
+    terminalReason?: CodeReviewTerminalReason;
     startedAt?: Date;
     completedAt?: Date;
     agentVersion?: string;
@@ -110,6 +120,9 @@ export async function updateCodeReviewStatus(
     }
     if (updates.errorMessage !== undefined) {
       updateData.error_message = updates.errorMessage;
+    }
+    if (updates.terminalReason !== undefined) {
+      updateData.terminal_reason = updates.terminalReason;
     }
     if (updates.startedAt !== undefined) {
       updateData.started_at = updates.startedAt.toISOString();
