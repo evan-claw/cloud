@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import type { FailureReason } from './types';
 import { beads, BeadRecord, createTableBeads, getIndexesBeads } from '../../db/tables/beads.table';
 import {
   bead_events,
