@@ -115,8 +115,6 @@ export interface Env {
   API_URL: string;
   INTERNAL_API_SECRET: string;
   CLOUD_AGENT_URL: string;
-  /** cloud-agent-next URL (used when useCloudAgentNext feature flag is enabled) */
-  CLOUD_AGENT_NEXT_URL: string;
   BACKEND_AUTH_TOKEN: string;
 
   // Optional Sentry

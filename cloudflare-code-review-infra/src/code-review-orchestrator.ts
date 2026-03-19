@@ -97,7 +97,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
   }
 
   private getCloudAgentNextClient(): CloudAgentNextFetchClient {
-    this.cloudAgentNextClient ??= createCloudAgentNextFetchClient(this.env.CLOUD_AGENT_NEXT_URL);
+    this.cloudAgentNextClient ??= createCloudAgentNextFetchClient(this.env.CLOUD_AGENT_URL);
     return this.cloudAgentNextClient;
   }
 
