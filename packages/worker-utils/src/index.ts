@@ -45,3 +45,5 @@ export {
   KILO_TOKEN_VERSION,
 } from './kilo-token.js';
 export type { KiloTokenPayload, SignKiloTokenExtra } from './kilo-token.js';
+
+export { sendBetterStackHeartbeat } from './betterstack-heartbeat.js';
