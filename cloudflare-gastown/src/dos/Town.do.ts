@@ -2881,18 +2881,15 @@ export class TownDO extends DurableObject<Env> {
       const { agentId, containerInfo } = result.value;
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
-        // 'not_found' is ambiguous for ALL agent types — the container
-        // may be restarting, the status check may have timed out, or
-        // the process manager hasn't registered the agent yet. Only act
-        // on confirmed 'exited' status.
-        if (containerInfo.status === 'not_found') continue;
-
         const agent = agents.getAgent(this.sql, agentId);
         if (!agent) continue;
 
         if (agent.role === 'refinery') {
-          // Set to idle, keep hook intact for recoverStuckReviews guard.
-          // If gt_done already closed the MR bead, unhook as cleanup.
+          // For refineries: set to idle, keep hook intact.
+          // - gt_done may still arrive and close the MR bead normally
+          // - recoverStuckReviews (guard: no WORKING agent) will recover
+          //   after 30 min if gt_done never arrives
+          // - If MR bead is already closed (gt_done already ran), unhook
           query(
             this.sql,
             /* sql */ `
