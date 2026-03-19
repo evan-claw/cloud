@@ -149,9 +149,10 @@ export async function handleDestroyMayor(c: Context<GastownEnv>, params: { townI
     'TownDO.getMayorStatus(destroyMayor)'
   );
   if (status.session) {
+    const { agentId } = status.session;
     await withDORetry(
       () => getTownDOStub(c.env, params.townId),
-      stub => stub.deleteAgent(status.session!.agentId),
+      stub => stub.deleteAgent(agentId),
       'TownDO.deleteAgent(destroyMayor)'
     );
   }

@@ -566,16 +566,17 @@ export async function handleMayorBeadReassign(
   );
 
   // Only unhook the old agent if it is still hooked to this specific bead
-  if (bead.assignee_agent_bead_id && bead.assignee_agent_bead_id !== parsed.data.agent_id) {
+  const prevAssigneeId = bead.assignee_agent_bead_id;
+  if (prevAssigneeId && prevAssigneeId !== parsed.data.agent_id) {
     const oldAgent = await withDORetry(
       () => getTownDOStub(c.env, params.townId),
-      stub => stub.getAgentAsync(bead.assignee_agent_bead_id!),
+      stub => stub.getAgentAsync(prevAssigneeId),
       'TownDO.getAgentAsync(mayorBeadReassign-oldAgent)'
     );
     if (oldAgent && oldAgent.current_hook_bead_id === params.beadId) {
       await withDORetry(
         () => getTownDOStub(c.env, params.townId),
-        stub => stub.unhookBead(bead.assignee_agent_bead_id!),
+        stub => stub.unhookBead(prevAssigneeId),
         'TownDO.unhookBead(mayorBeadReassign)'
       );
     }
