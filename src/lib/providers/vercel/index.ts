@@ -23,6 +23,7 @@ import type {
   GatewayMessagesRequest,
 } from '@/lib/providers/openrouter/types';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
+import { isZaiModel } from '@/lib/providers/zai';
 import * as crypto from 'crypto';
 
 // EMERGENCY SWITCH
@@ -97,7 +98,8 @@ export async function shouldRouteToVercel(
     !isGeminiModel(requestedModel) &&
     !isMinimaxModel(requestedModel) &&
     !isMoonshotModel(requestedModel) &&
-    !isOpenAiOssModel(requestedModel)
+    !isOpenAiOssModel(requestedModel) &&
+    !isZaiModel(requestedModel)
   ) {
     console.debug(`[shouldRouteToVercel] model family not allowed for randomized Vercel routing`);
     return false;
