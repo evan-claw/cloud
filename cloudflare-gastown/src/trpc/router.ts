@@ -1221,6 +1221,14 @@ export const gastownRouter = router({
       const townStub = getTownDOStub(ctx.env, input.townId);
       return townStub.getBeadAsync(input.beadId);
     }),
+
+  // DEBUG: raw agent_metadata dump — remove after debugging
+  debugAgentMetadata: adminProcedure
+    .input(z.object({ townId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const townStub = getTownDOStub(ctx.env, input.townId);
+      return townStub.debugAgentMetadata();
+    }),
 });
 
 export type GastownRouter = typeof gastownRouter;

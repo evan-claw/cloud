@@ -4041,6 +4041,25 @@ export class TownDO extends DurableObject<Env> {
     };
   }
 
+  // DEBUG: raw agent_metadata dump — remove after debugging
+  async debugAgentMetadata(): Promise<unknown[]> {
+    return [
+      ...query(
+        this.sql,
+        /* sql */ `
+          SELECT ${agent_metadata.bead_id},
+                 ${agent_metadata.role},
+                 ${agent_metadata.status},
+                 ${agent_metadata.current_hook_bead_id},
+                 ${agent_metadata.dispatch_attempts},
+                 ${agent_metadata.last_activity_at}
+          FROM ${agent_metadata}
+        `,
+        []
+      ),
+    ];
+  }
+
   async destroy(): Promise<void> {
     console.log(`${TOWN_LOG} destroy: clearing all storage and alarms`);
 
