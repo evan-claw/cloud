@@ -1,6 +1,21 @@
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
+import type { useKiloClawMutations } from '@/hooks/useKiloClaw';
 
 export type ClawState = KiloClawDashboardStatus['status'];
+
+export type ExecPreset = 'always-ask' | 'never-ask';
+
+export type ClawMutations = ReturnType<typeof useKiloClawMutations>;
+
+export function execPresetToConfig(preset: ExecPreset): { security: string; ask: string } {
+  switch (preset) {
+    case 'never-ask':
+      return { security: 'full', ask: 'off' };
+    case 'always-ask':
+    default:
+      return { security: 'allowlist', ask: 'on-miss' };
+  }
+}
 
 export const CLAW_STATUS_BADGE: Record<
   Exclude<ClawState, null>,

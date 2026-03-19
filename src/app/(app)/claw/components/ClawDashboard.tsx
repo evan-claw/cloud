@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Check, Loader2, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { Check, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import {
   useKiloClawGatewayStatus,
@@ -21,6 +21,9 @@ import { OpenClawButton } from './OpenClawButton';
 import { SettingsTab } from './SettingsTab';
 import { ChangelogCard } from './ChangelogCard';
 import { PairingCard } from './PairingCard';
+import { PermissionStep } from './PermissionStep';
+import { ProvisioningStep } from './ProvisioningStep';
+import type { ExecPreset } from './claw.types';
 import { BillingWrapper } from './billing/BillingWrapper';
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
@@ -60,6 +63,11 @@ export function ClawDashboard({
     instanceStatus.provisionedAt !== null &&
     Date.now() - instanceStatus.provisionedAt < SEVEN_DAYS_MS;
   const configServiceNudgeVisible = !instanceStatus || instanceYoung;
+
+  const [onboardingStep, setOnboardingStep] = useState<'permissions' | 'provisioning' | 'done'>(
+    'permissions'
+  );
+  const [selectedPreset, setSelectedPreset] = useState<ExecPreset | null>(null);
 
   const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
@@ -139,9 +147,21 @@ export function ClawDashboard({
             mutations={mutations}
             onProvisionStart={() => onNewSetupChange(true)}
           />
-        ) : isNewSetup &&
-          (instanceStatus.status !== 'running' || gatewayStatus?.state !== 'running') ? (
-          <ProvisioningSpinner onViewDashboard={() => onNewSetupChange(false)} />
+        ) : isNewSetup && onboardingStep === 'permissions' ? (
+          <PermissionStep
+            instanceRunning={isRunning && gatewayStatus?.state === 'running'}
+            onSelect={preset => {
+              setSelectedPreset(preset);
+              setOnboardingStep('provisioning');
+            }}
+          />
+        ) : isNewSetup && onboardingStep === 'provisioning' && selectedPreset ? (
+          <ProvisioningStep
+            preset={selectedPreset}
+            instanceRunning={isRunning && gatewayStatus?.state === 'running'}
+            mutations={mutations}
+            onComplete={() => setOnboardingStep('done')}
+          />
         ) : isNewSetup ? (
           <Card className="mt-6 overflow-hidden">
             <CardContent className="flex flex-col items-center justify-center gap-6 pt-12">
@@ -253,38 +273,5 @@ export function ClawDashboard({
 
       {instanceStatus && !isNewSetup && <ChangelogCard />}
     </div>
-  );
-}
-
-const SLOW_PROVISION_TIMEOUT_MS = 60_000;
-
-function ProvisioningSpinner({ onViewDashboard }: { onViewDashboard: () => void }) {
-  const [isSlow, setIsSlow] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setIsSlow(true), SLOW_PROVISION_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <Card className="mt-6">
-      <CardContent className="flex flex-col items-center justify-center gap-4 py-16">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-        <p className="text-muted-foreground text-sm">Setting up your KiloClaw instance...</p>
-        {isSlow && (
-          <p className="text-muted-foreground animate-in fade-in max-w-md text-center text-xs duration-500">
-            This is taking longer than expected. If you&apos;re stuck, please reach out to{' '}
-            <a href="mailto:hi@kilocode.ai" className="underline hover:opacity-80">
-              hi@kilocode.ai
-            </a>{' '}
-            for help, or{' '}
-            <button type="button" onClick={onViewDashboard} className="underline hover:opacity-80">
-              view the dashboard
-            </button>{' '}
-            for details.
-          </p>
-        )}
-      </CardContent>
-    </Card>
   );
 }
