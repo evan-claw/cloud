@@ -23,7 +23,7 @@ const LOG = '[scheduling]';
 // ── Constants ──────────────────────────────────────────────────────────
 
 export const DISPATCH_COOLDOWN_MS = 2 * 60_000; // 2 min
-export const MAX_DISPATCH_ATTEMPTS = 5;
+export const MAX_DISPATCH_ATTEMPTS = 20;
 
 // ── Context passed by the Town DO ──────────────────────────────────────
 
@@ -156,14 +156,18 @@ export async function dispatchAgent(
       // Use bead.bead_id (the actual bead being dispatched) rather than
       // agent.current_hook_bead_id which may be stale if the agent
       // snapshot was taken before hookBead was called.
+      // Set last_activity_at to now() so the dispatch cooldown prevents
+      // immediate retry — the container may need time to start up after
+      // a deploy/eviction.
       query(
         ctx.sql,
         /* sql */ `
           UPDATE ${agent_metadata}
-          SET ${agent_metadata.columns.status} = 'idle'
+          SET ${agent_metadata.columns.status} = 'idle',
+              ${agent_metadata.columns.last_activity_at} = ?
           WHERE ${agent_metadata.bead_id} = ?
         `,
-        [agent.id]
+        [now(), agent.id]
       );
       beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
       ctx.emitEvent({
@@ -184,10 +188,11 @@ export async function dispatchAgent(
         ctx.sql,
         /* sql */ `
           UPDATE ${agent_metadata}
-          SET ${agent_metadata.columns.status} = 'idle'
+          SET ${agent_metadata.columns.status} = 'idle',
+              ${agent_metadata.columns.last_activity_at} = ?
           WHERE ${agent_metadata.bead_id} = ?
         `,
-        [agent.id]
+        [now(), agent.id]
       );
       beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
     } catch (rollbackErr) {
