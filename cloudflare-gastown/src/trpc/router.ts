@@ -353,7 +353,11 @@ export const gastownRouter = router({
         'TownDO.destroy'
       );
 
-      await ownerStub.deleteTown(input.townId);
+      await withDORetry(
+        () => ownerStub,
+        stub => stub.deleteTown(input.townId),
+        'OwnerDO.deleteTown'
+      );
     }),
 
   // ── Rigs ────────────────────────────────────────────────────────────
@@ -420,13 +424,18 @@ export const gastownRouter = router({
         console.warn('[gastown-trpc] createRig: git credential refresh failed', err);
       }
 
-      const rig = await ownerStub.createRig({
-        town_id: input.townId,
-        name: input.name,
-        git_url: input.gitUrl,
-        default_branch: input.defaultBranch,
-        platform_integration_id: input.platformIntegrationId,
-      });
+      const rig = await withDORetry(
+        () => ownerStub,
+        stub =>
+          stub.createRig({
+            town_id: input.townId,
+            name: input.name,
+            git_url: input.gitUrl,
+            default_branch: input.defaultBranch,
+            platform_integration_id: input.platformIntegrationId,
+          }),
+        'OwnerDO.createRig'
+      );
 
       // Configure the Town DO with rig metadata so dispatchAgent can find it.
       // If this fails, roll back the rig creation to avoid an orphaned record.
@@ -462,7 +471,11 @@ export const gastownRouter = router({
           err
         );
         try {
-          await ownerStub.deleteRig(rig.id);
+          await withDORetry(
+            () => ownerStub,
+            stub => stub.deleteRig(rig.id),
+            'OwnerDO.deleteRig(rollback)'
+          );
         } catch {
           /* best effort rollback */
         }
@@ -533,7 +546,11 @@ export const gastownRouter = router({
         'TownDO.removeRig'
       );
       const ownerStub = ownership.stub;
-      await ownerStub.deleteRig(input.rigId);
+      await withDORetry(
+        () => ownerStub,
+        stub => stub.deleteRig(input.rigId),
+        'OwnerDO.deleteRig'
+      );
     }),
 
   // ── Beads ───────────────────────────────────────────────────────────
