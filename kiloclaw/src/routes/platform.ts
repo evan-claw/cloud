@@ -84,11 +84,14 @@ function jsonError(message: string, status: number, code?: string): Response {
 const SAFE_ERROR_PREFIXES = [
   'Instance is not ', // e.g. "Instance is not running"
   'Instance not ', // e.g. "Instance not provisioned" (DO uses both forms)
+  'Instance must be stopped ', // volume reassociation requires stopped state
   'User already has an ', // duplicate provision
   'Gateway controller ', // already sanitized at DO level
   'Config was modified ', // etag mismatch on config replace
   'Invalid secret patch: ', // catalog validation (allFieldsRequired, etc.)
   'Cannot enable Gmail ', // no Google account connected
+  'New volume ID is ', // reassociate: same volume
+  'Volume ', // reassociate: volume not found / bad state
 ];
 
 function sanitizeError(err: unknown, operation: string): { message: string; status: number } {
@@ -670,6 +673,32 @@ platform.post('/openclaw-config', async c => {
   }
 });
 
+// PATCH /api/platform/openclaw-config
+// Deep-merge a JSON patch into the live openclaw.json on the running machine.
+const PatchOpenclawConfigSchema = z.object({
+  userId: z.string().min(1),
+  patch: z.record(z.string(), z.unknown()),
+});
+
+platform.patch('/openclaw-config', async c => {
+  const result = await parseBody(c, PatchOpenclawConfigSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, patch } = result.data;
+
+  try {
+    const response = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.patchOpenclawConfig(patch),
+      'patchOpenclawConfig'
+    );
+    return c.json(response, 200);
+  } catch (err) {
+    const { message, status, code } = sanitizeOpenclawConfigError(err, 'openclaw-config patch');
+    return jsonError(message, status, code);
+  }
+});
+
 // GET /api/platform/files/tree?userId=...
 platform.get('/files/tree', async c => {
   const userId = c.req.query('userId');
@@ -916,6 +945,52 @@ platform.get('/volume-snapshots', async c => {
     return c.json({ snapshots });
   } catch (err) {
     const { message, status } = sanitizeError(err, 'volume-snapshots');
+    return jsonError(message, status);
+  }
+});
+
+// GET /api/platform/candidate-volumes?userId=...
+// Returns all usable volumes in the user's Fly app for admin volume reassociation.
+platform.get('/candidate-volumes', async c => {
+  const userId = c.req.query('userId');
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.listCandidateVolumes(),
+      'listCandidateVolumes'
+    );
+    return c.json(result);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'candidate-volumes');
+    return jsonError(message, status);
+  }
+});
+
+// POST /api/platform/reassociate-volume
+// Changes the flyVolumeId on a stopped instance. Requires reason for audit trail.
+const ReassociateVolumeSchema = z.object({
+  userId: z.string().min(1),
+  newVolumeId: z.string().min(1),
+  reason: z.string().min(10).max(500),
+});
+
+platform.post('/reassociate-volume', async c => {
+  const result = await parseBody(c, ReassociateVolumeSchema);
+  if ('error' in result) return result.error;
+
+  try {
+    const response = await withDORetry(
+      instanceStubFactory(c.env, result.data.userId),
+      stub => stub.reassociateVolume(result.data.newVolumeId, result.data.reason),
+      'reassociateVolume'
+    );
+    return c.json(response);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'reassociate-volume');
     return jsonError(message, status);
   }
 });

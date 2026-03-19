@@ -12,6 +12,12 @@ export type ChangelogEntry = {
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
     date: '2026-03-17',
+    description: 'Updated 1Password CLI to 2.33.0.',
+    category: 'feature',
+    deployHint: 'redeploy_suggested',
+  },
+  {
+    date: '2026-03-17',
     description:
       'New workspace file editor — browse and edit all files in /root/.openclaw/ from the dashboard, including credentials and backups. Replaces the old single-file config editor.',
     category: 'feature',

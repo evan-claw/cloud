@@ -157,6 +157,17 @@ export class GastownClient {
     });
   }
 
+  async nudge(input: {
+    target_agent_id: string;
+    message: string;
+    mode: 'wait-idle' | 'immediate' | 'queue';
+  }): Promise<{ nudge_id: string }> {
+    return this.request<{ nudge_id: string }>(this.rigPath('/nudge'), {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
   async createEscalation(input: {
     title: string;
     body?: string;
@@ -289,6 +300,8 @@ export class MayorGastownClient {
     title: string;
     body?: string;
     metadata?: Record<string, unknown>;
+    depends_on?: string[];
+    convoy_id?: string;
   }): Promise<SlingResult> {
     return this.request<SlingResult>(this.mayorPath('/sling'), {
       method: 'POST',
@@ -351,6 +364,54 @@ export class MayorGastownClient {
     });
   }
 
+  async nudge(input: {
+    rig_id: string;
+    target_agent_id: string;
+    message: string;
+    mode: 'wait-idle' | 'immediate' | 'queue';
+  }): Promise<{ nudge_id: string }> {
+    return this.request<{ nudge_id: string }>(
+      `${this.baseUrl}/api/towns/${this.townId}/rigs/${input.rig_id}/nudge`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          target_agent_id: input.target_agent_id,
+          message: input.message,
+          mode: input.mode,
+        }),
+      }
+    );
+  }
+
+  async addBeadDependency(input: {
+    rig_id: string;
+    bead_id: string;
+    depends_on_bead_id: string;
+    dependency_type?: 'blocks' | 'tracks' | 'parent-child';
+  }): Promise<void> {
+    await this.request<{ ok: true }>(
+      `${this.baseUrl}/api/towns/${this.townId}/rigs/${input.rig_id}/beads/${input.bead_id}/dependencies`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          depends_on_bead_id: input.depends_on_bead_id,
+          dependency_type: input.dependency_type,
+        }),
+      }
+    );
+  }
+
+  async removeBeadDependency(input: {
+    rig_id: string;
+    bead_id: string;
+    depends_on_bead_id: string;
+  }): Promise<void> {
+    await this.request<{ ok: true; deleted: boolean }>(
+      `${this.baseUrl}/api/towns/${this.townId}/rigs/${input.rig_id}/beads/${input.bead_id}/dependencies/${input.depends_on_bead_id}`,
+      { method: 'DELETE' }
+    );
+  }
+
   async listConvoys(): Promise<Convoy[]> {
     return this.request<Convoy[]>(this.mayorPath('/convoys'));
   }
@@ -368,6 +429,7 @@ export class MayorGastownClient {
       status?: 'open' | 'in_progress' | 'in_review' | 'closed' | 'failed';
       priority?: 'low' | 'medium' | 'high' | 'critical';
       labels?: string[];
+      convoy_id?: string | null;
     }
   ): Promise<Bead> {
     return this.request<Bead>(this.mayorPath(`/rigs/${rigId}/beads/${beadId}`), {

@@ -49,6 +49,7 @@ vi.mock('../fly/client', async () => {
     deleteVolume: vi.fn(),
     getVolume: vi.fn(),
     listMachines: vi.fn().mockResolvedValue([]),
+    listVolumes: vi.fn().mockResolvedValue([]),
     listVolumeSnapshots: vi.fn().mockResolvedValue([]),
     execCommand: vi.fn(),
   };
@@ -4914,5 +4915,189 @@ describe('restartMachine restartingAt guard', () => {
     // the real Fly state (machine is stopped after the failed restart).
     // Status is NOT forcibly restored from storage on failure — that would
     // mask the fact that the machine may actually be stopped.
+  });
+});
+
+// ============================================================================
+// Volume reassociation (admin)
+// ============================================================================
+
+describe('listCandidateVolumes', () => {
+  it('returns all usable volumes with isCurrent flag', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1' });
+
+    (flyClient.listVolumes as Mock).mockResolvedValueOnce([
+      {
+        id: 'vol-1',
+        name: 'kiloclaw_sb1',
+        state: 'attached',
+        size_gb: 1,
+        region: 'iad',
+        attached_machine_id: 'mach-1',
+        created_at: '2025-01-01T00:00:00Z',
+      },
+      {
+        id: 'vol-2',
+        name: 'kiloclaw_sb1_old',
+        state: 'detached',
+        size_gb: 1,
+        region: 'iad',
+        attached_machine_id: null,
+        created_at: '2024-12-01T00:00:00Z',
+      },
+      {
+        id: 'vol-3',
+        name: 'kiloclaw_sb1_destroyed',
+        state: 'destroyed',
+        size_gb: 1,
+        region: 'iad',
+        attached_machine_id: null,
+        created_at: '2024-11-01T00:00:00Z',
+      },
+    ]);
+
+    const result = await instance.listCandidateVolumes();
+
+    expect(result.currentVolumeId).toBe('vol-1');
+    // Destroyed volumes are filtered out
+    expect(result.volumes).toHaveLength(2);
+    expect(result.volumes[0].id).toBe('vol-1');
+    expect(result.volumes[0].isCurrent).toBe(true);
+    expect(result.volumes[1].id).toBe('vol-2');
+    expect(result.volumes[1].isCurrent).toBe(false);
+  });
+
+  it('filters out destroying volumes', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1' });
+
+    (flyClient.listVolumes as Mock).mockResolvedValueOnce([
+      {
+        id: 'vol-1',
+        name: 'v1',
+        state: 'attached',
+        size_gb: 1,
+        region: 'iad',
+        attached_machine_id: null,
+        created_at: '2025-01-01T00:00:00Z',
+      },
+      {
+        id: 'vol-4',
+        name: 'v4',
+        state: 'destroying',
+        size_gb: 1,
+        region: 'iad',
+        attached_machine_id: null,
+        created_at: '2025-01-01T00:00:00Z',
+      },
+    ]);
+
+    const result = await instance.listCandidateVolumes();
+    expect(result.volumes).toHaveLength(1);
+    expect(result.volumes[0].id).toBe('vol-1');
+  });
+});
+
+describe('reassociateVolume', () => {
+  it('rejects when instance is not provisioned', async () => {
+    const { instance } = createInstance();
+    // No seedProvisioned — userId is null
+    await expect(instance.reassociateVolume('vol-2', 'fixing wrong volume')).rejects.toThrow(
+      'Instance is not provisioned'
+    );
+  });
+
+  it('rejects when instance is not stopped', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage);
+
+    await expect(instance.reassociateVolume('vol-2', 'fixing wrong volume')).rejects.toThrow(
+      'Instance must be stopped before reassociating volume'
+    );
+  });
+
+  it('rejects when new volume is the same as current', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1' });
+
+    await expect(instance.reassociateVolume('vol-1', 'fixing wrong volume')).rejects.toThrow(
+      'New volume ID is the same as the current volume'
+    );
+  });
+
+  it('rejects when volume is not found in Fly', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1' });
+
+    (flyClient.getVolume as Mock).mockRejectedValueOnce(new FlyApiError('not found', 404, '{}'));
+
+    await expect(instance.reassociateVolume('vol-bad', 'fixing wrong volume')).rejects.toThrow(
+      'Volume vol-bad not found in this Fly app'
+    );
+  });
+
+  it('rejects when volume is in destroyed state', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1' });
+
+    (flyClient.getVolume as Mock).mockResolvedValueOnce({
+      id: 'vol-dead',
+      name: 'v',
+      state: 'destroyed',
+      size_gb: 1,
+      region: 'iad',
+      attached_machine_id: null,
+      created_at: '2025-01-01T00:00:00Z',
+    });
+
+    await expect(instance.reassociateVolume('vol-dead', 'fixing wrong volume')).rejects.toThrow(
+      'Volume vol-dead is in state "destroyed" and cannot be used'
+    );
+  });
+
+  it('successfully reassociates volume on stopped instance', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1', flyRegion: 'iad' });
+
+    (flyClient.getVolume as Mock).mockResolvedValueOnce({
+      id: 'vol-2',
+      name: 'kiloclaw_sb1_fork',
+      state: 'detached',
+      size_gb: 1,
+      region: 'ewr',
+      attached_machine_id: null,
+      created_at: '2025-01-01T00:00:00Z',
+    });
+
+    const result = await instance.reassociateVolume('vol-2', 'fixing wrong volume after migration');
+
+    expect(result.previousVolumeId).toBe('vol-1');
+    expect(result.newVolumeId).toBe('vol-2');
+    expect(result.newRegion).toBe('ewr');
+
+    // Verify storage was updated
+    expect(storage._store.get('flyVolumeId')).toBe('vol-2');
+    expect(storage._store.get('flyRegion')).toBe('ewr');
+  });
+
+  it('updates region when reassociating to volume in different region', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { status: 'stopped', flyVolumeId: 'vol-1', flyRegion: 'iad' });
+
+    (flyClient.getVolume as Mock).mockResolvedValueOnce({
+      id: 'vol-3',
+      name: 'v3',
+      state: 'created',
+      size_gb: 2,
+      region: 'lax',
+      attached_machine_id: null,
+      created_at: '2025-01-01T00:00:00Z',
+    });
+
+    const result = await instance.reassociateVolume('vol-3', 'moving to west coast region');
+
+    expect(result.newRegion).toBe('lax');
+    expect(storage._store.get('flyRegion')).toBe('lax');
   });
 });

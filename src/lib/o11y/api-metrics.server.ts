@@ -81,6 +81,13 @@ export function getToolsAvailable(request: GatewayRequest): string[] {
     });
   }
 
+  if (request.kind === 'messages') {
+    return request.body.tools.map((tool): string => {
+      const name = typeof tool.name === 'string' ? tool.name.trim() : '';
+      return name ? `function:${name}` : 'function:unknown';
+    });
+  }
+
   return request.body.tools.map((tool): string => {
     if (tool.type === 'function') {
       const toolName = typeof tool.function?.name === 'string' ? tool.function.name.trim() : '';
@@ -113,6 +120,21 @@ export function getToolsUsed(request: GatewayRequest): string[] {
       }
     }
 
+    return used;
+  }
+
+  if (request.kind === 'messages') {
+    const used = new Array<string>();
+    for (const message of request.body.messages) {
+      if (message.role !== 'assistant') continue;
+      const content = Array.isArray(message.content) ? message.content : [];
+      for (const block of content) {
+        if (block.type === 'tool_use') {
+          const name = typeof block.name === 'string' ? block.name.trim() : '';
+          used.push(name ? `function:${name}` : 'function:unknown');
+        }
+      }
+    }
     return used;
   }
 

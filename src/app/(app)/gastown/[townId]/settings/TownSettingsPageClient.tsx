@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useGastownTRPC } from '@/lib/gastown/trpc';
+import { useUser } from '@/hooks/useUser';
 import { Button } from '@/components/Button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,16 +25,20 @@ import {
   Layers,
   RefreshCw,
   Container,
+  User,
+  Key,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
-type Props = { townId: string };
+type Props = { townId: string; readOnly?: boolean };
 
 type EnvVarEntry = { key: string; value: string; isNew?: boolean };
 
 // Section definitions for the scrollspy nav
 const SECTIONS = [
   { id: 'git-auth', label: 'Git Authentication', icon: GitBranch },
+  { id: 'github-cli', label: 'GitHub CLI', icon: Key },
+  { id: 'commit-identity', label: 'Commit Identity', icon: User },
   { id: 'env-vars', label: 'Environment Variables', icon: Variable },
   { id: 'agent-defaults', label: 'Agent Defaults', icon: Bot },
   { id: 'convoys', label: 'Convoys', icon: Layers },
@@ -77,12 +82,15 @@ function scrollToSection(id: string) {
   }
 }
 
-export function TownSettingsPageClient({ townId }: Props) {
+export function TownSettingsPageClient({ townId, readOnly = false }: Props) {
   const trpc = useGastownTRPC();
   const queryClient = useQueryClient();
+  const { data: currentUser } = useUser();
 
   const townQuery = useQuery(trpc.gastown.getTown.queryOptions({ townId }));
   const configQuery = useQuery(trpc.gastown.getTownConfig.queryOptions({ townId }));
+
+  const effectiveReadOnly = readOnly && currentUser?.id !== configQuery.data?.created_by_user_id;
 
   const updateConfig = useMutation(
     trpc.gastown.updateTownConfig.mutationOptions({
@@ -114,6 +122,10 @@ export function TownSettingsPageClient({ townId }: Props) {
   const [autoMerge, setAutoMerge] = useState(true);
   const [mergeStrategy, setMergeStrategy] = useState<'direct' | 'pr'>('direct');
   const [stagedConvoysDefault, setStagedConvoysDefault] = useState(false);
+  const [githubCliPat, setGithubCliPat] = useState('');
+  const [gitAuthorName, setGitAuthorName] = useState('');
+  const [gitAuthorEmail, setGitAuthorEmail] = useState('');
+  const [disableAiCoauthor, setDisableAiCoauthor] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showTokens, setShowTokens] = useState(false);
 
@@ -130,6 +142,10 @@ export function TownSettingsPageClient({ townId }: Props) {
     setAutoMerge(cfg.refinery?.auto_merge ?? true);
     setMergeStrategy(cfg.merge_strategy === 'pr' ? 'pr' : 'direct');
     setStagedConvoysDefault(cfg.staged_convoys_default ?? false);
+    setGithubCliPat(cfg.github_cli_pat ?? '');
+    setGitAuthorName(cfg.git_author_name ?? '');
+    setGitAuthorEmail(cfg.git_author_email ?? '');
+    setDisableAiCoauthor(cfg.disable_ai_coauthor ?? false);
     setInitialized(true);
   }
 
@@ -154,6 +170,12 @@ export function TownSettingsPageClient({ townId }: Props) {
         },
         ...(defaultModel ? { default_model: defaultModel } : {}),
         ...(maxPolecats ? { max_polecats_per_rig: maxPolecats } : {}),
+        ...(githubCliPat && !githubCliPat.startsWith('****')
+          ? { github_cli_pat: githubCliPat }
+          : {}),
+        ...(gitAuthorName ? { git_author_name: gitAuthorName } : { git_author_name: '' }),
+        ...(gitAuthorEmail ? { git_author_email: gitAuthorEmail } : { git_author_email: '' }),
+        disable_ai_coauthor: disableAiCoauthor,
         merge_strategy: mergeStrategy,
         staged_convoys_default: stagedConvoysDefault,
         refinery: {
@@ -214,16 +236,23 @@ export function TownSettingsPageClient({ townId }: Props) {
           <h1 className="text-lg font-semibold tracking-tight text-white/90">Settings</h1>
           <span className="text-sm text-white/30">{townQuery.data?.name}</span>
         </div>
-        <Button
-          onClick={handleSave}
-          disabled={updateConfig.isPending}
-          variant="primary"
-          size="sm"
-          className="gap-1.5 bg-[color:oklch(95%_0.15_108_/_0.90)] text-black hover:bg-[color:oklch(95%_0.15_108_/_0.95)]"
-        >
-          <Save className="size-3.5" />
-          {updateConfig.isPending ? 'Saving...' : 'Save'}
-        </Button>
+        {!effectiveReadOnly && (
+          <Button
+            onClick={handleSave}
+            disabled={updateConfig.isPending}
+            variant="primary"
+            size="sm"
+            className="gap-1.5 bg-[color:oklch(95%_0.15_108_/_0.90)] text-black hover:bg-[color:oklch(95%_0.15_108_/_0.95)]"
+          >
+            <Save className="size-3.5" />
+            {updateConfig.isPending ? 'Saving...' : 'Save'}
+          </Button>
+        )}
+        {effectiveReadOnly && (
+          <span className="text-xs text-white/30">
+            View only — only town creators and org owners can edit
+          </span>
+        )}
       </div>
 
       {/* Two-column body — single scroll container so sticky works */}
@@ -285,13 +314,86 @@ export function TownSettingsPageClient({ townId }: Props) {
                 </div>
               </SettingsSection>
 
+              {/* ── GitHub CLI ─────────────────────────────────────── */}
+              <SettingsSection
+                id="github-cli"
+                title="GitHub CLI"
+                description="Personal Access Token used exclusively for gh CLI operations (PRs, issues, reviews). Git clone and push still use the integration token above."
+                icon={Key}
+                index={1}
+              >
+                <div className="space-y-4">
+                  <FieldGroup
+                    label="GitHub Personal Access Token"
+                    hint="When set, PRs and issues created by agents will appear under your GitHub identity. Requires repo scope (or fine-grained: contents, pull_requests, issues)."
+                  >
+                    <Input
+                      type={showTokens ? 'text' : 'password'}
+                      value={githubCliPat}
+                      onChange={e => setGithubCliPat(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxx or github_pat_xxxxxxxxxxxx"
+                      className="border-white/[0.08] bg-white/[0.03] font-mono text-sm text-white/85 placeholder:text-white/20"
+                    />
+                  </FieldGroup>
+                </div>
+              </SettingsSection>
+
+              {/* ── Commit Identity ─────────────────────────────────── */}
+              <SettingsSection
+                id="commit-identity"
+                title="Commit Identity"
+                description="Override the git commit author. When set, you become the primary author and the AI agent is added as co-author."
+                icon={User}
+                index={2}
+              >
+                <div className="space-y-4">
+                  <FieldGroup
+                    label="Author Name"
+                    hint="Used as GIT_AUTHOR_NAME and GIT_COMMITTER_NAME for all commits in this town."
+                  >
+                    <Input
+                      value={gitAuthorName}
+                      onChange={e => setGitAuthorName(e.target.value)}
+                      placeholder="Jane Smith"
+                      className="border-white/[0.08] bg-white/[0.03] text-sm text-white/85 placeholder:text-white/20"
+                    />
+                  </FieldGroup>
+                  <FieldGroup
+                    label="Author Email"
+                    hint="Used as GIT_AUTHOR_EMAIL and GIT_COMMITTER_EMAIL."
+                  >
+                    <Input
+                      value={gitAuthorEmail}
+                      onChange={e => setGitAuthorEmail(e.target.value)}
+                      placeholder="jane@example.com"
+                      className="border-white/[0.08] bg-white/[0.03] text-sm text-white/85 placeholder:text-white/20"
+                    />
+                  </FieldGroup>
+
+                  <div className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+                    <Switch
+                      checked={disableAiCoauthor}
+                      onCheckedChange={setDisableAiCoauthor}
+                      disabled={!gitAuthorName}
+                    />
+                    <div>
+                      <Label className="text-sm text-white/70">Disable AI co-authorship</Label>
+                      <p className="text-[11px] text-white/30">
+                        When enabled, the AI agent&apos;s Co-authored-by trailer is omitted from
+                        commits. Only takes effect when Author Name is set.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </SettingsSection>
+
               {/* ── Environment Variables ────────────────────────────── */}
               <SettingsSection
                 id="env-vars"
                 title="Environment Variables"
                 description="Injected into all agent processes. Agent-level overrides take precedence."
                 icon={Variable}
-                index={1}
+                index={3}
                 action={
                   <button
                     onClick={addEnvVar}
@@ -344,7 +446,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Agent Defaults"
                 description="Default configuration applied to newly spawned agents."
                 icon={Bot}
-                index={2}
+                index={4}
               >
                 <div className="space-y-4">
                   <FieldGroup label="Default Model">
@@ -381,7 +483,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Convoys"
                 description="Settings for convoy (batch task) behavior."
                 icon={Layers}
-                index={3}
+                index={5}
               >
                 <div className="flex items-center gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
                   <Switch
@@ -405,7 +507,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Merge Strategy"
                 description="How agent work lands in the default branch. Per-rig overrides coming soon."
                 icon={GitPullRequest}
-                index={4}
+                index={6}
               >
                 <div className="space-y-3">
                   <MergeStrategyOption
@@ -429,7 +531,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Refinery"
                 description="Quality gates run before merging polecat branches into the default branch."
                 icon={Shield}
-                index={5}
+                index={7}
                 action={
                   <button
                     onClick={addRefineryGate}
@@ -485,7 +587,7 @@ export function TownSettingsPageClient({ townId }: Props) {
                 title="Container"
                 description="Manage the town's container runtime and authentication tokens."
                 icon={Container}
-                index={6}
+                index={8}
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-4 py-3">
@@ -551,18 +653,20 @@ export function TownSettingsPageClient({ townId }: Props) {
               </ul>
 
               {/* Save button mirrored in sidebar */}
-              <div className="mt-6 border-t border-white/[0.06] pt-4">
-                <Button
-                  onClick={handleSave}
-                  disabled={updateConfig.isPending}
-                  variant="primary"
-                  size="sm"
-                  className="w-full gap-1.5 bg-[color:oklch(95%_0.15_108_/_0.90)] text-black hover:bg-[color:oklch(95%_0.15_108_/_0.95)]"
-                >
-                  <Save className="size-3" />
-                  {updateConfig.isPending ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
+              {!effectiveReadOnly && (
+                <div className="mt-6 border-t border-white/[0.06] pt-4">
+                  <Button
+                    onClick={handleSave}
+                    disabled={updateConfig.isPending}
+                    variant="primary"
+                    size="sm"
+                    className="w-full gap-1.5 bg-[color:oklch(95%_0.15_108_/_0.90)] text-black hover:bg-[color:oklch(95%_0.15_108_/_0.95)]"
+                  >
+                    <Save className="size-3" />
+                    {updateConfig.isPending ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+              )}
             </nav>
           </div>
         </div>

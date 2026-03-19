@@ -32,6 +32,7 @@ import {
   kiloclaw_earlybird_purchases,
   kiloclaw_subscriptions,
   bot_requests,
+  kiloclaw_admin_audit_logs,
 } from '@kilocode/db/schema';
 import { eq, count } from 'drizzle-orm';
 import { softDeleteUser, SoftDeletePreconditionError, findUserById, findUsersByIds } from './user';
@@ -61,6 +62,7 @@ describe('User', () => {
     await db.delete(referral_codes);
     await db.delete(organization_audit_logs);
     await db.delete(security_audit_log);
+    await db.delete(kiloclaw_admin_audit_logs);
     await db.delete(security_analysis_queue);
     await db.delete(security_findings);
     await db.delete(security_analysis_owner_state);
@@ -403,6 +405,55 @@ describe('User', () => {
       expect(logs[0].actor_name).toBeNull();
       expect(logs[0].actor_id).toBe(user.id); // actor_id preserved
       expect(logs[0].action).toBe(SecurityAuditLogAction.FindingDismissed); // action preserved
+    });
+
+    it('should anonymize kiloclaw admin audit logs where user is actor', async () => {
+      const user = await insertTestUser();
+
+      await db.insert(kiloclaw_admin_audit_logs).values({
+        action: 'kiloclaw.volume.reassociate',
+        actor_id: user.id,
+        actor_email: user.google_user_email,
+        actor_name: user.google_user_name,
+        target_user_id: 'some-other-user',
+        message: 'Volume reassociated',
+      });
+
+      await softDeleteUser(user.id);
+
+      const logs = await db
+        .select()
+        .from(kiloclaw_admin_audit_logs)
+        .where(eq(kiloclaw_admin_audit_logs.actor_id, user.id));
+      expect(logs).toHaveLength(1);
+      expect(logs[0].actor_email).toBeNull();
+      expect(logs[0].actor_name).toBeNull();
+      expect(logs[0].actor_id).toBe(user.id);
+      expect(logs[0].target_user_id).toBe('some-other-user'); // not anonymized (different user)
+    });
+
+    it('should anonymize kiloclaw admin audit logs where user is target', async () => {
+      const targetUser = await insertTestUser();
+      const adminUser = await insertTestUser();
+
+      await db.insert(kiloclaw_admin_audit_logs).values({
+        action: 'kiloclaw.volume.reassociate',
+        actor_id: adminUser.id,
+        actor_email: adminUser.google_user_email,
+        actor_name: adminUser.google_user_name,
+        target_user_id: targetUser.id,
+        message: 'Volume reassociated',
+      });
+
+      await softDeleteUser(targetUser.id);
+
+      const logs = await db
+        .select()
+        .from(kiloclaw_admin_audit_logs)
+        .where(eq(kiloclaw_admin_audit_logs.actor_id, adminUser.id));
+      expect(logs).toHaveLength(1);
+      expect(logs[0].target_user_id).toBe('deleted-user');
+      expect(logs[0].actor_email).toBe(adminUser.google_user_email); // admin not anonymized
     });
 
     it('should delete security_analysis_owner_state rows for the user', async () => {

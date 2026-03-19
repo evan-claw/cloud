@@ -1,5 +1,6 @@
 import { ReasoningDetailType } from '@/lib/custom-llm/reasoning-details';
 import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
+import { addCacheBreakpoints } from '@/lib/providers/openrouter/request-helpers';
 import type {
   GatewayRequest,
   MessageWithReasoning,
@@ -48,4 +49,5 @@ export function applyAlibabaProviderSettings(requestToMutate: GatewayRequest) {
   if (requestToMutate.kind === 'chat_completions') {
     convertReasoningDetailsToReasoningContent(requestToMutate.body);
   }
+  addCacheBreakpoints(requestToMutate);
 }

@@ -23,6 +23,7 @@ import {
   stripPartContentIfFile,
   isUserMessage,
   isAssistantMessage,
+  isToolPart,
   type EventMessageUpdated,
   type EventMessagePartUpdated,
   type EventMessagePartRemoved,
@@ -432,16 +433,27 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
   function forceCompleteAllMessages(skipStreamingToggle = false): void {
     const now = Date.now();
     for (const [key, message] of messagesMap) {
-      if (isAssistantMessage(message.info) && !isAssistantMessageComplete(message)) {
+      if (!isAssistantMessage(message.info)) continue;
+
+      const [sessionId, messageId] = key.split(':');
+      const parentSessionId = getParentSessionId(sessionId);
+
+      if (!isAssistantMessageComplete(message)) {
         message.info = {
           ...message.info,
           time: { ...message.info.time, completed: now },
         };
 
-        const [sessionId, messageId] = key.split(':');
-        const parentSessionId = getParentSessionId(sessionId);
+        // Force-complete any in-flight tool parts so their spinners stop
+        forceCompleteToolParts(message, now);
+
         callbacks.onMessageCompleted?.(sessionId, messageId, message, parentSessionId);
         completedMessages.add(key);
+      } else if (forceCompleteToolParts(message, now)) {
+        // Already-completed messages can still have stuck tool parts when the
+        // server sent time.completed before all part updates arrived.
+        // Notify the UI so it re-renders the cleaned-up parts.
+        callbacks.onMessageUpdated?.(sessionId, messageId, message, parentSessionId);
       }
     }
 
@@ -451,6 +463,34 @@ export function createEventProcessor(config: EventProcessorConfig = {}): EventPr
       streaming = false;
       callbacks.onStreamingChanged?.(false);
     }
+  }
+
+  /**
+   * Force-complete tool parts that are stuck in pending/running state.
+   * Transitions them to error state with a synthetic timestamp so the UI
+   * stops showing a spinner.
+   * Returns true if any parts were modified.
+   */
+  function forceCompleteToolParts(message: ProcessedMessage, now: number): boolean {
+    let modified = false;
+    for (let i = 0; i < message.parts.length; i++) {
+      const part = message.parts[i];
+      if (!isToolPart(part)) continue;
+      if (part.state.status === 'completed' || part.state.status === 'error') continue;
+
+      const start = part.state.status === 'running' ? part.state.time.start : now;
+      message.parts[i] = {
+        ...part,
+        state: {
+          status: 'error',
+          input: part.state.input,
+          error: 'Connection lost',
+          time: { start, end: now },
+        },
+      };
+      modified = true;
+    }
+    return modified;
   }
 
   /**

@@ -5,7 +5,7 @@
  * Tests the env var handling chain for shell injection resistance:
  * 1. Env var NAME validation (validateUserEnvVarName, Zod envVarNameSchema)
  * 2. Env var VALUE handling through encrypt/decrypt round-trip
- * 3. Shell escaping of decrypted values (single-quote escape from start-openclaw.sh)
+ * 3. Shell escaping of decrypted values (single-quote escape in the decryption logic)
  * 4. Reserved env var prefix protection
  *
  * The critical code path: user-controlled env var values are decrypted at boot
@@ -27,7 +27,7 @@ import {
 import { InstanceConfigSchema } from '../schemas/instance-config';
 
 // =============================================================================
-// Shell escape function — extracted from start-openclaw.sh line 80
+// Shell escape function — standard single-quote escaping for bash `export` lines
 // =============================================================================
 
 function shellEscapeSingleQuote(value: string): string {
@@ -346,18 +346,18 @@ describe('shell escaping — encryption integrity', () => {
 });
 
 // =============================================================================
-// Tests: Regex consistency between TypeScript and start-openclaw.sh
+// Tests: Regex consistency between bootstrap decryption and env-encryption.ts
 // =============================================================================
 
 describe('shell escaping — regex consistency', () => {
-  // start-openclaw.sh line 49: const VALID_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  const START_SCRIPT_VALID_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  // bootstrap.ts VALID_NAME: /^[A-Za-z_][A-Za-z0-9_]*$/;
+  const BOOTSTRAP_VALID_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-  it('start-openclaw.sh regex matches env-encryption.ts regex for all inputs', () => {
+  it('bootstrap VALID_NAME regex matches env-encryption.ts regex for all inputs', () => {
     const allNames = [...SHELL_INJECTION_NAMES, 'VALID_NAME', '_also_valid', 'x', 'X123'];
     for (const name of allNames) {
       expect(isValidShellIdentifier(name), `Regex mismatch for: ${JSON.stringify(name)}`).toBe(
-        START_SCRIPT_VALID_NAME.test(name)
+        BOOTSTRAP_VALID_NAME.test(name)
       );
     }
   });

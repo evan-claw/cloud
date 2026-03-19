@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { PROVIDERS, type Provider } from '@/lib/providers';
 import { getEnvVariable } from '@/lib/dotenvx';
+import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 
 /**
  * Generates a service-specific SHA256 hash.
@@ -35,4 +36,29 @@ export function generateOpenRouterUpstreamSafetyIdentifier(userId: string): stri
     .createHash('sha256')
     .update(orgId + '-' + generateProviderSpecificHash(userId, PROVIDERS.OPENROUTER))
     .digest('hex');
+}
+
+export function applyTrackingIds(
+  request: GatewayRequest,
+  provider: Provider,
+  userId: string,
+  taskId: string | null
+) {
+  const userHash = generateProviderSpecificHash(userId, provider);
+  const taskHash = taskId ? generateProviderSpecificHash(userId + '-' + taskId, provider) : '';
+  if (request.kind === 'messages') {
+    request.body.metadata = { ...request.body.metadata, user_id: userHash };
+    if (provider.id === 'openrouter') {
+      request.body.user = userHash;
+      if (taskHash) {
+        request.body.session_id = taskHash;
+      }
+    }
+  } else {
+    if (taskHash) {
+      request.body.prompt_cache_key = taskHash;
+    }
+    request.body.safety_identifier = userHash;
+    request.body.user = userHash; // deprecated, but this is what OpenRouter uses
+  }
 }

@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
 import { getGastownUserStub } from '../dos/GastownUser.do';
+import { getGastownOrgStub } from '../dos/GastownOrg.do';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import {
@@ -23,6 +24,8 @@ const MayorSlingBody = z.object({
   title: z.string().min(1),
   body: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  depends_on: z.array(z.string().min(1)).optional(),
+  convoy_id: z.string().min(1).optional(),
 });
 
 const MayorSlingBatchBody = z
@@ -91,9 +94,25 @@ function resolveUserId(c: Context<GastownEnv>): string | null {
 }
 
 /**
- * Verify that `rigId` belongs to `townId` by checking the user's rig
- * registry. Returns the rig record on success, or null if the rig
- * doesn't belong to this town (or doesn't exist).
+ * Resolve the DO stub that owns rigs for a given town. For personal towns
+ * this is GastownUserDO; for org towns it's GastownOrgDO.
+ */
+async function resolveRigOwnerForTown(env: Env, townId: string, userId: string) {
+  const townStub = getTownDOStub(env, townId);
+  try {
+    const config = await townStub.getTownConfig();
+    if (config.owner_type === 'org' && config.organization_id) {
+      return getGastownOrgStub(env, config.organization_id);
+    }
+  } catch {
+    // Fall through to user DO
+  }
+  return getGastownUserStub(env, userId);
+}
+
+/**
+ * Verify that `rigId` belongs to `townId` by checking the rig registry
+ * (user DO for personal towns, org DO for org towns).
  */
 async function verifyRigBelongsToTown(
   c: Context<GastownEnv>,
@@ -102,8 +121,8 @@ async function verifyRigBelongsToTown(
 ): Promise<boolean> {
   const userId = resolveUserId(c);
   if (!userId) return false;
-  const userDO = getGastownUserStub(c.env, userId);
-  const rig = await userDO.getRigAsync(rigId);
+  const ownerDO = await resolveRigOwnerForTown(c.env, townId, userId);
+  const rig = await ownerDO.getRigAsync(rigId);
   return rig !== null && rig.town_id === townId;
 }
 
@@ -135,7 +154,11 @@ export async function handleMayorSling(c: Context<GastownEnv>, params: { townId:
   const town = getTownDOStub(c.env, params.townId);
   const result = await town.slingBead({
     rigId: parsed.data.rig_id,
-    ...parsed.data,
+    title: parsed.data.title,
+    body: parsed.data.body,
+    metadata: parsed.data.metadata,
+    dependsOn: parsed.data.depends_on,
+    convoyId: parsed.data.convoy_id,
   });
 
   console.log(
@@ -158,8 +181,8 @@ export async function handleMayorListRigs(c: Context<GastownEnv>, params: { town
 
   console.log(`${HANDLER_LOG} handleMayorListRigs: townId=${params.townId} userId=${userId}`);
 
-  const userDO = getGastownUserStub(c.env, userId);
-  const rigs = await userDO.listRigs(params.townId);
+  const ownerDO = await resolveRigOwnerForTown(c.env, params.townId, userId);
+  const rigs = await ownerDO.listRigs(params.townId);
 
   return c.json(resSuccess(rigs));
 }
@@ -320,6 +343,30 @@ export async function handleMayorListConvoys(c: Context<GastownEnv>, params: { t
 }
 
 /**
+ * GET /api/mayor/:townId/tools/rigs/:rigId/agents/:agentId/pending-nudges
+ * Returns undelivered, non-expired nudges for the given agent.
+ * Allows the mayor to inspect an agent's nudge queue and decide whether to intervene.
+ */
+export async function handleMayorGetPendingNudges(
+  c: Context<GastownEnv>,
+  params: { townId: string; rigId: string; agentId: string }
+) {
+  const rigOwned = await verifyRigBelongsToTown(c, params.townId, params.rigId);
+  if (!rigOwned) {
+    return c.json(resError('Rig not found in this town'), 403);
+  }
+
+  console.log(
+    `${HANDLER_LOG} handleMayorGetPendingNudges: townId=${params.townId} rigId=${params.rigId} agentId=${params.agentId}`
+  );
+
+  const town = getTownDOStub(c.env, params.townId);
+  const nudges = await town.getPendingNudges(params.agentId);
+
+  return c.json(resSuccess(nudges));
+}
+
+/**
  * GET /api/mayor/:townId/tools/convoys/:convoyId
  * Detailed convoy status with per-bead breakdown.
  */
@@ -350,6 +397,7 @@ const BeadUpdateBody = z
     metadata: z.record(z.string(), z.unknown()).optional(),
     rig_id: z.string().min(1).nullable().optional(),
     parent_bead_id: z.string().min(1).nullable().optional(),
+    convoy_id: z.string().min(1).nullable().optional(),
   })
   .refine(
     data =>
@@ -360,7 +408,8 @@ const BeadUpdateBody = z
       data.status !== undefined ||
       data.metadata !== undefined ||
       data.rig_id !== undefined ||
-      data.parent_bead_id !== undefined,
+      data.parent_bead_id !== undefined ||
+      data.convoy_id !== undefined,
     { message: 'At least one field must be provided' }
   );
 
@@ -415,7 +464,24 @@ export async function handleMayorBeadUpdate(
     return c.json(resError('Bead does not belong to this rig'), 403);
   }
 
-  const bead = await town.updateBead(params.beadId, parsed.data, 'mayor');
+  // Handle convoy_id changes separately — convoy membership is managed
+  // via 'tracks' dependencies and counter updates, not plain field updates.
+  if (parsed.data.convoy_id !== undefined) {
+    // null → remove from current convoy; string → add to that convoy
+    if (parsed.data.convoy_id === null) {
+      await town.removeBeadFromConvoy(params.beadId);
+    } else {
+      await town.addBeadToConvoy(params.beadId, parsed.data.convoy_id);
+    }
+  }
+
+  // Forward remaining fields (excluding convoy_id) to the normal update path
+  const { convoy_id: _convoyId, ...fieldUpdates } = parsed.data;
+  const hasFieldUpdates = Object.values(fieldUpdates).some(v => v !== undefined);
+
+  const bead = hasFieldUpdates
+    ? await town.updateBead(params.beadId, fieldUpdates, 'mayor')
+    : await town.getBeadAsync(params.beadId);
 
   return c.json(resSuccess(bead));
 }

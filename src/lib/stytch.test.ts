@@ -199,7 +199,7 @@ describe('Stytch Fingerprint Functions', () => {
       });
 
       expect(creditTransaction?.credit_category).toBe('automatic-welcome-credits');
-      expect(creditTransaction?.amount_microdollars).toBe(5000000); // $5 in microdollars
+      expect(creditTransaction?.amount_microdollars).toBe(2500000); // $2.50 in microdollars
     });
   });
 

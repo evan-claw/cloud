@@ -2,8 +2,8 @@
  * AES-256-GCM encryption for environment variable values.
  *
  * Used to encrypt sensitive env var values in the CF Worker before placing
- * them in Fly Machine config.env. Decrypted at boot by start-openclaw.sh
- * using the KILOCLAW_ENV_KEY (stored as a Fly app secret).
+ * them in Fly Machine config.env. Decrypted at boot by the controller's
+ * bootstrap module using the KILOCLAW_ENV_KEY (stored as a Fly app secret).
  *
  * Ciphertext format: "enc:v1:{base64(12-byte-iv + ciphertext + 16-byte-tag)}"
  */

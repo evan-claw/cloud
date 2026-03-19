@@ -249,6 +249,31 @@ export type GmailNotificationsResponse = {
   gmailNotificationsEnabled: boolean;
 };
 
+/** A candidate volume for admin volume reassociation. */
+export type CandidateVolume = {
+  id: string;
+  name: string;
+  state: 'created' | 'attached' | 'detached';
+  size_gb: number;
+  region: string;
+  attached_machine_id: string | null;
+  created_at: string;
+  isCurrent: boolean;
+};
+
+/** Response from GET /api/platform/candidate-volumes */
+export type CandidateVolumesResponse = {
+  currentVolumeId: string | null;
+  volumes: CandidateVolume[];
+};
+
+/** Response from POST /api/platform/reassociate-volume */
+export type ReassociateVolumeResponse = {
+  previousVolumeId: string | null;
+  newVolumeId: string;
+  newRegion: string;
+};
+
 /** Combined status returned by tRPC getStatus */
 export type KiloClawDashboardStatus = PlatformStatusResponse & {
   /** Worker base URL for constructing the "Open" link. Falls back to claw.kilo.ai. */

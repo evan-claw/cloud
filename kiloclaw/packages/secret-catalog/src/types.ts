@@ -10,9 +10,9 @@ export const SecretIconKeySchema = z.enum(['send', 'discord', 'slack', 'key', 'g
  * How a secret is delivered to the OpenClaw process at runtime.
  *
  * - 'env': The worker encrypts the secret value and sets it as a
- *   KILOCLAW_ENC_* env var on the Fly machine. At boot, start-openclaw.sh
- *   decrypts the env var, then a Node patch script reads the plaintext
- *   value and writes it into the appropriate location in openclaw.json
+ *   KILOCLAW_ENC_* env var on the Fly machine. At boot, the controller's
+ *   bootstrap decrypts the env var, then patches the plaintext value into
+ *   the appropriate location in openclaw.json
  *   (e.g., config.channels.telegram.botToken). OpenClaw reads from
  *   openclaw.json at startup — it never reads these env vars directly.
  *

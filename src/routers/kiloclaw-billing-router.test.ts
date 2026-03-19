@@ -30,11 +30,14 @@ type AnyMock = jest.Mock<(...args: any[]) => any>;
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
 jest.mock('@/lib/stripe-client', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { errors } = require('stripe').default ?? require('stripe');
   const stripeMock = {
     subscriptions: { retrieve: jest.fn(), update: jest.fn(), list: jest.fn() },
     subscriptionSchedules: { create: jest.fn(), update: jest.fn(), release: jest.fn() },
-    checkout: { sessions: { create: jest.fn(), list: jest.fn() } },
+    checkout: { sessions: { create: jest.fn(), list: jest.fn(), expire: jest.fn() } },
     billingPortal: { sessions: { create: jest.fn() } },
+    errors,
   };
   return { client: stripeMock, __stripeMock: stripeMock };
 });
@@ -87,10 +90,11 @@ jest.mock('@/lib/kiloclaw/kiloclaw-internal-client', () => {
 let createCallerForUser: (userId: string) => Promise<any>;
 
 type StripeMockShape = {
-  checkout: { sessions: { create: AnyMock; list: AnyMock } };
+  checkout: { sessions: { create: AnyMock; list: AnyMock; expire: AnyMock } };
   billingPortal: { sessions: { create: AnyMock } };
   subscriptions: { retrieve: AnyMock; update: AnyMock; list: AnyMock };
   subscriptionSchedules: { create: AnyMock; update: AnyMock; release: AnyMock };
+  errors: Stripe['errors'];
 };
 
 const stripeMock = jest.requireMock<{ __stripeMock: StripeMockShape }>(
@@ -116,6 +120,8 @@ beforeEach(async () => {
   stripeMock.checkout.sessions.create.mockReset();
   stripeMock.checkout.sessions.list.mockReset();
   stripeMock.checkout.sessions.list.mockResolvedValue({ data: [] });
+  stripeMock.checkout.sessions.expire.mockReset();
+  stripeMock.checkout.sessions.expire.mockResolvedValue({});
   stripeMock.billingPortal.sessions.create.mockReset();
   stripeMock.subscriptions.retrieve.mockReset();
   stripeMock.subscriptions.update.mockReset();
@@ -788,16 +794,40 @@ describe('reactivateSubscription', () => {
 });
 
 describe('createSubscriptionCheckout — concurrent checkout guard', () => {
-  it('rejects when an open checkout session already exists', async () => {
+  it('expires stale open checkout sessions and creates a new one', async () => {
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
     stripeMock.checkout.sessions.list.mockResolvedValue({
       data: [{ id: 'cs_existing', metadata: { type: 'kiloclaw' } }],
     });
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      id: 'cs_new',
+      url: 'https://checkout.stripe.com/new',
+    });
 
     const caller = await createCallerForUser(user.id);
-    await expect(caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' })).rejects.toThrow(
-      'A checkout is already in progress'
-    );
+    const result = await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
+
+    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_existing');
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalled();
+    expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
+  });
+
+  it('swallows expire errors (session already expired or completed)', async () => {
+    stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
+    stripeMock.checkout.sessions.list.mockResolvedValue({
+      data: [{ id: 'cs_gone', metadata: { type: 'kiloclaw' } }],
+    });
+    stripeMock.checkout.sessions.expire.mockRejectedValue(new Error('session no longer open'));
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      id: 'cs_new',
+      url: 'https://checkout.stripe.com/new',
+    });
+
+    const caller = await createCallerForUser(user.id);
+    const result = await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
+
+    expect(stripeMock.checkout.sessions.expire).toHaveBeenCalledWith('cs_gone');
+    expect(result).toEqual({ url: 'https://checkout.stripe.com/new' });
   });
 
   it('rejects when an active Stripe subscription already exists', async () => {

@@ -47,7 +47,7 @@ export function writeKiloCliConfig(
 
   // Seed config on fresh install only.
   // No provider block needed — the KiloAuthPlugin auto-registers the "kilo"
-  // provider when KILO_API_KEY is in the environment (exported by start-openclaw.sh).
+  // provider when KILO_API_KEY is in the environment (set by bootstrap).
   if (isFreshInstall && !deps.existsSync(configPath)) {
     const config = {
       $schema: 'https://app.kilo.ai/config.json',

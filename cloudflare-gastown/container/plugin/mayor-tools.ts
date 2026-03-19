@@ -67,22 +67,46 @@ export function createMayorTools(client: MayorGastownClient) {
           .string()
           .describe('JSON-encoded metadata object for additional context')
           .optional(),
+        depends_on: tool.schema
+          .array(tool.schema.string())
+          .describe(
+            'Optional list of bead IDs this task depends on. The new bead will not be dispatched until all listed beads are closed.'
+          )
+          .optional(),
+        convoy_id: tool.schema
+          .string()
+          .describe(
+            'Optional convoy ID to add this bead to. The bead will be tracked by the convoy and included in its progress.'
+          )
+          .optional(),
       },
       async execute(args) {
         const metadata = args.metadata ? parseJsonObject(args.metadata, 'metadata') : undefined;
+        // Pass depends_on directly to client.sling() so TownDO.slingBead()
+        // inserts the dependency rows atomically before arming dispatch.
         const result = await client.sling({
           rig_id: args.rig_id,
           title: args.title,
           body: args.body,
           metadata,
+          depends_on: args.depends_on,
+          convoy_id: args.convoy_id,
         });
-        return [
+
+        const lines = [
           `Task slung successfully.`,
           `Bead: ${result.bead.bead_id} — "${result.bead.title}"`,
           `Assigned to: ${result.agent.name} (${result.agent.role}, id: ${result.agent.id})`,
           `Status: ${result.bead.status}`,
-          `The polecat will be dispatched automatically by the alarm scheduler.`,
-        ].join('\n');
+        ];
+        if (args.depends_on && args.depends_on.length > 0) {
+          lines.push(`Dependencies: blocked by ${args.depends_on.length} bead(s)`);
+        }
+        if (args.convoy_id) {
+          lines.push(`Convoy: added to ${args.convoy_id}`);
+        }
+        lines.push(`The polecat will be dispatched automatically by the alarm scheduler.`);
+        return lines.join('\n');
       },
     }),
 
@@ -215,10 +239,7 @@ export function createMayorTools(client: MayorGastownClient) {
         });
 
         const beadLines = result.beads.map(
-          (
-            b: { bead: { title: string }; agent: { name: string; id: string } | null },
-            i: number
-          ) =>
+          (b: { bead: { title: string }; agent: { name: string; id: string } | null }, i: number) =>
             b.agent
               ? `  ${i + 1}. "${b.bead.title}" → ${b.agent.name} (${b.agent.id})`
               : `  ${i + 1}. "${b.bead.title}" (unassigned, pending gt_convoy_start)`
@@ -304,7 +325,9 @@ export function createMayorTools(client: MayorGastownClient) {
     }),
 
     gt_bead_update: tool({
-      description: "Edit a bead's status, title, body, priority, or labels.",
+      description:
+        "Edit a bead's status, title, body, priority, labels, or convoy membership. " +
+        'Set convoy_id to add the bead to a convoy, or set it to null/empty to remove it.',
       args: {
         rig_id: tool.schema.string().describe('The UUID of the rig the bead belongs to'),
         bead_id: tool.schema.string().describe('The UUID of the bead to update'),
@@ -322,6 +345,13 @@ export function createMayorTools(client: MayorGastownClient) {
           .array(tool.schema.string())
           .describe('Replacement labels array for the bead')
           .optional(),
+        convoy_id: tool.schema
+          .string()
+          .describe(
+            'Set to a convoy UUID to add this bead to that convoy. ' +
+              'Set to an empty string to remove the bead from its current convoy.'
+          )
+          .optional(),
       },
       async execute(args) {
         const bead = await client.updateBead(args.rig_id, args.bead_id, {
@@ -330,6 +360,7 @@ export function createMayorTools(client: MayorGastownClient) {
           status: args.status,
           priority: args.priority,
           labels: args.labels,
+          convoy_id: args.convoy_id === '' ? null : args.convoy_id,
         });
         return `Bead ${bead.bead_id} updated. Status: ${bead.status}, Priority: ${bead.priority}, Title: "${bead.title}".`;
       },
@@ -444,6 +475,82 @@ export function createMayorTools(client: MayorGastownClient) {
         const action = parseUiAction(parsed);
         await client.broadcastUiAction(action);
         return `UI action "${action.type}" broadcast to dashboard.`;
+      },
+    }),
+
+    gt_nudge: tool({
+      description:
+        'Send a real-time nudge to a polecat agent in any rig. Unlike gt_mail_send (which queues ' +
+        "a formal persistent message), gt_nudge delivers immediately at the agent's next idle moment. " +
+        'Use this for time-sensitive coordination: wake up an agent, request a status check, ' +
+        'or notify of a blocking issue.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the target agent belongs to'),
+        target_agent_id: tool.schema.string().describe('UUID of the agent to nudge'),
+        message: tool.schema.string().describe('The message to deliver'),
+        mode: tool.schema
+          .enum(['wait-idle', 'immediate', 'queue'])
+          .describe(
+            'Delivery mode: wait-idle (default) delivers at next idle moment; ' +
+              'immediate injects mid-task; queue delivers with TTL'
+          )
+          .optional(),
+      },
+      async execute(args) {
+        const result = await client.nudge({
+          rig_id: args.rig_id,
+          target_agent_id: args.target_agent_id,
+          message: args.message,
+          mode: args.mode ?? 'wait-idle',
+        });
+        return `Nudge queued: ${result.nudge_id} (mode: ${args.mode ?? 'wait-idle'})`;
+      },
+    }),
+
+    gt_bead_add_dependency: tool({
+      description:
+        'Add a dependency between two beads. The bead at bead_id will be blocked by depends_on_bead_id — ' +
+        'it will not be dispatched until the dependency is closed.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the beads belong to'),
+        bead_id: tool.schema.string().describe('The UUID of the bead that should be blocked'),
+        depends_on_bead_id: tool.schema
+          .string()
+          .describe('The UUID of the bead that must close first'),
+        dependency_type: tool.schema
+          .enum(['blocks', 'parent-child'])
+          .describe('Type of dependency (default: blocks)')
+          .optional(),
+      },
+      async execute(args) {
+        await client.addBeadDependency({
+          rig_id: args.rig_id,
+          bead_id: args.bead_id,
+          depends_on_bead_id: args.depends_on_bead_id,
+          dependency_type: args.dependency_type ?? 'blocks',
+        });
+        return `Dependency added: bead ${args.bead_id} now depends on ${args.depends_on_bead_id} (type: ${args.dependency_type ?? 'blocks'}).`;
+      },
+    }),
+
+    gt_bead_remove_dependency: tool({
+      description:
+        'Remove a dependency between two beads. If removing the dependency unblocks the bead, ' +
+        'it will be dispatched automatically.',
+      args: {
+        rig_id: tool.schema.string().describe('The UUID of the rig the beads belong to'),
+        bead_id: tool.schema.string().describe('The UUID of the dependent bead'),
+        depends_on_bead_id: tool.schema
+          .string()
+          .describe('The UUID of the bead it currently depends on'),
+      },
+      async execute(args) {
+        await client.removeBeadDependency({
+          rig_id: args.rig_id,
+          bead_id: args.bead_id,
+          depends_on_bead_id: args.depends_on_bead_id,
+        });
+        return `Dependency removed: bead ${args.bead_id} no longer depends on ${args.depends_on_bead_id}. If this was the last blocker, the bead will be dispatched automatically.`;
       },
     }),
   };

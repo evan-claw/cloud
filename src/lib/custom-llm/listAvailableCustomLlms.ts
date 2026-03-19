@@ -1,15 +1,14 @@
 import { custom_llm } from '@kilocode/db/schema';
 import { readDb } from '@/lib/drizzle';
-import { OpenCodeSettingsSchema, ToolArraySchema } from '@kilocode/db/schema-types';
+import { OpenCodeSettingsSchema } from '@kilocode/db/schema-types';
 
 const listColumns = {
   public_id: custom_llm.public_id,
   display_name: custom_llm.display_name,
   context_length: custom_llm.context_length,
   max_completion_tokens: custom_llm.max_completion_tokens,
+  provider: custom_llm.provider,
   organization_ids: custom_llm.organization_ids,
-  included_tools: custom_llm.included_tools,
-  excluded_tools: custom_llm.excluded_tools,
   supports_image_input: custom_llm.supports_image_input,
   opencode_settings: custom_llm.opencode_settings,
 };
@@ -49,11 +48,10 @@ export function convert(model: ListRow) {
     per_request_limits: null,
     supported_parameters: ['max_tokens', 'temperature', 'tools', 'reasoning', 'include_reasoning'],
     default_parameters: {},
-    settings: {
-      included_tools: ToolArraySchema.safeParse(model.included_tools).data ?? [],
-      excluded_tools: ToolArraySchema.safeParse(model.excluded_tools).data ?? [],
+    opencode: {
+      ...OpenCodeSettingsSchema.safeParse(model.opencode_settings).data,
+      ai_sdk_provider: model.provider,
     },
-    opencode: OpenCodeSettingsSchema.safeParse(model.opencode_settings).data,
   };
 }
 

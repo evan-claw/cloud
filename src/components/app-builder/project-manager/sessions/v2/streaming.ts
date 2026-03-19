@@ -235,6 +235,8 @@ export function createV2StreamingCoordinator(config: V2StreamingConfig): V2Strea
   function updateConnectionState(state: ConnectionState): void {
     connectionState = state;
     if (state.status === 'error' || state.status === 'disconnected') {
+      // Force-complete all in-flight messages so they don't appear stuck in streaming state
+      processor?.forceCompleteAll();
       store.setState({ isStreaming: false });
       if (state.status === 'disconnected') {
         onStreamComplete?.();

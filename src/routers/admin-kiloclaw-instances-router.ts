@@ -7,7 +7,16 @@ import {
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
 import { flyAppNameFromUserId } from '@/lib/kiloclaw/fly-app-name';
-import type { PlatformDebugStatusResponse, VolumeSnapshot } from '@/lib/kiloclaw/types';
+import {
+  createKiloClawAdminAuditLog,
+  listKiloClawAdminAuditLogs,
+} from '@/lib/kiloclaw/admin-audit-log';
+import type {
+  PlatformDebugStatusResponse,
+  VolumeSnapshot,
+  CandidateVolumesResponse,
+  ReassociateVolumeResponse,
+} from '@/lib/kiloclaw/types';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { eq, and, or, desc, asc, ilike, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
@@ -558,4 +567,77 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
 
     return { success: true };
   }),
+
+  adminAuditLogs: adminProcedure
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        action: z.string().optional(),
+        limit: z.number().min(1).max(50).default(10),
+      })
+    )
+    .query(async ({ input }) => {
+      return listKiloClawAdminAuditLogs({
+        target_user_id: input.userId,
+        action: input.action as Parameters<typeof listKiloClawAdminAuditLogs>[0]['action'],
+        limit: input.limit,
+      });
+    }),
+
+  candidateVolumes: adminProcedure
+    .input(z.object({ userId: z.string().min(1) }))
+    .query(async ({ input }): Promise<CandidateVolumesResponse> => {
+      try {
+        const client = new KiloClawInternalClient();
+        return await client.listCandidateVolumes(input.userId);
+      } catch (err) {
+        throwKiloclawAdminError(err, 'Failed to list candidate volumes');
+      }
+    }),
+
+  reassociateVolume: adminProcedure
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        newVolumeId: z.string().min(1),
+        reason: z.string().min(10).max(500),
+      })
+    )
+    .mutation(async ({ input, ctx }): Promise<ReassociateVolumeResponse> => {
+      console.log(
+        `[admin-kiloclaw] Volume reassociation triggered by admin ${ctx.user.id} (${ctx.user.google_user_email}) for user ${input.userId}: newVolume=${input.newVolumeId} reason="${input.reason}"`
+      );
+      try {
+        const client = new KiloClawInternalClient();
+        const result = await client.reassociateVolume(
+          input.userId,
+          input.newVolumeId,
+          input.reason
+        );
+
+        try {
+          await createKiloClawAdminAuditLog({
+            action: 'kiloclaw.volume.reassociate',
+            actor_id: ctx.user.id,
+            actor_email: ctx.user.google_user_email,
+            actor_name: ctx.user.google_user_name,
+            target_user_id: input.userId,
+            message: `Volume reassociated: ${result.previousVolumeId ?? 'none'} → ${result.newVolumeId} (region: ${result.newRegion}). Reason: ${input.reason}`,
+            metadata: {
+              previousVolumeId: result.previousVolumeId,
+              newVolumeId: result.newVolumeId,
+              newRegion: result.newRegion,
+              reason: input.reason,
+            },
+          });
+        } catch (auditErr) {
+          console.error('Failed to write audit log for volume reassociation:', auditErr);
+        }
+
+        return result;
+      } catch (err) {
+        console.error('Failed to reassociate volume for user:', input.userId, err);
+        throwKiloclawAdminError(err, 'Failed to reassociate volume');
+      }
+    }),
 });

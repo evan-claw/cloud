@@ -3,6 +3,7 @@ import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 import type { AnthropicProviderOptions } from '@ai-sdk/anthropic';
 import type { ReasoningDetailUnion } from '@/lib/custom-llm/reasoning-details';
 import type { AwsCredentials } from '@/lib/providers/openrouter/inference-provider-id';
+import type Anthropic from '@anthropic-ai/sdk';
 
 // Base types for OpenRouter API that don't depend on other lib files
 // This breaks circular dependencies with mistral.ts, minimax.ts, etc.
@@ -56,11 +57,17 @@ export type SharedGatewayRequestProperties = {
   // https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request#request.body.models
   models?: string[];
 
-  thinking?: { type?: 'enabled' | 'disabled' };
+  thinking?: { type?: 'enabled' | 'adaptive' | 'disabled' };
 };
 
 export type GatewayResponsesRequest = SharedGatewayRequestProperties &
   OpenAI.Responses.ResponseCreateParams;
+
+export type GatewayMessagesRequest = SharedGatewayRequestProperties &
+  Anthropic.MessageCreateParams & {
+    user?: string;
+    session_id?: string;
+  };
 
 /**
  * Approximately OpenRouter API request type. Actually based on OpenAI's, but the differences aren't huge.
@@ -86,7 +93,8 @@ export type MessageWithReasoning = {
 
 export type GatewayRequest =
   | { kind: 'chat_completions'; body: OpenRouterChatCompletionRequest }
-  | { kind: 'responses'; body: GatewayResponsesRequest };
+  | { kind: 'responses'; body: GatewayResponsesRequest }
+  | { kind: 'messages'; body: GatewayMessagesRequest };
 
 export type OpenRouterGeneration = {
   data: {

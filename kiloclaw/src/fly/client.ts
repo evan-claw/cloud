@@ -360,6 +360,12 @@ export async function getVolume(config: FlyClientConfig, volumeId: string): Prom
   return resp.json();
 }
 
+export async function listVolumes(config: FlyClientConfig): Promise<FlyVolume[]> {
+  const resp = await flyFetch(config, '/volumes');
+  await assertOk(resp, 'listVolumes');
+  return resp.json();
+}
+
 // -- Exec --
 
 /**

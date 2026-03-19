@@ -48,6 +48,10 @@ import {
   parseResponsesMicrodollarUsageFromStream,
   parseResponsesMicrodollarUsageFromString,
 } from '@/lib/processUsage.responses';
+import {
+  parseMessagesMicrodollarUsageFromStream,
+  parseMessagesMicrodollarUsageFromString,
+} from '@/lib/processUsage.messages';
 import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
 import { isAnthropicModel } from '@/lib/providers/anthropic';
 import { isMinimaxModel } from '@/lib/providers/minimax';
@@ -568,6 +572,21 @@ export function countAndStoreUsage(
                 usageContext.kiloUserId,
                 clonedReponse.status
               )
+            );
+    }
+    if (usageContext.api_kind === 'messages') {
+      usageStatsPromise = usageContext.isStreaming
+        ? parseMessagesMicrodollarUsageFromStream(
+            clonedReponse.body,
+            usageContext.kiloUserId,
+            openrouterRequestSpan,
+            usageContext.provider,
+            clonedReponse.status
+          )
+        : clonedReponse
+            .text()
+            .then(content =>
+              parseMessagesMicrodollarUsageFromString(content, clonedReponse.status)
             );
     }
   }

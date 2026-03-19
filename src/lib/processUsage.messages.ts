@@ -1,0 +1,269 @@
+// TODO review this file
+
+import { createParser, type EventSourceMessage } from 'eventsource-parser';
+import { captureException, captureMessage, startInactiveSpan } from '@sentry/nextjs';
+import type { Span } from '@sentry/nextjs';
+import { toMicrodollars } from './utils';
+import { sentryRootSpan } from './getRootSpan';
+import type { ProviderId } from '@/lib/providers/provider-id';
+import type {
+  JustTheCostsUsageStats,
+  MicrodollarUsageStats,
+  NotYetCostedUsageStats,
+  PromptInfo,
+} from '@/lib/processUsage.types';
+import type { GatewayMessagesRequest } from '@/lib/providers/openrouter/types';
+import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
+import type Anthropic from '@anthropic-ai/sdk';
+
+// ref: https://docs.anthropic.com/en/api/messages
+// Anthropic usage combined with OpenRouter cost fields
+// ref: https://docs.anthropic.com/en/api/messages
+// ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
+type MessagesApiUsage = Anthropic.Messages.Usage & {
+  cost?: number;
+  is_byok?: boolean | null;
+  cost_details?: { upstream_inference_cost: number };
+};
+
+function processMessagesApiUsage(
+  usage: MessagesApiUsage | null | undefined,
+  coreProps: NotYetCostedUsageStats
+): JustTheCostsUsageStats {
+  const inputTokens = usage?.input_tokens ?? 0;
+  const outputTokens = usage?.output_tokens ?? 0;
+  const cacheHitTokens = usage?.cache_read_input_tokens ?? 0;
+  const cacheWriteTokens = usage?.cache_creation_input_tokens ?? 0;
+
+  // OpenRouter path: cost fields are present directly in usage
+  if (usage?.cost != null || usage?.is_byok != null) {
+    const is_byok = usage.is_byok ?? null;
+    const openrouterCost_USD = usage.cost ?? 0;
+    const upstream_inference_cost_USD = usage.cost_details?.upstream_inference_cost ?? 0;
+    const cost_mUsd = toMicrodollars(is_byok ? upstream_inference_cost_USD : openrouterCost_USD);
+    const inferredUpstream_USD = openrouterCost_USD * OPENROUTER_BYOK_COST_MULTIPLIER;
+    const microdollar_error = (inferredUpstream_USD - upstream_inference_cost_USD) * 1000000;
+    if (
+      (is_byok == null && (openrouterCost_USD || upstream_inference_cost_USD)) ||
+      (is_byok && usage.cost !== 0 && 1.1 < Math.abs(microdollar_error))
+    ) {
+      const { responseContent: _ignore, ...corePropsCopy } = coreProps;
+      captureMessage("SUSPICIOUS: openrouters cost accounting doesn't make sense", {
+        level: 'error',
+        tags: { source: 'messages_sse_processing' },
+        extra: {
+          ...corePropsCopy,
+          cost_mUsd,
+          is_byok,
+          openrouterCost_USD,
+          upstream_inference_cost_USD,
+          inferredUpstream_USD,
+          microdollar_error,
+        },
+      });
+    }
+    return { inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens, cost_mUsd, is_byok };
+  }
+
+  // No cost info available
+  return {
+    inputTokens,
+    outputTokens,
+    cacheHitTokens,
+    cacheWriteTokens,
+    cost_mUsd: 0,
+    is_byok: null,
+  };
+}
+
+export async function parseMessagesMicrodollarUsageFromStream(
+  stream: ReadableStream,
+  kiloUserId: string,
+  openrouterRequestSpan: Span | undefined,
+  provider: ProviderId,
+  statusCode: number
+): Promise<MicrodollarUsageStats> {
+  openrouterRequestSpan?.end();
+  const streamProcessingSpan = startInactiveSpan({
+    name: 'messages-stream-processing',
+    op: 'performance',
+  });
+  const timeToFirstTokenSpan = startInactiveSpan({
+    name: 'time-to-first-token',
+    op: 'performance',
+  });
+
+  let messageId: string | null = null;
+  let model: string | null = null;
+  let responseContent = '';
+  const reportedError = statusCode >= 400;
+  const startedAt = performance.now();
+  let firstTokenReceived = false;
+  let inputUsage: MessagesApiUsage | null = null;
+  let outputTokens = 0;
+  let finish_reason: string | null = null;
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+
+  const sseStreamParser = createParser({
+    onEvent(event: EventSourceMessage) {
+      if (!firstTokenReceived) {
+        sentryRootSpan()?.setAttribute(
+          'messages.time_to_first_token_ms',
+          performance.now() - startedAt
+        );
+        firstTokenReceived = true;
+        timeToFirstTokenSpan.end();
+      }
+
+      const json = JSON.parse(event.data) as Anthropic.Messages.MessageStreamEvent;
+
+      if (!json) {
+        captureException(new Error('SUSPICIOUS: No JSON in SSE event'), {
+          extra: { event },
+        });
+        return;
+      }
+
+      //if (json.type === 'error') {
+      //  reportedError = true;
+      //  captureException(new Error(`Messages API error: ${json.error.message}`), {
+      //    tags: { source: 'messages_sse_processing' },
+      //    extra: { json, event },
+      //  });
+      //  return;
+      //}
+
+      if (json.type === 'message_start') {
+        messageId = json.message.id;
+        model = json.message.model;
+        inputUsage = json.message.usage;
+      }
+
+      if (
+        json.type === 'content_block_delta' &&
+        json.delta.type === 'text_delta' &&
+        json.delta.text
+      ) {
+        responseContent += json.delta.text;
+      }
+
+      if (json.type === 'message_delta') {
+        finish_reason = json.delta.stop_reason;
+        outputTokens = json.usage.output_tokens;
+      }
+    },
+  });
+
+  let wasAborted = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseStreamParser.feed(decoder.decode(value, { stream: true }));
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'ResponseAborted') {
+      wasAborted = true;
+    } else {
+      throw error;
+    }
+  } finally {
+    reader.releaseLock();
+    streamProcessingSpan.end();
+  }
+
+  if (!reportedError && !inputUsage) {
+    captureMessage('SUSPICIOUS: No usage in Messages API stream', {
+      level: 'warning',
+      tags: { source: 'messages_usage_processing' },
+      extra: { kiloUserId, provider, messageId, model },
+    });
+  }
+
+  // Merge input and output usage together
+  const usage: MessagesApiUsage | null =
+    inputUsage !== null ? Object.assign({}, inputUsage, { output_tokens: outputTokens }) : null;
+
+  const coreProps = {
+    messageId,
+    hasError: reportedError || wasAborted,
+    model,
+    responseContent,
+    inference_provider: null,
+    finish_reason,
+    upstream_id: null,
+    latency: null,
+    moderation_latency: null,
+    generation_time: null,
+    streamed: true,
+    cancelled: null,
+  } satisfies NotYetCostedUsageStats;
+
+  const costs = processMessagesApiUsage(usage, coreProps);
+  return { ...coreProps, ...costs };
+}
+
+export function parseMessagesMicrodollarUsageFromString(
+  fullResponse: string,
+  statusCode: number
+): MicrodollarUsageStats {
+  const responseJson = JSON.parse(fullResponse) as Anthropic.Messages.Message | null;
+
+  const usage = responseJson?.usage;
+
+  const responseContent =
+    responseJson?.content
+      .filter(c => c.type === 'text')
+      .map(c => c.text ?? '')
+      .join('') ?? '';
+
+  const coreProps = {
+    messageId: responseJson?.id ?? null,
+    hasError: !responseJson?.model || statusCode >= 400,
+    model: responseJson?.model ?? null,
+    responseContent,
+    inference_provider: null,
+    upstream_id: null,
+    finish_reason: responseJson?.stop_reason ?? null,
+    latency: null,
+    moderation_latency: null,
+    generation_time: null,
+    streamed: false,
+    cancelled: null,
+  } satisfies NotYetCostedUsageStats;
+
+  const costs = processMessagesApiUsage(usage, coreProps);
+  return { ...coreProps, ...costs };
+}
+
+export function extractMessagesPromptInfo(body: GatewayMessagesRequest): PromptInfo {
+  const systemContent =
+    typeof body.system === 'string'
+      ? body.system
+      : Array.isArray(body.system)
+        ? body.system.map(b => b.text).join('\n')
+        : '';
+
+  const lastUserMessage = body.messages.filter(m => m.role === 'user').at(-1);
+
+  let userPrompt = '';
+  if (lastUserMessage) {
+    const content = lastUserMessage.content;
+    if (typeof content === 'string') {
+      userPrompt = content;
+    } else {
+      userPrompt = content
+        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+        .map(c => c.text)
+        .join('\n');
+    }
+  }
+
+  return {
+    system_prompt_prefix: systemContent.slice(0, 100),
+    system_prompt_length: systemContent.length,
+    user_prompt_prefix: userPrompt.slice(0, 100),
+  };
+}

@@ -7,6 +7,7 @@ import type {
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
   GatewayRequest,
+  GatewayMessagesRequest,
 } from '@/lib/providers/openrouter/types';
 import {
   applyMistralModelSettings,
@@ -39,7 +40,7 @@ import { eq } from 'drizzle-orm';
 import { applyMoonshotProviderSettings, isMoonshotModel } from '@/lib/providers/moonshotai';
 import type { AnonymousUserContext } from '@/lib/anonymous';
 import { isAnonymousContext } from '@/lib/anonymous';
-import { isOpenAiModel } from '@/lib/providers/openai';
+import { isOpenAiModel, isOpenAiOssModel } from '@/lib/providers/openai';
 import { applyAlibabaProviderSettings } from '@/lib/providers/qwen';
 import type { ProviderId } from '@/lib/providers/provider-id';
 import { isZaiModel } from '@/lib/providers/zai';
@@ -119,7 +120,7 @@ async function checkBYOK(
 
 export async function getProvider(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest,
+  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest | GatewayMessagesRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
@@ -173,12 +174,11 @@ export async function getProvider(
         organization_ids: [],
         base_url: freeModelProvider.apiUrl,
         api_key: freeModelProvider.apiKey,
-        included_tools: null,
-        excluded_tools: null,
         supports_image_input: kiloFreeModel.flags.includes('vision'),
         force_reasoning: true,
         opencode_settings: null,
         extra_body: null,
+        extra_headers: null,
         interleaved_format: null,
       },
     };
@@ -257,12 +257,21 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
       OpenRouterInferenceProviderIdSchema.enum['z-ai'],
     ];
   }
+  if (isOpenAiOssModel(requestedModel)) {
+    return [
+      OpenRouterInferenceProviderIdSchema.enum.novita,
+      OpenRouterInferenceProviderIdSchema.enum['amazon-bedrock'],
+    ];
+  }
   return [];
 }
 
 function applyPreferredProvider(
   requestedModel: string,
-  requestToMutate: OpenRouterChatCompletionRequest | GatewayResponsesRequest
+  requestToMutate:
+    | OpenRouterChatCompletionRequest
+    | GatewayResponsesRequest
+    | GatewayMessagesRequest
 ) {
   const preferredProviderOrder = getPreferredProviderOrder(requestedModel);
   if (preferredProviderOrder.length === 0) {
@@ -354,7 +363,7 @@ export async function openRouterRequest({
   path: string;
   search: string;
   method: string;
-  body: OpenRouterChatCompletionRequest | GatewayResponsesRequest;
+  body: OpenRouterChatCompletionRequest | GatewayResponsesRequest | GatewayMessagesRequest;
   extraHeaders: Record<string, string>;
   provider: Provider;
   signal?: AbortSignal;

@@ -1,0 +1,1 @@
+DROP TABLE "temp_phase" CASCADE;
