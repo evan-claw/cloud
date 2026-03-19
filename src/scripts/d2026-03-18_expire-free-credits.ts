@@ -252,13 +252,14 @@ async function processUser(
     // Reduce expiration on newly-tagged credits, starting from last (least priority)
     for (let i = newTransactions.length - 1; i >= 0 && deficit > 0; i--) {
       const tx = newTransactions[i];
-      if (!affectedIdSet.has(tx.original_transaction_id!)) continue;
+      const origId = tx.original_transaction_id;
+      if (origId == null || !affectedIdSet.has(origId)) continue;
 
       const expiredAmt = Math.abs(tx.amount_microdollars ?? 0);
       if (expiredAmt === 0) continue;
 
       const reduction = Math.min(deficit, expiredAmt);
-      baselineBoosts.set(tx.original_transaction_id!, reduction);
+      baselineBoosts.set(origId, reduction);
       deficit -= reduction;
     }
 
@@ -476,7 +477,7 @@ async function main() {
       }
     }
 
-    lastUserId = [...byUser.keys()].sort().pop()!;
+    lastUserId = [...byUser.keys()].sort().pop() ?? lastUserId;
     console.log(
       `  ${totalCredits} credits fetched, ${usersProcessed} users processed, ${totalErrors} errors`
     );
