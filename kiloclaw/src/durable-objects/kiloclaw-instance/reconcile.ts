@@ -1,30 +1,33 @@
-import type { KiloClawEnv } from '../../types';
-import type { FlyClientConfig } from '../../fly/client';
-import type { FlyMachineConfig } from '../../fly/types';
-import type { PersistedState } from '../../schemas/instance-config';
-import * as fly from '../../fly/client';
+import type { KiloClawEnv } from "../../types";
+import type { FlyClientConfig } from "../../fly/client";
+import type { FlyMachineConfig } from "../../fly/types";
+import type { PersistedState } from "../../schemas/instance-config";
+import * as fly from "../../fly/client";
 import {
   SELF_HEAL_THRESHOLD,
   STARTUP_TIMEOUT_SECONDS,
   STARTING_TIMEOUT_MS,
   RESTARTING_TIMEOUT_MS,
   getProactiveRefreshThresholdMs,
-} from '../../config';
-import { ENCRYPTED_ENV_PREFIX, encryptEnvValue } from '../../utils/env-encryption';
+} from "../../config";
+import {
+  ENCRYPTED_ENV_PREFIX,
+  encryptEnvValue,
+} from "../../utils/env-encryption";
 import {
   METADATA_RECOVERY_COOLDOWN_MS,
   BOUND_MACHINE_RECOVERY_COOLDOWN_MS,
   TERMINAL_STOPPED_STATES,
   selectRecoveryCandidate,
   volumeIdFromMachine,
-} from '../machine-recovery';
-import { METADATA_KEY_USER_ID } from '../machine-config';
-import type { InstanceMutableState, DestroyResult } from './types';
-import { storageUpdate, resetMutableState } from './state';
-import { reconcileLog, doError, doWarn, toLoggable } from './log';
-import { ensureVolume, staleProvisionAgeMs } from './fly-machines';
-import { mintFreshApiKey } from './config';
-import * as gateway from './gateway';
+} from "../machine-recovery";
+import { METADATA_KEY_USER_ID } from "../machine-config";
+import type { InstanceMutableState, DestroyResult } from "./types";
+import { storageUpdate, resetMutableState } from "./state";
+import { reconcileLog, doError, doWarn, toLoggable } from "./log";
+import { ensureVolume, staleProvisionAgeMs } from "./fly-machines";
+import { mintFreshApiKey } from "./config";
+import * as gateway from "./gateway";
 
 /**
  * Check actual Fly state against DO state and fix drift.
@@ -39,35 +42,51 @@ export async function reconcileWithFly(
   /** Callback to trigger a full destroy (calls back into the DO). */
   triggerDestroy: () => Promise<void>,
   /** Callback for marking Postgres row destroyed during finalization. */
-  markDestroyedInPostgres?: (userId: string, sandboxId: string) => Promise<boolean>
+  markDestroyedInPostgres?: (
+    userId: string,
+    sandboxId: string,
+  ) => Promise<boolean>,
 ): Promise<void> {
-  if (state.status === 'destroying') {
-    await retryPendingDestroy(flyConfig, ctx, state, reason, markDestroyedInPostgres);
+  if (state.status === "destroying") {
+    await retryPendingDestroy(
+      flyConfig,
+      ctx,
+      state,
+      reason,
+      markDestroyedInPostgres,
+    );
     return;
   }
 
-  if (state.status === 'starting') {
+  if (state.status === "starting") {
     await reconcileStarting(flyConfig, ctx, state, env, reason);
     return;
   }
 
-  if (state.status === 'restarting') {
+  if (state.status === "restarting") {
     await reconcileRestarting(flyConfig, ctx, state, env, reason);
     return;
   }
 
-  const machineReconciled = await reconcileMachine(flyConfig, ctx, state, reason);
+  const machineReconciled = await reconcileMachine(
+    flyConfig,
+    ctx,
+    state,
+    reason,
+  );
 
   // Auto-destroy stale provisioned instances
   const staleAge = staleProvisionAgeMs(state);
   if (staleAge !== null && machineReconciled) {
-    reconcileLog(reason, 'auto_destroy_stale_provision', {
+    reconcileLog(reason, "auto_destroy_stale_provision", {
       user_id: state.userId,
       provisioned_at: state.provisionedAt,
       age_hours: Math.round(staleAge / 3600000),
     });
     state.pendingPostgresMarkOnFinalize = true;
-    await ctx.storage.put(storageUpdate({ pendingPostgresMarkOnFinalize: true }));
+    await ctx.storage.put(
+      storageUpdate({ pendingPostgresMarkOnFinalize: true }),
+    );
     await triggerDestroy();
     return;
   }
@@ -85,9 +104,9 @@ async function reconcileApiKeyExpiry(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   env: KiloClawEnv,
-  reason: string
+  reason: string,
 ): Promise<void> {
-  if (state.status !== 'running' || !state.flyMachineId) return;
+  if (state.status !== "running" || !state.flyMachineId) return;
   if (!state.kilocodeApiKeyExpiresAt || !state.userId) return;
 
   const machineId = state.flyMachineId;
@@ -97,7 +116,9 @@ async function reconcileApiKeyExpiry(
   if (Number.isNaN(expiresAtMs)) return;
 
   const timeUntilExpiry = expiresAtMs - Date.now();
-  const thresholdMs = getProactiveRefreshThresholdMs(env.PROACTIVE_REFRESH_THRESHOLD_HOURS);
+  const thresholdMs = getProactiveRefreshThresholdMs(
+    env.PROACTIVE_REFRESH_THRESHOLD_HOURS,
+  );
   if (timeUntilExpiry > thresholdMs) return;
 
   // Fetch controller version for observability (best-effort, not used for gating).
@@ -106,12 +127,12 @@ async function reconcileApiKeyExpiry(
     const info = await gateway.getControllerVersion(state, env);
     controllerVersion = info?.version ?? null;
   } catch (err) {
-    doWarn(state, 'controller version check failed', {
+    doWarn(state, "controller version check failed", {
       error: toLoggable(err),
     });
   }
 
-  reconcileLog(reason, 'api_key_expiry_approaching', {
+  reconcileLog(reason, "api_key_expiry_approaching", {
     user_id: userId,
     expires_at: state.kilocodeApiKeyExpiresAt,
     hours_remaining: Math.round(timeUntilExpiry / 3600000),
@@ -125,11 +146,14 @@ async function reconcileApiKeyExpiry(
     freshKey = await Promise.race([
       mintFreshApiKey(env, userId),
       new Promise<never>((_, reject) => {
-        mintTimeoutId = setTimeout(() => reject(new Error('mint timeout')), MINT_TIMEOUT_MS);
+        mintTimeoutId = setTimeout(
+          () => reject(new Error("mint timeout")),
+          MINT_TIMEOUT_MS,
+        );
       }),
     ]);
   } catch (err) {
-    reconcileLog(reason, 'api_key_mint_error', {
+    reconcileLog(reason, "api_key_mint_error", {
       user_id: userId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -138,7 +162,7 @@ async function reconcileApiKeyExpiry(
     clearTimeout(mintTimeoutId);
   }
   if (!freshKey) {
-    reconcileLog(reason, 'api_key_mint_failed', { user_id: userId });
+    reconcileLog(reason, "api_key_mint_failed", { user_id: userId });
     return;
   }
 
@@ -154,18 +178,21 @@ async function reconcileApiKeyExpiry(
 
     const appStub = env.KILOCLAW_APP.get(env.KILOCLAW_APP.idFromName(userId));
     const { key: envKey, secretsVersion } = await appStub.ensureEnvKey(userId);
-    updatedEnv[`${ENCRYPTED_ENV_PREFIX}KILOCODE_API_KEY`] = encryptEnvValue(envKey, freshKey.token);
+    updatedEnv[`${ENCRYPTED_ENV_PREFIX}KILOCODE_API_KEY`] = encryptEnvValue(
+      envKey,
+      freshKey.token,
+    );
 
     await fly.updateMachine(
       flyConfig,
       machineId,
       { ...machine.config, env: updatedEnv },
-      { skipLaunch: true, minSecretsVersion: secretsVersion }
+      { skipLaunch: true, minSecretsVersion: secretsVersion },
     );
 
     flyConfigUpdated = true;
   } catch (err) {
-    reconcileLog(reason, 'api_key_fly_config_update_failed', {
+    reconcileLog(reason, "api_key_fly_config_update_failed", {
       user_id: userId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -183,13 +210,13 @@ async function reconcileApiKeyExpiry(
     });
     pushed = result?.signaled ?? false;
     if (!pushed) {
-      reconcileLog(reason, 'api_key_push_not_signaled', {
+      reconcileLog(reason, "api_key_push_not_signaled", {
         user_id: userId,
-        result: result ? `ok=${result.ok} signaled=${result.signaled}` : 'null',
+        result: result ? `ok=${result.ok} signaled=${result.signaled}` : "null",
       });
     }
   } catch (err) {
-    reconcileLog(reason, 'api_key_push_error', {
+    reconcileLog(reason, "api_key_push_error", {
       user_id: userId,
       error: err instanceof Error ? err.message : String(err),
       controller_version: controllerVersion,
@@ -202,7 +229,7 @@ async function reconcileApiKeyExpiry(
   //    Persisting the new expiry would cause future alarms to skip refresh,
   //    letting the old key expire silently.
   if (!pushed && !flyConfigUpdated) {
-    reconcileLog(reason, 'api_key_refresh_failed_all_paths', {
+    reconcileLog(reason, "api_key_refresh_failed_all_paths", {
       user_id: userId,
     });
     return;
@@ -214,10 +241,10 @@ async function reconcileApiKeyExpiry(
     storageUpdate({
       kilocodeApiKey: freshKey.token,
       kilocodeApiKeyExpiresAt: freshKey.expiresAt,
-    })
+    }),
   );
 
-  reconcileLog(reason, 'api_key_refreshed', {
+  reconcileLog(reason, "api_key_refreshed", {
     user_id: userId,
     new_expires_at: freshKey.expiresAt,
     pushed,
@@ -245,37 +272,38 @@ async function reconcileStarting(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   env: KiloClawEnv,
-  reason: string
+  reason: string,
 ): Promise<void> {
   const startingAt = state.startingAt;
-  const isTimedOut = startingAt !== null && Date.now() - startingAt > STARTING_TIMEOUT_MS;
+  const isTimedOut =
+    startingAt !== null && Date.now() - startingAt > STARTING_TIMEOUT_MS;
 
   if (!state.flyMachineId) {
     if (isTimedOut) {
       // No machine after STARTING_TIMEOUT_MS — start() never created one. Give up.
-      reconcileLog(reason, 'starting_timeout', {
+      reconcileLog(reason, "starting_timeout", {
         user_id: state.userId,
         starting_at: state.startingAt,
         elapsed_ms: Date.now() - startingAt,
-        new_state: 'stopped',
+        new_state: "stopped",
         last_start_error: state.lastStartErrorMessage,
       });
-      state.status = 'stopped';
+      state.status = "stopped";
       state.startingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
-          status: 'stopped',
+          status: "stopped",
           startingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
       return;
     }
     // start() hasn't persisted a machine ID yet — still in progress, wait.
-    reconcileLog(reason, 'starting_no_machine_yet', { user_id: state.userId });
+    reconcileLog(reason, "starting_no_machine_yet", { user_id: state.userId });
     return;
   }
 
@@ -294,73 +322,73 @@ async function reconcileStarting(
     // If syncStatusWithFly transitioned us out of 'starting', we're done.
     // If still 'starting' after the timeout, the machine exists but isn't
     // started yet — fall back to 'stopped' so the user can retry.
-    if (isTimedOut && state.status === 'starting') {
-      reconcileLog(reason, 'starting_timeout_with_machine', {
+    if (isTimedOut && state.status === "starting") {
+      reconcileLog(reason, "starting_timeout_with_machine", {
         machine_id: state.flyMachineId,
         fly_state: machine.state,
         elapsed_ms: Date.now() - startingAt,
-        new_state: 'stopped',
+        new_state: "stopped",
         last_start_error: state.lastStartErrorMessage,
       });
-      state.status = 'stopped';
+      state.status = "stopped";
       state.startingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
-          status: 'stopped',
+          status: "stopped",
           startingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
     }
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
       // Machine was never created or was cleaned up externally.
-      reconcileLog(reason, 'starting_machine_gone', {
+      reconcileLog(reason, "starting_machine_gone", {
         machine_id: state.flyMachineId,
-        new_state: 'stopped',
+        new_state: "stopped",
       });
       state.flyMachineId = null;
-      state.status = 'stopped';
+      state.status = "stopped";
       state.startingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
           flyMachineId: null,
-          status: 'stopped',
+          status: "stopped",
           startingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
     } else if (isTimedOut) {
       // Transient Fly API error but we've exceeded the starting timeout.
       // Fall back to 'stopped' so the user can retry instead of staying
       // stuck in 'starting' indefinitely while the Fly API is unreachable.
-      reconcileLog(reason, 'starting_timeout_transient_error', {
+      reconcileLog(reason, "starting_timeout_transient_error", {
         machine_id: state.flyMachineId,
         error: err instanceof Error ? err.message : String(err),
         elapsed_ms: startingAt !== null ? Date.now() - startingAt : undefined,
-        new_state: 'stopped',
+        new_state: "stopped",
       });
-      state.status = 'stopped';
+      state.status = "stopped";
       state.startingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
-          status: 'stopped',
+          status: "stopped",
           startingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
     } else {
       // Transient Fly API error — leave in 'starting', alarm will retry.
-      doError(state, 'reconcileStarting: transient error checking machine', {
+      doError(state, "reconcileStarting: transient error checking machine", {
         error: toLoggable(err),
       });
     }
@@ -372,19 +400,24 @@ async function reconcileRestarting(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   env: KiloClawEnv,
-  reason: string
+  reason: string,
 ): Promise<void> {
-  if (state.status !== 'restarting') return;
+  if (state.status !== "restarting") return;
   if (!state.flyMachineId) return;
 
   const restartingAt = state.restartingAt;
-  const isTimedOut = restartingAt !== null && Date.now() - restartingAt > RESTARTING_TIMEOUT_MS;
+  const isTimedOut =
+    restartingAt !== null && Date.now() - restartingAt > RESTARTING_TIMEOUT_MS;
 
   try {
     const machine = await fly.getMachine(flyConfig, state.flyMachineId);
-    if (machine.state === 'started') {
+    if (machine.state === "started") {
       if (state.restartUpdateSent) {
         // updateMachine() was sent — started means the new config is live.
+        reconcileLog(reason, 'restarting_reconcile_success', {
+          machine_id: state.flyMachineId,
+          elapsed_ms: restartingAt !== null ? Date.now() - restartingAt : undefined,
+        });
         await markRestartSuccessful(ctx, state);
         await reconcileVolume(flyConfig, ctx, state, env, reason);
         return;
@@ -394,22 +427,23 @@ async function reconcileRestarting(
       // restarting → running. If timed out, fall back to running so the user
       // can retry — the machine is genuinely serving traffic, just with old config.
       if (isTimedOut) {
-        reconcileLog(reason, 'restarting_no_update_timeout_fallback', {
+        reconcileLog(reason, "restarting_no_update_timeout_fallback", {
           machine_id: state.flyMachineId,
           last_restart_error: state.lastRestartErrorMessage,
-          elapsed_ms: restartingAt !== null ? Date.now() - restartingAt : undefined,
+          elapsed_ms:
+            restartingAt !== null ? Date.now() - restartingAt : undefined,
         });
-        state.status = 'running';
+        state.status = "running";
         state.restartingAt = null;
         state.restartUpdateSent = false;
         state.healthCheckFailCount = 0;
         await ctx.storage.put(
           storageUpdate({
-            status: 'running',
+            status: "running",
             restartingAt: null,
             restartUpdateSent: false,
             healthCheckFailCount: 0,
-          })
+          }),
         );
       }
       await reconcileVolume(flyConfig, ctx, state, env, reason);
@@ -418,10 +452,10 @@ async function reconcileRestarting(
 
     await syncStatusWithFly(ctx, state, machine.state, reason);
     await reconcileVolume(flyConfig, ctx, state, env, reason);
-    const currentStatus = await ctx.storage.get('status');
+    const currentStatus = await ctx.storage.get("status");
 
-    if (currentStatus === 'stopped') {
-      state.status = 'stopped';
+    if (currentStatus === "stopped") {
+      state.status = "stopped";
       state.restartingAt = null;
       await ctx.storage.put(storageUpdate({ restartingAt: null }));
       return;
@@ -432,7 +466,7 @@ async function reconcileRestarting(
     }
 
     const timeoutMessage = `Restart is taking longer than expected; still reconciling while the machine remains ${machine.state}`;
-    reconcileLog(reason, 'restarting_timeout_transient', {
+    reconcileLog(reason, "restarting_timeout_transient", {
       machine_id: state.flyMachineId,
       fly_state: machine.state,
       elapsed_ms: restartingAt !== null ? Date.now() - restartingAt : undefined,
@@ -441,54 +475,55 @@ async function reconcileRestarting(
     await setRestartError(ctx, state, timeoutMessage);
 
     if (TERMINAL_STOPPED_STATES.has(machine.state)) {
-      state.status = 'stopped';
+      state.status = "stopped";
       state.restartingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
-          status: 'stopped',
+          status: "stopped",
           restartingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
     }
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      reconcileLog(reason, 'restarting_machine_gone', {
+      reconcileLog(reason, "restarting_machine_gone", {
         machine_id: state.flyMachineId,
-        new_state: 'stopped',
+        new_state: "stopped",
       });
       state.flyMachineId = null;
-      state.status = 'stopped';
+      state.status = "stopped";
       state.restartingAt = null;
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
           flyMachineId: null,
-          status: 'stopped',
+          status: "stopped",
           restartingAt: null,
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
       return;
     }
 
     if (isTimedOut) {
       const timeoutMessage = err instanceof Error ? err.message : String(err);
-      reconcileLog(reason, 'restarting_timeout_error', {
+      reconcileLog(reason, "restarting_timeout_error", {
         machine_id: state.flyMachineId,
         error: timeoutMessage,
-        elapsed_ms: restartingAt !== null ? Date.now() - restartingAt : undefined,
+        elapsed_ms:
+          restartingAt !== null ? Date.now() - restartingAt : undefined,
       });
       await setRestartError(ctx, state, timeoutMessage);
       return;
     }
 
-    doError(state, 'reconcileRestarting: transient error checking machine', {
+    doError(state, "reconcileRestarting: transient error checking machine", {
       error: toLoggable(err),
     });
   }
@@ -501,7 +536,7 @@ async function reconcileVolume(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   env: KiloClawEnv,
-  reason: string
+  reason: string,
 ): Promise<void> {
   if (!state.flyVolumeId) {
     await ensureVolume(flyConfig, ctx, state, env, reason);
@@ -512,7 +547,7 @@ async function reconcileVolume(
     await fly.getVolume(flyConfig, state.flyVolumeId);
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      reconcileLog(reason, 'replace_lost_volume', {
+      reconcileLog(reason, "replace_lost_volume", {
         data_loss: true,
         old_volume_id: state.flyVolumeId,
       });
@@ -520,7 +555,7 @@ async function reconcileVolume(
       await ctx.storage.put(storageUpdate({ flyVolumeId: null }));
       await ensureVolume(flyConfig, ctx, state, env, reason);
     } else {
-      doWarn(state, 'getVolume failed (will retry next alarm)', {
+      doWarn(state, "getVolume failed (will retry next alarm)", {
         error: toLoggable(err),
       });
     }
@@ -536,7 +571,7 @@ async function reconcileMachine(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<boolean> {
   if (!state.flyMachineId) {
     return attemptMetadataRecovery(flyConfig, ctx, state, reason);
@@ -563,7 +598,7 @@ export async function attemptMetadataRecovery(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<boolean> {
   if (!state.userId) return false;
 
@@ -575,7 +610,9 @@ export async function attemptMetadataRecovery(
   }
 
   state.lastMetadataRecoveryAt = Date.now();
-  await ctx.storage.put(storageUpdate({ lastMetadataRecoveryAt: state.lastMetadataRecoveryAt }));
+  await ctx.storage.put(
+    storageUpdate({ lastMetadataRecoveryAt: state.lastMetadataRecoveryAt }),
+  );
 
   try {
     const machines = await fly.listMachines(flyConfig, {
@@ -583,17 +620,17 @@ export async function attemptMetadataRecovery(
     });
 
     if (machines.length > 1) {
-      reconcileLog(reason, 'multiple_machines_found', {
+      reconcileLog(reason, "multiple_machines_found", {
         user_id: state.userId,
         count: machines.length,
-        machine_ids: machines.map(m => m.id),
+        machine_ids: machines.map((m) => m.id),
       });
     }
 
     const candidate = selectRecoveryCandidate(machines);
     if (!candidate) return true;
 
-    reconcileLog(reason, 'recover_machine_from_metadata', {
+    reconcileLog(reason, "recover_machine_from_metadata", {
       machine_id: candidate.id,
       state: candidate.state,
       region: candidate.region,
@@ -607,16 +644,16 @@ export async function attemptMetadataRecovery(
       flyRegion: candidate.region,
     };
 
-    if (candidate.state === 'started') {
-      state.status = 'running';
-      updates.status = 'running';
+    if (candidate.state === "started") {
+      state.status = "running";
+      updates.status = "running";
     } else if (
-      candidate.state === 'stopped' ||
-      candidate.state === 'created' ||
-      candidate.state === 'failed'
+      candidate.state === "stopped" ||
+      candidate.state === "created" ||
+      candidate.state === "failed"
     ) {
-      state.status = 'stopped';
-      updates.status = 'stopped';
+      state.status = "stopped";
+      updates.status = "stopped";
     }
 
     if (!state.flyVolumeId) {
@@ -626,13 +663,13 @@ export async function attemptMetadataRecovery(
           await fly.getVolume(flyConfig, recoveredVolumeId);
           state.flyVolumeId = recoveredVolumeId;
           updates.flyVolumeId = recoveredVolumeId;
-          reconcileLog(reason, 'recover_volume_from_mount', {
+          reconcileLog(reason, "recover_volume_from_mount", {
             volume_id: recoveredVolumeId,
             machine_id: candidate.id,
           });
         } catch (err) {
           if (fly.isFlyNotFound(err)) {
-            reconcileLog(reason, 'recovered_volume_missing', {
+            reconcileLog(reason, "recovered_volume_missing", {
               volume_id: recoveredVolumeId,
             });
           }
@@ -643,7 +680,7 @@ export async function attemptMetadataRecovery(
     await ctx.storage.put(storageUpdate(updates));
     return true;
   } catch (err) {
-    doError(state, 'metadata recovery failed', { error: toLoggable(err) });
+    doError(state, "metadata recovery failed", { error: toLoggable(err) });
     return false;
   }
 }
@@ -655,11 +692,14 @@ export async function syncStatusWithFly(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   flyState: string,
-  reason: string
+  reason: string,
 ): Promise<void> {
-  if (flyState === 'started' && state.status !== 'running') {
-    reconcileLog(reason, 'sync_status', { old_state: state.status, new_state: 'running' });
-    state.status = 'running';
+  if (flyState === "started" && state.status !== "running") {
+    reconcileLog(reason, "sync_status", {
+      old_state: state.status,
+      new_state: "running",
+    });
+    state.status = "running";
     state.startingAt = null;
     state.healthCheckFailCount = 0;
     // Backfill lastStartedAt whenever a transition to 'running' is observed and
@@ -671,16 +711,16 @@ export async function syncStatusWithFly(
     }
     await ctx.storage.put(
       storageUpdate({
-        status: 'running',
+        status: "running",
         startingAt: null,
         healthCheckFailCount: 0,
         lastStartedAt: state.lastStartedAt,
-      })
+      }),
     );
     return;
   }
 
-  if (flyState === 'started' && state.status === 'running') {
+  if (flyState === "started" && state.status === "running") {
     if (state.healthCheckFailCount > 0) {
       state.healthCheckFailCount = 0;
       await ctx.storage.put(storageUpdate({ healthCheckFailCount: 0 }));
@@ -690,42 +730,50 @@ export async function syncStatusWithFly(
 
   // failed is definitively terminal — transition immediately without waiting for
   // SELF_HEAL_THRESHOLD consecutive checks like we do for stopped/created.
-  if (flyState === 'failed' && state.status !== 'stopped') {
-    reconcileLog(reason, 'sync_status_failed', { old_state: state.status, fly_state: flyState });
-    state.status = 'stopped';
+  if (flyState === "failed" && state.status !== "stopped") {
+    reconcileLog(reason, "sync_status_failed", {
+      old_state: state.status,
+      fly_state: flyState,
+    });
+    state.status = "stopped";
     state.startingAt = null;
     state.lastStoppedAt = Date.now();
     state.healthCheckFailCount = 0;
     await ctx.storage.put(
       storageUpdate({
-        status: 'stopped',
+        status: "stopped",
         startingAt: null,
         lastStoppedAt: state.lastStoppedAt,
         healthCheckFailCount: 0,
-      })
+      }),
     );
     return;
   }
 
-  if ((flyState === 'stopped' || flyState === 'created') && state.status === 'running') {
+  if (
+    (flyState === "stopped" || flyState === "created") &&
+    state.status === "running"
+  ) {
     state.healthCheckFailCount++;
-    await ctx.storage.put(storageUpdate({ healthCheckFailCount: state.healthCheckFailCount }));
+    await ctx.storage.put(
+      storageUpdate({ healthCheckFailCount: state.healthCheckFailCount }),
+    );
 
     if (state.healthCheckFailCount >= SELF_HEAL_THRESHOLD) {
-      reconcileLog(reason, 'mark_stopped', {
-        old_state: 'running',
-        new_state: 'stopped',
+      reconcileLog(reason, "mark_stopped", {
+        old_state: "running",
+        new_state: "stopped",
         fail_count: state.healthCheckFailCount,
       });
-      state.status = 'stopped';
+      state.status = "stopped";
       state.lastStoppedAt = Date.now();
       state.healthCheckFailCount = 0;
       await ctx.storage.put(
         storageUpdate({
-          status: 'stopped',
+          status: "stopped",
           lastStoppedAt: state.lastStoppedAt,
           healthCheckFailCount: 0,
-        })
+        }),
       );
     }
   }
@@ -733,9 +781,14 @@ export async function syncStatusWithFly(
 
 export async function markRestartSuccessful(
   ctx: DurableObjectState,
-  state: InstanceMutableState
+  state: InstanceMutableState,
 ): Promise<void> {
-  state.status = 'running';
+  reconcileLog("restart", "restart_self_healed", {
+    machine_id: state.flyMachineId,
+    previous_error: state.lastRestartErrorMessage,
+    had_restart_error: state.lastRestartErrorMessage !== null,
+  });
+  state.status = "running";
   state.startingAt = null;
   state.restartingAt = null;
   state.restartUpdateSent = false;
@@ -747,7 +800,7 @@ export async function markRestartSuccessful(
   state.lastRestartErrorAt = null;
   await ctx.storage.put(
     storageUpdate({
-      status: 'running',
+      status: "running",
       startingAt: null,
       restartingAt: null,
       restartUpdateSent: false,
@@ -755,14 +808,14 @@ export async function markRestartSuccessful(
       healthCheckFailCount: 0,
       lastRestartErrorMessage: null,
       lastRestartErrorAt: null,
-    })
+    }),
   );
 }
 
 async function setRestartError(
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  message: string
+  message: string,
 ): Promise<void> {
   state.lastRestartErrorMessage = message;
   state.lastRestartErrorAt = Date.now();
@@ -770,7 +823,7 @@ async function setRestartError(
     storageUpdate({
       lastRestartErrorMessage: message,
       lastRestartErrorAt: state.lastRestartErrorAt,
-    })
+    }),
   );
 }
 
@@ -780,7 +833,7 @@ async function setRestartError(
 export async function syncStatusFromLiveCheck(
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  env: KiloClawEnv
+  env: KiloClawEnv,
 ): Promise<void> {
   if (!state.flyMachineId) return;
   if (state.restartingAt !== null) return;
@@ -799,24 +852,28 @@ export async function syncStatusFromLiveCheck(
       await ctx.storage.put(storageUpdate({ machineSize: state.machineSize }));
     }
 
-    if (machine.state === 'started') {
+    if (machine.state === "started") {
       state.healthCheckFailCount = 0;
       return;
     }
 
     if (TERMINAL_STOPPED_STATES.has(machine.state)) {
-      console.log('[DO] Live check: Fly state is', machine.state, '— marking stopped in-memory');
-      state.status = 'stopped';
+      console.log(
+        "[DO] Live check: Fly state is",
+        machine.state,
+        "— marking stopped in-memory",
+      );
+      state.status = "stopped";
     } else {
       state.healthCheckFailCount = 0;
     }
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      console.log('[DO] Live check: machine 404 — marking stopped in-memory');
-      state.status = 'stopped';
+      console.log("[DO] Live check: machine 404 — marking stopped in-memory");
+      state.status = "stopped";
       return;
     }
-    doWarn(state, 'Live check failed, using cached status', {
+    doWarn(state, "Live check failed, using cached status", {
       error: toLoggable(err),
     });
   }
@@ -830,18 +887,20 @@ export async function reconcileMachineMount(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   machine: { state: string; config: FlyMachineConfig },
-  reason: string
+  reason: string,
 ): Promise<void> {
-  if (machine.state !== 'started' || !state.flyVolumeId) return;
+  if (machine.state !== "started" || !state.flyVolumeId) return;
 
   const mounts = machine.config?.mounts ?? [];
-  const hasCorrectMount = mounts.some(m => m.volume === state.flyVolumeId && m.path === '/root');
+  const hasCorrectMount = mounts.some(
+    (m) => m.volume === state.flyVolumeId && m.path === "/root",
+  );
 
   if (hasCorrectMount) return;
 
   if (!state.flyMachineId) return;
 
-  reconcileLog(reason, 'repair_mount', {
+  reconcileLog(reason, "repair_mount", {
     machine_id: state.flyMachineId,
     volume_id: state.flyVolumeId,
   });
@@ -849,9 +908,14 @@ export async function reconcileMachineMount(
   await fly.stopMachineAndWait(flyConfig, state.flyMachineId);
   await fly.updateMachine(flyConfig, state.flyMachineId, {
     ...machine.config,
-    mounts: [{ volume: state.flyVolumeId, path: '/root' }],
+    mounts: [{ volume: state.flyVolumeId, path: "/root" }],
   });
-  await fly.waitForState(flyConfig, state.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
+  await fly.waitForState(
+    flyConfig,
+    state.flyMachineId,
+    "started",
+    STARTUP_TIMEOUT_SECONDS,
+  );
 }
 
 /**
@@ -860,24 +924,24 @@ export async function reconcileMachineMount(
 async function handleMachineGone(
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<void> {
-  reconcileLog(reason, 'clear_stale_machine', {
+  reconcileLog(reason, "clear_stale_machine", {
     old_state: state.status,
-    new_state: 'stopped',
+    new_state: "stopped",
     machine_id: state.flyMachineId,
   });
   state.flyMachineId = null;
-  state.status = 'stopped';
+  state.status = "stopped";
   state.lastStoppedAt = Date.now();
   state.healthCheckFailCount = 0;
   await ctx.storage.put(
     storageUpdate({
       flyMachineId: null,
-      status: 'stopped',
+      status: "stopped",
       lastStoppedAt: state.lastStoppedAt,
       healthCheckFailCount: 0,
-    })
+    }),
   );
 }
 
@@ -892,7 +956,10 @@ async function retryPendingDestroy(
   ctx: DurableObjectState,
   state: InstanceMutableState,
   reason: string,
-  markDestroyedInPostgres?: (userId: string, sandboxId: string) => Promise<boolean>
+  markDestroyedInPostgres?: (
+    userId: string,
+    sandboxId: string,
+  ) => Promise<boolean>,
 ): Promise<void> {
   await recoverBoundMachineForDestroy(flyConfig, ctx, state, reason);
   await tryDeleteMachine(flyConfig, ctx, state, reason);
@@ -904,14 +971,15 @@ async function recoverBoundMachineForDestroy(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<void> {
   if (state.pendingDestroyMachineId) return;
   if (!state.pendingDestroyVolumeId) return;
 
   if (
     state.lastBoundMachineRecoveryAt &&
-    Date.now() - state.lastBoundMachineRecoveryAt < BOUND_MACHINE_RECOVERY_COOLDOWN_MS
+    Date.now() - state.lastBoundMachineRecoveryAt <
+      BOUND_MACHINE_RECOVERY_COOLDOWN_MS
   ) {
     return;
   }
@@ -922,19 +990,21 @@ async function recoverBoundMachineForDestroy(
 
     if (!machineId || !MACHINE_ID_RE.test(machineId)) {
       if (machineId) {
-        reconcileLog(reason, 'recover_bound_machine_invalid_id', {
+        reconcileLog(reason, "recover_bound_machine_invalid_id", {
           volume_id: state.pendingDestroyVolumeId,
           attached_machine_id: machineId,
         });
       }
       state.lastBoundMachineRecoveryAt = Date.now();
       await ctx.storage.put(
-        storageUpdate({ lastBoundMachineRecoveryAt: state.lastBoundMachineRecoveryAt })
+        storageUpdate({
+          lastBoundMachineRecoveryAt: state.lastBoundMachineRecoveryAt,
+        }),
       );
       return;
     }
 
-    reconcileLog(reason, 'recover_bound_machine_for_destroy', {
+    reconcileLog(reason, "recover_bound_machine_for_destroy", {
       volume_id: state.pendingDestroyVolumeId,
       machine_id: machineId,
     });
@@ -947,7 +1017,7 @@ async function recoverBoundMachineForDestroy(
         pendingDestroyMachineId: machineId,
         flyMachineId: machineId,
         lastBoundMachineRecoveryAt: null,
-      })
+      }),
     );
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
@@ -955,11 +1025,11 @@ async function recoverBoundMachineForDestroy(
     }
     const message = err instanceof Error ? err.message : String(err);
     const status = err instanceof fly.FlyApiError ? err.status : null;
-    reconcileLog(reason, 'recover_bound_machine_failed', {
+    reconcileLog(reason, "recover_bound_machine_failed", {
       volume_id: state.pendingDestroyVolumeId,
       error: message,
     });
-    await persistDestroyError(ctx, state, 'recover', status, message);
+    await persistDestroyError(ctx, state, "recover", status, message);
   }
 }
 
@@ -967,35 +1037,37 @@ export async function tryDeleteMachine(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<void> {
   if (!state.pendingDestroyMachineId) return;
 
   try {
     await fly.destroyMachine(flyConfig, state.pendingDestroyMachineId);
-    reconcileLog(reason, 'destroy_machine_ok', {
+    reconcileLog(reason, "destroy_machine_ok", {
       machine_id: state.pendingDestroyMachineId,
     });
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      reconcileLog(reason, 'destroy_machine_already_gone', {
+      reconcileLog(reason, "destroy_machine_already_gone", {
         machine_id: state.pendingDestroyMachineId,
       });
     } else {
       const message = err instanceof Error ? err.message : String(err);
       const status = err instanceof fly.FlyApiError ? err.status : null;
-      reconcileLog(reason, 'destroy_machine_failed', {
+      reconcileLog(reason, "destroy_machine_failed", {
         machine_id: state.pendingDestroyMachineId,
         error: message,
       });
-      await persistDestroyError(ctx, state, 'machine', status, message);
+      await persistDestroyError(ctx, state, "machine", status, message);
       return;
     }
   }
 
   state.pendingDestroyMachineId = null;
   state.flyMachineId = null;
-  await ctx.storage.put(storageUpdate({ pendingDestroyMachineId: null, flyMachineId: null }));
+  await ctx.storage.put(
+    storageUpdate({ pendingDestroyMachineId: null, flyMachineId: null }),
+  );
   await clearDestroyError(ctx, state);
 }
 
@@ -1003,44 +1075,46 @@ export async function tryDeleteVolume(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  reason: string
+  reason: string,
 ): Promise<void> {
   if (!state.pendingDestroyVolumeId) return;
 
   try {
     await fly.deleteVolume(flyConfig, state.pendingDestroyVolumeId);
-    reconcileLog(reason, 'destroy_volume_ok', {
+    reconcileLog(reason, "destroy_volume_ok", {
       volume_id: state.pendingDestroyVolumeId,
     });
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      reconcileLog(reason, 'destroy_volume_already_gone', {
+      reconcileLog(reason, "destroy_volume_already_gone", {
         volume_id: state.pendingDestroyVolumeId,
       });
     } else {
       const message = err instanceof Error ? err.message : String(err);
       const status = err instanceof fly.FlyApiError ? err.status : null;
-      reconcileLog(reason, 'destroy_volume_failed', {
+      reconcileLog(reason, "destroy_volume_failed", {
         volume_id: state.pendingDestroyVolumeId,
         error: message,
       });
-      await persistDestroyError(ctx, state, 'volume', status, message);
+      await persistDestroyError(ctx, state, "volume", status, message);
       return;
     }
   }
 
   state.pendingDestroyVolumeId = null;
   state.flyVolumeId = null;
-  await ctx.storage.put(storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null }));
+  await ctx.storage.put(
+    storageUpdate({ pendingDestroyVolumeId: null, flyVolumeId: null }),
+  );
   await clearDestroyError(ctx, state);
 }
 
 async function persistDestroyError(
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  op: 'machine' | 'volume' | 'recover',
+  op: "machine" | "volume" | "recover",
   status: number | null,
-  message: string
+  message: string,
 ): Promise<void> {
   state.lastDestroyErrorOp = op;
   state.lastDestroyErrorStatus = status;
@@ -1052,13 +1126,13 @@ async function persistDestroyError(
       lastDestroyErrorStatus: status,
       lastDestroyErrorMessage: message,
       lastDestroyErrorAt: state.lastDestroyErrorAt,
-    })
+    }),
   );
 }
 
 async function clearDestroyError(
   ctx: DurableObjectState,
-  state: InstanceMutableState
+  state: InstanceMutableState,
 ): Promise<void> {
   if (!state.lastDestroyErrorOp) return;
   state.lastDestroyErrorOp = null;
@@ -1071,7 +1145,7 @@ async function clearDestroyError(
       lastDestroyErrorStatus: null,
       lastDestroyErrorMessage: null,
       lastDestroyErrorAt: null,
-    })
+    }),
   );
 }
 
@@ -1081,27 +1155,41 @@ async function clearDestroyError(
 export async function finalizeDestroyIfComplete(
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  markDestroyedInPostgres?: (userId: string, sandboxId: string) => Promise<boolean>
+  markDestroyedInPostgres?: (
+    userId: string,
+    sandboxId: string,
+  ) => Promise<boolean>,
 ): Promise<DestroyResult> {
   if (state.pendingDestroyMachineId || state.pendingDestroyVolumeId) {
-    return { finalized: false, destroyedUserId: null, destroyedSandboxId: null };
+    return {
+      finalized: false,
+      destroyedUserId: null,
+      destroyedSandboxId: null,
+    };
   }
 
   if (!state.userId || !state.sandboxId) {
-    return { finalized: false, destroyedUserId: null, destroyedSandboxId: null };
+    return {
+      finalized: false,
+      destroyedUserId: null,
+      destroyedSandboxId: null,
+    };
   }
 
   const destroyedUserId = state.userId;
   const destroyedSandboxId = state.sandboxId;
 
   if (state.pendingPostgresMarkOnFinalize && markDestroyedInPostgres) {
-    const marked = await markDestroyedInPostgres(destroyedUserId, destroyedSandboxId);
+    const marked = await markDestroyedInPostgres(
+      destroyedUserId,
+      destroyedSandboxId,
+    );
     if (!marked) {
       return { finalized: false, destroyedUserId, destroyedSandboxId };
     }
   }
 
-  reconcileLog('finalize', 'destroy_complete', {
+  reconcileLog("finalize", "destroy_complete", {
     user_id: destroyedUserId,
     sandbox_id: destroyedSandboxId,
   });

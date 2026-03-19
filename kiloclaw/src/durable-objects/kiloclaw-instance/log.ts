@@ -112,6 +112,18 @@ function emitStructuredLog(
 }
 
 /**
+ * Structured info log for DO modules. Instance context fields always
+ * take precedence over caller details to prevent accidental shadowing.
+ */
+export function doLog(
+  state: InstanceMutableState,
+  message: string,
+  details: Record<string, unknown> = {}
+): void {
+  emitStructuredLog(console.log, 'info', state, message, details);
+}
+
+/**
  * Structured error log for DO modules. Instance context fields always
  * take precedence over caller details to prevent accidental shadowing.
  */

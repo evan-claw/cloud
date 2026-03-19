@@ -46,7 +46,7 @@ import type { GatewayProcessStatus } from '../gateway-controller-types';
 import type { InstanceMutableState, InstanceStatus, DestroyResult } from './types';
 import { getFlyConfig } from './types';
 import { createMutableState, loadState, storageUpdate } from './state';
-import { nextAlarmTime, doError, doWarn, toLoggable } from './log';
+import { nextAlarmTime, doLog, doError, doWarn, toLoggable } from './log';
 import { attemptMetadataRecovery } from './reconcile';
 import { resolveImageTag, getRegistryApp, buildUserEnvVars } from './config';
 import * as gateway from './gateway';
@@ -1272,12 +1272,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         ? 'upgrade-to-latest'
         : `pin-to-tag:${options.imageTag}`
       : 'redeploy-same-image';
-    console.log(
-      '[DO] restartMachine:',
+    doLog(this.s, `restartMachine: initiating async restart`, {
       action,
-      '| current trackedImageTag:',
-      this.s.trackedImageTag
-    );
+      previousStatus,
+      trackedImageTag: this.s.trackedImageTag,
+      flyMachineId: this.s.flyMachineId,
+    });
 
     try {
       if (options?.imageTag) {
@@ -1374,6 +1374,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
             error: stopErr,
           });
         }
+      } else {
+        doLog(this.s, 'restartMachine: skipping stop, machine was not running', {
+          previousStatus,
+        });
       }
 
       // Re-check ownership before buildUserEnvVars — it can write to storage
@@ -1384,7 +1388,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);
       const imageTag = resolveImageTag(this.s, this.env);
-      console.log('[DO] restartMachine: deploying with imageTag:', imageTag);
+      doLog(this.s, 'restartMachine: deploying update', {
+        imageTag,
+        flyMachineId: this.s.flyMachineId,
+      });
       const identity = {
         userId: this.s.userId ?? '',
         sandboxId: this.s.sandboxId ?? '',
@@ -1418,6 +1425,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       if (preSuccessStatus !== 'restarting') return;
 
       await markRestartSuccessful(this.ctx, this.s);
+      doLog(this.s, 'restartMachine: background restart completed successfully');
       await this.scheduleAlarm();
     } catch (err) {
       // A waitForState 408 after updateMachine was sent is expected — the
