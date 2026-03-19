@@ -12,6 +12,13 @@ import { buildContainerConfig, resolveModel, resolveSmallModel } from './config'
 
 const TOWN_LOG = '[Town.do]';
 
+// Module-level diagnostic: stores the last container start error so
+// callers can surface it via the admin API. Reset on each call.
+let lastStartError: string | null = null;
+export function getLastStartError(): string | null {
+  return lastStartError;
+}
+
 /**
  * Resolve the GASTOWN_JWT_SECRET binding to a string.
  */
@@ -304,6 +311,7 @@ export async function startAgentInContainer(
     }>;
   }
 ): Promise<boolean> {
+  lastStartError = null;
   console.log(
     `${TOWN_LOG} startAgentInContainer: agentId=${params.agentId} role=${params.role} name=${params.agentName}`
   );
@@ -429,14 +437,19 @@ export async function startAgentInContainer(
 
     if (!response.ok) {
       const text = await response.text().catch(() => '(unreadable)');
+      const errorMsg = `(${response.status}) ${text.slice(0, 300)}`;
       console.error(
-        `${TOWN_LOG} startAgentInContainer: error response (${response.status}) for ` +
-          `agent=${params.agentId} role=${params.role}: ${text.slice(0, 500)}`
+        `${TOWN_LOG} startAgentInContainer: error response for ` +
+          `agent=${params.agentId} role=${params.role}: ${errorMsg}`
       );
+      // Store error on a well-known key so the caller can read it
+      lastStartError = errorMsg;
     }
     return response.ok;
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error(`${TOWN_LOG} startAgentInContainer: EXCEPTION for agent ${params.agentId}:`, err);
+    lastStartError = `EXCEPTION: ${message.slice(0, 300)}`;
     return false;
   }
 }
