@@ -28,10 +28,10 @@ function processMessagesApiUsage(
   usage: MessagesApiUsage | null | undefined,
   coreProps: NotYetCostedUsageStats
 ): JustTheCostsUsageStats {
-  const inputTokens = usage?.input_tokens ?? 0;
-  const outputTokens = usage?.output_tokens ?? 0;
   const cacheHitTokens = usage?.cache_read_input_tokens ?? 0;
   const cacheWriteTokens = usage?.cache_creation_input_tokens ?? 0;
+  const inputTokens = (usage?.input_tokens ?? 0) + cacheHitTokens + cacheWriteTokens;
+  const outputTokens = usage?.output_tokens ?? 0;
 
   // OpenRouter path: cost fields are present directly in usage
   if (usage?.cost != null || usage?.is_byok != null) {
