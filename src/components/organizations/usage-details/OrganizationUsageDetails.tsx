@@ -19,7 +19,16 @@ import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DollarSign, Activity, Hash, Users, Calculator, Sparkles } from 'lucide-react';
+import {
+  DollarSign,
+  Activity,
+  Hash,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Users,
+  Calculator,
+  Sparkles,
+} from 'lucide-react';
 
 // Import our extracted modules
 import type { ChartSplitBy } from './types';
@@ -167,6 +176,34 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
         loading: metricsLoading.includes('tokens'),
       },
       {
+        key: 'inputTokens',
+        title: 'Input Tokens',
+        value: (
+          <span className="text-2xl font-bold">
+            {formatLargeNumber(metricsTotals.input_tokens)}
+          </span>
+        ),
+        chartType: 'line' as const,
+        data: convertTimeseriesData(metricsTimeseriesData.input_tokens),
+        icon: ArrowDownToLine,
+        color: CHART_COLOR,
+        loading: metricsLoading.includes('input_tokens'),
+      },
+      {
+        key: 'outputTokens',
+        title: 'Output Tokens',
+        value: (
+          <span className="text-2xl font-bold">
+            {formatLargeNumber(metricsTotals.output_tokens)}
+          </span>
+        ),
+        chartType: 'line' as const,
+        data: convertTimeseriesData(metricsTimeseriesData.output_tokens),
+        icon: ArrowUpFromLine,
+        color: CHART_COLOR,
+        loading: metricsLoading.includes('output_tokens'),
+      },
+      {
         key: 'users',
         title: 'Active Users',
         value: (
@@ -289,7 +326,11 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
                     ? 'avg_cost_per_req'
                     : selectedMetric === 'users'
                       ? 'active_users'
-                      : (selectedMetric as 'cost' | 'requests' | 'tokens')
+                      : selectedMetric === 'inputTokens'
+                        ? 'input_tokens'
+                        : selectedMetric === 'outputTokens'
+                          ? 'output_tokens'
+                          : (selectedMetric as 'cost' | 'requests' | 'tokens')
                 }
                 timeseriesData={timeseriesResponse?.timeseries || []}
                 filteredTimeseriesData={filteredTimeseriesData}
