@@ -289,6 +289,31 @@ export function completeReviewWithResult(
     const mergeTimestamp = now();
     closeBead(sql, entry.bead_id, entry.agent_id);
 
+    // Close ALL other open/in_progress/failed MR beads for the same
+    // source bead. During rework cycles, multiple MR beads accumulate.
+    // Without this cleanup, stale MR beads trigger failReviewWithRework
+    // on the next alarm tick, reopening the source bead that was just
+    // closed by this merge.
+    query(
+      sql,
+      /* sql */ `
+        UPDATE ${beads}
+        SET ${beads.columns.status} = 'closed',
+            ${beads.columns.updated_at} = ?,
+            ${beads.columns.closed_at} = ?
+        WHERE ${beads.type} = 'merge_request'
+          AND ${beads.bead_id} != ?
+          AND ${beads.status} NOT IN ('closed')
+          AND ${beads.bead_id} IN (
+            SELECT dep.${bead_dependencies.columns.bead_id}
+            FROM ${bead_dependencies} AS dep
+            WHERE dep.${bead_dependencies.columns.depends_on_bead_id} = ?
+              AND dep.${bead_dependencies.columns.dependency_type} = 'tracks'
+          )
+      `,
+      [mergeTimestamp, mergeTimestamp, input.entry_id, entry.bead_id]
+    );
+
     // closeBead → updateBeadStatus short-circuits when completeReview already
     // set the status to 'closed' via direct SQL, so updateConvoyProgress is
     // never reached transitively. Call it explicitly to ensure the convoy
