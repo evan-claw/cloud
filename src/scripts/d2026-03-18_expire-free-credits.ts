@@ -11,7 +11,7 @@
  *
  * For each affected user the script:
  *   1. Fetches all personal credit transactions (excluding org-scoped).
- *   2. Simulates what would expire on 2026-04-15 using computeExpiration().
+ *   2. Simulates what would expire on EXPIRY_DATE using computeExpiration().
  *   3. Writes a JSONL log line with the user's current/projected balance and
  *      per-credit projected expired amounts.
  *   4. In --execute mode, sets expiry_date and expiration_baseline on the
