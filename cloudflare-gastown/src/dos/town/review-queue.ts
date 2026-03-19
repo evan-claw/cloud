@@ -564,7 +564,16 @@ export function recoverOrphanedSourceBeads(sql: SqlStorage): void {
 export function agentDone(sql: SqlStorage, agentId: string, input: AgentDoneInput): void {
   const agent = getAgent(sql, agentId);
   if (!agent) throw new Error(`Agent ${agentId} not found`);
-  if (!agent.current_hook_bead_id) throw new Error(`Agent ${agentId} has no hooked bead`);
+  if (!agent.current_hook_bead_id) {
+    // The agent was unhooked by a recovery path (witnessPatrol, rehookOrphanedBeads)
+    // between when the agent finished work and when it called gt_done.
+    // This is expected during container restarts. Log and return gracefully
+    // rather than 500ing — the recovery paths will handle the bead lifecycle.
+    console.warn(
+      `[review-queue] agentDone: agent ${agentId} has no hooked bead (likely unhooked by recovery) — ignoring`
+    );
+    return;
+  }
 
   // Triage batch beads don't produce code — close and unhook without
   // submitting to the review queue. Only applies to system-created triage
