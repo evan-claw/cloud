@@ -1265,8 +1265,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       return { success: false, error: 'Instance is busy' };
     }
 
-    const previousStatus = this.s.status;
-
     const action = options?.imageTag
       ? options.imageTag === 'latest'
         ? 'upgrade-to-latest'
@@ -1274,7 +1272,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       : 'redeploy-same-image';
     doLog(this.s, `restartMachine: initiating async restart`, {
       action,
-      previousStatus,
+      currentStatus: this.s.status,
       trackedImageTag: this.s.trackedImageTag,
       flyMachineId: this.s.flyMachineId,
     });
@@ -1332,7 +1330,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       await this.scheduleAlarm();
 
-      this.ctx.waitUntil(this.restartMachineInBackground(previousStatus));
+      this.ctx.waitUntil(this.restartMachineInBackground());
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -1340,7 +1338,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
   }
 
-  private async restartMachineInBackground(previousStatus: InstanceStatus | null): Promise<void> {
+  private async restartMachineInBackground(): Promise<void> {
     try {
       await this.loadState();
 
@@ -1364,26 +1362,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       const flyConfig = getFlyConfig(this.env, this.s);
 
-      if (previousStatus === 'running') {
-        try {
-          await fly.stopMachineAndWait(flyConfig, this.s.flyMachineId);
-        } catch (stopErr) {
-          const isTimeout = stopErr instanceof fly.FlyApiError && stopErr.status === 408;
-          if (!isTimeout) throw stopErr;
-          doWarn(this.s, 'restartMachine: stop timed out, will update in-place', {
-            error: stopErr,
-          });
-        }
-      } else {
-        doLog(this.s, 'restartMachine: skipping stop, machine was not running', {
-          previousStatus,
-        });
-      }
-
-      // Re-check ownership before buildUserEnvVars — it can write to storage
-      // (API key refresh), and destroy() may have interleaved during the stop await.
-      const preEnvStatus = await this.ctx.storage.get('status');
-      if (preEnvStatus !== 'restarting') return;
+      // No explicit stop — updateMachine on a running machine triggers a
+      // restart with the new config. Stopping first would leave the machine
+      // in 'stopped' after the update (Fly doesn't auto-start on update),
+      // requiring a separate startMachine call and introducing a window
+      // where the machine is down.
 
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);

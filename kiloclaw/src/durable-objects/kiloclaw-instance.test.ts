@@ -4971,7 +4971,6 @@ describe('restartMachine restartingAt guard', () => {
 
     expect(result.success).toBe(true);
     await Promise.all(waitUntilPromises);
-    expect(flyClient.stopMachineAndWait).not.toHaveBeenCalled();
     expect(storage._store.get('status')).toBe('running');
   });
 
@@ -5192,25 +5191,15 @@ describe('restartMachine restartingAt guard', () => {
     const { instance, storage, waitUntilPromises } = createInstance();
     await seedRunning(storage);
 
-    // Block stopMachineAndWait so we can wipe storage before the background
-    // task's initial status check (loadState reads from storage.get()).
-    let resolveStop!: () => void;
-    (flyClient.stopMachineAndWait as Mock).mockReturnValue(
-      new Promise<void>(r => {
-        resolveStop = r;
-      })
-    );
+    // Make updateMachine simulate destroy clearing storage mid-flight
+    (flyClient.updateMachine as Mock).mockImplementation(async () => {
+      // Simulate destroy() running during the update
+      storage._store.clear();
+    });
 
     const result = await instance.restartMachine();
     expect(result.success).toBe(true);
-    expect(storage._store.get('status')).toBe('restarting');
 
-    // Simulate destroy() clearing all storage before background proceeds.
-    // The background's loadState() already ran, but the status storage.get
-    // check happens right after loadState — clear now so it reads undefined.
-    storage._store.clear();
-
-    resolveStop();
     await Promise.all(waitUntilPromises);
 
     // Storage should remain empty — background must not recreate partial state
