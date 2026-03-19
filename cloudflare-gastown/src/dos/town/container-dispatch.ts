@@ -536,30 +536,34 @@ export async function checkAgentContainerStatus(
   try {
     const container = getTownContainerStub(env, townId);
     const response = await container.fetch(`http://container/agents/${agentId}/status`, {
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(10_000),
     });
     // 404 means the container is running but has no record of this agent
     // (e.g. after container eviction). Report as 'not_found' so
     // witnessPatrol can immediately reset and redispatch the agent
     // instead of waiting for the 2-hour GUPP timeout.
     if (response.status === 404) return { status: 'not_found' };
-    if (!response.ok) return { status: 'not_found' };
+    // Non-OK but not 404 — container is having issues but may still
+    // have the agent running. Return 'unknown' so witnessPatrol doesn't
+    // falsely reset a working agent.
+    if (!response.ok) return { status: 'unknown' };
     const data: unknown = await response.json();
     if (typeof data === 'object' && data !== null && 'status' in data) {
       const status = (data as { status: unknown }).status;
       const exitReason =
         'exitReason' in data ? (data as { exitReason: unknown }).exitReason : undefined;
       return {
-        status: typeof status === 'string' ? status : 'not_found',
+        status: typeof status === 'string' ? status : 'unknown',
         exitReason: typeof exitReason === 'string' ? exitReason : undefined,
       };
     }
-    return { status: 'not_found' };
+    return { status: 'unknown' };
   } catch {
-    // Timeout, network error, or container starting up — treat as
-    // not_found so zombie detection can reset the agent immediately
-    // rather than leaving it stuck in 'working' indefinitely.
-    return { status: 'not_found' };
+    // Timeout, network error, or container starting up — return
+    // 'unknown' so witnessPatrol doesn't falsely reset working agents.
+    // True zombies will be caught after repeated 'unknown' results
+    // once the GIPP/heartbeat timeout expires.
+    return { status: 'unknown' };
   }
 }
 

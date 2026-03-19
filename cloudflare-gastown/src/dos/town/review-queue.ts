@@ -29,9 +29,9 @@ import { getRig } from './rigs';
 import type { ReviewQueueInput, ReviewQueueEntry, AgentDoneInput, Molecule } from '../../types';
 
 // Review entries stuck in 'running' past this timeout are reset to 'pending'.
-// Only applies when the assigned refinery agent is NOT actively working
-// (the query in recoverStuckReviews excludes working agents).
-const REVIEW_RUNNING_TIMEOUT_MS = 5 * 60 * 1000;
+// Only applies when no agent (working or idle) is hooked to the MR bead.
+// Set to 15 min to give the refinery ample time for clone + review + merge.
+const REVIEW_RUNNING_TIMEOUT_MS = 15 * 60 * 1000;
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -419,7 +419,6 @@ export function recoverStuckReviews(sql: SqlStorage): void {
         AND NOT EXISTS (
           SELECT 1 FROM ${agent_metadata}
           WHERE ${agent_metadata.current_hook_bead_id} = ${beads.bead_id}
-            AND ${agent_metadata.status} = 'working'
         )
     `,
     [now(), timeout]
