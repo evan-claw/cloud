@@ -90,7 +90,13 @@ app.use(
 
 // Route: POST /review
 app.post('/review', async (c: Context<HonoEnv>) => {
-  const parsed = codeReviewRequestSchema.safeParse(await c.req.json());
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON body' }, 400);
+  }
+  const parsed = codeReviewRequestSchema.safeParse(raw);
   if (!parsed.success) {
     return c.json({ success: false, error: parsed.error.format() }, 400);
   }
@@ -190,7 +196,13 @@ app.post('/reviews/:reviewId/cancel', async (c: Context<HonoEnv>) => {
     return c.json({ error: 'reviewId parameter required' }, 400);
   }
 
-  const cancelParsed = cancelRequestSchema.safeParse(await c.req.json());
+  let cancelRaw: unknown;
+  try {
+    cancelRaw = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON body' }, 400);
+  }
+  const cancelParsed = cancelRequestSchema.safeParse(cancelRaw);
   if (!cancelParsed.success) {
     return c.json({ success: false, error: cancelParsed.error.format() }, 400);
   }

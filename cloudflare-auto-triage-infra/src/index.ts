@@ -64,7 +64,13 @@ app.use(
 
 // Route: POST /triage
 app.post('/triage', async (c: Context<HonoEnv>) => {
-  const parsed = triageRequestSchema.safeParse(await c.req.json());
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON body' }, 400);
+  }
+  const parsed = triageRequestSchema.safeParse(raw);
   if (!parsed.success) {
     return c.json({ success: false, error: parsed.error.format() }, 400);
   }

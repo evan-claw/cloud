@@ -80,7 +80,13 @@ app.get('/health', c => {
  */
 app.post('/fix/dispatch', async c => {
   try {
-    const parsed = fixRequestSchema.safeParse(await c.req.json());
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ success: false, error: 'Invalid JSON body' }, 400);
+    }
+    const parsed = fixRequestSchema.safeParse(raw);
     if (!parsed.success) {
       return c.json({ success: false, error: parsed.error.format() }, 400);
     }
