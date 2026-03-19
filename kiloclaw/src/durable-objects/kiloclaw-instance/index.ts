@@ -1362,12 +1362,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       const flyConfig = getFlyConfig(this.env, this.s);
 
-      // No explicit stop — updateMachine on a running machine triggers a
-      // restart with the new config. Stopping first would leave the machine
-      // in 'stopped' after the update (Fly doesn't auto-start on update),
-      // requiring a separate startMachine call and introducing a window
-      // where the machine is down.
-
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);
       const imageTag = resolveImageTag(this.s, this.env);
@@ -1390,6 +1384,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         identity
       );
 
+      // updateMachine on a running machine triggers a restart with the new
+      // config. On a stopped machine it applies the config without starting,
+      // so we explicitly start afterward.
       await fly.updateMachine(flyConfig, this.s.flyMachineId, machineConfig, {
         minSecretsVersion,
       });
@@ -1400,6 +1397,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       this.s.restartUpdateSent = true;
       await this.ctx.storage.put(storageUpdate({ restartUpdateSent: true }));
+
+      // Check if the machine needs an explicit start (e.g. was stopped).
+      const machine = await fly.getMachine(flyConfig, this.s.flyMachineId);
+      if (machine.state === 'stopped' || machine.state === 'created') {
+        doLog(this.s, 'restartMachine: machine not running after update, starting explicitly', {
+          flyState: machine.state,
+        });
+        await fly.startMachine(flyConfig, this.s.flyMachineId);
+      }
+
       await fly.waitForState(flyConfig, this.s.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
 
