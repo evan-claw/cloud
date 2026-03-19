@@ -1,4 +1,5 @@
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { useWorkersLogger } from 'workers-tagged-logger';
 import type { Env, DeployRequest, DeployResponse, StatusResponse } from './types';
 import {
   backendAuthMiddleware,
@@ -8,6 +9,7 @@ import {
 import { CloudflareAPI } from './cloudflare-api';
 import { validateWorkerName } from './utils';
 import * as Sentry from '@sentry/cloudflare';
+import { logger } from './logger';
 
 // Import base Durable Objects
 import { DeploymentOrchestrator as DeploymentOrchestratorBase } from './deployment-orchestrator';
@@ -42,6 +44,12 @@ function createDurableObjectBuilderID() {
 // Create Hono app with Env type
 type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
+
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+// workers-tagged-logger@1.0.0 was compiled against an older hono whose Handler
+// type is structurally incompatible with hono >=4.12.7 (missing [GET_MATCH_RESULT]).
+// The runtime middleware is fully compatible; only the .d.ts is stale.
+app.use('*', useWorkersLogger('deploy-builder') as unknown as MiddlewareHandler<HonoEnv>);
 
 // Authentication middleware
 app.use(
@@ -278,7 +286,7 @@ app.delete('/worker/:slug', async (c: Context<HonoEnv>) => {
 });
 
 // Global error handler
-const errorHandler = createErrorHandler(console, { includeMessage: false });
+const errorHandler = createErrorHandler(logger, { includeMessage: false });
 app.onError((err, c) => {
   Sentry.captureException(err, {
     extra: {
