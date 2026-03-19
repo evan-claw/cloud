@@ -117,6 +117,10 @@ export async function parseMessagesMicrodollarUsageFromStream(
         timeToFirstTokenSpan.end();
       }
 
+      if (event.data === '[DONE]') {
+        return;
+      }
+
       const json = JSON.parse(event.data) as Anthropic.Messages.MessageStreamEvent;
 
       if (!json) {
