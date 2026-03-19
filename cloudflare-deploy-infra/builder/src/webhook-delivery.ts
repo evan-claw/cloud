@@ -5,8 +5,8 @@
 
 import type { Env, Event, DeliveryState, WebhookPayload } from './types';
 import type { EventStore } from './event-store';
-import { logExceptInTest, errorExceptInTest } from './utils';
 import * as Sentry from '@sentry/cloudflare';
+import { logger } from './logger';
 
 const DELIVERY_STATE_KEY = 'deliveryState';
 
@@ -212,9 +212,7 @@ export class WebhookDelivery {
       if (response.ok) {
         const lastEventId = events[events.length - 1].id;
 
-        logExceptInTest(
-          `Successfully delivered events till ${lastEventId} for build ${this.getBuildId()}`
-        );
+        logger.info('Successfully delivered events', { lastEventId, buildId: this.getBuildId() });
 
         return lastEventId;
       } else {
@@ -227,7 +225,7 @@ export class WebhookDelivery {
             tags: { source: 'deploy-events-webhook' },
           }
         );
-        errorExceptInTest(`Webhook delivery failed with status ${response.status}`);
+        logger.error('Webhook delivery failed', { status: response.status });
         return null;
       }
     } catch (error) {
@@ -236,7 +234,7 @@ export class WebhookDelivery {
         level: 'warning',
         tags: { source: 'deploy-events-webhook' },
       });
-      errorExceptInTest(`Webhook delivery error: ${errorMessage}`);
+      logger.error('Webhook delivery error', { error: errorMessage });
       return null;
     }
   }

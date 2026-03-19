@@ -5,6 +5,7 @@ import type { AppEnv } from '../types';
 import { KILOCLAW_AUTH_COOKIE } from '../config';
 import { validateKiloToken } from './jwt';
 import { getWorkerDb, findPepperByUserId } from '../db';
+import { logger } from '../logger';
 
 /**
  * Auth middleware for user-facing routes.
@@ -18,7 +19,7 @@ import { getWorkerDb, findPepperByUserId } from '../db';
 export async function authMiddleware(c: Context<AppEnv>, next: Next) {
   const secret = c.env.NEXTAUTH_SECRET;
   if (!secret) {
-    console.error('[auth] NEXTAUTH_SECRET not configured');
+    logger.error('[auth] NEXTAUTH_SECRET not configured');
     return c.json({ error: 'Server configuration error' }, 500);
   }
 
@@ -38,7 +39,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
 
   const result = await validateKiloToken(token, secret, c.env.WORKER_ENV);
   if (!result.success) {
-    console.warn('[auth] Token validation failed:', result.error);
+    logger.warn('[auth] Token validation failed', { error: result.error });
     return c.json({ error: 'Authentication failed' }, 401);
   }
 
@@ -49,7 +50,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
   // - JWT null + DB string: pre-rotation token used after rotation, revoked
   // - JWT string + DB different string: wrong pepper, revoked
   if (!c.env.HYPERDRIVE?.connectionString) {
-    console.error('[auth] HYPERDRIVE not configured -- cannot validate token pepper');
+    logger.error('[auth] HYPERDRIVE not configured -- cannot validate token pepper');
     return c.json({ error: 'Server configuration error' }, 500);
   }
 
@@ -57,16 +58,18 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
     const db = getWorkerDb(c.env.HYPERDRIVE.connectionString);
     const user = await findPepperByUserId(db, result.userId);
     if (!user) {
-      console.warn('[auth] User not found in DB:', result.userId);
+      logger.warn('[auth] User not found in DB', { userId: result.userId });
       return c.json({ error: 'User not found' }, 401);
     }
     const dbPepper = user.api_token_pepper ?? null;
     if (dbPepper !== result.pepper) {
-      console.warn('[auth] Pepper mismatch for user:', result.userId);
+      logger.warn('[auth] Pepper mismatch for user', { userId: result.userId });
       return c.json({ error: 'Token revoked' }, 401);
     }
   } catch (err) {
-    console.error('[auth] Pepper validation failed:', err);
+    logger.error('[auth] Pepper validation failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Authentication service unavailable' }, 500);
   }
 
@@ -87,7 +90,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
 export async function internalApiMiddleware(c: Context<AppEnv>, next: Next) {
   const secret = c.env.INTERNAL_API_SECRET;
   if (!secret) {
-    console.error('[auth] INTERNAL_API_SECRET not configured');
+    logger.error('[auth] INTERNAL_API_SECRET not configured');
     return c.json({ error: 'Server configuration error' }, 500);
   }
 

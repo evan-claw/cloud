@@ -6,6 +6,7 @@ import {
 } from '../schemas/image-version';
 import type { ImageVersionEntry, ImageVariant } from '../schemas/image-version';
 import { upsertCatalogVersion } from './catalog-registration';
+import { logger } from '../logger';
 
 /**
  * KV key for direct tag-to-entry lookup.
@@ -29,7 +30,7 @@ export async function resolveLatestVersion(
 
   const parsed = ImageVersionEntrySchema.safeParse(raw);
   if (!parsed.success) {
-    console.warn('[image-version] Invalid latest entry in KV:', parsed.error.flatten());
+    logger.warn('[image-version] Invalid latest entry in KV', { errors: parsed.error.flatten() });
     return null;
   }
 
@@ -99,14 +100,13 @@ export async function registerVersionIfNeeded(
         publishedAt,
       });
     } catch (e) {
-      console.error(
-        '[image-version] Failed to write catalog entry to Postgres:',
-        e instanceof Error ? e.message : e
-      );
+      logger.error('[image-version] Failed to write catalog entry to Postgres', {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
-  console.log('[image-version] Registered version:', openclawVersion, variant, '→', imageTag);
+  logger.info('[image-version] Registered version', { openclawVersion, variant, imageTag });
   return true;
 }
 
@@ -125,7 +125,9 @@ export async function updateTagIndex(kv: KVNamespace, imageTag: string): Promise
       await kv.put(IMAGE_VERSION_INDEX_KEY, JSON.stringify(index));
     }
   } catch (e) {
-    console.warn('[image-version] Failed to update tag index:', e instanceof Error ? e.message : e);
+    logger.warn('[image-version] Failed to update tag index', {
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
@@ -143,7 +145,7 @@ async function getOrRebuildIndex(kv: KVNamespace): Promise<string[]> {
     // Fall through to rebuild
   }
 
-  console.warn('[image-version] Tag index missing or corrupted, rebuilding from KV list');
+  logger.warn('[image-version] Tag index missing or corrupted, rebuilding from KV list');
   return rebuildIndex(kv);
 }
 
@@ -172,7 +174,7 @@ async function rebuildIndex(kv: KVNamespace): Promise<string[]> {
   } while (cursor);
 
   await kv.put(IMAGE_VERSION_INDEX_KEY, JSON.stringify(tags));
-  console.log('[image-version] Rebuilt tag index with', tags.length, 'entries');
+  logger.info('[image-version] Rebuilt tag index', { count: tags.length });
   return tags;
 }
 
@@ -198,12 +200,15 @@ export async function resolveVersionByTag(
     if (parsed.success) {
       return parsed.data;
     }
-    console.warn('[image-version] Invalid tag entry in KV:', imageTag, parsed.error.flatten());
+    logger.warn('[image-version] Invalid tag entry in KV', {
+      imageTag,
+      errors: parsed.error.flatten(),
+    });
   }
 
   // Fallback: scan versioned keys (for backward compatibility or cache misses).
   // Capped at 5 pages (5000 keys) to prevent unbounded iteration.
-  console.warn('[image-version] Tag lookup key missing, falling back to scan for:', imageTag);
+  logger.warn('[image-version] Tag lookup key missing, falling back to scan', { imageTag });
   let cursor: string | undefined;
   let pages = 0;
   const MAX_SCAN_PAGES = 5;
@@ -223,10 +228,9 @@ export async function resolveVersionByTag(
       if (parsed.success && parsed.data.imageTag === imageTag) {
         // Backfill the tag lookup key for future requests (fire-and-forget)
         kv.put(imageVersionTagKey(imageTag), JSON.stringify(parsed.data)).catch(err =>
-          console.warn(
-            '[image-version] Failed to backfill tag lookup key:',
-            err instanceof Error ? err.message : err
-          )
+          logger.warn('[image-version] Failed to backfill tag lookup key', {
+            error: err instanceof Error ? err.message : String(err),
+          })
         );
         return parsed.data;
       }
@@ -235,7 +239,7 @@ export async function resolveVersionByTag(
   } while (cursor && pages < MAX_SCAN_PAGES);
 
   if (cursor) {
-    console.warn('[image-version] Scan aborted after', MAX_SCAN_PAGES, 'pages for tag:', imageTag);
+    logger.warn('[image-version] Scan aborted', { maxScanPages: MAX_SCAN_PAGES, imageTag });
   }
 
   return null;

@@ -13,6 +13,7 @@
 import { createDecipheriv, privateDecrypt, constants } from 'crypto';
 import { FIELD_KEY_TO_ENV_VAR } from '@kilocode/kiloclaw-secret-catalog';
 import type { EncryptedEnvelope, EncryptedChannelTokens } from '../schemas/instance-config';
+import { logger } from '../logger';
 
 export class EncryptionConfigurationError extends Error {
   constructor(message: string) {
@@ -155,7 +156,7 @@ export function mergeEnvVarsWithSecrets(
  * Example: channels.telegramBotToken -> TELEGRAM_BOT_TOKEN
  *
  * Unknown keys (e.g. stale DO state from a rolled-back schema change) are
- * skipped with a console.warn rather than throwing, so a single unrecognised
+ * skipped with a logger.warn rather than throwing, so a single unrecognised
  * key does not prevent the machine from starting.
  */
 export function decryptChannelTokens(
@@ -173,8 +174,9 @@ export function decryptChannelTokens(
         // This can happen if DO state contains a key that was removed from the
         // catalog (e.g. after a schema rollback) or added to EncryptedChannelTokens
         // before the catalog was updated.
-        console.warn(
-          `[decryptChannelTokens] Unknown channel key '${channelKey}' — not in secret catalog. Skipping.`
+        logger.warn(
+          `[decryptChannelTokens] Unknown channel key — not in secret catalog. Skipping.`,
+          { channelKey }
         );
         continue;
       }

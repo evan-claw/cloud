@@ -9,6 +9,7 @@ import { pipeline } from 'stream/promises';
 import { Readable, type PassThrough } from 'stream';
 import type { DeploymentFile } from './types';
 import { getMimeType } from './utils';
+import { logger } from './logger';
 
 // Type for the sandbox stub returned by getSandbox()
 type SandboxStub = Awaited<ReturnType<typeof getSandbox>>;
@@ -210,9 +211,10 @@ export async function readFolderAsArchive(
   } finally {
     const cleanupResult = await session.exec(`rm -f '${escapedArchivePath}'`);
     if (!cleanupResult.success) {
-      console.warn(
-        `Failed to clean up temporary archive ${tmpArchivePath}: ${cleanupResult.stderr}`
-      );
+      logger.warn('Failed to clean up temporary archive', {
+        tmpArchivePath,
+        stderr: cleanupResult.stderr,
+      });
     }
   }
 }

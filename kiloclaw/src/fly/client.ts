@@ -20,6 +20,7 @@ import type {
   MachineExecRequest,
   MachineExecResponse,
 } from './types';
+import { logger } from '../logger';
 
 const FLY_API_BASE = 'https://api.machines.dev';
 
@@ -225,7 +226,7 @@ export async function createVolumeWithFallback(
     } catch (err) {
       lastError = err;
       if (!isFlyInsufficientResources(err)) throw err;
-      console.warn(`[fly] Volume creation failed in ${region} (capacity), trying next region`);
+      logger.warn('[fly] Volume creation failed (capacity), trying next region', { region });
     }
   }
 
@@ -325,7 +326,10 @@ export function isFlyInsufficientResources(err: unknown): boolean {
 
   // Status matched but no capacity signal — likely a bad-request/auth/conflict/precondition issue.
   // Log so we can tune matching if Fly introduces new capacity error formats.
-  console.warn(`[fly] Unclassified ${err.status} error (not treated as capacity):`, err.body);
+  logger.warn('[fly] Unclassified error (not treated as capacity)', {
+    status: err.status,
+    body: err.body,
+  });
   return false;
 }
 

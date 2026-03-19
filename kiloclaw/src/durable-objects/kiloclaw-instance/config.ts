@@ -7,6 +7,7 @@ import { KILOCODE_API_KEY_EXPIRY_SECONDS } from '../../config';
 import type { InstanceMutableState } from './types';
 import { storageUpdate } from './state';
 import { doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 
 const MINT_TIMEOUT_MS = 5_000;
 
@@ -64,7 +65,7 @@ export async function mintFreshApiKey(
   const db = getWorkerDb(connectionString);
   const user = await findPepperByUserId(db, userId);
   if (!user) {
-    console.warn('[DO] mintFreshApiKey: user not found in DB');
+    logger.warn('[DO] mintFreshApiKey: user not found in DB');
     return null;
   }
 
@@ -117,7 +118,9 @@ export async function buildUserEnvVars(
             kilocodeApiKeyExpiresAt: freshKey.expiresAt,
           })
         );
-        console.log('[DO] buildUserEnvVars: minted fresh API key, expires:', freshKey.expiresAt);
+        logger.info('[DO] buildUserEnvVars: minted fresh API key', {
+          expiresAt: freshKey.expiresAt,
+        });
       }
     } catch (err) {
       doWarn(state, 'buildUserEnvVars: failed to mint fresh API key, using stored key', {

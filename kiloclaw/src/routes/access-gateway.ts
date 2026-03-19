@@ -6,6 +6,7 @@ import { getWorkerDb, validateAndRedeemAccessCode, findPepperByUserId } from '..
 import { signKiloToken, validateKiloToken } from '../auth/jwt';
 import { deriveGatewayToken } from '../auth/gateway-token';
 import { sandboxIdFromUserId } from '../auth/sandbox-id';
+import { logger } from '../logger';
 
 /**
  * Access gateway routes — unauthenticated.
@@ -170,13 +171,13 @@ async function redeemCodeAndSetCookie(
 ): Promise<{ redirectUrl: string } | { error: string; status: 401 | 500 }> {
   const connectionString = c.env.HYPERDRIVE?.connectionString;
   if (!connectionString) {
-    console.error('[access-gateway] HYPERDRIVE not configured');
+    logger.error('[access-gateway] HYPERDRIVE not configured');
     return { error: 'Server configuration error.', status: 500 };
   }
 
   const secret = c.env.NEXTAUTH_SECRET;
   if (!secret) {
-    console.error('[access-gateway] NEXTAUTH_SECRET not configured');
+    logger.error('[access-gateway] NEXTAUTH_SECRET not configured');
     return { error: 'Server configuration error.', status: 500 };
   }
 

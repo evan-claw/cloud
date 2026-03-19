@@ -1,5 +1,6 @@
 import { PersistedStateSchema, type PersistedState } from '../../schemas/instance-config';
 import type { InstanceMutableState } from './types';
+import { logger } from '../../logger';
 
 /**
  * Derived from PersistedStateSchema — single source of truth for DO KV keys.
@@ -69,10 +70,9 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
   } else {
     const hasAnyData = entries.size > 0;
     if (hasAnyData) {
-      console.warn(
-        '[DO] Persisted state failed validation, treating as fresh. Errors:',
-        parsed.error.flatten().fieldErrors
-      );
+      logger.warn('[DO] Persisted state failed validation, treating as fresh', {
+        errors: parsed.error.flatten().fieldErrors,
+      });
     }
   }
 

@@ -7,6 +7,7 @@ import { getWorkerDb } from '@kilocode/db/client';
 import { kiloclaw_image_catalog, sql, ne } from '@kilocode/db';
 import { eq } from 'drizzle-orm';
 import { isValidImageTag } from './image-tag-validation';
+import { logger } from '../logger';
 
 const OPENCLAW_VERSION_RE = /^\d{4}\.\d{1,2}\.\d{1,2}$/;
 const VARIANT_RE = /^[a-z0-9-]{1,64}$/;
@@ -93,7 +94,7 @@ export async function upsertCatalogVersion(
 ): Promise<void> {
   const validationError = validateEntry(entry);
   if (validationError) {
-    console.warn('[catalog-registration] Skipping invalid entry:', validationError);
+    logger.warn('[catalog-registration] Skipping invalid entry', { validationError });
     return;
   }
 

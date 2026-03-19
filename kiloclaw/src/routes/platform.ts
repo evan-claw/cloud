@@ -26,6 +26,7 @@ import { upsertCatalogVersion } from '../lib/catalog-registration';
 import { z } from 'zod';
 import { withDORetry } from '@kilocode/worker-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
+import { logger } from '../logger';
 
 const GmailHistoryIdSchema = z.object({
   userId: z.string().min(1),
@@ -79,7 +80,7 @@ function jsonError(message: string, status: number, code?: string): Response {
 /**
  * Safe error messages that can be returned to callers without leaking internals.
  * All other error messages are replaced with a generic "Internal error" response.
- * The raw error is always logged via console.error for Sentry/debugging.
+ * The raw error is always logged for Sentry/debugging.
  */
 const SAFE_ERROR_PREFIXES = [
   'Instance is not ', // e.g. "Instance is not running"
@@ -100,7 +101,7 @@ function sanitizeError(err: unknown, operation: string): { message: string; stat
   const normalized = raw.replace(/^(?:[A-Za-z]+Error:\s*)+/, '');
 
   // Log the full error for Sentry/debugging — this never reaches the caller
-  console.error(`[platform] ${operation} failed:`, raw);
+  logger.error(`[platform] ${operation} failed`, { error: raw });
 
   // Allow known-safe messages through
   if (SAFE_ERROR_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
@@ -134,7 +135,7 @@ function sanitizeOpenclawConfigError(
       ? (err as { code: string }).code
       : undefined;
 
-  console.error(`[platform] ${operation} failed:`, raw);
+  logger.error(`[platform] ${operation} failed`, { error: raw });
 
   if (code && OPENCLAW_CONFIG_ERROR_CODES.has(code)) {
     return { message: normalized, status, code };
@@ -211,7 +212,7 @@ platform.post('/provision', async c => {
   } catch (err) {
     const raw = err instanceof Error ? err.message : 'Unknown error';
     if (raw.includes('duplicate key') || raw.includes('unique constraint')) {
-      console.error('[platform] provision failed: duplicate instance');
+      logger.error('[platform] provision failed: duplicate instance');
       return c.json({ error: 'User already has an active instance' }, 409);
     }
     const { message, status } = sanitizeError(err, 'provision');
@@ -533,7 +534,7 @@ platform.get('/controller-version', async c => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const status = statusCodeFromError(err);
-    console.error(`[platform] controller version failed: ${message} status=${status}`);
+    logger.error('[platform] controller version failed', { message, status });
     return jsonError(message, status);
   }
 });
@@ -614,7 +615,7 @@ platform.post('/config/restore', async c => {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     const status = statusCodeFromError(err);
-    console.error('[platform] config restore failed:', message);
+    logger.error('[platform] config restore failed', { message });
     return jsonError(message, status);
   }
 });
@@ -977,7 +978,9 @@ platform.get('/versions', async c => {
     const versions = await listAllVersions(c.env.KV_CLAW_CACHE);
     return c.json(versions);
   } catch (err) {
-    console.error('[platform] Failed to list versions:', err);
+    logger.error('[platform] Failed to list versions', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to list versions' }, 500);
   }
 });
@@ -990,7 +993,9 @@ platform.get('/versions/latest', async c => {
     if (!latest) return c.json({ error: 'No latest version registered' }, 404);
     return c.json(latest);
   } catch (err) {
-    console.error('[platform] Failed to get latest version:', err);
+    logger.error('[platform] Failed to get latest version', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to get latest version' }, 500);
   }
 });
@@ -1056,18 +1061,18 @@ platform.post('/publish-image-version', async c => {
         publishedAt: parsed.data.publishedAt,
       });
     } catch (e) {
-      console.warn('[platform] Failed to write catalog entry to Postgres:', e);
+      logger.warn('[platform] Failed to write catalog entry to Postgres', {
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
-  console.log(
-    '[platform] Published image version:',
+  logger.info('[platform] Published image version', {
     openclawVersion,
     variant,
-    '→',
     imageTag,
-    setLatest ? '(latest)' : '(backfill)'
-  );
+    mode: setLatest ? 'latest' : 'backfill',
+  });
   return c.json({ ok: true, setLatest, ...parsed.data }, 201);
 });
 

@@ -21,6 +21,7 @@ import { METADATA_KEY_USER_ID } from '../machine-config';
 import type { InstanceMutableState, DestroyResult } from './types';
 import { storageUpdate, resetMutableState } from './state';
 import { reconcileLog, doError, doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 import { ensureVolume, staleProvisionAgeMs } from './fly-machines';
 import { mintFreshApiKey } from './config';
 import * as gateway from './gateway';
@@ -629,14 +630,16 @@ export async function syncStatusFromLiveCheck(
     }
 
     if (TERMINAL_STOPPED_STATES.has(machine.state)) {
-      console.log('[DO] Live check: Fly state is', machine.state, '— marking stopped in-memory');
+      logger.info('[DO] Live check: Fly state — marking stopped in-memory', {
+        machineState: machine.state,
+      });
       state.status = 'stopped';
     } else {
       state.healthCheckFailCount = 0;
     }
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      console.log('[DO] Live check: machine 404 — marking stopped in-memory');
+      logger.info('[DO] Live check: machine 404 — marking stopped in-memory');
       state.status = 'stopped';
       return;
     }

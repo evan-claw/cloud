@@ -1,4 +1,5 @@
 import type { InstanceMutableState, InstanceStatus } from './types';
+import { logger } from '../../logger';
 import {
   ALARM_INTERVAL_RUNNING_MS,
   ALARM_INTERVAL_STARTING_MS,
@@ -16,14 +17,7 @@ export function reconcileLog(
   action: string,
   details: Record<string, unknown> = {}
 ): void {
-  console.log(
-    JSON.stringify({
-      tag: 'reconcile',
-      reason,
-      action,
-      ...details,
-    })
-  );
+  logger.info(JSON.stringify({ tag: 'reconcile', reason, action, ...details }));
 }
 
 // ── Structured error/warn logging ────────────────────────────────────
@@ -82,17 +76,17 @@ function instanceContext(state: InstanceMutableState): Record<string, unknown> {
 }
 
 /**
- * Emit a structured JSON log line. Falls back to plain console output
+ * Emit a structured JSON log line. Falls back to plain output
  * if JSON.stringify throws (e.g. circular references, BigInt values)
  * so that logging never crashes the surrounding error-handling path.
  */
 function emitStructuredLog(
-  logFn: (...args: unknown[]) => void,
   level: 'error' | 'warn',
   state: InstanceMutableState,
   message: string,
   details: Record<string, unknown>
 ): void {
+  const logFn = level === 'error' ? logger.error.bind(logger) : logger.warn.bind(logger);
   try {
     logFn(
       JSON.stringify({
@@ -106,7 +100,7 @@ function emitStructuredLog(
   } catch {
     // Serialization failed — fall back to plain multi-arg logging so the
     // message and context are still captured in the log stream.
-    logFn(`[kiloclaw_do] [${level}]`, message, details, instanceContext(state));
+    logFn(`[kiloclaw_do] [${level}] ${message}`);
   }
 }
 
@@ -119,7 +113,7 @@ export function doError(
   message: string,
   details: Record<string, unknown> = {}
 ): void {
-  emitStructuredLog(console.error, 'error', state, message, details);
+  emitStructuredLog('error', state, message, details);
 }
 
 /**
@@ -131,7 +125,7 @@ export function doWarn(
   message: string,
   details: Record<string, unknown> = {}
 ): void {
-  emitStructuredLog(console.warn, 'warn', state, message, details);
+  emitStructuredLog('warn', state, message, details);
 }
 
 /**

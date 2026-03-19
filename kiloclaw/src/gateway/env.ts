@@ -15,6 +15,7 @@ import {
   decryptWithPrivateKey,
 } from '../utils/encryption';
 import { validateUserEnvVarName } from '../utils/env-encryption';
+import { logger } from '../logger';
 
 /**
  * User-provided configuration for building container environment variables.
@@ -115,7 +116,7 @@ export async function buildEnvVars(
         try {
           validateUserEnvVarName(name);
         } catch {
-          console.warn(`Dropping invalid env var "${name}": uses reserved prefix`);
+          logger.warn('Dropping invalid env var: uses reserved prefix', { name });
           delete cleanedEnvVars[name];
         }
       }
@@ -125,7 +126,7 @@ export async function buildEnvVars(
         try {
           validateUserEnvVarName(name);
         } catch {
-          console.warn(`Dropping invalid encrypted secret "${name}": uses reserved prefix`);
+          logger.warn('Dropping invalid encrypted secret: uses reserved prefix', { name });
           delete cleanedSecrets[name];
         }
       }
@@ -178,7 +179,9 @@ export async function buildEnvVars(
           plainEnv.KILOCLAW_GOOGLE_ACCOUNT_EMAIL = userConfig.googleCredentials.email;
         }
       } catch (err) {
-        console.warn('Failed to decrypt Google credentials, starting without Google access:', err);
+        logger.warn('Failed to decrypt Google credentials, starting without Google access', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }

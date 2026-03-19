@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { isValidImageTag } from '../lib/image-tag-validation';
 import { GoogleCredentialsSchema } from '../schemas/instance-config';
+import { logger } from '../logger';
 
 /**
  * API routes
@@ -118,7 +119,9 @@ adminApi.get('/public-key', async c => {
 
     return c.json({ publicKey: publicKeyPem });
   } catch (err) {
-    console.error('[api] Failed to derive public key:', err);
+    logger.error('[api] Failed to derive public key', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to derive public key' }, 500);
   }
 });
@@ -130,7 +133,9 @@ adminApi.get('/google-credentials', async c => {
     const status = await stub.getStatus();
     return c.json({ googleConnected: status.googleConnected ?? false }, 200);
   } catch (err) {
-    console.error('[api] google-credentials status failed:', err);
+    logger.error('[api] google-credentials status failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to check Google credentials status' }, 500);
   }
 });
@@ -158,7 +163,9 @@ adminApi.post('/google-credentials', async c => {
     const result = await stub.updateGoogleCredentials(parsed.data);
     return c.json(result, 200);
   } catch (err) {
-    console.error('[api] google-credentials failed:', err);
+    logger.error('[api] google-credentials failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to store Google credentials' }, 500);
   }
 });
@@ -170,7 +177,9 @@ adminApi.delete('/google-credentials', async c => {
     const result = await stub.clearGoogleCredentials();
     return c.json(result, 200);
   } catch (err) {
-    console.error('[api] google-credentials delete failed:', err);
+    logger.error('[api] google-credentials delete failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return c.json({ error: 'Failed to clear Google credentials' }, 500);
   }
 });

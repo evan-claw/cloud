@@ -1,14 +1,3 @@
-/**
- * Test-friendly logging helpers that suppress output during tests
- */
-const isInTestMode = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
-const consoleExceptInTest = (kind: 'log' | 'warn' | 'error') =>
-  (isInTestMode ? () => {} : console[kind]) satisfies typeof console.log;
-
-export const logExceptInTest = consoleExceptInTest('log');
-export const warnExceptInTest = consoleExceptInTest('warn');
-export const errorExceptInTest = consoleExceptInTest('error');
-
 export function validateWorkerName(name: string): void {
   // Validate worker name
   const nameRegex = /^[a-zA-Z0-9_-]{1,64}$/;

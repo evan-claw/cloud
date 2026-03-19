@@ -14,6 +14,7 @@ import {
 import { HEALTH_PROBE_TIMEOUT_SECONDS, HEALTH_PROBE_INTERVAL_MS } from '../../config';
 import type { InstanceMutableState } from './types';
 import { doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 
 /**
  * Validate that the instance has all context needed for gateway controller RPCs.
@@ -454,25 +455,26 @@ export async function waitForHealthy(
               headers: { 'fly-force-instance-id': machineId },
             });
             if (rootRes.status !== 502) {
-              console.log(
-                '[DO] Gateway health probe passed (state: running, root:',
-                rootRes.status,
-                ')'
-              );
+              logger.info('[DO] Gateway health probe passed', {
+                state: 'running',
+                rootStatus: rootRes.status,
+              });
               return;
             }
-            console.log('[DO] Gateway reports running but root returned 502 — retrying');
+            logger.info('[DO] Gateway reports running but root returned 502 — retrying');
           } catch {
-            console.log('[DO] Gateway reports running but root fetch failed — retrying');
+            logger.info('[DO] Gateway reports running but root fetch failed — retrying');
           }
         } else {
-          console.log('[DO] Gateway state:', body.state, '— retrying');
+          logger.info('[DO] Gateway state — retrying', { gatewayState: body.state });
         }
       } else {
-        console.log('[DO] Gateway status returned', res.status, '— retrying');
+        logger.info('[DO] Gateway status returned — retrying', { status: res.status });
       }
     } catch (err) {
-      console.log('[DO] Gateway status fetch error — retrying:', err);
+      logger.info('[DO] Gateway status fetch error — retrying', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     await new Promise(r => setTimeout(r, HEALTH_PROBE_INTERVAL_MS));
   }

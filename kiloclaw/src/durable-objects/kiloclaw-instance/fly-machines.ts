@@ -13,6 +13,7 @@ import { guestFromSize, volumeNameFromSandboxId } from '../machine-config';
 import type { InstanceMutableState } from './types';
 import { storageUpdate } from './state';
 import { reconcileLog, doError, doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 
 /**
  * Ensure a Fly Volume exists. Creates one if flyVolumeId is null.
@@ -190,15 +191,15 @@ export async function startExistingMachine(
     if (machine.state === 'stopped' || machine.state === 'created' || machine.state === 'failed') {
       await fly.updateMachine(flyConfig, state.flyMachineId, machineConfig, { minSecretsVersion });
       await fly.waitForState(flyConfig, state.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
-      console.log('[DO] Machine updated and started:', state.flyMachineId);
+      logger.info('[DO] Machine updated and started', { machineId: state.flyMachineId });
     } else if (machine.state === 'started') {
-      console.log('[DO] Machine already started');
+      logger.info('[DO] Machine already started');
     } else {
       await fly.waitForState(flyConfig, state.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
     }
   } catch (err) {
     if (fly.isFlyNotFound(err)) {
-      console.log('[DO] Machine gone (404), creating new one');
+      logger.info('[DO] Machine gone (404), creating new one');
       state.flyMachineId = null;
       await ctx.storage.put(storageUpdate({ flyMachineId: null }));
       await createNewMachine(
@@ -240,10 +241,10 @@ export async function createNewMachine(
   state.flyMachineId = machine.id;
 
   await ctx.storage.put(storageUpdate({ flyMachineId: machine.id }));
-  console.log('[DO] Created Fly Machine:', machine.id, 'region:', machine.region);
+  logger.info('[DO] Created Fly Machine', { machineId: machine.id, region: machine.region });
 
   await fly.waitForState(flyConfig, machine.id, 'started', STARTUP_TIMEOUT_SECONDS);
-  console.log('[DO] Machine started');
+  logger.info('[DO] Machine started');
 }
 
 /**

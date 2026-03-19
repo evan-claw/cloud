@@ -4,6 +4,7 @@
  */
 
 import type { Event } from './types';
+import { logger } from './logger';
 
 const MAX_EVENTS = 5000;
 
@@ -161,10 +162,11 @@ export class EventStore {
 
     // Safety check: warn if we can't trim because all events are unprocessed
     if (this.eventsList.length > MAX_EVENTS) {
-      console.warn(
-        `Event buffer exceeded MAX_EVENTS (${MAX_EVENTS}) but cannot trim - all events are unprocessed. ` +
-          `Current size: ${this.eventsList.length}, lastProcessedId: ${this.lastProcessedId}`
-      );
+      logger.warn('Event buffer exceeded MAX_EVENTS but cannot trim — all events are unprocessed', {
+        maxEvents: MAX_EVENTS,
+        currentSize: this.eventsList.length,
+        lastProcessedId: this.lastProcessedId,
+      });
     }
   }
 }

@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import type { DeploymentFile, WorkerMetadata } from './types';
 import type { PlaintextEnvVar } from '../../../src/lib/user-deployments/env-vars-validation';
+import { logger } from './logger';
 
 /**
  * Cloudflare API Client - Handles interactions with Cloudflare Workers API.
@@ -115,9 +116,7 @@ export class CloudflareAPI {
 
         // Exponential backoff: 1s, 2s, 4s, etc., max 30s
         const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
-        console.log(
-          `${operation} failed (attempt ${attempt}/${maxAttempts}), retrying in ${delayMs}ms...`
-        );
+        logger.info(`${operation} failed, retrying`, { attempt, maxAttempts, delayMs });
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }

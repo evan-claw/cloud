@@ -21,6 +21,7 @@ import * as apps from '../fly/apps';
 import { setAppSecret } from '../fly/secrets';
 import { generateEnvKey } from '../utils/env-encryption';
 import { METADATA_KEY_USER_ID } from './machine-config';
+import { logger } from '../logger';
 
 // -- Persisted state schema --
 
@@ -116,7 +117,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
         const existing = await apps.getApp({ apiToken }, appName);
         if (!existing) {
           await apps.createApp({ apiToken }, appName, orgSlug, userId, METADATA_KEY_USER_ID);
-          console.log('[AppDO] Created Fly App:', appName);
+          logger.info('[AppDO] Created Fly App', { appName });
         }
       }
 
@@ -125,7 +126,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
         await apps.allocateIP(apiToken, appName, 'v6');
         this.ipv6Allocated = true;
         await this.ctx.storage.put({ ipv6Allocated: true } satisfies Partial<AppState>);
-        console.log('[AppDO] Allocated IPv6 for:', appName);
+        logger.info('[AppDO] Allocated IPv6', { appName });
       }
 
       // Step 3: Allocate shared IPv4 if not done
@@ -133,7 +134,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
         await apps.allocateIP(apiToken, appName, 'shared_v4');
         this.ipv4Allocated = true;
         await this.ctx.storage.put({ ipv4Allocated: true } satisfies Partial<AppState>);
-        console.log('[AppDO] Allocated shared IPv4 for:', appName);
+        logger.info('[AppDO] Allocated shared IPv4', { appName });
       }
 
       // Step 4: Generate and store env encryption key if not done.
@@ -146,7 +147,10 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
       // even if the caller doesn't retry.
       if (!this.isSetupComplete()) {
         await this.ctx.storage.setAlarm(Date.now() + RETRY_ALARM_MS);
-        console.error('[AppDO] Partial failure, retry alarm armed for:', appName, err);
+        logger.error('[AppDO] Partial failure, retry alarm armed', {
+          appName,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
       throw err;
     }
@@ -217,7 +221,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
     if (!this.envKeySet) {
       this.envKeySet = true;
       await this.ctx.storage.put({ envKeySet: true } satisfies Partial<AppState>);
-      console.log('[AppDO] Set env encryption key for:', this.flyAppName);
+      logger.info('[AppDO] Set env encryption key', { appName: this.flyAppName });
     }
 
     return { key: this.envKey, secretsVersion };
@@ -244,7 +248,7 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
     if (!apiToken) throw new Error('FLY_API_TOKEN is not configured');
 
     await apps.deleteApp({ apiToken }, this.flyAppName);
-    console.log('[AppDO] Deleted Fly App:', this.flyAppName);
+    logger.info('[AppDO] Deleted Fly App', { appName: this.flyAppName });
 
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
@@ -267,12 +271,14 @@ export class KiloClawApp extends DurableObject<KiloClawEnv> {
     if (!this.userId || !this.flyAppName) return;
     if (this.isSetupComplete()) return;
 
-    console.log('[AppDO] Retrying incomplete setup for:', this.flyAppName);
+    logger.info('[AppDO] Retrying incomplete setup', { appName: this.flyAppName });
 
     try {
       await this.ensureApp(this.userId);
     } catch (err) {
-      console.error('[AppDO] Retry failed, rescheduling:', err);
+      logger.error('[AppDO] Retry failed, rescheduling', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       await this.ctx.storage.setAlarm(Date.now() + RETRY_ALARM_MS);
     }
   }

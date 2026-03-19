@@ -32,7 +32,7 @@ export async function restoreFromPostgres(
       return;
     }
 
-    console.log('[DO] Restoring state from Postgres backup for', userId);
+    doWarn(state, 'Restoring state from Postgres backup', { userId });
 
     const envVars: Record<string, string> | null = null;
     const encryptedSecrets: Record<string, EncryptedEnvelope> | null = null;
@@ -97,7 +97,7 @@ export async function restoreFromPostgres(
     state.instanceFeatures = [];
     state.loaded = true;
 
-    console.log('[DO] Restored from Postgres: sandboxId =', instance.sandboxId);
+    doWarn(state, 'Restored from Postgres', { sandboxId: instance.sandboxId });
 
     // Attempt to recover machine/volume IDs via Fly metadata.
     try {

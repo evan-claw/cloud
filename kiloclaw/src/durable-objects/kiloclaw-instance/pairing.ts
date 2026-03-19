@@ -5,6 +5,7 @@ import type { InstanceMutableState } from './types';
 import { getFlyConfig } from './types';
 import { callGatewayController, isErrorUnknownRoute } from './gateway';
 import { doError, doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 import {
   GatewayControllerError,
   ControllerChannelPairingResponseSchema,
@@ -85,7 +86,7 @@ export async function listPairingRequests(
     const cached = await env.KV_CLAW_CACHE.get(cacheKey, 'json');
     const requests = parseCachedChannelRequests(cached);
     if (requests) {
-      console.log(`[DO] pairing list served from KV cache (key=${cacheKey})`);
+      logger.info('[DO] pairing list served from KV cache', { cacheKey });
       return { requests };
     }
   }
@@ -262,7 +263,7 @@ export async function listDevicePairingRequests(
     const cached = await env.KV_CLAW_CACHE.get(cacheKey, 'json');
     const requests = parseCachedDeviceRequests(cached);
     if (requests) {
-      console.log(`[DO] device pairing list served from KV cache (key=${cacheKey})`);
+      logger.info('[DO] device pairing list served from KV cache', { cacheKey });
       return { requests };
     }
   }

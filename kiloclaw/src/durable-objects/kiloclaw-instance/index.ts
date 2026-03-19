@@ -47,6 +47,7 @@ import type { InstanceMutableState, InstanceStatus, DestroyResult } from './type
 import { getFlyConfig } from './types';
 import { createMutableState, loadState, storageUpdate } from './state';
 import { nextAlarmTime, doError, doWarn, toLoggable } from './log';
+import { logger } from '../../logger';
 import { attemptMetadataRecovery } from './reconcile';
 import { resolveImageTag, getRegistryApp, buildUserEnvVars } from './config';
 import * as gateway from './gateway';
@@ -118,7 +119,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       const { appName } = await appStub.ensureApp(userId);
       this.s.flyAppName = appName;
       await this.persist({ flyAppName: appName });
-      console.log('[DO] Per-user Fly App ensured:', appName);
+      logger.info('[DO] Per-user Fly App ensured', { appName });
     }
 
     // Create Fly Volume on first provision.
@@ -139,11 +140,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       );
       this.s.flyVolumeId = volume.id;
       this.s.flyRegion = volume.region;
-      console.log('[DO] Created Fly Volume:', volume.id, 'region:', volume.region);
+      logger.info('[DO] Created Fly Volume', { volumeId: volume.id, region: volume.region });
     }
 
     // Resolve the image version for this provision.
-    console.debug('[DO] provision: pinnedImageTag from config:', config.pinnedImageTag ?? 'none');
+    logger.info('[DO] provision: pinnedImageTag from config', {
+      pinnedImageTag: config.pinnedImageTag ?? 'none',
+    });
     if (config.pinnedImageTag) {
       let pinned = await resolveVersionByTag(this.env.KV_CLAW_CACHE, config.pinnedImageTag);
 
@@ -174,10 +177,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
                 imageDigest: catalogEntry.imageDigest,
                 publishedAt: catalogEntry.publishedAt,
               };
-              console.debug(
-                '[DO] Resolved pinned tag from Postgres catalog:',
-                config.pinnedImageTag
-              );
+              logger.info('[DO] Resolved pinned tag from Postgres catalog', {
+                pinnedImageTag: config.pinnedImageTag,
+              });
             }
           }
         } catch (err) {
@@ -192,7 +194,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         this.s.imageVariant = pinned.variant;
         this.s.trackedImageTag = pinned.imageTag;
         this.s.trackedImageDigest = pinned.imageDigest;
-        console.debug('[DO] Using pinned version:', pinned.openclawVersion, '→', pinned.imageTag);
+        logger.info('[DO] Using pinned version', {
+          openclawVersion: pinned.openclawVersion,
+          imageTag: pinned.imageTag,
+        });
       } else {
         doWarn(this.s, 'Pinned tag not found in KV or Postgres, using tag directly', {
           pinnedImageTag: config.pinnedImageTag,
@@ -393,10 +398,10 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     for (const [key, value] of Object.entries(patch)) {
       if (value === null) {
-        console.log('[DO] Secret removed', { fieldKey: key, operation: 'remove' });
+        logger.info('[DO] Secret removed', { fieldKey: key, operation: 'remove' });
         delete currentSecrets[key];
       } else {
-        console.log('[DO] Secret updated', { fieldKey: key, operation: 'set' });
+        logger.info('[DO] Secret updated', { fieldKey: key, operation: 'set' });
         currentSecrets[key] = value;
       }
     }
@@ -674,27 +679,28 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         const machine = await fly.getMachine(flyConfig, this.s.flyMachineId);
         if (machine.state === 'started') {
           await reconcileMachineMount(flyConfig, this.ctx, this.s, machine, 'start');
-          console.log('[DO] Machine already running, mount verified');
+          logger.info('[DO] Machine already running, mount verified');
           await this.scheduleAlarm();
           return;
         }
-        console.log('[DO] Status is running but machine state is:', machine.state, '-- restarting');
+        logger.info('[DO] Status is running but machine state is, restarting', {
+          machineState: machine.state,
+        });
       } catch (err) {
-        console.log('[DO] Failed to get machine state, will recreate:', err);
+        logger.info('[DO] Failed to get machine state, will recreate', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
     const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
     const guest = guestFromSize(this.s.machineSize);
     const imageTag = resolveImageTag(this.s, this.env);
-    console.log(
-      '[DO] startGateway: deploying with imageTag:',
+    logger.info('[DO] startGateway: deploying', {
       imageTag,
-      'trackedImageTag:',
-      this.s.trackedImageTag,
-      'openclawVersion:',
-      this.s.openclawVersion
-    );
+      trackedImageTag: this.s.trackedImageTag,
+      openclawVersion: this.s.openclawVersion,
+    });
     const identity = {
       userId: this.s.userId,
       sandboxId: this.s.sandboxId,
@@ -868,7 +874,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.s.status === 'starting' ||
       this.s.status === 'destroying'
     ) {
-      console.log('[DO] Instance not running (status:', this.s.status, '), no-op');
+      logger.info('[DO] Instance not running, no-op', { status: this.s.status });
       return;
     }
 
@@ -880,7 +886,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         if (!fly.isFlyNotFound(err)) {
           throw err;
         }
-        console.log('[DO] Machine already gone (404), marking stopped');
+        logger.info('[DO] Machine already gone (404), marking stopped');
       }
     }
 
@@ -1142,11 +1148,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     const previousVolumeId = this.s.flyVolumeId;
 
-    console.log(
-      `[admin-volume-reassociate] userId=${this.s.userId} ` +
-        `previous=${previousVolumeId} new=${newVolumeId} region=${volume.region} ` +
-        `reason="${reason}"`
-    );
+    logger.info('[admin-volume-reassociate]', {
+      userId: this.s.userId,
+      previousVolumeId,
+      newVolumeId,
+      region: volume.region,
+      reason,
+    });
 
     // Persist the new volume ID and region
     this.s.flyVolumeId = newVolumeId;
@@ -1249,12 +1257,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         ? 'upgrade-to-latest'
         : `pin-to-tag:${options.imageTag}`
       : 'redeploy-same-image';
-    console.log(
-      '[DO] restartMachine:',
-      action,
-      '| current trackedImageTag:',
-      this.s.trackedImageTag
-    );
+    logger.info('[DO] restartMachine', { action, trackedImageTag: this.s.trackedImageTag });
 
     try {
       if (options?.imageTag) {
@@ -1310,7 +1313,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);
       const imageTag = resolveImageTag(this.s, this.env);
-      console.log('[DO] restartMachine: deploying with imageTag:', imageTag);
+      logger.info('[DO] restartMachine: deploying', { imageTag });
       const identity = {
         userId: this.s.userId ?? '',
         sandboxId: this.s.sandboxId ?? '',

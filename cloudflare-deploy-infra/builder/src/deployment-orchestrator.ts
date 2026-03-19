@@ -28,6 +28,7 @@ import type {
 } from '../../../src/lib/user-deployments/env-vars-validation';
 import decryptEnvVars from './env-decryptor';
 import * as Sentry from '@sentry/cloudflare';
+import { logger } from './logger';
 import {
   ArchiveExtractionError,
   BuildStepError,
@@ -410,7 +411,7 @@ export class DeploymentOrchestrator extends DurableObject<Env> {
     // Get the commit hash
     const commitHashResult = await sandbox.exec('cd /workspace/project && git rev-parse HEAD');
     if (!commitHashResult.success) {
-      console.log(commitHashResult.stderr);
+      logger.warn('Failed to get commit hash', { stderr: commitHashResult.stderr });
     }
     const commitHash = commitHashResult.stdout.trim();
 
