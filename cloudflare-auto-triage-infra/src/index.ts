@@ -7,12 +7,44 @@
  */
 
 import { Hono, type Context } from 'hono';
-import type { Env, TriageRequest, TriageResponse } from './types';
+import { z } from 'zod';
+import type { Env, TriageResponse } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const sessionInputSchema = z.object({
+  repoFullName: z.string(),
+  issueNumber: z.number(),
+  issueTitle: z.string(),
+  issueBody: z.string().nullable(),
+  githubToken: z.string().optional(),
+  kilocodeOrganizationId: z.string().optional(),
+  duplicateThreshold: z.number(),
+  autoFixThreshold: z.number(),
+  customInstructions: z.string().nullable().optional(),
+  modelSlug: z.string(),
+  baseBranch: z.string().optional(),
+  branchPrefix: z.string().optional(),
+  maxClassificationTimeMinutes: z.number().optional(),
+  autoCreatePrThreshold: z.number().optional(),
+  maxPRCreationTimeMinutes: z.number().optional(),
+});
+
+const triageRequestSchema = z.object({
+  ticketId: z.string(),
+  authToken: z.string(),
+  sessionInput: sessionInputSchema,
+  owner: ownerSchema,
+});
 
 // Import base Durable Object
 import { TriageOrchestrator as TriageOrchestratorBase } from './triage-orchestrator';
@@ -32,23 +64,11 @@ app.use(
 
 // Route: POST /triage
 app.post('/triage', async (c: Context<HonoEnv>) => {
-  let body: TriageRequest;
-
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const parsed = triageRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.format() }, 400);
   }
-
-  // Validate required fields
-  if (!body.ticketId || !body.authToken || !body.sessionInput || !body.owner) {
-    return c.json(
-      {
-        error: 'Missing required fields: ticketId, authToken, sessionInput, owner',
-      },
-      400
-    );
-  }
+  const body = parsed.data;
 
   console.log('[POST /triage] Received triage request', {
     ticketId: body.ticketId,

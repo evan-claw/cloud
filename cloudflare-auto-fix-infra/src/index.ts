@@ -5,13 +5,54 @@
  */
 
 import { Hono } from 'hono';
-import type { Env, FixRequest, FixResponse } from './types';
+import { z } from 'zod';
+import type { Env, FixResponse } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
 import { AutoFixOrchestrator } from './fix-orchestrator';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const sessionInputSchema = z.object({
+  repoFullName: z.string(),
+  issueNumber: z.number(),
+  issueTitle: z.string(),
+  issueBody: z.string().nullable(),
+  classification: z.enum(['bug', 'feature', 'question', 'unclear']).optional(),
+  confidence: z.number().optional(),
+  intentSummary: z.string().optional(),
+  relatedFiles: z.array(z.string()).optional(),
+  githubToken: z.string().optional(),
+  kilocodeOrganizationId: z.string().optional(),
+  customInstructions: z.string().nullable().optional(),
+  modelSlug: z.string(),
+  prBaseBranch: z.string(),
+  prBranchPrefix: z.string(),
+  prTitleTemplate: z.string(),
+  prBodyTemplate: z.string().nullable().optional(),
+  maxPRCreationTimeMinutes: z.number().optional(),
+  upstreamBranch: z.string().optional(),
+  reviewCommentId: z.number().optional(),
+  reviewCommentBody: z.string().optional(),
+  filePath: z.string().optional(),
+  lineNumber: z.number().optional(),
+  diffHunk: z.string().optional(),
+});
+
+const fixRequestSchema = z.object({
+  ticketId: z.string(),
+  authToken: z.string(),
+  sessionInput: sessionInputSchema,
+  owner: ownerSchema,
+  triggerSource: z.enum(['label', 'review_comment']).optional(),
+});
 
 // Export the Durable Object class
 export { AutoFixOrchestrator };
@@ -39,12 +80,11 @@ app.get('/health', c => {
  */
 app.post('/fix/dispatch', async c => {
   try {
-    const body = await c.req.json<FixRequest>();
-
-    // Validate required fields
-    if (!body.ticketId || !body.authToken || !body.sessionInput || !body.owner) {
-      return c.json({ error: 'Missing required fields' }, 400);
+    const parsed = fixRequestSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return c.json({ success: false, error: parsed.error.format() }, 400);
     }
+    const body = parsed.data;
 
     // Get or create Durable Object instance
     const id = c.env.AUTO_FIX_ORCHESTRATOR.idFromName(body.ticketId);

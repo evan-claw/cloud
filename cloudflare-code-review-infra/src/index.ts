@@ -19,13 +19,58 @@
  */
 
 import { Hono, type Context } from 'hono';
-import type { Env, CodeReviewRequest, CodeReviewResponse } from './types';
+import { z } from 'zod';
+import type { Env, CodeReviewResponse } from './types';
 import {
   withDORetry,
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+
+const ownerSchema = z.object({
+  type: z.enum(['user', 'org']),
+  id: z.string(),
+  userId: z.string(),
+});
+
+const mcpServerConfigSchema = z.object({
+  type: z.string(),
+  url: z.string(),
+  headers: z.record(z.string(), z.string()),
+  timeout: z.number(),
+});
+
+const sessionInputSchema = z.object({
+  githubRepo: z.string().optional(),
+  gitUrl: z.string().optional(),
+  kilocodeOrganizationId: z.string().optional(),
+  prompt: z.string(),
+  mode: z.literal('code'),
+  model: z.string(),
+  variant: z.string().optional(),
+  upstreamBranch: z.string(),
+  githubToken: z.string().optional(),
+  gitToken: z.string().optional(),
+  platform: z.enum(['github', 'gitlab']).optional(),
+  envVars: z.record(z.string(), z.string()).optional(),
+  mcpServers: z.record(z.string(), mcpServerConfigSchema).optional(),
+  gateThreshold: z.enum(['off', 'all', 'warning', 'critical']).optional(),
+});
+
+const codeReviewRequestSchema = z.object({
+  reviewId: z.string(),
+  authToken: z.string(),
+  sessionInput: sessionInputSchema,
+  owner: ownerSchema,
+  skipBalanceCheck: z.boolean().optional(),
+  agentVersion: z.string().optional(),
+  previousCloudAgentSessionId: z.string().optional(),
+});
+
+const cancelRequestSchema = z.object({
+  reason: z.string().optional(),
+});
 
 // Import base Durable Object
 import { CodeReviewOrchestrator as CodeReviewOrchestratorBase } from './code-review-orchestrator';
@@ -45,23 +90,11 @@ app.use(
 
 // Route: POST /review
 app.post('/review', async (c: Context<HonoEnv>) => {
-  let body: CodeReviewRequest;
-
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const parsed = codeReviewRequestSchema.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.format() }, 400);
   }
-
-  // Validate required fields
-  if (!body.reviewId || !body.authToken || !body.sessionInput || !body.owner) {
-    return c.json(
-      {
-        error: 'Missing required fields: reviewId, authToken, sessionInput, owner',
-      },
-      400
-    );
-  }
+  const body = parsed.data;
 
   console.log('[POST /review] Received review request', {
     reviewId: body.reviewId,
@@ -157,13 +190,11 @@ app.post('/reviews/:reviewId/cancel', async (c: Context<HonoEnv>) => {
     return c.json({ error: 'reviewId parameter required' }, 400);
   }
 
-  let body: { reason?: string };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: 'Invalid JSON body' }, 400);
+  const cancelParsed = cancelRequestSchema.safeParse(await c.req.json());
+  if (!cancelParsed.success) {
+    return c.json({ success: false, error: cancelParsed.error.format() }, 400);
   }
-  const reason = body.reason;
+  const reason = cancelParsed.data.reason;
 
   console.log('[POST /reviews/:reviewId/cancel] Cancelling review', { reviewId, reason });
 
