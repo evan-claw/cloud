@@ -3305,7 +3305,7 @@ export class TownDO extends DurableObject<Env> {
       // may be a convoy feature branch that doesn't exist on the remote yet.
       // The refinery's system prompt tells it which branch to merge into.
       defaultBranch: rigConfig.defaultBranch,
-      kilocodeToken: rigConfig.kilocodeToken,
+      kilocodeToken: rigConfig.kilocodeToken ?? (await this.resolveKilocodeToken()),
       townConfig,
       systemPromptOverride: systemPrompt,
       platformIntegrationId: rigConfig.platformIntegrationId,
