@@ -587,40 +587,47 @@ export function feedStrandedConvoys(sql: SqlStorage, townId: string): void {
 }
 
 /**
- * Recover open beads whose assigned agent is no longer hooked to them.
+ * Recover beads whose assigned agent is no longer hooked to them.
  *
  * After container restarts, review failures, or rework cycles, beads
- * can end up in 'open' with a stale assignee_agent_bead_id — the agent
- * has been unhooked but the bead still references it. Neither
- * feedStrandedConvoys (requires assignee IS NULL) nor schedulePendingWork
- * (requires agent hooked) will pick these up.
+ * can end up in 'open' or 'in_progress' with a stale
+ * assignee_agent_bead_id — the agent has been unhooked but the bead
+ * still references it. Neither feedStrandedConvoys (requires assignee
+ * IS NULL) nor schedulePendingWork (requires agent hooked) will pick
+ * these up.
  *
- * For each orphaned bead, re-hook the assigned agent (or a fresh one
- * if the original is busy) so schedulePendingWork dispatches it on the
- * next tick.
+ * For each orphaned bead:
+ * - If in_progress, reset to open (no agent is actually working on it)
+ * - Hook a polecat so schedulePendingWork dispatches it on the next tick
  */
 export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
   const OrphanedBeadRow = z.object({
     bead_id: z.string(),
+    bead_status: z.string(),
     rig_id: z.string().nullable(),
     assignee_agent_bead_id: z.string(),
   });
 
-  // Find open issue beads where the assigned agent's current_hook_bead_id
-  // does NOT point back to this bead (either NULL or hooked elsewhere).
+  // Find open/in_progress issue beads where the assigned agent's
+  // current_hook_bead_id does NOT point back to this bead (either NULL
+  // or hooked elsewhere). Also require the agent to NOT be 'working' —
+  // if the agent is working, the hook mismatch may be a transient race
+  // during dispatch rather than a real orphan.
   const rows = OrphanedBeadRow.array().parse([
     ...query(
       sql,
       /* sql */ `
         SELECT ${beads.bead_id},
+               ${beads.status} AS bead_status,
                ${beads.rig_id},
                ${beads.assignee_agent_bead_id}
         FROM ${beads}
         INNER JOIN ${agent_metadata}
           ON ${agent_metadata.bead_id} = ${beads.assignee_agent_bead_id}
-        WHERE ${beads.status} = 'open'
+        WHERE ${beads.status} IN ('open', 'in_progress')
           AND ${beads.type} = 'issue'
           AND ${beads.assignee_agent_bead_id} IS NOT NULL
+          AND ${agent_metadata.status} != 'working'
           AND (
             ${agent_metadata.current_hook_bead_id} IS NULL
             OR ${agent_metadata.current_hook_bead_id} != ${beads.bead_id}
@@ -639,8 +646,12 @@ export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
     if (!rigId) continue;
 
     try {
-      // Prefer re-using the original agent if it's idle+unhooked.
-      // Otherwise getOrCreateAgent finds or creates a fresh polecat.
+      // If the bead is in_progress but no agent is working on it,
+      // reset to open so the dispatch flow starts cleanly.
+      if (row.bead_status === 'in_progress') {
+        updateBeadStatus(sql, row.bead_id, 'open', 'system');
+      }
+
       const agent = getOrCreateAgent(sql, 'polecat', rigId, townId);
       hookBead(sql, agent.id, row.bead_id);
       query(
@@ -652,7 +663,9 @@ export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
         `,
         [agent.id]
       );
-      console.log(`${LOG} rehookOrphanedBeads: re-hooked agent=${agent.id} to bead=${row.bead_id}`);
+      console.log(
+        `${LOG} rehookOrphanedBeads: re-hooked agent=${agent.id} to bead=${row.bead_id} (was ${row.bead_status})`
+      );
     } catch (err) {
       console.warn(`${LOG} rehookOrphanedBeads: failed to re-hook bead=${row.bead_id}:`, err);
     }
