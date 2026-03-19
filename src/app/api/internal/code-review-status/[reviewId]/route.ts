@@ -52,15 +52,10 @@ import { PLATFORM } from '@/lib/integrations/core/constants';
 import { appendUsageFooter } from '@/lib/code-reviews/summary/usage-footer';
 import { APP_URL } from '@/lib/constants';
 import type { CloudAgentCodeReview, PlatformIntegration } from '@kilocode/db/schema';
-
-type TerminalReason =
-  | 'billing'
-  | 'user_cancelled'
-  | 'superseded'
-  | 'interrupted'
-  | 'timeout'
-  | 'upstream_error'
-  | 'unknown';
+import {
+  CODE_REVIEW_TERMINAL_REASONS,
+  type CodeReviewTerminalReason,
+} from '@kilocode/db/schema-types';
 
 /**
  * Payload from the orchestrator DO (legacy format).
@@ -70,7 +65,7 @@ type OrchestratorPayload = {
   cliSessionId?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   errorMessage?: string;
-  terminalReason?: TerminalReason;
+  terminalReason?: CodeReviewTerminalReason;
   gateResult?: 'pass' | 'fail';
 };
 
@@ -84,7 +79,7 @@ type CloudAgentNextCallbackPayload = {
   kiloSessionId?: string;
   status: 'completed' | 'failed' | 'interrupted';
   errorMessage?: string;
-  terminalReason?: TerminalReason;
+  terminalReason?: CodeReviewTerminalReason;
   lastSeenBranch?: string;
   gateResult?: 'pass' | 'fail';
 };
@@ -100,7 +95,7 @@ function normalizePayload(raw: StatusUpdatePayload): {
   sessionId?: string;
   cliSessionId?: string;
   errorMessage?: string;
-  terminalReason?: TerminalReason;
+  terminalReason?: CodeReviewTerminalReason;
   gateResult?: 'pass' | 'fail';
 } {
   // Map cloud-agent-next 'interrupted' → 'cancelled'
@@ -118,18 +113,23 @@ function normalizePayload(raw: StatusUpdatePayload): {
   const sessionId =
     raw.sessionId ?? ('cloudAgentSessionId' in raw ? raw.cloudAgentSessionId : undefined);
 
+  // Validate terminalReason against allowlist to prevent free-form text in the DB
+  const validReasons: ReadonlySet<string> = new Set(CODE_REVIEW_TERMINAL_REASONS);
+  const terminalReason =
+    raw.terminalReason && validReasons.has(raw.terminalReason) ? raw.terminalReason : undefined;
+
   return {
     status,
     sessionId,
     cliSessionId,
     errorMessage: raw.errorMessage,
-    terminalReason: raw.terminalReason,
+    terminalReason,
     gateResult: raw.gateResult,
   };
 }
 
-function isBillingTerminalReason(
-  terminalReason?: TerminalReason,
+function isBillingCodeReviewTerminalReason(
+  terminalReason?: CodeReviewTerminalReason,
   errorMessage?: string | null
 ): boolean {
   if (terminalReason === 'billing') {
@@ -216,7 +216,7 @@ async function getReviewUsageData(reviewId: string) {
 function mapStatusToCheckRun(
   reviewStatus: string,
   errorMessage?: string,
-  terminalReason?: TerminalReason,
+  terminalReason?: CodeReviewTerminalReason,
   gateResult?: 'pass' | 'fail'
 ) {
   const statusMap: Record<string, 'in_progress' | 'completed'> = {
@@ -233,7 +233,7 @@ function mapStatusToCheckRun(
   // (e.g. findings exceeding the gate_threshold), fail the check.
   const reviewFailed = reviewStatus === 'completed' && gateResult === 'fail';
   const billingFailure =
-    reviewStatus === 'failed' && isBillingTerminalReason(terminalReason, errorMessage);
+    reviewStatus === 'failed' && isBillingCodeReviewTerminalReason(terminalReason, errorMessage);
 
   const conclusionMap: Record<string, CheckRunConclusion> = {
     completed: reviewFailed ? 'failure' : 'success',
@@ -289,7 +289,7 @@ function mapStatusToGitLabState(
 function getGitLabStatusDescription(
   reviewStatus: string,
   errorMessage?: string,
-  terminalReason?: TerminalReason,
+  terminalReason?: CodeReviewTerminalReason,
   gateResult?: 'pass' | 'fail'
 ): string | undefined {
   if (reviewStatus === 'running') return 'Kilo Code Review in progress';
@@ -298,7 +298,10 @@ function getGitLabStatusDescription(
   }
   if (reviewStatus === 'completed') return 'Kilo Code Review completed';
   if (reviewStatus === 'cancelled') return 'Kilo Code Review cancelled';
-  if (reviewStatus === 'failed' && isBillingTerminalReason(terminalReason, errorMessage)) {
+  if (
+    reviewStatus === 'failed' &&
+    isBillingCodeReviewTerminalReason(terminalReason, errorMessage)
+  ) {
     return 'Insufficient credits to run review';
   }
   if (reviewStatus === 'failed' && errorMessage) return `Review failed: ${errorMessage}`;
@@ -335,7 +338,7 @@ async function updatePRGateCheck(
   integration: PlatformIntegration,
   reviewStatus: string,
   errorMessage?: string,
-  terminalReason?: TerminalReason,
+  terminalReason?: CodeReviewTerminalReason,
   gitlabAccessToken?: string,
   gateResult?: 'pass' | 'fail'
 ) {

@@ -15,15 +15,7 @@ import { eq, and, desc, count, ne, inArray, sql, sum, gte } from 'drizzle-orm';
 import { captureException } from '@sentry/nextjs';
 import type { CreateReviewParams, CodeReviewStatus, ListReviewsParams, Owner } from '../core';
 import type { CloudAgentCodeReview } from '@kilocode/db/schema';
-
-type CodeReviewTerminalReason =
-  | 'billing'
-  | 'user_cancelled'
-  | 'superseded'
-  | 'interrupted'
-  | 'timeout'
-  | 'upstream_error'
-  | 'unknown';
+import type { CodeReviewTerminalReason } from '@kilocode/db/schema-types';
 
 /**
  * Creates a new code review record

@@ -85,6 +85,10 @@ export type CloudAgentInterruptOutput = {
 // tRPC HTTP helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Valid terminal reasons for code review failures.
+ * Keep in sync with CodeReviewTerminalReason in packages/db/src/schema-types.ts.
+ */
 export type CloudAgentTerminalReason =
   | 'billing'
   | 'user_cancelled'
