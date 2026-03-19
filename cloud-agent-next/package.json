@@ -1,9 +1,11 @@
 {
   "name": "cloud-agent-next",
   "version": "1.0.0",
-  "type": "module",
   "private": true,
   "description": "A Cloudflare Workers project for Kilocode Cloud Agents",
+  "license": "MIT",
+  "author": "",
+  "type": "module",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
     "deploy": "wrangler deploy",
@@ -14,8 +16,8 @@
     "types": "wrangler types",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts' 'wrapper/src/**/*.ts'",
     "lint:fix": "eslint --config eslint.config.mjs --cache --fix 'src/**/*.ts' 'wrapper/src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts'",
+    "format": "oxfmt --threads=1 src",
+    "format:check": "oxfmt --list-different --threads=1 src",
     "build:wrapper": "bun run --cwd wrapper build",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -49,11 +51,8 @@
     "@vitest/ui": "^3.2.4",
     "drizzle-kit": "catalog:",
     "eslint": "catalog:",
-    "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"
-  },
-  "author": "",
-  "license": "MIT"
+  }
 }

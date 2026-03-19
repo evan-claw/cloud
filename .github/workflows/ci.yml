@@ -123,7 +123,7 @@ jobs:
       - name: Format check
         run: |
           pnpm run format:check || {
-            echo "::error::Prettier formatting check failed. Please run 'pnpm run format' locally and commit the changes before pushing."
+            echo "::error::oxfmt formatting check failed. Please run 'pnpm run format' locally and commit the changes before pushing."
             exit 1
           }
 

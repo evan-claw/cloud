@@ -1,9 +1,11 @@
 {
   "name": "kiloclaw",
   "version": "1.0.0",
-  "type": "module",
   "private": true,
   "description": "Multi-tenant OpenClaw on Fly.io Machines",
+  "license": "Apache-2.0",
+  "author": "",
+  "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
     "start": "wrangler dev",
@@ -12,8 +14,8 @@
     "typecheck": "tsgo --noEmit --incremental false",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "lint:fix": "eslint --config eslint.config.mjs --cache --fix 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts'",
+    "format": "oxfmt --threads=1 src",
+    "format:check": "oxfmt --list-different --threads=1 src",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -34,11 +36,8 @@
     "@typescript/native-preview": "catalog:",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "catalog:",
-    "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "^4.1.0",
     "wrangler": "catalog:"
-  },
-  "author": "",
-  "license": "Apache-2.0"
+  }
 }

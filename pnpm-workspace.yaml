@@ -43,7 +43,6 @@ catalog:
   hono: ^4.12.7
   jose: ^6.2.1
   jsonwebtoken: ^9.0.3
-  prettier: ^3.8.1
   typescript: ^5.9.3
   typescript-eslint: ^8.57.0
   workers-tagged-logger: ^1.0.0

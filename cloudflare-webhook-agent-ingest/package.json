@@ -1,9 +1,9 @@
 {
   "name": "cloudflare-webhook-agent-ingest",
   "version": "1.0.0",
-  "type": "module",
   "private": true,
   "description": "Webhook ingest service for Kilo Cod agents",
+  "type": "module",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
     "deploy:prod": "wrangler deploy --env=\"\"",
@@ -13,8 +13,8 @@
     "types": "wrangler types",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "lint:fix": "eslint --config eslint.config.mjs --cache --fix 'src/**/*.ts'",
-    "format": "prettier --write 'src/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts'",
+    "format": "oxfmt --threads=1 src",
+    "format:check": "oxfmt --list-different --threads=1 src",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.workers.config.ts",
@@ -38,7 +38,6 @@
     "@vitest/ui": "^3.2.4",
     "drizzle-kit": "catalog:",
     "eslint": "catalog:",
-    "prettier": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"
