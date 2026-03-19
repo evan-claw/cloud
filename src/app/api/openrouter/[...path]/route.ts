@@ -89,6 +89,8 @@ function validatePath(
   | { path: '/chat/completions' | '/responses' | '/messages' }
   | { errorResponse: ReturnType<typeof invalidPathResponse> } {
   const pathSuffix =
+    stripRequiredPrefix(url.pathname, '/api/gateway/v1') ??
+    stripRequiredPrefix(url.pathname, '/api/openrouter/v1') ??
     stripRequiredPrefix(url.pathname, '/api/gateway') ??
     stripRequiredPrefix(url.pathname, '/api/openrouter');
 
