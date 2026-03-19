@@ -1335,6 +1335,20 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     try {
       await this.loadState();
 
+      // Bail if the instance was destroyed (or otherwise left 'restarting')
+      // while this background task was queued. Reading from storage rather
+      // than this.s mirrors the pattern in startAsync's catch handler —
+      // waitUntil runs after the originating request context completes and
+      // other handlers (e.g. destroy) may have mutated storage in the interim.
+      const currentStatus = await this.ctx.storage.get('status');
+      if (currentStatus !== 'restarting') {
+        console.log(
+          '[DO] restartMachine: aborting background restart, status is now',
+          currentStatus
+        );
+        return;
+      }
+
       if (!this.s.flyMachineId) {
         throw new Error('No machine exists');
       }
@@ -1375,25 +1389,41 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       await fly.updateMachine(flyConfig, this.s.flyMachineId, machineConfig, {
         minSecretsVersion,
       });
+
+      // Check ownership before writing — destroy() may have cleared storage.
+      const midStatus = await this.ctx.storage.get('status');
+      if (midStatus !== 'restarting') return;
+
       this.s.restartUpdateSent = true;
       await this.ctx.storage.put(storageUpdate({ restartUpdateSent: true }));
       await fly.waitForState(flyConfig, this.s.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
+
+      // Final ownership check before persisting success.
+      const preSuccessStatus = await this.ctx.storage.get('status');
+      if (preSuccessStatus !== 'restarting') return;
+
       await markRestartSuccessful(this.ctx, this.s);
       await this.scheduleAlarm();
     } catch (err) {
       doError(this.s, 'restartMachine: background restart failed', {
         error: toLoggable(err),
       });
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      this.s.lastRestartErrorMessage = errorMessage;
-      this.s.lastRestartErrorAt = Date.now();
-      await this.ctx.storage.put(
-        storageUpdate({
-          lastRestartErrorMessage: errorMessage,
-          lastRestartErrorAt: this.s.lastRestartErrorAt,
-        })
-      );
+      // Only persist error if we're still in 'restarting'. If destroy()
+      // ran concurrently, storage may have been wiped — writing here would
+      // recreate partial state on a destroyed instance.
+      const postStatus = await this.ctx.storage.get('status');
+      if (postStatus === 'restarting') {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        this.s.lastRestartErrorMessage = errorMessage;
+        this.s.lastRestartErrorAt = Date.now();
+        await this.ctx.storage.put(
+          storageUpdate({
+            lastRestartErrorMessage: errorMessage,
+            lastRestartErrorAt: this.s.lastRestartErrorAt,
+          })
+        );
+      }
     }
   }
 

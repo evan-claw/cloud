@@ -5188,6 +5188,36 @@ describe('restartMachine restartingAt guard', () => {
     expect(storage._store.get('lastRestartErrorAt')).toBeGreaterThan(0);
   });
 
+  it('background restart aborts without writing state if instance was destroyed concurrently', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage);
+
+    // Block stopMachineAndWait so we can wipe storage before the background
+    // task's initial status check (loadState reads from storage.get()).
+    let resolveStop!: () => void;
+    (flyClient.stopMachineAndWait as Mock).mockReturnValue(
+      new Promise<void>(r => {
+        resolveStop = r;
+      })
+    );
+
+    const result = await instance.restartMachine();
+    expect(result.success).toBe(true);
+    expect(storage._store.get('status')).toBe('restarting');
+
+    // Simulate destroy() clearing all storage before background proceeds.
+    // The background's loadState() already ran, but the status storage.get
+    // check happens right after loadState — clear now so it reads undefined.
+    storage._store.clear();
+
+    resolveStop();
+    await Promise.all(waitUntilPromises);
+
+    // Storage should remain empty — background must not recreate partial state
+    expect(storage._store.has('lastRestartErrorMessage')).toBe(false);
+    expect(storage._store.has('restartUpdateSent')).toBe(false);
+  });
+
   it('clears restart errors at the beginning of a retry attempt', async () => {
     const { instance, storage } = createInstance();
     await seedRunning(storage, {
