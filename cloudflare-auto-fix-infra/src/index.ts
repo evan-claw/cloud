@@ -10,6 +10,7 @@ import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
+  withDORetry,
 } from '@kilocode/worker-utils';
 import { AutoFixOrchestrator } from './fix-orchestrator';
 
@@ -82,10 +83,12 @@ app.get('/fix/:ticketId/status', async c => {
 
     // Get Durable Object instance
     const id = c.env.AUTO_FIX_ORCHESTRATOR.idFromName(ticketId);
-    const stub = c.env.AUTO_FIX_ORCHESTRATOR.get(id);
 
-    // Get status (this would need to be implemented in the DO)
-    const result = await stub.getEvents();
+    const result = await withDORetry(
+      () => c.env.AUTO_FIX_ORCHESTRATOR.get(id),
+      stub => stub.getEvents(),
+      'getEvents'
+    );
 
     return c.json(result);
   } catch (error) {
