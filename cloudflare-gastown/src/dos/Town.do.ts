@@ -3182,6 +3182,24 @@ export class TownDO extends DurableObject<Env> {
     // Poll open PRs created by the 'pr' strategy
     await this.pollPendingPRs();
 
+    // Retry: if the refinery is idle but still hooked to an in_progress
+    // MR bead, the previous dispatch failed (container not ready). Re-
+    // dispatch via dispatchAgent which handles the full startup flow.
+    const refineryForRetry = agents.listAgents(this.sql, { role: 'refinery' })[0];
+    if (
+      refineryForRetry?.status === 'idle' &&
+      refineryForRetry.current_hook_bead_id
+    ) {
+      const hookedMr = beadOps.getBead(this.sql, refineryForRetry.current_hook_bead_id);
+      if (hookedMr?.status === 'in_progress' && hookedMr.type === 'merge_request') {
+        console.log(
+          `${TOWN_LOG} processReviewQueue: retrying refinery dispatch for MR bead=${hookedMr.bead_id}`
+        );
+        await this.dispatchAgent(refineryForRetry, hookedMr);
+        return;
+      }
+    }
+
     const entry = reviewQueue.popReviewQueue(this.sql);
     if (!entry) return;
 
