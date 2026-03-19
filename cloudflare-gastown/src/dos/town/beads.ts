@@ -51,6 +51,10 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function cloneBeadMetadata(metadata: Bead['metadata'] | null | undefined): Record<string, unknown> {
+  return metadata ? { ...metadata } : {};
+}
+
 export function initBeadTables(sql: SqlStorage): void {
   // Create all tables first (IF NOT EXISTS — safe for existing DOs)
   query(sql, createTableBeads(), []);
@@ -1001,7 +1005,7 @@ export function addBeadToConvoy(sql: SqlStorage, beadId: string, convoyId: strin
   const metadataPatch: Record<string, unknown> = { convoy_id: convoyId };
   if (featureBranch) metadataPatch.feature_branch = featureBranch;
 
-  const existingMetadata = z.record(z.string(), z.unknown()).parse(bead.metadata);
+  const existingMetadata = cloneBeadMetadata(bead.metadata);
   const merged = { ...existingMetadata, ...metadataPatch };
 
   query(
@@ -1072,7 +1076,7 @@ export function removeBeadFromConvoy(sql: SqlStorage, beadId: string): string | 
   // Strip convoy_id + feature_branch from metadata
   const bead = getBead(sql, beadId);
   if (bead) {
-    const existingMetadata = z.record(z.string(), z.unknown()).parse(bead.metadata);
+    const existingMetadata = cloneBeadMetadata(bead.metadata);
     delete existingMetadata.convoy_id;
     delete existingMetadata.feature_branch;
     const timestamp = now();

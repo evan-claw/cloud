@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev --env dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit --incremental false",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "test": "jest"
   },
@@ -21,6 +21,7 @@
   "devDependencies": {
     "@kilocode/eslint-config": "workspace:*",
     "@types/jest": "^29.5.14",
+    "@typescript/native-preview": "catalog:",
     "drizzle-kit": "catalog:",
     "eslint": "catalog:",
     "jest": "^29.7.0",

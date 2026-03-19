@@ -7,7 +7,7 @@
     "deploy:dev": "wrangler deploy --env dev",
     "dev": "wrangler dev --env dev",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit --incremental false",
     "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts",
     "test": "vitest run"
   },
@@ -19,7 +19,8 @@
   },
   "devDependencies": {
     "@kilocode/eslint-config": "workspace:*",
-    "@types/node": "^22",
+    "@types/node": "^22.19.15",
+    "@typescript/native-preview": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4",
     "wrangler": "catalog:"

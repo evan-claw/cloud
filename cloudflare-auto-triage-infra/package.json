@@ -7,12 +7,13 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "tail": "wrangler tail",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit --incremental false",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@kilocode/eslint-config": "workspace:*",
+    "@typescript/native-preview": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "wrangler": "catalog:"

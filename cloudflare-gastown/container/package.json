@@ -8,7 +8,7 @@
     "start": "bun run src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit --incremental false",
     "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
   },
   "devDependencies": {
     "@kilocode/eslint-config": "workspace:*",
-    "@types/bun": "^1.2.17",
+    "@types/bun": "^1.3.10",
+    "@typescript/native-preview": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "^3.2.4"
