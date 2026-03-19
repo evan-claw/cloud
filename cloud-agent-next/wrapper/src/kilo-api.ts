@@ -15,10 +15,7 @@ import { logToFile } from './utils.js';
 type SessionClient = {
   create: (args: { body: { title?: string } }) => Promise<{ data?: { id: string } }>;
   get: (args: { path: { id: string } }) => Promise<{ data?: { id: string } }>;
-  promptAsync: (args: {
-    path?: { id?: string };
-    body?: unknown;
-  }) => Promise<unknown>;
+  promptAsync: (args: { path?: { id?: string }; body?: unknown }) => Promise<unknown>;
   abort: (args: { path: { id: string } }) => Promise<unknown>;
   command: (args: {
     path: { id: string };
