@@ -2906,25 +2906,44 @@ export class TownDO extends DurableObject<Env> {
       const { agentId, containerInfo } = result.value;
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
-        if (containerInfo.exitReason === 'completed') {
-          reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });
-          continue;
+        // Route ALL dead agents through agentCompleted so the bead
+        // lifecycle is properly handled. For refineries, this triggers
+        // the rework flow (MR bead failed → source bead back to
+        // in_progress). For polecats, it fails/closes the bead.
+        // 'completed' exit means normal termination; 'not_found' or
+        // no exit reason means the process died unexpectedly.
+        const status = containerInfo.exitReason === 'completed' ? 'completed' : 'failed';
+        const result = reviewQueue.agentCompleted(this.sql, agentId, {
+          status,
+          reason: status === 'failed' ? 'Agent process died (container restart or crash)' : undefined,
+        });
+
+        // For refinery rework: dispatch a polecat to re-work the source bead
+        if (result.reworkSourceBeadId) {
+          const sourceBead = beadOps.getBead(this.sql, result.reworkSourceBeadId);
+          if (sourceBead?.rig_id) {
+            try {
+              const reworkAgent = agents.getOrCreateAgent(
+                this.sql,
+                'polecat',
+                sourceBead.rig_id,
+                this.townId
+              );
+              agents.hookBead(this.sql, reworkAgent.id, result.reworkSourceBeadId);
+              this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
+                console.error(
+                  `${TOWN_LOG} witnessPatrol: rework dispatch failed for bead=${result.reworkSourceBeadId}`,
+                  err
+                )
+              );
+            } catch (err) {
+              console.warn(
+                `${TOWN_LOG} witnessPatrol: could not dispatch rework for bead=${result.reworkSourceBeadId}:`,
+                err
+              );
+            }
+          }
         }
-        // Clear last_activity_at so schedulePendingWork picks this agent
-        // up on the very next tick without waiting for the dispatch
-        // cooldown. The cooldown protects against double-dispatch of live
-        // agents with an in-flight start — a dead agent has no in-flight
-        // dispatch to collide with.
-        query(
-          this.sql,
-          /* sql */ `
-            UPDATE ${agent_metadata}
-            SET ${agent_metadata.columns.status} = 'idle',
-                ${agent_metadata.columns.last_activity_at} = NULL
-            WHERE ${agent_metadata.bead_id} = ?
-          `,
-          [agentId]
-        );
       }
     }
 
