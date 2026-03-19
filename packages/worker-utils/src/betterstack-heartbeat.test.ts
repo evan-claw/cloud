@@ -16,9 +16,7 @@ describe('sendBetterStackHeartbeat', () => {
     await sendBetterStackHeartbeat('https://uptime.betterstack.com/api/v1/heartbeat/abc', true);
 
     expect(mockFetch).toHaveBeenCalledOnce();
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://uptime.betterstack.com/api/v1/heartbeat/abc'
-    );
+    expect(mockFetch).toHaveBeenCalledWith('https://uptime.betterstack.com/api/v1/heartbeat/abc');
   });
 
   it('appends /fail to the URL on failure', async () => {
