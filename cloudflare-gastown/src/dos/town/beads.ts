@@ -1002,7 +1002,9 @@ export function addBeadToConvoy(sql: SqlStorage, beadId: string, convoyId: strin
   if (featureBranch) metadataPatch.feature_branch = featureBranch;
 
   const existingMetadata: Record<string, unknown> =
-    typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {});
+    typeof bead.metadata === 'string'
+      ? (JSON.parse(bead.metadata) as Record<string, unknown>)
+      : (bead.metadata ?? {});
   const merged = { ...existingMetadata, ...metadataPatch };
 
   query(
@@ -1074,7 +1076,9 @@ export function removeBeadFromConvoy(sql: SqlStorage, beadId: string): string | 
   const bead = getBead(sql, beadId);
   if (bead) {
     const existingMetadata: Record<string, unknown> =
-      typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {});
+      typeof bead.metadata === 'string'
+        ? (JSON.parse(bead.metadata) as Record<string, unknown>)
+        : (bead.metadata ?? {});
     delete existingMetadata.convoy_id;
     delete existingMetadata.feature_branch;
     const timestamp = now();

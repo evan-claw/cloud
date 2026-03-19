@@ -19,8 +19,9 @@ let cleanupStaleAnalyses: typeof analysisDbModule.cleanupStaleAnalyses;
 let isFindingEligibleForAutoAnalysis: typeof analysisDbModule.isFindingEligibleForAutoAnalysis;
 
 beforeAll(async () => {
-  ({ cleanupStaleAnalyses, isFindingEligibleForAutoAnalysis } =
-    await import('./security-analysis'));
+  ({ cleanupStaleAnalyses, isFindingEligibleForAutoAnalysis } = await import(
+    './security-analysis'
+  ));
 });
 
 beforeEach(() => {

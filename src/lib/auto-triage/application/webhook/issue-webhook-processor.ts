@@ -237,8 +237,9 @@ export class IssueWebhookProcessor {
     issueNumber: number
   ): Promise<void> {
     try {
-      const { tryDispatchPendingTickets } =
-        await import('@/lib/auto-triage/dispatch/dispatch-pending-tickets');
+      const { tryDispatchPendingTickets } = await import(
+        '@/lib/auto-triage/dispatch/dispatch-pending-tickets'
+      );
       await tryDispatchPendingTickets(owner);
       logExceptInTest(`Dispatched pending tickets for owner ${owner.type}:${owner.id}`);
     } catch (dispatchError) {
