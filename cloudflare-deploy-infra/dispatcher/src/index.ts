@@ -1,5 +1,6 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { getCookie } from 'hono/cookie';
+import { useWorkersLogger } from 'workers-tagged-logger';
 import type { Env } from './types';
 import { getPasswordRecord } from './auth/password-store';
 import { isBannerEnabled } from './banner/banner-store';
@@ -7,20 +8,25 @@ import { injectBanner } from './banner/inject-banner';
 import { validateAuthCookie } from './auth/jwt';
 import { api } from './routes/api';
 import { auth } from './routes/auth';
+import { logger } from './logger';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+// workers-tagged-logger@1.0.0 was compiled against an older hono whose Handler
+// type is structurally incompatible with hono >=4.12.7 (missing [GET_MATCH_RESULT]).
+// The runtime middleware is fully compatible; only the .d.ts is stale.
+app.use('*', useWorkersLogger('deploy-dispatcher') as unknown as MiddlewareHandler);
+
 // Request logging middleware
-/*
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
   const duration = Date.now() - start;
   const { method } = c.req;
   const url = c.req.url;
-  console.log(`${method} ${url} - ${c.res.status} (${duration}ms)`);
+  logger.info(`${method} ${url} - ${c.res.status} (${duration}ms)`);
 });
-*/
 
 // Redirect .d.kiloapps.ai to .d.kiloapps.io
 app.use('*', async (c, next) => {
@@ -116,7 +122,7 @@ subdomainApp.all('*', async c => {
           return injectBanner(response, c.env.BANNER_LINK_URL);
         }
       } catch (bannerError) {
-        console.error('Banner injection failed, serving original response:', bannerError);
+        logger.error('Banner injection failed, serving original response', { error: bannerError instanceof Error ? bannerError.message : String(bannerError) });
       }
     }
 
@@ -155,7 +161,7 @@ app.all('*', async c => {
 
 // Error handler
 app.onError((err, c) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error', { error: err instanceof Error ? err.message : String(err) });
   return c.text('Internal Server Error', 500);
 });
 

@@ -11,8 +11,9 @@
  * - Public routes: no auth (health check only)
  */
 
-import type { Context, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from 'hono';
 import { Hono } from 'hono';
+import { useWorkersLogger } from 'workers-tagged-logger';
 
 import type { AppEnv, KiloClawEnv } from './types';
 import { accessGatewayRoutes, publicRoutes, api, kiloclaw, platform } from './routes';
@@ -22,6 +23,7 @@ import { sandboxIdFromUserId } from './auth/sandbox-id';
 import { registerVersionIfNeeded } from './lib/image-version';
 import { startingUpPage } from './pages/starting-up';
 import { buildForwardHeaders } from './utils/proxy-headers';
+import { logger } from './logger';
 
 // Export DOs (match wrangler.jsonc class_name bindings)
 export { KiloClawInstance } from './durable-objects/kiloclaw-instance';
@@ -65,7 +67,7 @@ function flyProxyUrl(appName: string, url: URL): string {
 async function logRequest(c: Context<AppEnv>, next: Next) {
   const url = new URL(c.req.url);
   const redactedSearch = redactSensitiveParams(url);
-  console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
+  logger.info(`${c.req.method} ${url.pathname}${redactedSearch}`);
   await next();
 }
 
@@ -86,7 +88,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
     if (!c.env.GATEWAY_TOKEN_SECRET) missing.push('GATEWAY_TOKEN_SECRET');
     if (!c.env.FLY_API_TOKEN) missing.push('FLY_API_TOKEN');
     if (missing.length > 0) {
-      console.error('[CONFIG] Platform route missing bindings:', missing.join(', '));
+      logger.error('Platform route missing bindings', { missing: missing.join(', ') });
       return c.json({ error: 'Configuration error' }, 503);
     }
     return next();
@@ -94,7 +96,7 @@ async function requireEnvVars(c: Context<AppEnv>, next: Next) {
 
   const missingVars = validateRequiredEnv(c.env);
   if (missingVars.length > 0) {
-    console.error('[CONFIG] Missing required environment variables:', missingVars.join(', '));
+    logger.error('Missing required environment variables', { missing: missingVars.join(', ') });
     return c.json({ error: 'Configuration error' }, 503);
   }
 
@@ -134,6 +136,11 @@ async function deriveSandboxId(c: Context<AppEnv>, next: Next) {
 const app = new Hono<AppEnv>();
 
 // Global middleware (all routes)
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+// workers-tagged-logger@1.0.0 was compiled against an older hono whose Handler
+// type is structurally incompatible with hono >=4.12.7 (missing [GET_MATCH_RESULT]).
+// The runtime middleware is fully compatible; only the .d.ts is stale.
+app.use('*', useWorkersLogger('kiloclaw') as unknown as MiddlewareHandler<AppEnv>);
 app.use('*', logRequest);
 
 // Public routes (no auth)
@@ -178,11 +185,13 @@ async function attemptCrashRecovery(c: Context<AppEnv>): Promise<boolean> {
     }
 
     // Machine dead despite running status -- restart
-    console.log('[PROXY] Instance status is running but machine unreachable, restarting');
+    logger.info('Instance status is running but machine unreachable, restarting');
     await stub.start(userId);
     return true;
   } catch (err) {
-    console.error('[PROXY] Crash recovery failed:', err);
+    logger.error('Crash recovery failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
   return false;
 }
@@ -243,12 +252,12 @@ app.all('*', async c => {
   const url = new URL(request.url);
   const targetUrl = flyProxyUrl(appName, url);
 
-  console.log('[PROXY] Handling request:', url.pathname, 'machine:', machineId);
+  logger.info('Handling request', { path: url.pathname, machineId });
 
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
 
   if (!c.env.GATEWAY_TOKEN_SECRET) {
-    console.error('[CONFIG] Missing required environment variables: GATEWAY_TOKEN_SECRET');
+    logger.error('Missing required environment variables: GATEWAY_TOKEN_SECRET');
     return c.json({ error: 'Configuration error' }, 503);
   }
 
@@ -261,7 +270,7 @@ app.all('*', async c => {
 
   // WebSocket proxy
   if (isWebSocketRequest) {
-    console.log('[WS] Proxying WebSocket connection to OpenClaw via Fly Proxy');
+    logger.info('Proxying WebSocket connection to OpenClaw via Fly Proxy');
 
     let containerResponse: Response;
     try {
@@ -269,7 +278,9 @@ app.all('*', async c => {
         headers: forwardHeaders,
       });
     } catch (err) {
-      console.error('[WS] Fly Proxy fetch failed:', err);
+      logger.error('WebSocket: Fly Proxy fetch failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
 
       const recovered = await attemptCrashRecovery(c);
       if (recovered) {
@@ -285,7 +296,9 @@ app.all('*', async c => {
             headers: forwardHeaders,
           });
         } catch (retryErr) {
-          console.error('[WS] Retry after recovery failed:', retryErr);
+          logger.error('WebSocket: retry after recovery failed', {
+            error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+          });
           return c.json({ error: 'Instance not reachable after restart attempt' }, 503);
         }
       } else {
@@ -298,7 +311,7 @@ app.all('*', async c => {
         );
       }
     }
-    console.log('[WS] Fly Proxy response status:', containerResponse.status);
+    logger.info('WebSocket: Fly Proxy response', { status: containerResponse.status });
 
     // Gateway not ready yet — return a clear JSON error for WebSocket clients
     if (containerResponse.status === 502) {
@@ -313,7 +326,7 @@ app.all('*', async c => {
 
     const containerWs = containerResponse.webSocket;
     if (!containerWs) {
-      console.error('[WS] No WebSocket in response - returning direct response');
+      logger.error('WebSocket: no WebSocket in response, returning direct response');
       return containerResponse;
     }
 
@@ -373,13 +386,13 @@ app.all('*', async c => {
     });
 
     // Error relay
-    serverWs.addEventListener('error', event => {
-      console.error('[WS] Client error:', event);
+    serverWs.addEventListener('error', () => {
+      logger.error('WebSocket: client error');
       containerWs.close(1011, 'Client error');
     });
 
-    containerWs.addEventListener('error', event => {
-      console.error('[WS] Container error:', event);
+    containerWs.addEventListener('error', () => {
+      logger.error('WebSocket: container error');
       serverWs.close(1011, 'Container error');
     });
 
@@ -392,7 +405,7 @@ app.all('*', async c => {
   // HTTP proxy
   // Buffer body upfront so it can be replayed on crash-recovery retry (streams are one-shot).
   const requestBody = request.body ? await request.arrayBuffer() : null;
-  console.log('[HTTP] Proxying:', url.pathname + url.search);
+  logger.info('HTTP proxying', { path: url.pathname + url.search });
   let httpResponse: Response;
   try {
     httpResponse = await fetch(targetUrl, {
@@ -401,7 +414,9 @@ app.all('*', async c => {
       body: requestBody,
     });
   } catch (err) {
-    console.error('[HTTP] Fly Proxy fetch failed:', err);
+    logger.error('HTTP: Fly Proxy fetch failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
 
     const recovered = await attemptCrashRecovery(c);
     if (recovered) {
@@ -419,7 +434,9 @@ app.all('*', async c => {
           body: requestBody,
         });
       } catch (retryErr) {
-        console.error('[HTTP] Retry after recovery failed:', retryErr);
+        logger.error('HTTP: retry after recovery failed', {
+          error: retryErr instanceof Error ? retryErr.message : String(retryErr),
+        });
         return c.json({ error: 'Instance not reachable after restart attempt' }, 503);
       }
     } else {
@@ -432,7 +449,7 @@ app.all('*', async c => {
       );
     }
   }
-  console.log('[HTTP] Response status:', httpResponse.status);
+  logger.info('HTTP response', { status: httpResponse.status });
 
   // Gateway not ready yet — show friendly "starting up" page instead of raw 502
   if (httpResponse.status === 502) {

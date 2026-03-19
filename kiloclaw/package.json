@@ -26,6 +26,7 @@
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "jose": "^6.0.0",
+    "workers-tagged-logger": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
