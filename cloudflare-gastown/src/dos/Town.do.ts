@@ -2910,14 +2910,13 @@ export class TownDO extends DurableObject<Env> {
         if (!agent) continue;
 
         if (agent.role === 'refinery') {
-          // NEVER unhook or agentComplete refineries from witnessPatrol.
-          // The refinery's lifecycle is managed entirely by:
-          // - gt_done (success): closes MR bead + source bead + unhooks
-          // - recoverStuckReviews (timeout): resets MR bead to open
-          // Keeping the hook intact ensures recoverStuckReviews' NOT EXISTS
-          // guard skips the MR bead while the refinery might still call
-          // gt_done. Just reset status to idle so processReviewQueue knows
-          // the refinery is available for re-dispatch if needed.
+          // Set refinery to idle. Keep the hook intact so
+          // recoverStuckReviews' guard (NOT EXISTS working agent) can
+          // distinguish between "refinery is actively working" (skip)
+          // and "refinery died" (recover after timeout).
+          //
+          // Exception: if gt_done already closed the MR bead, unhook
+          // the refinery as cleanup so it can be reused immediately.
           query(
             this.sql,
             /* sql */ `
@@ -2928,6 +2927,12 @@ export class TownDO extends DurableObject<Env> {
             `,
             [agentId]
           );
+          if (agent.current_hook_bead_id) {
+            const mrBead = beadOps.getBead(this.sql, agent.current_hook_bead_id);
+            if (mrBead && (mrBead.status === 'closed' || mrBead.status === 'failed')) {
+              agents.unhookBead(this.sql, agentId);
+            }
+          }
         } else if (containerInfo.exitReason === 'completed') {
           // Non-refinery normal exit — route through agentCompleted
           reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });

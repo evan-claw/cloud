@@ -469,27 +469,68 @@ export function listPendingPRReviews(sql: SqlStorage): MergeRequestBeadRecord[] 
  */
 export function recoverStuckReviews(sql: SqlStorage): void {
   const timeout = new Date(Date.now() - REVIEW_RUNNING_TIMEOUT_MS).toISOString();
-  query(
-    sql,
-    /* sql */ `
-      UPDATE ${beads}
-      SET ${beads.columns.status} = 'open',
-          ${beads.columns.updated_at} = ?
-      WHERE ${beads.type} = 'merge_request'
-        AND ${beads.status} = 'in_progress'
-        AND ${beads.updated_at} < ?
-        AND ${beads.bead_id} NOT IN (
-          SELECT ${review_metadata.bead_id}
-          FROM ${review_metadata}
-          WHERE ${review_metadata.pr_url} IS NOT NULL
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM ${agent_metadata}
-          WHERE ${agent_metadata.current_hook_bead_id} = ${beads.bead_id}
-        )
-    `,
-    [now(), timeout]
-  );
+  const timestamp = now();
+
+  // Find stuck MR beads: in_progress past the timeout, no pr_url, and
+  // no WORKING agent hooked. An idle agent hooked to the MR means the
+  // refinery died (witnessPatrol set it to idle) — the review should be
+  // recovered. Only skip if the agent is actively working.
+  const stuckMrRows = BeadRecord.pick({ bead_id: true })
+    .array()
+    .parse([
+      ...query(
+        sql,
+        /* sql */ `
+          SELECT ${beads.bead_id}
+          FROM ${beads}
+          WHERE ${beads.type} = 'merge_request'
+            AND ${beads.status} = 'in_progress'
+            AND ${beads.updated_at} < ?
+            AND ${beads.bead_id} NOT IN (
+              SELECT ${review_metadata.bead_id}
+              FROM ${review_metadata}
+              WHERE ${review_metadata.pr_url} IS NOT NULL
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM ${agent_metadata}
+              WHERE ${agent_metadata.current_hook_bead_id} = ${beads.bead_id}
+                AND ${agent_metadata.status} = 'working'
+            )
+        `,
+        [timeout]
+      ),
+    ]);
+
+  for (const row of stuckMrRows) {
+    // Reset MR bead to open for re-processing
+    query(
+      sql,
+      /* sql */ `
+        UPDATE ${beads}
+        SET ${beads.columns.status} = 'open',
+            ${beads.columns.updated_at} = ?
+        WHERE ${beads.bead_id} = ?
+      `,
+      [timestamp, row.bead_id]
+    );
+
+    // Unhook any idle refinery still pointing at this MR bead so it
+    // can be reused for the next processReviewQueue cycle
+    query(
+      sql,
+      /* sql */ `
+        UPDATE ${agent_metadata}
+        SET ${agent_metadata.columns.current_hook_bead_id} = NULL
+        WHERE ${agent_metadata.current_hook_bead_id} = ?
+          AND ${agent_metadata.status} = 'idle'
+      `,
+      [row.bead_id]
+    );
+
+    console.log(
+      `[review-queue] recoverStuckReviews: reset MR bead=${row.bead_id} to open, unhooked idle agents`
+    );
+  }
 }
 
 /**
