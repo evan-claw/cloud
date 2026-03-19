@@ -8,4 +8,4 @@ INTERNAL_API_SECRET=your-secret-here
 BACKEND_AUTH_TOKEN=your-backend-auth-token
 
 # Cloud agent URL for code review execution
-CLOUD_AGENT_URL=https://agent.kilocode.com
+CLOUD_AGENT_URL=https://cloud-agent-next.kilosessions.ai
