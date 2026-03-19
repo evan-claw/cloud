@@ -11,7 +11,7 @@ export async function timingSafeCompare(a: string, b: string): Promise<boolean> 
   // Constant-time byte comparison — no early exit to prevent timing attacks.
   let diff = 0;
   for (let i = 0; i < bytesA.length; i++) {
-    diff |= bytesA[i]! ^ bytesB[i]!;
+    diff |= (bytesA[i] ?? 0) ^ (bytesB[i] ?? 0);
   }
   return diff === 0;
 }
