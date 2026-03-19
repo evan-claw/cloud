@@ -17,6 +17,7 @@
     "local_protocol": "http",
     "ip": "0.0.0.0",
   },
+  "upload_source_maps": true,
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,
