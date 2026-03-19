@@ -392,13 +392,13 @@ export function SettingsTab({
       {isRunning && <PairingSection mutations={mutations} />}
 
       {/* ── OpenClaw Instance card ── */}
-      {hasVersionInfo && (
-        <div className="rounded-lg border px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Settings className="text-muted-foreground h-5 w-5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium">OpenClaw Instance</p>
+      <div className="rounded-lg border px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Settings className="text-muted-foreground h-5 w-5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium">OpenClaw Instance</p>
+              {hasVersionInfo && (
                 <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 text-xs">
                   <span>
                     Version:{' '}
@@ -460,34 +460,34 @@ export function SettingsTab({
                     </Tooltip>
                   )}
                 </div>
-              </div>
+              )}
             </div>
-            <Button variant="outline" size="sm" onClick={() => setManageVersionOpen(v => !v)}>
-              Manage Version
-            </Button>
           </div>
-
-          {/* Expandable version pinning */}
-          {manageVersionOpen && (
-            <div className="mt-4 border-t pt-4">
-              <VersionPinCard />
-            </div>
-          )}
+          <Button variant="outline" size="sm" onClick={() => setManageVersionOpen(v => !v)}>
+            Manage Version
+          </Button>
         </div>
-      )}
+
+        {/* Expandable version pinning */}
+        {manageVersionOpen && (
+          <div className="mt-4 border-t pt-4">
+            <VersionPinCard />
+          </div>
+        )}
+      </div>
 
       {/* ── Model Configuration ── */}
       <div>
         <h2 className="text-foreground mb-3 text-base font-semibold">Model Configuration</h2>
         <div className="rounded-lg border px-4 py-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="min-w-0">
               <p className="text-sm font-medium">Default Model</p>
               <p className="text-muted-foreground text-xs">
                 Used for new conversations. Can be changed per-conversation.
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex items-center gap-2">
               <ModelCombobox
                 label=""
                 models={modelOptions}
@@ -496,7 +496,7 @@ export function SettingsTab({
                 error={modelSelectionError}
                 isLoading={isLoadingModelSelection}
                 disabled={isSaving || isLoadingModelSelection || hasModelSelectionError}
-                className="min-w-[300px]"
+                className="min-w-0 flex-1 sm:min-w-[300px]"
               />
               <Button
                 size="sm"

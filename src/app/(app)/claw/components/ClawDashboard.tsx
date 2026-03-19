@@ -259,7 +259,7 @@ export function ClawDashboard({
                     value="changelog"
                     className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
                   >
-                    What&apos;s New
+                    What&apos;s New <Sparkles className="ml-1 inline h-3 w-3 text-amber-400" />
                   </TabsTrigger>
                 </TabsList>
               </div>
