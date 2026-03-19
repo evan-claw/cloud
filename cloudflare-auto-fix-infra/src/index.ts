@@ -85,7 +85,7 @@ app.get('/fix/:ticketId/status', async c => {
     const stub = c.env.AUTO_FIX_ORCHESTRATOR.get(id);
 
     // Get status (this would need to be implemented in the DO)
-    const result = stub.getEvents();
+    const result = await stub.getEvents();
 
     return c.json(result);
   } catch (error) {
