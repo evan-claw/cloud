@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ChevronRight, ExternalLink, PlayCircle } from 'lucide-react';
+import { validateFieldValue } from '@kilocode/kiloclaw-secret-catalog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -58,19 +59,39 @@ type SetupSectionProps = {
   onTokenChange: (value: string) => void;
 };
 
+/** Token field keys that belong to each channel. */
+const CHANNEL_FIELD_KEYS: Record<ChannelId, { key: string; pattern: string }[]> = {
+  telegram: [{ key: 'telegramBotToken', pattern: String.raw`^\d{8,}:[A-Za-z0-9_-]{30,50}$` }],
+  discord: [
+    {
+      key: 'discordBotToken',
+      pattern: String.raw`^[A-Za-z\d_-]{24,}?\.[A-Za-z\d_-]{4,}\.[A-Za-z\d_-]{25,}$`,
+    },
+  ],
+  slack: [
+    { key: 'slackBotToken', pattern: String.raw`^xoxb-[A-Za-z0-9-]{20,255}$` },
+    { key: 'slackAppToken', pattern: String.raw`^xapp-[A-Za-z0-9-]{20,255}$` },
+  ],
+};
+
 function isChannelValid(channelId: ChannelId | null, tokens: Record<string, string>): boolean {
   if (!channelId) return false;
-  switch (channelId) {
-    case 'telegram':
-      return (tokens.telegramBotToken ?? '').trim().length > 0;
-    case 'discord':
-      return (tokens.discordBotToken ?? '').trim().length > 0;
-    case 'slack':
-      return (
-        (tokens.slackBotToken ?? '').trim().startsWith('xoxb-') &&
-        (tokens.slackAppToken ?? '').trim().startsWith('xapp-')
-      );
+  return CHANNEL_FIELD_KEYS[channelId].every(({ key, pattern }) =>
+    validateFieldValue((tokens[key] ?? '').trim(), pattern)
+  );
+}
+
+/** Return only the trimmed tokens belonging to the given channel. */
+function pickChannelTokens(
+  channelId: ChannelId,
+  tokens: Record<string, string>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const { key } of CHANNEL_FIELD_KEYS[channelId]) {
+    const trimmed = (tokens[key] ?? '').trim();
+    if (trimmed) result[key] = trimmed;
   }
+  return result;
 }
 
 export function ChannelSelectionStepView({
@@ -167,7 +188,7 @@ export function ChannelSelectionStepView({
         <Button
           className="w-full bg-emerald-600 py-6 text-base text-white hover:bg-emerald-700"
           disabled={!isChannelValid(selected, tokens)}
-          onClick={() => selected && onSelect?.(selected, tokens)}
+          onClick={() => selected && onSelect?.(selected, pickChannelTokens(selected, tokens))}
         >
           Continue
           <ChevronRight className="ml-1 h-5 w-5" />
