@@ -41,6 +41,17 @@ export type ConnectionConfig = {
   kiloClient: WrapperKiloClient;
 };
 
+type SdkEvent = {
+  type?: string;
+  properties?: unknown;
+};
+
+type EventClient = {
+  subscribe: (args: {
+    signal: AbortSignal;
+  }) => Promise<{ stream?: AsyncGenerator<SdkEvent, void, unknown> }>;
+};
+
 export type ConnectionCallbacks = {
   /** Called when a completion event is detected for a message */
   onMessageComplete: (messageId: string) => void;
@@ -296,7 +307,8 @@ export function createConnectionManager(
 
     void (async () => {
       try {
-        const result = await config.kiloClient.sdkClient.event.subscribe({
+        const eventClient = config.kiloClient.sdkClient.event as unknown as EventClient;
+        const result = await eventClient.subscribe({
           signal: abortController.signal,
         });
         if (!result.stream) {

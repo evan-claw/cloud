@@ -12,6 +12,44 @@ import type { KiloClient as SDKClient } from '@kilocode/sdk';
 import { createKiloClient as createV2Client } from '@kilocode/sdk/v2';
 import { logToFile } from './utils.js';
 
+type SessionClient = {
+  create: (args: { body: { title?: string } }) => Promise<{ data?: { id: string } }>;
+  get: (args: { path: { id: string } }) => Promise<{ data?: { id: string } }>;
+  promptAsync: (args: {
+    path?: { id?: string };
+    body?: unknown;
+  }) => Promise<unknown>;
+  abort: (args: { path: { id: string } }) => Promise<unknown>;
+  command: (args: {
+    path: { id: string };
+    body: { command: string; arguments: string };
+  }) => Promise<{ data?: unknown }>;
+};
+
+type V2Client = {
+  session: {
+    promptAsync: (args: {
+      sessionID: string;
+      parts: Array<{ type: 'text'; text: string }>;
+      variant?: string;
+      model?: { providerID: string; modelID: string };
+      system?: string;
+      tools?: Record<string, boolean>;
+      agent?: string;
+    }) => Promise<unknown>;
+  };
+  permission: {
+    reply: (args: { requestID: string; reply: PermissionResponse }) => Promise<unknown>;
+  };
+  question: {
+    reply: (args: { requestID: string; answers: string[][] }) => Promise<unknown>;
+    reject: (args: { requestID: string }) => Promise<unknown>;
+  };
+  commitMessage: {
+    generate: (args: { path: string }) => Promise<{ data?: { message: string } }>;
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -71,14 +109,16 @@ export function createWrapperKiloClient(
   serverUrl: string
 ): WrapperKiloClient {
   logToFile(`creating wrapper kilo client for ${serverUrl}`);
-  const v2Client = createV2Client({ baseUrl: serverUrl });
+  const sessionClient = sdkClient.session as unknown as SessionClient;
+  const createTypedV2Client = createV2Client as unknown as (args: { baseUrl: string }) => V2Client;
+  const v2Client = createTypedV2Client({ baseUrl: serverUrl });
 
   return {
     sdkClient,
     serverUrl,
 
     createSession: async opts => {
-      const result = await sdkClient.session.create({
+      const result = await sessionClient.create({
         body: { title: opts?.title },
       });
       if (!result.data) {
@@ -88,7 +128,7 @@ export function createWrapperKiloClient(
     },
 
     getSession: async sessionId => {
-      const result = await sdkClient.session.get({
+      const result = await sessionClient.get({
         path: { id: sessionId },
       });
       if (!result.data) {
@@ -121,12 +161,12 @@ export function createWrapperKiloClient(
     },
 
     abortSession: async opts => {
-      await sdkClient.session.abort({ path: { id: opts.sessionId } });
+      await sessionClient.abort({ path: { id: opts.sessionId } });
       return true;
     },
 
     sendCommand: async opts => {
-      const result = await sdkClient.session.command({
+      const result = await sessionClient.command({
         path: { id: opts.sessionId },
         body: {
           command: opts.command,
