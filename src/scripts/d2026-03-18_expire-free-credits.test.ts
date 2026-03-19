@@ -578,58 +578,50 @@ async function runAssertions(): Promise<AssertionResult[]> {
     });
   }
 
-  // --- 22. Orb double-deduction: balance stays at $0, never goes negative
+  // --- 22. Orb double-deduction: credit skipped, balance stays at $0
   //     User got $5 free, Orb clawed it back (acquired=0, used=0, balance=$0).
   //     Without the fix, expiring the $5 credit would push to -$5.
-  //     With the fix, baseline is boosted so $0 expires.
+  //     With the fix, expiry is NOT set on the credit (skipped).
   {
     const user = userById(USER_ORB_DOUBLE_DEDUCT);
     const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
-    const totalExpired = simulateExpiration(USER_ORB_DOUBLE_DEDUCT);
-    const balanceAfter = balanceNow - totalExpired;
 
     results.push({
       name: 'Orb double-deduct: balance is $0 today',
       passed: balanceNow === 0,
       detail: `Expected 0, got ${balanceNow}`,
     });
+    // Credit should NOT have expiry_date set (skipped to prevent negative balance)
+    const credit = creditsFor(USER_ORB_DOUBLE_DEDUCT).find(
+      c => c.credit_category === 'stytch-validation'
+    );
     results.push({
-      name: 'Orb double-deduct: $0 expires (floor at zero)',
-      passed: totalExpired === 0,
-      detail: `Expected 0, got ${totalExpired}`,
-    });
-    results.push({
-      name: 'Orb double-deduct: balance is $0 after expiry',
-      passed: balanceAfter === 0,
-      detail: `Expected 0, got ${balanceAfter}`,
-    });
-    // Verify the baseline was boosted
-    const credit = creditsFor(USER_ORB_DOUBLE_DEDUCT).find(c => c.expiry_date != null);
-    results.push({
-      name: 'Orb double-deduct: baseline boosted to absorb deficit',
-      passed: (credit?.expiration_baseline_microdollars_used ?? 0) > 0,
-      detail: `Baseline: ${credit?.expiration_baseline_microdollars_used}`,
+      name: 'Orb double-deduct: credit skipped (no expiry set)',
+      passed: credit?.expiry_date == null,
+      detail: `expiry_date: ${credit?.expiry_date}`,
     });
   }
 
   // --- 23. Orb double-deduction with existing expiring credit:
-  //     User has $5 balance. Existing $5 credit (with expiry) expires all $5.
-  //     New $5 credit should NOT expire anything — floor at zero prevents -$5.
+  //     User has $5 balance. Existing $5 credit (with expiry) already covers it.
+  //     New $5 credit should NOT get expiry — would push to -$5.
   {
     const user = userById(USER_ORB_EXISTING_EXPIRY);
     const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
-    const totalExpired = simulateExpiration(USER_ORB_EXISTING_EXPIRY);
-    const balanceAfter = balanceNow - totalExpired;
 
     results.push({
       name: 'Orb existing-expiry: balance is $5 today',
       passed: balanceNow === 5 * MICRODOLLARS,
       detail: `Expected ${5 * MICRODOLLARS}, got ${balanceNow}`,
     });
+    // The new credit (automatic-welcome-credits) should NOT have expiry set
+    const newCredit = creditsFor(USER_ORB_EXISTING_EXPIRY).find(
+      c => c.credit_category === 'automatic-welcome-credits'
+    );
     results.push({
-      name: 'Orb existing-expiry: balance is $0 after expiry (not negative)',
-      passed: balanceAfter >= 0,
-      detail: `Expected >= 0, got ${balanceAfter}`,
+      name: 'Orb existing-expiry: new credit skipped (no expiry set)',
+      passed: newCredit?.expiry_date == null,
+      detail: `expiry_date: ${newCredit?.expiry_date}`,
     });
   }
 
