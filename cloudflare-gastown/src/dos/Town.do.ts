@@ -3334,8 +3334,24 @@ export class TownDO extends DurableObject<Env> {
       agents.unhookBead(this.sql, refineryAgent.id);
       agents.updateAgentStatus(this.sql, refineryAgent.id, 'idle');
       console.error(
-        `${TOWN_LOG} processReviewQueue: refinery agent failed to start for entry=${entry.id}`
+        `${TOWN_LOG} processReviewQueue: refinery agent failed to start for entry=${entry.id} ` +
+          `rigId=${rigId} agentId=${refineryAgent.id} agentName=${refineryAgent.name} ` +
+          `branch=${entry.branch} kilocodeToken=${!!(rigConfig.kilocodeToken ?? (await this.resolveKilocodeToken()))}`
       );
+      // Log the failure as a bead event so it's visible in the admin dashboard
+      beadOps.logBeadEvent(this.sql, {
+        beadId: entry.id,
+        agentId: refineryAgent.id,
+        eventType: 'status_changed',
+        newValue: 'dispatch_failed',
+        metadata: {
+          reason: 'container_start_failed',
+          rigId,
+          branch: entry.branch,
+          targetBranch,
+          mergeStrategy: effectiveMergeStrategy,
+        },
+      });
       this.failReviewWithRework(entry, 'Refinery container failed to start');
     }
   }

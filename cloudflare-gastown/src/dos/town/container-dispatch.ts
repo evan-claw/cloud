@@ -429,7 +429,10 @@ export async function startAgentInContainer(
 
     if (!response.ok) {
       const text = await response.text().catch(() => '(unreadable)');
-      console.error(`${TOWN_LOG} startAgentInContainer: error response: ${text.slice(0, 500)}`);
+      console.error(
+        `${TOWN_LOG} startAgentInContainer: error response (${response.status}) for ` +
+          `agent=${params.agentId} role=${params.role}: ${text.slice(0, 500)}`
+      );
     }
     return response.ok;
   } catch (err) {
