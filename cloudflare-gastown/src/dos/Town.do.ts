@@ -2881,23 +2881,18 @@ export class TownDO extends DurableObject<Env> {
       const { agentId, containerInfo } = result.value;
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
+        // 'not_found' is ambiguous for ALL agent types — the container
+        // may be restarting, the status check may have timed out, or
+        // the process manager hasn't registered the agent yet. Only act
+        // on confirmed 'exited' status.
+        if (containerInfo.status === 'not_found') continue;
+
         const agent = agents.getAgent(this.sql, agentId);
         if (!agent) continue;
 
         if (agent.role === 'refinery') {
-          // For refineries, only act on definitive 'exited' status.
-          // 'not_found' is ambiguous — the container may be restarting
-          // or the status check may have timed out. Setting the refinery
-          // to idle on not_found would enable recoverStuckReviews to
-          // fire prematurely.
-          if (containerInfo.status === 'not_found') {
-            // Skip — don't touch the refinery. It may still be alive.
-            continue;
-          }
-          // Container confirmed exited. Set to idle, keep hook intact
-          // so recoverStuckReviews' guard works (checks status='working').
-          // Exception: if gt_done already closed the MR bead, unhook
-          // as cleanup so the refinery can be reused immediately.
+          // Set to idle, keep hook intact for recoverStuckReviews guard.
+          // If gt_done already closed the MR bead, unhook as cleanup.
           query(
             this.sql,
             /* sql */ `
@@ -2929,10 +2924,6 @@ export class TownDO extends DurableObject<Env> {
               WHERE ${agent_metadata.bead_id} = ?
             `,
             [agentId]
-          );
-          console.log(
-            `${TOWN_LOG} witnessPatrol: agent ${agentId} (${agent.role}) died abnormally — ` +
-              `reset to idle, bead status preserved for recovery`
           );
         }
       }

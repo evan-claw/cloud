@@ -310,6 +310,11 @@ export function completeReviewWithResult(
 
   if (input.status === 'merged') {
     const mergeTimestamp = now();
+    console.log(
+      `[review-queue] completeReviewWithResult MERGED: entry_id=${input.entry_id} ` +
+        `entry.bead_id (source)=${entry.bead_id} entry.id (MR)=${entry.id} — ` +
+        `calling closeBead on source`
+    );
     closeBead(sql, entry.bead_id, entry.agent_id);
 
     // Close ALL other open/in_progress/failed MR beads for the same
