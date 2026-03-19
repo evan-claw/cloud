@@ -32,6 +32,8 @@ const USER_MULTI_MATCH = `${TEST_PREFIX}-multi-match`;
 const USER_ZERO_AMOUNT = `${TEST_PREFIX}-zero-amount`;
 const USER_EXISTING_EXPIRATION = `${TEST_PREFIX}-existing-expiration`;
 const USER_MULTI_BLOCK = `${TEST_PREFIX}-multi-block`;
+const USER_BUY_USE_FREE = `${TEST_PREFIX}-buy-use-free`;
+const USER_FREE_USE_BUY = `${TEST_PREFIX}-free-use-buy`;
 
 const ALL_USER_IDS = [
   USER_FULLY_SPENT,
@@ -47,6 +49,8 @@ const ALL_USER_IDS = [
   USER_ZERO_AMOUNT,
   USER_EXISTING_EXPIRATION,
   USER_MULTI_BLOCK,
+  USER_BUY_USE_FREE,
+  USER_FREE_USE_BUY,
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ function makeCredit(
     isFree?: boolean;
     expiryDate?: string | null;
     organizationId?: string | null;
+    originalBaseline?: number;
   } = {}
 ) {
   return {
@@ -84,7 +89,7 @@ function makeCredit(
       'Free credits for new users, obtained by stych approval, card validation, or maybe some other method',
     expiry_date: opts.expiryDate ?? null,
     organization_id: opts.organizationId ?? null,
-    original_baseline_microdollars_used: 0,
+    original_baseline_microdollars_used: (opts.originalBaseline ?? 0) * MICRODOLLARS,
     check_category_uniqueness: false,
   };
 }
@@ -114,6 +119,9 @@ async function setup() {
       next_credit_expiration_at: EARLIER_EXPIRY,
     },
     makeUser(USER_MULTI_BLOCK, 7, 15),
+    // Both have $10 used, $20 acquired ($10 paid + $10 free), balance = $10
+    makeUser(USER_BUY_USE_FREE, 10, 20),
+    makeUser(USER_FREE_USE_BUY, 10, 20),
   ]);
 
   // Insert credits
@@ -188,6 +196,15 @@ async function setup() {
         category: 'stytch-validation',
         description: 'Free credits for passing Stytch fraud detection.',
       }),
+
+      // 14. Buy $10, use $10, get $10 free → original_baseline=10 (spent $10 before free credit)
+      //     The paid $10 is non-expiring, non-free
+      makeCredit(USER_BUY_USE_FREE, 10, { isFree: false }),
+      makeCredit(USER_BUY_USE_FREE, 10, { originalBaseline: 10 }),
+
+      // 15. Get $10 free, use $10, buy $10 → original_baseline=0 (spent $0 before free credit)
+      makeCredit(USER_FREE_USE_BUY, 10),
+      makeCredit(USER_FREE_USE_BUY, 10, { isFree: false }),
     ])
     .returning({ id: credit_transactions.id });
 
@@ -437,15 +454,13 @@ async function runAssertions(): Promise<AssertionResult[]> {
     });
   }
 
-  // --- 19. Multi-block: verify projected expiration via JSONL output
-  //     User has 3 x $5 = $15, spent $7 → $8 should expire
-  //     We verify this by running computeExpiration directly on the post-script state
-  {
-    const credits = creditsFor(USER_MULTI_BLOCK).filter(c => c.expiry_date != null);
-    const user = userById(USER_MULTI_BLOCK);
+  // --- Helper: simulate expiration and return total expired amount
+  const { computeExpiration } = await import('@/lib/creditExpiration');
 
-    // Import computeExpiration to verify the projection
-    const { computeExpiration } = await import('@/lib/creditExpiration');
+  function simulateExpiration(userId: string): number {
+    const credits = creditsFor(userId).filter(c => c.expiry_date != null);
+    const user = userById(userId);
+    if (credits.length === 0) return 0;
 
     const expiringTxns = credits.map(c => ({
       id: c.id,
@@ -464,16 +479,70 @@ async function runAssertions(): Promise<AssertionResult[]> {
       user.id
     );
 
-    const totalExpired = newTransactions.reduce(
-      (sum, t) => sum + Math.abs(t.amount_microdollars ?? 0),
-      0
-    );
-    const expectedExpired = 8 * MICRODOLLARS; // $15 - $7 = $8
+    return newTransactions.reduce((sum, t) => sum + Math.abs(t.amount_microdollars ?? 0), 0);
+  }
 
+  // --- 19. Multi-block: verify projected expiration
+  //     User has 3 x $5 = $15, spent $7 → $8 should expire
+  {
+    const totalExpired = simulateExpiration(USER_MULTI_BLOCK);
+    const expectedExpired = 8 * MICRODOLLARS;
     results.push({
       name: 'Multi-block: projected expiration is $8 (3x$5 - $7 spent)',
       passed: totalExpired === expectedExpired,
       detail: `Expected ${expectedExpired}, got ${totalExpired}`,
+    });
+  }
+
+  // --- 20. Buy $10, use $10, get $10 free → balance $10 today, $0 after expiry
+  //     Free credit has original_baseline=10 (user already spent $10 when it was granted)
+  //     So the free $10 is NOT covered by usage → all $10 expires
+  {
+    const user = userById(USER_BUY_USE_FREE);
+    const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
+    const totalExpired = simulateExpiration(USER_BUY_USE_FREE);
+    const balanceAfter = balanceNow - totalExpired;
+
+    results.push({
+      name: 'Buy-use-free: balance is $10 today',
+      passed: balanceNow === 10 * MICRODOLLARS,
+      detail: `Expected ${10 * MICRODOLLARS}, got ${balanceNow}`,
+    });
+    results.push({
+      name: 'Buy-use-free: $10 expires (free credit unused)',
+      passed: totalExpired === 10 * MICRODOLLARS,
+      detail: `Expected ${10 * MICRODOLLARS}, got ${totalExpired}`,
+    });
+    results.push({
+      name: 'Buy-use-free: balance is $0 after expiry',
+      passed: balanceAfter === 0,
+      detail: `Expected 0, got ${balanceAfter}`,
+    });
+  }
+
+  // --- 21. Get $10 free, use $10, buy $10 → balance $10 today, $10 after expiry
+  //     Free credit has original_baseline=0 (user had $0 spent when it was granted)
+  //     So the free $10 IS fully covered by usage → $0 expires
+  {
+    const user = userById(USER_FREE_USE_BUY);
+    const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
+    const totalExpired = simulateExpiration(USER_FREE_USE_BUY);
+    const balanceAfter = balanceNow - totalExpired;
+
+    results.push({
+      name: 'Free-use-buy: balance is $10 today',
+      passed: balanceNow === 10 * MICRODOLLARS,
+      detail: `Expected ${10 * MICRODOLLARS}, got ${balanceNow}`,
+    });
+    results.push({
+      name: 'Free-use-buy: $0 expires (free credit fully used)',
+      passed: totalExpired === 0,
+      detail: `Expected 0, got ${totalExpired}`,
+    });
+    results.push({
+      name: 'Free-use-buy: balance is $10 after expiry',
+      passed: balanceAfter === 10 * MICRODOLLARS,
+      detail: `Expected ${10 * MICRODOLLARS}, got ${balanceAfter}`,
     });
   }
 
