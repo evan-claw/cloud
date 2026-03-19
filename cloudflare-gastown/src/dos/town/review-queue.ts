@@ -30,8 +30,9 @@ import type { ReviewQueueInput, ReviewQueueEntry, AgentDoneInput, Molecule } fro
 
 // Review entries stuck in 'running' past this timeout are reset to 'pending'.
 // Only applies when no agent (working or idle) is hooked to the MR bead.
-// Set to 15 min to give the refinery ample time for clone + review + merge.
-const REVIEW_RUNNING_TIMEOUT_MS = 15 * 60 * 1000;
+// Set to 30 min — reviews can legitimately take 10-15 min for clone + build
+// + test + merge, and the refinery hook guard is the primary protection.
+const REVIEW_RUNNING_TIMEOUT_MS = 30 * 60 * 1000;
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -565,7 +566,11 @@ export function closeOrphanedReviewBeads(sql: SqlStorage): void {
  * recovery timeout, to avoid interfering with in-flight reviews.
  */
 export function recoverOrphanedSourceBeads(sql: SqlStorage): void {
-  const cutoff = new Date(Date.now() - REVIEW_RUNNING_TIMEOUT_MS).toISOString();
+  // Use a shorter timeout than REVIEW_RUNNING_TIMEOUT_MS — by the time
+  // this runs, ALL MR beads for the source are already terminal (the
+  // NOT EXISTS guard below ensures this). The 5-min window just avoids
+  // interfering with in-flight transitions.
+  const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
   const stuckRows = [
     ...query(
@@ -804,29 +809,18 @@ export function agentCompleted(
   if (!agent) return result;
 
   if (agent.current_hook_bead_id) {
-    // When a refinery exits with 'completed' but the MR bead is still
-    // in_progress (not closed/merged), it means the refinery requested
-    // rework. Route through completeReviewWithResult so the source bead
-    // is returned to in_progress for re-dispatch.
-    if (agent.role === 'refinery' && input.status === 'completed') {
-      const mrBead = getBead(sql, agent.current_hook_bead_id);
-      if (mrBead && mrBead.status !== 'closed') {
-        const sourceBeadId =
-          typeof mrBead.metadata?.source_bead_id === 'string'
-            ? mrBead.metadata.source_bead_id
-            : null;
-        completeReviewWithResult(sql, {
-          entry_id: agent.current_hook_bead_id,
-          status: 'failed',
-          message: input.reason ?? 'Refinery exited without merge — rework needed',
-        });
-        result.reworkSourceBeadId = sourceBeadId;
-        unhookBead(sql, agentId);
-        // Mark agent idle (below)
-      } else {
-        // MR was already closed (merged) — normal completion
-        unhookBead(sql, agentId);
-      }
+    if (agent.role === 'refinery') {
+      // NEVER fail an MR bead from agentCompleted. The refinery's lifecycle
+      // is managed by gt_done (success) and recoverStuckReviews (timeout).
+      //
+      // agentCompleted races with gt_done: the process may exit before
+      // gt_done's HTTP response reaches the DO, causing agentCompleted to
+      // arrive first. If we fail the MR here, we'd undo a successful merge.
+      //
+      // Just unhook and idle. If the refinery merged, gt_done will close
+      // the MR bead when it arrives. If the refinery crashed without
+      // merging, recoverStuckReviews resets the MR bead after timeout.
+      unhookBead(sql, agentId);
     } else {
       const beadStatus = input.status === 'completed' ? 'closed' : 'failed';
       updateBeadStatus(sql, agent.current_hook_bead_id, beadStatus, agentId);

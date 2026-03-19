@@ -2910,13 +2910,14 @@ export class TownDO extends DurableObject<Env> {
         if (!agent) continue;
 
         if (agent.role === 'refinery') {
-          // NEVER route refineries through agentCompleted from witnessPatrol.
-          // The refinery's lifecycle is managed by:
-          // - gt_done (success path): closes MR bead + source bead
-          // - recoverStuckReviews (timeout): resets MR bead to open for retry
-          // Calling agentCompleted here races with gt_done and can fail
-          // an MR bead that the refinery successfully merged.
-          agents.unhookBead(this.sql, agentId);
+          // NEVER unhook or agentComplete refineries from witnessPatrol.
+          // The refinery's lifecycle is managed entirely by:
+          // - gt_done (success): closes MR bead + source bead + unhooks
+          // - recoverStuckReviews (timeout): resets MR bead to open
+          // Keeping the hook intact ensures recoverStuckReviews' NOT EXISTS
+          // guard skips the MR bead while the refinery might still call
+          // gt_done. Just reset status to idle so processReviewQueue knows
+          // the refinery is available for re-dispatch if needed.
           query(
             this.sql,
             /* sql */ `
