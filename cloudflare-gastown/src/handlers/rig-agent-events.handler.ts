@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { getEnforcedAgentId } from '../middleware/auth.middleware';
@@ -35,8 +36,11 @@ export async function handleAppendAgentEvent(c: Context<GastownEnv>, _params: { 
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.appendAgentEvent(parsed.data.agent_id, parsed.data.event_type, parsed.data.data);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.appendAgentEvent(parsed.data.agent_id, parsed.data.event_type, parsed.data.data),
+    'TownDO.appendAgentEvent'
+  );
   return c.json(resSuccess({ appended: true }), 201);
 }
 
@@ -58,12 +62,11 @@ export async function handleGetAgentEvents(
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
-  const events = await town.getAgentEvents(
-    params.agentId,
-    queryParsed.data.after_id,
-    queryParsed.data.limit
+  const events = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.getAgentEvents(params.agentId, queryParsed.data.after_id, queryParsed.data.limit),
+    'TownDO.getAgentEvents'
   );
 
   return c.json(resSuccess(events));

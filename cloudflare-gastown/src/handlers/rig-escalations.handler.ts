@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { BeadPriority } from '../types';
@@ -22,14 +23,18 @@ export async function handleCreateEscalation(c: Context<GastownEnv>, params: { r
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const escalation = await town.routeEscalation({
-    townId,
-    source_rig_id: params.rigId,
-    severity: parsed.data.priority ?? 'medium',
-    message: parsed.data.title,
-    category: undefined,
-    source_agent_id: undefined,
-  });
+  const escalation = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.routeEscalation({
+        townId,
+        source_rig_id: params.rigId,
+        severity: parsed.data.priority ?? 'medium',
+        message: parsed.data.title,
+        category: undefined,
+        source_agent_id: undefined,
+      }),
+    'TownDO.routeEscalation'
+  );
   return c.json(resSuccess(escalation), 201);
 }

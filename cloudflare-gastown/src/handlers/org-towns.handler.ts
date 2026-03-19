@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import { getGastownOrgStub } from '../dos/GastownOrg.do';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import type { GastownEnv } from '../gastown.worker';
@@ -32,30 +33,45 @@ export async function handleCreateOrgTown(c: Context<GastownEnv>, params: { orgI
   const userId = c.get('kiloUserId');
   if (!userId) return c.json(resError('Authentication required'), 401);
 
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const town = await orgDO.createTown({
-    name: parsed.data.name,
-    owner_org_id: params.orgId,
-    created_by_user_id: userId,
-  });
+  const town = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub =>
+      stub.createTown({
+        name: parsed.data.name,
+        owner_org_id: params.orgId,
+        created_by_user_id: userId,
+      }),
+    'GastawnOrgDO.createTown'
+  );
 
   // Initialize the TownDO config with org ownership metadata
-  const townDOStub = getTownDOStub(c.env, town.id);
-  await townDOStub.setTownId(town.id);
-  await townDOStub.updateTownConfig({
-    owner_type: 'org',
-    owner_id: params.orgId,
-    owner_user_id: userId,
-    organization_id: params.orgId,
-    created_by_user_id: userId,
-  });
+  await withDORetry(
+    () => getTownDOStub(c.env, town.id),
+    stub => stub.setTownId(town.id),
+    'TownDO.setTownId(createOrgTown)'
+  );
+  await withDORetry(
+    () => getTownDOStub(c.env, town.id),
+    stub =>
+      stub.updateTownConfig({
+        owner_type: 'org',
+        owner_id: params.orgId,
+        owner_user_id: userId,
+        organization_id: params.orgId,
+        created_by_user_id: userId,
+      }),
+    'TownDO.updateTownConfig(createOrgTown)'
+  );
 
   return c.json(resSuccess(town), 201);
 }
 
 export async function handleListOrgTowns(c: Context<GastownEnv>, params: { orgId: string }) {
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const towns = await orgDO.listTowns();
+  const towns = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.listTowns(),
+    'GastawnOrgDO.listTowns'
+  );
   return c.json(resSuccess(towns));
 }
 
@@ -63,8 +79,11 @@ export async function handleGetOrgTown(
   c: Context<GastownEnv>,
   params: { orgId: string; townId: string }
 ) {
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const town = await orgDO.getTownAsync(params.townId);
+  const town = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.getTownAsync(params.townId),
+    'GastawnOrgDO.getTownAsync'
+  );
   if (!town) return c.json(resError('Town not found'), 404);
   return c.json(resSuccess(town));
 }
@@ -85,13 +104,19 @@ export async function handleCreateOrgRig(c: Context<GastownEnv>, params: { orgId
     `${ORG_TOWNS_LOG} handleCreateOrgRig: orgId=${params.orgId} town_id=${parsed.data.town_id} name=${parsed.data.name} git_url=${parsed.data.git_url}`
   );
 
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-
   // Verify the town belongs to this org before creating the rig
-  const town = await orgDO.getTownAsync(parsed.data.town_id);
+  const town = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.getTownAsync(parsed.data.town_id),
+    'GastawnOrgDO.getTownAsync(createOrgRig)'
+  );
   if (!town) return c.json(resError('Town not found in this org'), 404);
 
-  const rig = await orgDO.createRig(parsed.data);
+  const rig = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.createRig(parsed.data),
+    'GastawnOrgDO.createRig'
+  );
   console.log(
     `${ORG_TOWNS_LOG} handleCreateOrgRig: rig created id=${rig.id}, now configuring Town DO`
   );
@@ -99,33 +124,53 @@ export async function handleCreateOrgRig(c: Context<GastownEnv>, params: { orgId
   // Configure the Town DO with rig metadata and register the rig.
   // If this fails, roll back the rig creation to avoid an orphaned record.
   try {
-    const townDOStub = getTownDOStub(c.env, parsed.data.town_id);
-    await townDOStub.setTownId(parsed.data.town_id);
-    await townDOStub.configureRig({
-      rigId: rig.id,
-      townId: parsed.data.town_id,
-      gitUrl: parsed.data.git_url,
-      defaultBranch: parsed.data.default_branch,
-      userId,
-      // Never trust caller-supplied kilocode tokens for org rigs — the
-      // town's existing token (minted by the owner) is used instead.
-      kilocodeToken: undefined,
-      platformIntegrationId: parsed.data.platform_integration_id,
-    });
-    // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
-    await townDOStub.addRig({
-      rigId: rig.id,
-      name: parsed.data.name,
-      gitUrl: parsed.data.git_url,
-      defaultBranch: parsed.data.default_branch,
-    });
+    await withDORetry(
+      () => getTownDOStub(c.env, parsed.data.town_id),
+      stub => stub.setTownId(parsed.data.town_id),
+      'TownDO.setTownId(createOrgRig)'
+    );
+    await withDORetry(
+      () => getTownDOStub(c.env, parsed.data.town_id),
+      stub =>
+        stub.configureRig({
+          rigId: rig.id,
+          townId: parsed.data.town_id,
+          gitUrl: parsed.data.git_url,
+          defaultBranch: parsed.data.default_branch,
+          userId,
+          // Never trust caller-supplied kilocode tokens for org rigs — the
+          // town's existing token (minted by the owner) is used instead.
+          kilocodeToken: undefined,
+          platformIntegrationId: parsed.data.platform_integration_id,
+        }),
+      'TownDO.configureRig(createOrgRig)'
+    );
+    await withDORetry(
+      () => getTownDOStub(c.env, parsed.data.town_id),
+      stub =>
+        stub.addRig({
+          rigId: rig.id,
+          name: parsed.data.name,
+          gitUrl: parsed.data.git_url,
+          defaultBranch: parsed.data.default_branch,
+        }),
+      'TownDO.addRig(createOrgRig)'
+    );
     console.log(`${ORG_TOWNS_LOG} handleCreateOrgRig: Town DO configured and rig registered`);
   } catch (err) {
     console.error(
       `${ORG_TOWNS_LOG} handleCreateOrgRig: Town DO configure FAILED for rig ${rig.id}, rolling back:`,
       err
     );
-    await orgDO.deleteRig(rig.id);
+    try {
+      await withDORetry(
+        () => getGastownOrgStub(c.env, params.orgId),
+        stub => stub.deleteRig(rig.id),
+        'GastawnOrgDO.deleteRig(rollback)'
+      );
+    } catch {
+      /* best effort rollback */
+    }
     return c.json(resError('Failed to configure rig'), 500);
   }
 
@@ -136,8 +181,11 @@ export async function handleListOrgRigs(
   c: Context<GastownEnv>,
   params: { orgId: string; townId: string }
 ) {
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const rigs = await orgDO.listRigs(params.townId);
+  const rigs = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.listRigs(params.townId),
+    'GastawnOrgDO.listRigs'
+  );
   return c.json(resSuccess(rigs));
 }
 
@@ -145,8 +193,11 @@ export async function handleGetOrgRig(
   c: Context<GastownEnv>,
   params: { orgId: string; rigId: string }
 ) {
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const rig = await orgDO.getRigAsync(params.rigId);
+  const rig = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.getRigAsync(params.rigId),
+    'GastawnOrgDO.getRigAsync'
+  );
   if (!rig) return c.json(resError('Rig not found'), 404);
   return c.json(resSuccess(rig));
 }
@@ -165,16 +216,21 @@ export async function handleDeleteOrgTown(
     return c.json(resError('Only org owners can delete towns'), 403);
   }
 
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-
   // Verify the town belongs to this org BEFORE destroying anything
-  const town = await orgDO.getTownAsync(params.townId);
+  const town = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.getTownAsync(params.townId),
+    'GastawnOrgDO.getTownAsync(deleteOrgTown)'
+  );
   if (!town) return c.json(resError('Town not found'), 404);
 
   // Destroy the Town DO (handles all rigs, agents, and mayor cleanup)
   try {
-    const townDOStub = getTownDOStub(c.env, params.townId);
-    await townDOStub.destroy();
+    await withDORetry(
+      () => getTownDOStub(c.env, params.townId),
+      stub => stub.destroy(),
+      'TownDO.destroy(deleteOrgTown)'
+    );
     console.log(
       `${ORG_TOWNS_LOG} handleDeleteOrgTown: Town DO destroyed for town ${params.townId}`
     );
@@ -182,7 +238,11 @@ export async function handleDeleteOrgTown(
     console.error(`${ORG_TOWNS_LOG} handleDeleteOrgTown: failed to destroy Town DO:`, err);
   }
 
-  const deleted = await orgDO.deleteTown(params.townId);
+  const deleted = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.deleteTown(params.townId),
+    'GastawnOrgDO.deleteTown'
+  );
   if (!deleted) return c.json(resError('Town not found'), 404);
   return c.json(resSuccess({ deleted: true }));
 }
@@ -201,17 +261,27 @@ export async function handleDeleteOrgRig(
     return c.json(resError('Only org owners can delete rigs'), 403);
   }
 
-  const orgDO = getGastownOrgStub(c.env, params.orgId);
-  const rig = await orgDO.getRigAsync(params.rigId);
+  const rig = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.getRigAsync(params.rigId),
+    'GastawnOrgDO.getRigAsync(deleteOrgRig)'
+  );
   if (!rig) return c.json(resError('Rig not found'), 404);
 
-  const deleted = await orgDO.deleteRig(params.rigId);
+  const deleted = await withDORetry(
+    () => getGastownOrgStub(c.env, params.orgId),
+    stub => stub.deleteRig(params.rigId),
+    'GastawnOrgDO.deleteRig'
+  );
   if (!deleted) return c.json(resError('Rig not found'), 404);
 
   // Remove the rig from the Town DO
   try {
-    const townDOStub = getTownDOStub(c.env, rig.town_id);
-    await townDOStub.removeRig(params.rigId);
+    await withDORetry(
+      () => getTownDOStub(c.env, rig.town_id),
+      stub => stub.removeRig(params.rigId),
+      'TownDO.removeRig(deleteOrgRig)'
+    );
   } catch (err) {
     console.error(`${ORG_TOWNS_LOG} handleDeleteOrgRig: failed to remove rig from Town DO:`, err);
   }

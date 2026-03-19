@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import type { GastownEnv } from '../gastown.worker';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { UiActionSchema, normalizeUiAction, uiActionRigId } from '../types';
@@ -49,14 +50,17 @@ export async function handleSendMayorMessage(c: Context<GastownEnv>, params: { t
     `${MAYOR_HANDLER_LOG} handleSendMayorMessage: townId=${params.townId} message="${parsed.data.message.slice(0, 80)}"`
   );
 
-  const town = getTownDOStub(c.env, params.townId);
   // Ensure the TownDO knows its real UUID (ctx.id.name is unreliable in local dev)
   // TODO: This should only be done on town creation. Why are we doing it here?
-  await town.setTownId(params.townId);
-  const result = await town.sendMayorMessage(
-    parsed.data.message,
-    parsed.data.model,
-    parsed.data.uiContext
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setTownId(params.townId),
+    'TownDO.setTownId(sendMayorMessage)'
+  );
+  const result = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.sendMayorMessage(parsed.data.message, parsed.data.model, parsed.data.uiContext),
+    'TownDO.sendMayorMessage'
   );
   return c.json(resSuccess(result), 200);
 }
@@ -66,9 +70,16 @@ export async function handleSendMayorMessage(c: Context<GastownEnv>, params: { t
  * Get the mayor's session status.
  */
 export async function handleGetMayorStatus(c: Context<GastownEnv>, params: { townId: string }) {
-  const town = getTownDOStub(c.env, params.townId);
-  await town.setTownId(params.townId);
-  const status = await town.getMayorStatus();
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setTownId(params.townId),
+    'TownDO.setTownId(getMayorStatus)'
+  );
+  const status = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.getMayorStatus(),
+    'TownDO.getMayorStatus'
+  );
   return c.json(resSuccess(status), 200);
 }
 
@@ -79,9 +90,16 @@ export async function handleGetMayorStatus(c: Context<GastownEnv>, params: { tow
  */
 export async function handleEnsureMayor(c: Context<GastownEnv>, params: { townId: string }) {
   console.log(`${MAYOR_HANDLER_LOG} handleEnsureMayor: townId=${params.townId}`);
-  const town = getTownDOStub(c.env, params.townId);
-  await town.setTownId(params.townId);
-  const result = await town.ensureMayor();
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setTownId(params.townId),
+    'TownDO.setTownId(ensureMayor)'
+  );
+  const result = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.ensureMayor(),
+    'TownDO.ensureMayor'
+  );
   return c.json(resSuccess(result), 200);
 }
 
@@ -104,11 +122,15 @@ export async function handleMayorCompleted(c: Context<GastownEnv>, params: { tow
     `${MAYOR_HANDLER_LOG} handleMayorCompleted: townId=${params.townId} status=${parsed.data.status}`
   );
 
-  const town = getTownDOStub(c.env, params.townId);
-  await town.agentCompleted(parsed.data.agentId ?? '', {
-    status: parsed.data.status,
-    reason: parsed.data.reason,
-  });
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub =>
+      stub.agentCompleted(parsed.data.agentId ?? '', {
+        status: parsed.data.status,
+        reason: parsed.data.reason,
+      }),
+    'TownDO.agentCompleted(mayorCompleted)'
+  );
   return c.json(resSuccess({ acknowledged: true }), 200);
 }
 
@@ -121,10 +143,17 @@ export async function handleDestroyMayor(c: Context<GastownEnv>, params: { townI
   console.log(
     `${MAYOR_HANDLER_LOG} handleDestroyMayor: destroying mayor for townId=${params.townId}`
   );
-  const town = getTownDOStub(c.env, params.townId);
-  const status = await town.getMayorStatus();
+  const status = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.getMayorStatus(),
+    'TownDO.getMayorStatus(destroyMayor)'
+  );
   if (status.session) {
-    await town.deleteAgent(status.session.agentId);
+    await withDORetry(
+      () => getTownDOStub(c.env, params.townId),
+      stub => stub.deleteAgent(status.session!.agentId),
+      'TownDO.deleteAgent(destroyMayor)'
+    );
   }
   return c.json(resSuccess({ destroyed: true }), 200);
 }
@@ -155,9 +184,16 @@ export async function handleSetDashboardContext(
     );
   }
 
-  const town = getTownDOStub(c.env, params.townId);
-  await town.setTownId(params.townId);
-  await town.setDashboardContext(parsed.data.context);
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setTownId(params.townId),
+    'TownDO.setTownId(setDashboardContext)'
+  );
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setDashboardContext(parsed.data.context),
+    'TownDO.setDashboardContext'
+  );
   return c.json(resSuccess({ stored: true }), 200);
 }
 
@@ -183,18 +219,29 @@ export async function handleBroadcastUiAction(c: Context<GastownEnv>, params: { 
 
   const action = normalizeUiAction(parsed.data.action, params.townId);
 
-  const town = getTownDOStub(c.env, params.townId);
-  await town.setTownId(params.townId);
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.setTownId(params.townId),
+    'TownDO.setTownId(broadcastUiAction)'
+  );
 
   // Validate that the referenced rig belongs to this town
   const rigId = uiActionRigId(action);
   if (rigId) {
-    const rig = await town.getRigAsync(rigId);
+    const rig = await withDORetry(
+      () => getTownDOStub(c.env, params.townId),
+      stub => stub.getRigAsync(rigId),
+      'TownDO.getRigAsync(broadcastUiAction)'
+    );
     if (!rig) {
       return c.json({ success: false, error: `Rig ${rigId} does not belong to this town` }, 400);
     }
   }
 
-  await town.broadcastUiAction(action);
+  await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.broadcastUiAction(action),
+    'TownDO.broadcastUiAction'
+  );
   return c.json(resSuccess({ broadcast: true }), 200);
 }

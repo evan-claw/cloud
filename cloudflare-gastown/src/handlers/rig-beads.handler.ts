@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { getEnforcedAgentId } from '../middleware/auth.middleware';
@@ -43,8 +44,11 @@ export async function handleCreateBead(c: Context<GastownEnv>, params: { rigId: 
     `${HANDLER_LOG} handleCreateBead: rigId=${params.rigId} type=${parsed.data.type} title="${parsed.data.title?.slice(0, 80)}" assignee=${parsed.data.assignee_agent_id ?? 'none'}`
   );
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const bead = await town.createBead({ ...parsed.data, rig_id: params.rigId });
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.createBead({ ...parsed.data, rig_id: params.rigId }),
+    'TownDO.createBead'
+  );
   console.log(
     `${HANDLER_LOG} handleCreateBead: created bead ${JSON.stringify(bead).slice(0, 200)}`
   );
@@ -69,16 +73,20 @@ export async function handleListBeads(c: Context<GastownEnv>, params: { rigId: s
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const beads = await town.listBeads({
-    status: status?.data,
-    type: type?.data,
-    assignee_agent_bead_id:
-      c.req.query('assignee_agent_bead_id') ?? c.req.query('assignee_agent_id'),
-    rig_id: params.rigId,
-    limit: limit?.data,
-    offset: offset?.data,
-  });
+  const beads = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.listBeads({
+        status: status?.data,
+        type: type?.data,
+        assignee_agent_bead_id:
+          c.req.query('assignee_agent_bead_id') ?? c.req.query('assignee_agent_id'),
+        rig_id: params.rigId,
+        limit: limit?.data,
+        offset: offset?.data,
+      }),
+    'TownDO.listBeads'
+  );
   return c.json(resSuccess(beads));
 }
 
@@ -87,8 +95,11 @@ export async function handleGetBead(
   params: { rigId: string; beadId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const bead = await town.getBeadAsync(params.beadId);
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getBeadAsync(params.beadId),
+    'TownDO.getBeadAsync'
+  );
   if (!bead || bead.rig_id !== params.rigId) return c.json(resError('Bead not found'), 404);
   return c.json(resSuccess(bead));
 }
@@ -109,8 +120,11 @@ export async function handleUpdateBeadStatus(
     return c.json(resError('agent_id does not match authenticated agent'), 403);
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const bead = await town.updateBeadStatus(params.beadId, parsed.data.status, parsed.data.agent_id);
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.updateBeadStatus(params.beadId, parsed.data.status, parsed.data.agent_id),
+    'TownDO.updateBeadStatus'
+  );
   return c.json(resSuccess(bead));
 }
 
@@ -130,8 +144,11 @@ export async function handleCloseBead(
     return c.json(resError('agent_id does not match authenticated agent'), 403);
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const bead = await town.closeBead(params.beadId, parsed.data.agent_id);
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.closeBead(params.beadId, parsed.data.agent_id),
+    'TownDO.closeBead'
+  );
   return c.json(resSuccess(bead));
 }
 
@@ -154,8 +171,11 @@ export async function handleSlingBead(c: Context<GastownEnv>, params: { rigId: s
     `${HANDLER_LOG} handleSlingBead: rigId=${params.rigId} title="${parsed.data.title?.slice(0, 80)}" metadata=${JSON.stringify(parsed.data.metadata)}`
   );
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const result = await town.slingBead({ ...parsed.data, rigId: params.rigId });
+  const result = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.slingBead({ ...parsed.data, rigId: params.rigId }),
+    'TownDO.slingBead'
+  );
   console.log(
     `${HANDLER_LOG} handleSlingBead: completed, result=${JSON.stringify(result).slice(0, 300)}`
   );
@@ -167,9 +187,16 @@ export async function handleDeleteBead(
   params: { rigId: string; beadId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const bead = await town.getBeadAsync(params.beadId);
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getBeadAsync(params.beadId),
+    'TownDO.getBeadAsync(deleteBead)'
+  );
   if (!bead || bead.rig_id !== params.rigId) return c.json(resError('Bead not found'), 404);
-  await town.deleteBead(params.beadId);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.deleteBead(params.beadId),
+    'TownDO.deleteBead'
+  );
   return c.json(resSuccess({ deleted: true }));
 }

@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { AgentRole, AgentStatus } from '../types';
@@ -47,8 +48,11 @@ export async function handleRegisterAgent(c: Context<GastownEnv>, params: { rigI
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const agent = await town.registerAgent({ ...parsed.data, rig_id: params.rigId });
+  const agent = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.registerAgent({ ...parsed.data, rig_id: params.rigId }),
+    'TownDO.registerAgent'
+  );
   return c.json(resSuccess(agent), 201);
 }
 
@@ -62,12 +66,16 @@ export async function handleListAgents(c: Context<GastownEnv>, params: { rigId: 
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const agents = await town.listAgents({
-    role: role?.data,
-    status: status?.data,
-    rig_id: params.rigId,
-  });
+  const agents = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.listAgents({
+        role: role?.data,
+        status: status?.data,
+        rig_id: params.rigId,
+      }),
+    'TownDO.listAgents'
+  );
   return c.json(resSuccess(agents));
 }
 
@@ -76,8 +84,11 @@ export async function handleGetAgent(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const agent = await town.getAgentAsync(params.agentId);
+  const agent = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getAgentAsync(params.agentId),
+    'TownDO.getAgentAsync'
+  );
   if (!agent || agent.rig_id !== params.rigId) return c.json(resError('Agent not found'), 404);
   return c.json(resSuccess(agent));
 }
@@ -98,8 +109,11 @@ export async function handleHookBead(
     `${AGENT_LOG} handleHookBead: rigId=${params.rigId} agentId=${params.agentId} beadId=${parsed.data.bead_id}`
   );
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.hookBead(params.agentId, parsed.data.bead_id);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.hookBead(params.agentId, parsed.data.bead_id),
+    'TownDO.hookBead'
+  );
   console.log(`${AGENT_LOG} handleHookBead: hooked successfully`);
   return c.json(resSuccess({ hooked: true }));
 }
@@ -109,8 +123,11 @@ export async function handleUnhookBead(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.unhookBead(params.agentId);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.unhookBead(params.agentId),
+    'TownDO.unhookBead'
+  );
   return c.json(resSuccess({ unhooked: true }));
 }
 
@@ -119,8 +136,11 @@ export async function handlePrime(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const context = await town.prime(params.agentId);
+  const context = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.prime(params.agentId),
+    'TownDO.prime'
+  );
   return c.json(resSuccess(context));
 }
 
@@ -136,8 +156,11 @@ export async function handleAgentDone(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.agentDone(params.agentId, parsed.data);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.agentDone(params.agentId, parsed.data),
+    'TownDO.agentDone'
+  );
   return c.json(resSuccess({ done: true }));
 }
 
@@ -157,8 +180,11 @@ export async function handleAgentCompleted(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.agentCompleted(params.agentId, parsed.data);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.agentCompleted(params.agentId, parsed.data),
+    'TownDO.agentCompleted'
+  );
   return c.json(resSuccess({ completed: true }));
 }
 
@@ -174,8 +200,11 @@ export async function handleWriteCheckpoint(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.writeCheckpoint(params.agentId, parsed.data.data);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.writeCheckpoint(params.agentId, parsed.data.data),
+    'TownDO.writeCheckpoint'
+  );
   return c.json(resSuccess({ written: true }));
 }
 
@@ -184,8 +213,11 @@ export async function handleCheckMail(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const messages = await town.checkMail(params.agentId);
+  const messages = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.checkMail(params.agentId),
+    'TownDO.checkMail'
+  );
   return c.json(resSuccess(messages));
 }
 
@@ -198,8 +230,11 @@ export async function handleHeartbeat(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.touchAgentHeartbeat(params.agentId);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.touchAgentHeartbeat(params.agentId),
+    'TownDO.touchAgentHeartbeat'
+  );
   return c.json(resSuccess({ heartbeat: true }));
 }
 
@@ -224,8 +259,11 @@ export async function handleGetOrCreateAgent(c: Context<GastownEnv>, params: { r
     `${AGENT_LOG} handleGetOrCreateAgent: rigId=${params.rigId} role=${parsed.data.role}`
   );
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const agent = await town.getOrCreateAgent(parsed.data.role, params.rigId);
+  const agent = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getOrCreateAgent(parsed.data.role, params.rigId),
+    'TownDO.getOrCreateAgent'
+  );
   console.log(`${AGENT_LOG} handleGetOrCreateAgent: result=${JSON.stringify(agent).slice(0, 200)}`);
   return c.json(resSuccess(agent));
 }
@@ -242,8 +280,11 @@ export async function handleUpdateAgentStatusMessage(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.updateAgentStatusMessage(params.agentId, parsed.data.message);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.updateAgentStatusMessage(params.agentId, parsed.data.message),
+    'TownDO.updateAgentStatusMessage'
+  );
   return c.json(resSuccess({ ok: true }));
 }
 
@@ -252,10 +293,17 @@ export async function handleDeleteAgent(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const agent = await town.getAgentAsync(params.agentId);
+  const agent = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getAgentAsync(params.agentId),
+    'TownDO.getAgentAsync(deleteAgent)'
+  );
   if (!agent || agent.rig_id !== params.rigId) return c.json(resError('Agent not found'), 404);
-  await town.deleteAgent(params.agentId);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.deleteAgent(params.agentId),
+    'TownDO.deleteAgent'
+  );
   return c.json(resSuccess({ deleted: true }));
 }
 
@@ -268,8 +316,11 @@ export async function handleGetPendingNudges(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const nudges = await town.getPendingNudges(params.agentId);
+  const nudges = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getPendingNudges(params.agentId),
+    'TownDO.getPendingNudges'
+  );
   return c.json(resSuccess(nudges));
 }
 
@@ -300,11 +351,15 @@ export async function handleNudge(c: Context<GastownEnv>, params: { rigId: strin
     `${AGENT_LOG} handleNudge: rigId=${params.rigId} from=${sourceAgentId} target=${parsed.data.target_agent_id}`
   );
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const nudgeId = await town.queueNudge(parsed.data.target_agent_id, parsed.data.message, {
-    mode: parsed.data.mode,
-    source: 'agent',
-  });
+  const nudgeId = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.queueNudge(parsed.data.target_agent_id, parsed.data.message, {
+        mode: parsed.data.mode,
+        source: 'agent',
+      }),
+    'TownDO.queueNudge'
+  );
   return c.json(resSuccess({ nudge_id: nudgeId }));
 }
 
@@ -323,7 +378,10 @@ export async function handleNudgeDelivered(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.markNudgeDelivered(parsed.data.nudge_id);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.markNudgeDelivered(parsed.data.nudge_id),
+    'TownDO.markNudgeDelivered'
+  );
   return c.json(resSuccess({ marked: true }));
 }

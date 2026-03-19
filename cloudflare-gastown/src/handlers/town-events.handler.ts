@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess } from '../util/res.util';
 import type { GastownEnv } from '../gastown.worker';
 
@@ -20,9 +21,11 @@ export async function handleListTownEvents(
       ? parsedLimit
       : 100;
 
-  const town = getTownDOStub(c.env, params.townId);
-  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
-  const events = await town.listBeadEvents({ since, limit });
+  const events = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.listBeadEvents({ since, limit }),
+    'TownDO.listBeadEvents(townEvents)'
+  );
 
   return c.json(resSuccess(events));
 }

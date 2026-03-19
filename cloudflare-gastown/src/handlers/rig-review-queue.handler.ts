@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { getEnforcedAgentId } from '../middleware/auth.middleware';
@@ -27,8 +28,11 @@ export async function handleSubmitToReviewQueue(c: Context<GastownEnv>, params: 
     return c.json(resError('agent_id does not match authenticated agent'), 403);
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.submitToReviewQueue({ ...parsed.data, rig_id: params.rigId });
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.submitToReviewQueue({ ...parsed.data, rig_id: params.rigId }),
+    'TownDO.submitToReviewQueue'
+  );
   return c.json(resSuccess({ submitted: true }), 201);
 }
 
@@ -50,10 +54,14 @@ export async function handleCompleteReview(
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.completeReviewWithResult({
-    entry_id: params.entryId,
-    ...parsed.data,
-  });
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.completeReviewWithResult({
+        entry_id: params.entryId,
+        ...parsed.data,
+      }),
+    'TownDO.completeReviewWithResult'
+  );
   return c.json(resSuccess({ completed: true }));
 }

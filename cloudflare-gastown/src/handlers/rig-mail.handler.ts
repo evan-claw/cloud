@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { getEnforcedAgentId } from '../middleware/auth.middleware';
@@ -26,7 +27,10 @@ export async function handleSendMail(c: Context<GastownEnv>, _params: { rigId: s
     return c.json(resError('from_agent_id does not match authenticated agent'), 403);
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  await town.sendMail(parsed.data);
+  await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.sendMail(parsed.data),
+    'TownDO.sendMail'
+  );
   return c.json(resSuccess({ sent: true }), 201);
 }

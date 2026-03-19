@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import { getEnforcedAgentId } from '../middleware/auth.middleware';
@@ -48,12 +49,15 @@ export async function handleResolveTriage(c: Context<GastownEnv>, _params: { rig
     );
   }
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
 
   // Verify this agent is actually working on a triage batch. Without this
   // check, any rig agent (polecat, refinery) could call the endpoint and
   // trigger restart/close/escalate side effects on other agents.
-  const hookedBead = await town.getHookedBead(agentId);
+  const hookedBead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getHookedBead(agentId),
+    'TownDO.getHookedBead'
+  );
   if (
     !hookedBead ||
     !hookedBead.labels.includes('gt:triage') ||
@@ -62,9 +66,14 @@ export async function handleResolveTriage(c: Context<GastownEnv>, _params: { rig
     return c.json(resError('Only triage agents can resolve triage requests'), 403);
   }
 
-  const bead = await town.resolveTriage({
-    agent_id: agentId,
-    ...parsed.data,
-  });
+  const bead = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub =>
+      stub.resolveTriage({
+        agent_id: agentId,
+        ...parsed.data,
+      }),
+    'TownDO.resolveTriage'
+  );
   return c.json(resSuccess(bead), 200);
 }

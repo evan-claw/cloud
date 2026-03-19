@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import type { GastownEnv } from '../gastown.worker';
@@ -8,8 +9,11 @@ import { TownConfigUpdateSchema, type TownConfig } from '../types';
 const LOG = '[town-config.handler]';
 
 export async function handleGetTownConfig(c: Context<GastownEnv>, params: { townId: string }) {
-  const townDO = getTownDOStub(c.env, params.townId);
-  const config = await townDO.getTownConfig();
+  const config = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.getTownConfig(),
+    'TownDO.getTownConfig'
+  );
   return c.json(resSuccess(maskSensitiveValues(config)));
 }
 
@@ -39,8 +43,11 @@ export async function handleUpdateTownConfig(c: Context<GastownEnv>, params: { t
     }
   }
 
-  const townDO = getTownDOStub(c.env, params.townId);
-  const config = await townDO.updateTownConfig(parsed.data);
+  const config = await withDORetry(
+    () => getTownDOStub(c.env, params.townId),
+    stub => stub.updateTownConfig(parsed.data),
+    'TownDO.updateTownConfig'
+  );
   console.log(`${LOG} handleUpdateTownConfig: town=${params.townId} updated config`);
   return c.json(resSuccess(maskSensitiveValues(config)));
 }

@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import { getTownDOStub } from '../dos/Town.do';
+import { withDORetry } from '@kilocode/worker-utils';
 import { resSuccess, resError } from '../util/res.util';
 import { parseJsonBody } from '../util/parse-json-body.util';
 import type { GastownEnv } from '../gastown.worker';
@@ -10,8 +11,11 @@ export async function handleGetMoleculeCurrentStep(
   params: { rigId: string; agentId: string }
 ) {
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const step = await town.getMoleculeCurrentStep(params.agentId);
+  const step = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.getMoleculeCurrentStep(params.agentId),
+    'TownDO.getMoleculeCurrentStep'
+  );
   if (!step) return c.json(resError('No active molecule for this agent'), 404);
   return c.json(resSuccess(step));
 }
@@ -34,8 +38,11 @@ export async function handleAdvanceMoleculeStep(
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  const result = await town.advanceMoleculeStep(params.agentId, parsed.data.summary);
+  const result = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.advanceMoleculeStep(params.agentId, parsed.data.summary),
+    'TownDO.advanceMoleculeStep'
+  );
   return c.json(resSuccess(result));
 }
 
@@ -64,8 +71,10 @@ export async function handleCreateMolecule(c: Context<GastownEnv>, _params: { ri
   }
 
   const townId = c.get('townId');
-  const town = getTownDOStub(c.env, townId);
-  // eslint-disable-next-line @typescript-eslint/await-thenable -- DO RPC stub returns Rpc.Promisified
-  const mol = await town.createMolecule(parsed.data.bead_id, parsed.data.formula);
+  const mol = await withDORetry(
+    () => getTownDOStub(c.env, townId),
+    stub => stub.createMolecule(parsed.data.bead_id, parsed.data.formula),
+    'TownDO.createMolecule'
+  );
   return c.json(resSuccess(mol), 201);
 }
