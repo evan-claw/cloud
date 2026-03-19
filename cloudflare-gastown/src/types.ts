@@ -180,6 +180,19 @@ export type PatrolResult = {
   orphaned_beads: string[];
 };
 
+// -- Failure Reasons --
+
+export type FailureReason = {
+  /** Machine-readable failure code */
+  code: string;
+  /** Human-readable summary */
+  message: string;
+  /** Optional detail: stack trace, error output, container logs */
+  details?: string;
+  /** What triggered the failure: 'scheduler' | 'patrol' | 'refinery' | 'triage' | 'admin' | 'container' */
+  source: string;
+};
+
 // -- Merge Strategy --
 
 export const MergeStrategy = z.enum(['direct', 'pr']);
