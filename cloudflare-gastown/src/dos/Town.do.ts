@@ -3112,6 +3112,20 @@ export class TownDO extends DurableObject<Env> {
         [timestamp, agent.id]
       );
 
+      // Reconstruct the agent's prior session transcript and inject it on
+      // re-dispatch (after a container restart) so work isn't duplicated.
+      // The presence of prior events is the signal: a fresh container has none.
+      const rawEvents = await this.getAgentEvents(agent.id);
+      const priorEvents = RigAgentEventRecord.array().safeParse(rawEvents);
+      const priorTurns = priorEvents.success ? reconstructConversation(priorEvents.data) : [];
+      let beadBody = bead.body ?? '';
+      if (priorTurns.length > 0) {
+        const priorTranscript = priorTurns
+          .map(t => `[${t.role === 'user' ? 'User' : 'Assistant'}]: ${t.content}`)
+          .join('\n\n');
+        beadBody = `Prior conversation:\n\n${priorTranscript}`;
+      }
+
       const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
         townId: this.townId,
         rigId,
@@ -3122,7 +3136,7 @@ export class TownDO extends DurableObject<Env> {
         identity: agent.identity,
         beadId: bead.bead_id,
         beadTitle: bead.title,
-        beadBody: bead.body ?? '',
+        beadBody,
         checkpoint: agent.checkpoint,
         gitUrl: rigConfig.gitUrl,
         defaultBranch: rigConfig.defaultBranch,
