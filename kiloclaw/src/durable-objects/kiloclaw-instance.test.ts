@@ -120,7 +120,6 @@ function expectStructuredWarn(spy: Mock, messageSubstring: string) {
     (c: unknown[]) => typeof c[0] === 'string' && c[0].includes(messageSubstring)
   );
   if (!call) throw new Error(`Expected a warn call containing "${messageSubstring}"`);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse returns any
   const parsed: Record<string, unknown> = JSON.parse(call[0] as string);
   expect(parsed.tag).toBe('kiloclaw_do');
   expect(parsed.level).toBe('warn');

@@ -13,4 +13,15 @@ export default defineConfig([
       '@typescript-eslint/restrict-template-expressions': 'off',
     },
   },
+  {
+    // vitest globals (vi.mock, vi.fn, etc.) are unresolvable via the workers tsconfig
+    // types restriction; disable unsafe rules for test files only
+    files: ['**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+    },
+  },
 ]);
