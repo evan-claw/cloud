@@ -48,6 +48,8 @@ import {
   Play,
   Square,
   RotateCcw,
+  RotateCw,
+  ArrowUpCircle,
   RefreshCw,
   Pin,
   Stethoscope,
@@ -961,6 +963,30 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     })
   );
 
+  const { mutateAsync: machineRedeploy, isPending: isMachineRedeploying } = useMutation(
+    trpc.admin.kiloclawInstances.restartMachine.mutationOptions({
+      onSuccess: () => {
+        toast.success('Redeploy requested');
+        invalidateMachineQueries();
+      },
+      onError: err => {
+        toast.error(`Failed to redeploy: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: machineUpgrade, isPending: isMachineUpgrading } = useMutation(
+    trpc.admin.kiloclawInstances.restartMachine.mutationOptions({
+      onSuccess: () => {
+        toast.success('Upgrade to latest requested');
+        invalidateMachineQueries();
+      },
+      onError: err => {
+        toast.error(`Failed to upgrade: ${err.message}`);
+      },
+    })
+  );
+
   const { mutateAsync: gatewayStart, isPending: isGatewayStarting } = useMutation(
     trpc.admin.kiloclawInstances.gatewayStart.mutationOptions({
       onSuccess: () => {
@@ -1061,7 +1087,14 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   }
 
   const isActive = data.destroyed_at === null;
-  const machineActionPending = isMachineStarting || isMachineStopping;
+  const machineStatus = data.workerStatus?.status ?? null;
+  const machineRestartBlocked =
+    machineStatus === 'provisioned' ||
+    machineStatus === 'destroying' ||
+    machineStatus === 'starting' ||
+    machineStatus === 'restarting';
+  const machineActionPending =
+    isMachineStarting || isMachineStopping || isMachineRedeploying || isMachineUpgrading;
   const gatewayActionPending =
     isGatewayStarting ||
     isGatewayStopping ||
@@ -1397,6 +1430,36 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                     <Square className="mr-1 h-4 w-4" />
                   )}
                   Stop Machine
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending || machineRestartBlocked}
+                  onClick={() =>
+                    void machineRedeploy({ instanceId: data.id, imageTag: undefined })
+                  }
+                >
+                  {isMachineRedeploying ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="mr-1 h-4 w-4" />
+                  )}
+                  Redeploy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending || machineRestartBlocked}
+                  onClick={() =>
+                    void machineUpgrade({ instanceId: data.id, imageTag: 'latest' })
+                  }
+                >
+                  {isMachineUpgrading ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUpCircle className="mr-1 h-4 w-4" />
+                  )}
+                  Upgrade to Latest
                 </Button>
               </div>
             </CardContent>
