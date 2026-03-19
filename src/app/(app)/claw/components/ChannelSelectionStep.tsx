@@ -101,6 +101,14 @@ export function ChannelSelectionStepView({
         onTokenChange={v => setToken('discordBotToken', v)}
       />
     ),
+    slack: (
+      <SlackSetupSection
+        botToken={tokens.slackBotToken ?? ''}
+        onBotTokenChange={v => setToken('slackBotToken', v)}
+        appToken={tokens.slackAppToken ?? ''}
+        onAppTokenChange={v => setToken('slackAppToken', v)}
+      />
+    ),
   };
 
   return (
@@ -229,18 +237,12 @@ function ChannelSetupSection({
   heading,
   children,
   videoGuideUrl,
-  tokenId,
-  tokenPlaceholder,
-  token,
-  onTokenChange,
+  tokenInputs,
 }: {
   heading: string;
   children: React.ReactNode;
   videoGuideUrl?: string;
-  tokenId: string;
-  tokenPlaceholder: string;
-  token: string;
-  onTokenChange: (value: string) => void;
+  tokenInputs: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-5">
@@ -260,13 +262,7 @@ function ChannelSetupSection({
           Prefer a walkthrough? Watch a short video guide
         </a>
       )}
-      <ChannelTokenInput
-        id={tokenId}
-        placeholder={tokenPlaceholder}
-        value={token}
-        onChange={onTokenChange}
-        maxLength={100}
-      />
+      {tokenInputs}
     </div>
   );
 }
@@ -274,10 +270,10 @@ function ChannelSetupSection({
 function NumberedStep({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="bg-muted text-muted-foreground mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
+      <span className="bg-muted text-muted-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
         {n}
       </span>
-      <p className="text-muted-foreground text-sm leading-relaxed">{children}</p>
+      <p className="text-muted-foreground mt-0.5 text-sm leading-relaxed">{children}</p>
     </div>
   );
 }
@@ -287,10 +283,15 @@ function TelegramSetupSection({ token, onTokenChange }: SetupSectionProps) {
     <ChannelSetupSection
       heading="Create your bot token"
       videoGuideUrl="https://youtu.be/t2iTYbDsSds"
-      tokenId="onboarding-telegram-token"
-      tokenPlaceholder="Paste your bot token here"
-      token={token}
-      onTokenChange={onTokenChange}
+      tokenInputs={
+        <ChannelTokenInput
+          id="onboarding-telegram-token"
+          placeholder="Paste your bot token here"
+          value={token}
+          onChange={onTokenChange}
+          maxLength={100}
+        />
+      }
     >
       <NumberedStep n={1}>
         Open Telegram and start a chat with{' '}
@@ -319,10 +320,15 @@ function DiscordSetupSection({ token, onTokenChange }: SetupSectionProps) {
     <ChannelSetupSection
       heading="Get your bot token"
       videoGuideUrl="https://youtu.be/t2iTYbDsSds"
-      tokenId="onboarding-discord-token"
-      tokenPlaceholder="Paste your Discord bot token..."
-      token={token}
-      onTokenChange={onTokenChange}
+      tokenInputs={
+        <ChannelTokenInput
+          id="onboarding-discord-token"
+          placeholder="Paste your Discord bot token..."
+          value={token}
+          onChange={onTokenChange}
+          maxLength={100}
+        />
+      }
     >
       <NumberedStep n={1}>
         Go to the{' '}
@@ -347,6 +353,78 @@ function DiscordSetupSection({ token, onTokenChange }: SetupSectionProps) {
         Click{' '}
         <code className="rounded bg-purple-900/40 px-1.5 py-0.5 text-purple-300">Reset Token</code>{' '}
         on the Bot page and copy the token that appears.
+      </NumberedStep>
+    </ChannelSetupSection>
+  );
+}
+
+function SlackSetupSection({
+  botToken,
+  onBotTokenChange,
+  appToken,
+  onAppTokenChange,
+}: {
+  botToken: string;
+  onBotTokenChange: (value: string) => void;
+  appToken: string;
+  onAppTokenChange: (value: string) => void;
+}) {
+  return (
+    <ChannelSetupSection
+      heading="Get your tokens"
+      videoGuideUrl="https://youtu.be/t2iTYbDsSds"
+      tokenInputs={
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-foreground text-sm font-semibold">Bot Token</span>
+            <ChannelTokenInput
+              id="onboarding-slack-bot-token"
+              placeholder="xoxb-"
+              value={botToken}
+              onChange={onBotTokenChange}
+              maxLength={200}
+            />
+            <span className="text-xs text-[#5a5b64]">From OAuth &amp; Permissions</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-foreground text-sm font-semibold">App Token</span>
+            <ChannelTokenInput
+              id="onboarding-slack-app-token"
+              placeholder="xapp-"
+              value={appToken}
+              onChange={onAppTokenChange}
+              maxLength={200}
+            />
+            <span className="text-xs text-[#5a5b64]">
+              From Basic Information &rarr; App-Level Tokens
+            </span>
+          </div>
+        </div>
+      }
+    >
+      <NumberedStep n={1}>
+        Go to{' '}
+        <a
+          href="https://api.slack.com/apps"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300"
+        >
+          Slack App Management
+          <ExternalLink className="mb-0.5 ml-0.5 inline h-3 w-3" />
+        </a>{' '}
+        and create or open your app.
+      </NumberedStep>
+      <NumberedStep n={2}>
+        Under <strong className="text-foreground">OAuth &amp; Permissions</strong>, copy the{' '}
+        <strong className="text-foreground">Bot Token</strong> &mdash; it starts with{' '}
+        <code className="rounded bg-purple-900/40 px-1.5 py-0.5 text-purple-300">xoxb-</code>.
+      </NumberedStep>
+      <NumberedStep n={3}>
+        Under <strong className="text-foreground">Basic Information &rarr; App-Level Tokens</strong>
+        , generate and copy the <strong className="text-foreground">App Token</strong> &mdash; it
+        starts with{' '}
+        <code className="rounded bg-purple-900/40 px-1.5 py-0.5 text-purple-300">xapp-</code>.
       </NumberedStep>
     </ChannelSetupSection>
   );

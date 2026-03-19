@@ -32,3 +32,9 @@ export const DiscordSelected: Story = {
     defaultSelected: 'discord',
   },
 };
+
+export const SlackSelected: Story = {
+  args: {
+    defaultSelected: 'slack',
+  },
+};
