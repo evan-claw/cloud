@@ -26,6 +26,10 @@ import * as config from './town/config';
 import * as rigs from './town/rigs';
 import * as dispatch from './town/container-dispatch';
 import * as patrol from './town/patrol';
+import {
+  reconstructConversation,
+  formatConversationTranscript,
+} from './town/conversation-reconstruction';
 import { GitHubPRStatusSchema, GitLabMRStatusSchema } from '../util/platform-pr.util';
 
 // Table imports for beads-centric operations
@@ -1738,6 +1742,22 @@ export class TownDO extends DurableObject<Env> {
         }
       }
 
+      // Fetch prior conversation and inject it into the new session's initial prompt
+      // so the Mayor can resume with full context after a container restart.
+      let transcript: string | null = null;
+      try {
+        const events = await this.getAgentEvents(mayor.id, { limit: 500 });
+        const turns = reconstructConversation(events);
+        if (turns.length > 0) {
+          transcript = formatConversationTranscript(turns);
+        }
+      } catch (err) {
+        console.warn(
+          `${TOWN_LOG} sendMayorMessage: failed to reconstruct conversation for mayor ${mayor.id} — proceeding without transcript:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+
       const started = await dispatch.startAgentInContainer(this.env, this.ctx.storage, {
         townId,
         rigId: `mayor-${townId}`,
@@ -1748,7 +1768,7 @@ export class TownDO extends DurableObject<Env> {
         identity: mayor.identity,
         beadId: '',
         beadTitle: message,
-        beadBody: '',
+        beadBody: transcript ?? '',
         checkpoint: agents.readCheckpoint(this.sql, mayor.id),
         gitUrl: rigConfig?.gitUrl ?? '',
         defaultBranch: rigConfig?.defaultBranch ?? 'main',
