@@ -152,7 +152,7 @@ export function UserAdminGastown({ userId }: { userId: string }) {
   return (
     <Card className="col-span-1 lg:col-span-4">
       <CardHeader>
-        <CardTitle>Gastown</CardTitle>
+        <CardTitle>Gas Town</CardTitle>
         <CardDescription>Towns and rigs owned by this user</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

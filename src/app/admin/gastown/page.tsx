@@ -497,7 +497,7 @@ export default function GastownAnalyticsPage() {
     <AdminPage
       breadcrumbs={
         <BreadcrumbItem>
-          <BreadcrumbLink href="/admin/gastown">Gastown Analytics</BreadcrumbLink>
+          <BreadcrumbLink href="/admin/gastown">Gas Town Analytics</BreadcrumbLink>
         </BreadcrumbItem>
       }
       buttons={

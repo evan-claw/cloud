@@ -124,7 +124,7 @@ export default function PersonalAppSidebar(props: React.ComponentProps<typeof Si
     ...(isGastownEnabled || isDevelopment
       ? [
           {
-            title: 'Gastown',
+            title: 'Gas Town',
             icon: Factory,
             url: '/gastown',
           },
