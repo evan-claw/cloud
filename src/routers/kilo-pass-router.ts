@@ -808,19 +808,26 @@ export const kiloPassRouter = createTRPCRouter({
           );
         }
 
-        const newPhase: Stripe.SubscriptionScheduleUpdateParams.Phase = {
-          items: [{ price: targetPriceId, quantity: 1 }],
-          start_date: effectiveAtUnix,
-          metadata,
-          proration_behavior: 'none',
-        };
-
         const yearlyTierUpgrade =
           fromCadence === KiloPassCadence.Yearly &&
           toCadence === KiloPassCadence.Yearly &&
           toPrice > fromPrice;
 
-        if (yearlyTierUpgrade) {
+        const newPhase: Stripe.SubscriptionScheduleUpdateParams.Phase = {
+          items: [{ price: targetPriceId, quantity: 1 }],
+          start_date: effectiveAtUnix,
+          metadata,
+          // Yearly tier upgrades use Stripe proration so the user is only charged the
+          // prorated difference for the remaining billing period, not a full new year.
+          // All other changes (downtiers, cadence changes) use no proration because
+          // they take effect at the billing cycle boundary.
+          proration_behavior: yearlyTierUpgrade ? 'create_prorations' : 'none',
+        };
+
+        // Cadence changes need a billing cycle reset so Stripe generates an invoice
+        // for the new cadence at the transition point. Yearly tier upgrades should NOT
+        // reset the anchor — they prorate within the existing billing period.
+        if (isCadenceChange) {
           newPhase.billing_cycle_anchor = 'phase_start';
         }
 
