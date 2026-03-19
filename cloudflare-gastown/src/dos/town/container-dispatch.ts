@@ -101,6 +101,7 @@ export async function ensureContainerToken(
   try {
     const resp = await container.fetch('http://container/refresh-token', {
       method: 'POST',
+      signal: AbortSignal.timeout(10_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
@@ -376,6 +377,7 @@ export async function startAgentInContainer(
 
     const response = await container.fetch('http://container/agents/start', {
       method: 'POST',
+      signal: AbortSignal.timeout(60_000),
       headers: {
         'Content-Type': 'application/json',
         'X-Town-Config': JSON.stringify(containerConfig),
@@ -533,27 +535,31 @@ export async function checkAgentContainerStatus(
 ): Promise<{ status: string; exitReason?: string }> {
   try {
     const container = getTownContainerStub(env, townId);
-    // TODO: Generally you should use containerFetch which waits for ports to be available
-    const response = await container.fetch(`http://container/agents/${agentId}/status`);
+    const response = await container.fetch(`http://container/agents/${agentId}/status`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     // 404 means the container is running but has no record of this agent
     // (e.g. after container eviction). Report as 'not_found' so
     // witnessPatrol can immediately reset and redispatch the agent
     // instead of waiting for the 2-hour GUPP timeout.
     if (response.status === 404) return { status: 'not_found' };
-    if (!response.ok) return { status: 'unknown' };
+    if (!response.ok) return { status: 'not_found' };
     const data: unknown = await response.json();
     if (typeof data === 'object' && data !== null && 'status' in data) {
       const status = (data as { status: unknown }).status;
       const exitReason =
         'exitReason' in data ? (data as { exitReason: unknown }).exitReason : undefined;
       return {
-        status: typeof status === 'string' ? status : 'unknown',
+        status: typeof status === 'string' ? status : 'not_found',
         exitReason: typeof exitReason === 'string' ? exitReason : undefined,
       };
     }
-    return { status: 'unknown' };
+    return { status: 'not_found' };
   } catch {
-    return { status: 'unknown' };
+    // Timeout, network error, or container starting up — treat as
+    // not_found so zombie detection can reset the agent immediately
+    // rather than leaving it stuck in 'working' indefinitely.
+    return { status: 'not_found' };
   }
 }
 

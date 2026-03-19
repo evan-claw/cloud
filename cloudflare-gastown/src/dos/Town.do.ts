@@ -3755,7 +3755,9 @@ export class TownDO extends DurableObject<Env> {
 
     try {
       const container = getTownContainerStub(this.env, townId);
-      await container.fetch('http://container/health');
+      await container.fetch('http://container/health', {
+        signal: AbortSignal.timeout(5_000),
+      });
     } catch {
       // Container is starting up or unavailable — alarm will retry
     }
