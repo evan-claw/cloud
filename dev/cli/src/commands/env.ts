@@ -6,12 +6,15 @@ import { join } from 'path';
 export async function envCheck(root: string) {
   ui.header('Environment Variable Check');
 
+  let allGood = true;
+
   const envLocalPath = join(root, '.env.local');
   const envLocalExists = await Bun.file(envLocalPath).exists();
   if (envLocalExists) {
     ui.success('.env.local exists');
   } else {
     ui.error('.env.local missing — run: vercel env pull');
+    allGood = false;
   }
 
   const vercelProjectPath = join(root, '.vercel', 'project.json');
@@ -20,10 +23,10 @@ export async function envCheck(root: string) {
     ui.success('Vercel project linked');
   } else {
     ui.warn('Vercel project not linked — run: vercel link --project kilocode-app');
+    allGood = false;
   }
 
   const servicesWithEnv = services.filter(s => s.envFile);
-  let allGood = true;
 
   for (const svc of servicesWithEnv) {
     const examplePath = join(root, svc.dir, svc.envFile!);

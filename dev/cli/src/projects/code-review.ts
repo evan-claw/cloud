@@ -2,6 +2,7 @@ import type { ProjectDef } from './types';
 import { spawnService, run } from '../utils/process';
 import * as ui from '../utils/ui';
 import { join } from 'path';
+import { mkdir } from 'fs/promises';
 import { createHmac, randomUUID } from 'crypto';
 
 const GENERIC_BODY = JSON.stringify(
@@ -48,6 +49,7 @@ async function upCommand(args: string[], root: string): Promise<void> {
   const skipRoot = args.includes('--no-root');
 
   const logDir = join(root, 'dev', '.dev-logs', 'review');
+  await mkdir(logDir, { recursive: true });
   await Bun.write(join(logDir, '.gitkeep'), '');
 
   ui.header('Kilo Cloud Dev Services — Code Review');
