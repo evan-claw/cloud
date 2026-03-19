@@ -56,7 +56,11 @@ export class GitHubTokenService {
       return cached;
     }
 
-    logger.info('GitHub token cache miss, generating new token', { installationId, appType, repoName });
+    logger.info('GitHub token cache miss, generating new token', {
+      installationId,
+      appType,
+      repoName,
+    });
     const credentials = this.getCredentials(appType);
     const { token, expiresAt } = await this.generateToken(numericId, credentials, [repoName]);
     await this.cacheToken(cacheKey, token, expiresAt);
@@ -161,7 +165,10 @@ export class GitHubTokenService {
         expiresAt: new Date(result.expiresAt).getTime(),
       };
     } catch (error) {
-      logger.error('Failed to generate GitHub token', { error: error instanceof Error ? error.message : String(error), installationId });
+      logger.error('Failed to generate GitHub token', {
+        error: error instanceof Error ? error.message : String(error),
+        installationId,
+      });
       const message = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`Failed to generate GitHub installation token: ${message}`);
     }

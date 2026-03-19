@@ -112,7 +112,10 @@ export class GitLabTokenService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        logger.error('GitLab OAuth token refresh failed', { status: response.status, error: errorText });
+        logger.error('GitLab OAuth token refresh failed', {
+          status: response.status,
+          error: errorText,
+        });
         return null;
       }
 
@@ -123,7 +126,9 @@ export class GitLabTokenService {
       }
       return parsed.data;
     } catch (error) {
-      logger.error('GitLab OAuth token refresh error', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('GitLab OAuth token refresh error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

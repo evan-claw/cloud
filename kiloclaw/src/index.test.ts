@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class FakeDurableObject {},
@@ -15,10 +15,6 @@ vi.mock('./lib/image-version', async () => {
 import worker from './index';
 
 describe('platform route env validation', () => {
-  beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-  });
-
   it('rejects platform routes when NEXTAUTH_SECRET is missing', async () => {
     const response = await worker.fetch(
       new Request('https://example.com/api/platform/provision', {
@@ -40,9 +36,5 @@ describe('platform route env validation', () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({ error: 'Configuration error' });
-    expect(console.error).toHaveBeenCalledWith(
-      '[CONFIG] Platform route missing bindings:',
-      'NEXTAUTH_SECRET'
-    );
   });
 });

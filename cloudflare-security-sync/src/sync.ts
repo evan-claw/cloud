@@ -336,9 +336,7 @@ async function fetchAllDependabotAlerts(
     // Check rate limit
     const remaining = response.headers.get('x-ratelimit-remaining');
     if (remaining !== null && Number(remaining) < 100) {
-      logger.warn(
-        `GitHub API rate limit low: ${remaining} remaining for ${repoOwner}/${repoName}`
-      );
+      logger.warn(`GitHub API rate limit low: ${remaining} remaining for ${repoOwner}/${repoName}`);
     }
   }
 

@@ -122,7 +122,9 @@ subdomainApp.all('*', async c => {
           return injectBanner(response, c.env.BANNER_LINK_URL);
         }
       } catch (bannerError) {
-        logger.error('Banner injection failed, serving original response', { error: bannerError instanceof Error ? bannerError.message : String(bannerError) });
+        logger.error('Banner injection failed, serving original response', {
+          error: bannerError instanceof Error ? bannerError.message : String(bannerError),
+        });
       }
     }
 

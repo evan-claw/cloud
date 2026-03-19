@@ -42,7 +42,10 @@ function createMCPServer(env: Env, claims: ImageMCPTokenClaims): McpServer {
         const publicUrl = await transferImage({ sourcePath, claims, r2, bucketPublicUrls });
         return { content: [{ type: 'text' as const, text: publicUrl }] };
       } catch (error) {
-        logger.error('transfer_image tool error', { error: error instanceof Error ? error.message : String(error), sourcePath });
+        logger.error('transfer_image tool error', {
+          error: error instanceof Error ? error.message : String(error),
+          sourcePath,
+        });
         throw error;
       }
     }
@@ -71,7 +74,10 @@ function createMCPServer(env: Env, claims: ImageMCPTokenClaims): McpServer {
           ],
         };
       } catch (error) {
-        logger.error('get_image tool error', { error: error instanceof Error ? error.message : String(error), sourcePath });
+        logger.error('get_image tool error', {
+          error: error instanceof Error ? error.message : String(error),
+          sourcePath,
+        });
         throw error;
       }
     }
@@ -137,7 +143,9 @@ export default {
     try {
       server = createMCPServer(env, claims);
     } catch (error) {
-      logger.error('Failed to create MCP server', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to create MCP server', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return withCorsHeaders(
         new Response(JSON.stringify({ error: 'Internal server error' }), {
           status: 500,
@@ -155,7 +163,9 @@ export default {
     try {
       await transport.handleRequest(req, res);
     } catch (error) {
-      logger.error('MCP transport handler error', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('MCP transport handler error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
     return withCorsHeaders(await toFetchResponse(res));
