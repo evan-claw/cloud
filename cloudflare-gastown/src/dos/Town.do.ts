@@ -2906,43 +2906,36 @@ export class TownDO extends DurableObject<Env> {
       const { agentId, containerInfo } = result.value;
 
       if (containerInfo.status === 'not_found' || containerInfo.status === 'exited') {
-        // Route ALL dead agents through agentCompleted so the bead
-        // lifecycle is properly handled. For refineries, this triggers
-        // the rework flow (MR bead failed → source bead back to
-        // in_progress). For polecats, it fails/closes the bead.
-        // 'completed' exit means normal termination; 'not_found' or
-        // no exit reason means the process died unexpectedly.
-        const status = containerInfo.exitReason === 'completed' ? 'completed' : 'failed';
-        const result = reviewQueue.agentCompleted(this.sql, agentId, {
-          status,
-          reason: status === 'failed' ? 'Agent process died (container restart or crash)' : undefined,
-        });
+        const agent = agents.getAgent(this.sql, agentId);
+        if (!agent) continue;
 
-        // For refinery rework: dispatch a polecat to re-work the source bead
-        if (result.reworkSourceBeadId) {
-          const sourceBead = beadOps.getBead(this.sql, result.reworkSourceBeadId);
-          if (sourceBead?.rig_id) {
-            try {
-              const reworkAgent = agents.getOrCreateAgent(
-                this.sql,
-                'polecat',
-                sourceBead.rig_id,
-                this.townId
-              );
-              agents.hookBead(this.sql, reworkAgent.id, result.reworkSourceBeadId);
-              this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
-                console.error(
-                  `${TOWN_LOG} witnessPatrol: rework dispatch failed for bead=${result.reworkSourceBeadId}`,
-                  err
-                )
-              );
-            } catch (err) {
-              console.warn(
-                `${TOWN_LOG} witnessPatrol: could not dispatch rework for bead=${result.reworkSourceBeadId}:`,
-                err
-              );
-            }
+        if (containerInfo.exitReason === 'completed') {
+          // Normal exit — route through agentCompleted for proper lifecycle
+          reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });
+        } else {
+          // Abnormal death (container restart, OOM, crash).
+          // DON'T fail the bead — just reset the agent to idle.
+          // For polecats: keep hook so schedulePendingWork re-dispatches
+          // For refineries: unhook (recoverStuckReviews handles MR bead
+          //   after timeout; the refinery may still call gt_done if the
+          //   merge succeeded before the process died)
+          if (agent.role === 'refinery') {
+            agents.unhookBead(this.sql, agentId);
           }
+          query(
+            this.sql,
+            /* sql */ `
+              UPDATE ${agent_metadata}
+              SET ${agent_metadata.columns.status} = 'idle',
+                  ${agent_metadata.columns.dispatch_attempts} = 0
+              WHERE ${agent_metadata.bead_id} = ?
+            `,
+            [agentId]
+          );
+          console.log(
+            `${TOWN_LOG} witnessPatrol: agent ${agentId} (${agent.role}) died abnormally — ` +
+              `reset to idle, bead status preserved for normal recovery`
+          );
         }
       }
     }

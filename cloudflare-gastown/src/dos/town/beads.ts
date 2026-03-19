@@ -258,6 +258,17 @@ export function updateBeadStatus(
   // No-op if already in the target status — avoids redundant events
   if (bead.status === status) return bead;
 
+  // HARD INVARIANT: terminal states (closed/failed) are immutable.
+  // Once a bead reaches a terminal state, no recovery function, stale MR
+  // failure, or race condition should ever change its status. Return the
+  // bead as-is (no-op, not an error) so callers don't need to pre-check.
+  if (bead.status === 'closed' || bead.status === 'failed') {
+    console.warn(
+      `[beads] updateBeadStatus: blocked ${bead.status} → ${status} for bead=${beadId} — terminal state is immutable`
+    );
+    return bead;
+  }
+
   const oldStatus = bead.status;
   const timestamp = now();
   const closedAt = status === 'closed' ? timestamp : bead.closed_at;

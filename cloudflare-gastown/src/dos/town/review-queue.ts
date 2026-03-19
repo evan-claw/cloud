@@ -225,6 +225,16 @@ export function completeReview(
   entryId: string,
   status: 'merged' | 'failed'
 ): void {
+  // Guard: don't overwrite terminal states (closed MR bead that was
+  // already merged should never be set to 'failed' by a stale call)
+  const current = getBead(sql, entryId);
+  if (current && (current.status === 'closed' || current.status === 'failed')) {
+    console.warn(
+      `[review-queue] completeReview: bead ${entryId} already ${current.status}, skipping`
+    );
+    return;
+  }
+
   const beadStatus = status === 'merged' ? 'closed' : 'failed';
   const timestamp = now();
   query(

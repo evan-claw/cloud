@@ -612,7 +612,10 @@ export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
   // current_hook_bead_id does NOT point back to this bead (either NULL
   // or hooked elsewhere). Also require the agent to NOT be 'working' —
   // if the agent is working, the hook mismatch may be a transient race
-  // during dispatch rather than a real orphan.
+  // during dispatch rather than a real orphan. Time guard: only touch
+  // beads orphaned for >2 min to avoid interfering with in-flight
+  // transitions (dispatch, gt_done, review completion).
+  const cutoff = new Date(Date.now() - 2 * 60_000).toISOString();
   const rows = OrphanedBeadRow.array().parse([
     ...query(
       sql,
@@ -627,13 +630,14 @@ export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
         WHERE ${beads.status} IN ('open', 'in_progress')
           AND ${beads.type} = 'issue'
           AND ${beads.assignee_agent_bead_id} IS NOT NULL
+          AND ${beads.updated_at} < ?
           AND ${agent_metadata.status} != 'working'
           AND (
             ${agent_metadata.current_hook_bead_id} IS NULL
             OR ${agent_metadata.current_hook_bead_id} != ${beads.bead_id}
           )
       `,
-      []
+      [cutoff]
     ),
   ]);
 
