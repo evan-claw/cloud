@@ -11,6 +11,8 @@ import {
   cliSessions,
   cli_sessions_v2,
   credit_transactions,
+  kiloclaw_subscriptions,
+  kiloclaw_earlybird_purchases,
 } from '@kilocode/db/schema';
 import { isNewSession } from '@/lib/cloud-agent/session-type';
 import { fetchSessionSnapshot, type SessionMessage } from '@/lib/session-ingest-client';
@@ -45,7 +47,7 @@ import {
 import { KiloPassIssuanceItemKind } from '@/lib/kilo-pass/enums';
 import { fromMicrodollars } from '@/lib/utils';
 import { sum } from 'drizzle-orm';
-import { CRON_SECRET } from '@/lib/config.server';
+import { CRON_SECRET, KILOCLAW_BILLING_ENFORCEMENT } from '@/lib/config.server';
 import { APP_URL } from '@/lib/constants';
 import { revalidatePath } from 'next/cache';
 import { recomputeUserBalances } from '@/lib/recomputeUserBalances';
@@ -53,6 +55,8 @@ import { getStripeInvoices } from '@/lib/stripe';
 import { client as stripeClient } from '@/lib/stripe-client';
 import { releaseScheduledChangeForSubscription } from '@/lib/kilo-pass/scheduled-change-release';
 import { kilo_pass_scheduled_changes } from '@kilocode/db/schema';
+import { KILOCLAW_EARLYBIRD_EXPIRY_DATE } from '@/lib/kiloclaw/constants';
+import { createKiloClawAdminAuditLog } from '@/lib/kiloclaw/admin-audit-log';
 import {
   getKilocodeRepoOpenPullRequestCounts,
   getKilocodeRepoOpenPullRequestsSummary,
@@ -156,6 +160,15 @@ const GetUserInvoicesSchema = z.object({
 const CancelAndRefundKiloPassSchema = z.object({
   userId: z.string(),
   reason: z.string().min(1, 'Reason is required').trim(),
+});
+
+const GetKiloClawStateSchema = z.object({
+  userId: z.string(),
+});
+
+const UpdateKiloClawTrialEndAtSchema = z.object({
+  userId: z.string(),
+  trial_ends_at: z.string().datetime(),
 });
 
 export const adminRouter = createTRPCRouter({
@@ -441,6 +454,126 @@ export const adminRouter = createTRPCRouter({
             bonusUnlocked: user.kilo_pass_threshold === null,
           },
         };
+      }),
+
+    getKiloClawState: adminProcedure.input(GetKiloClawStateSchema).query(async ({ input }) => {
+      const user = await db.query.kilocode_users.findFirst({
+        columns: { id: true },
+        where: eq(kilocode_users.id, input.userId),
+      });
+
+      if (!user) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+
+      const [subscription, earlybird] = await Promise.all([
+        db.query.kiloclaw_subscriptions.findFirst({
+          where: eq(kiloclaw_subscriptions.user_id, input.userId),
+        }),
+        db.query.kiloclaw_earlybird_purchases.findFirst({
+          columns: { id: true },
+          where: eq(kiloclaw_earlybird_purchases.user_id, input.userId),
+        }),
+      ]);
+
+      const now = new Date();
+      const earlybirdDaysRemaining = earlybird
+        ? Math.ceil(
+            (new Date(KILOCLAW_EARLYBIRD_EXPIRY_DATE).getTime() - now.getTime()) / 86_400_000
+          )
+        : 0;
+
+      let hasAccess = !KILOCLAW_BILLING_ENFORCEMENT;
+      let accessReason: 'trial' | 'subscription' | 'earlybird' | null = null;
+
+      if (
+        subscription?.status === 'active' ||
+        (subscription?.status === 'past_due' && !subscription.suspended_at)
+      ) {
+        hasAccess = true;
+        accessReason = 'subscription';
+      } else if (
+        subscription?.status === 'trialing' &&
+        subscription.trial_ends_at &&
+        new Date(subscription.trial_ends_at) > now
+      ) {
+        hasAccess = true;
+        accessReason = 'trial';
+      } else if (earlybird && new Date(KILOCLAW_EARLYBIRD_EXPIRY_DATE) > now) {
+        hasAccess = true;
+        accessReason = 'earlybird';
+      }
+
+      return {
+        subscription: subscription ?? null,
+        hasAccess,
+        accessReason,
+        earlybird: earlybird
+          ? {
+              purchased: true,
+              expiresAt: KILOCLAW_EARLYBIRD_EXPIRY_DATE,
+              daysRemaining: earlybirdDaysRemaining,
+            }
+          : null,
+      };
+    }),
+
+    updateKiloClawTrialEndAt: adminProcedure
+      .input(UpdateKiloClawTrialEndAtSchema)
+      .mutation(async ({ input, ctx }) => {
+        const user = await db.query.kilocode_users.findFirst({
+          columns: { id: true },
+          where: eq(kilocode_users.id, input.userId),
+        });
+
+        if (!user) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+        }
+
+        const subscription = await db.query.kiloclaw_subscriptions.findFirst({
+          where: eq(kiloclaw_subscriptions.user_id, input.userId),
+        });
+
+        if (!subscription) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'No KiloClaw subscription found for this user',
+          });
+        }
+
+        if (subscription.status !== 'trialing') {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Only trialing KiloClaw subscriptions can have their trial end date edited',
+          });
+        }
+
+        const previousTrialEndsAt = subscription.trial_ends_at;
+
+        await db.transaction(async tx => {
+          await tx
+            .update(kiloclaw_subscriptions)
+            .set({ trial_ends_at: input.trial_ends_at })
+            .where(eq(kiloclaw_subscriptions.user_id, input.userId));
+
+          await createKiloClawAdminAuditLog({
+            action: 'kiloclaw.subscription.update_trial_end',
+            actor_id: ctx.user.id,
+            actor_email: ctx.user.google_user_email,
+            actor_name: ctx.user.google_user_name,
+            target_user_id: input.userId,
+            message: `KiloClaw trial end updated from ${
+              previousTrialEndsAt ?? 'unset'
+            } to ${input.trial_ends_at}`,
+            metadata: {
+              previousTrialEndsAt,
+              newTrialEndsAt: input.trial_ends_at,
+            },
+            tx,
+          });
+        });
+
+        return successResult();
       }),
 
     getInvoices: adminProcedure.input(GetUserInvoicesSchema).query(async ({ input }) => {
