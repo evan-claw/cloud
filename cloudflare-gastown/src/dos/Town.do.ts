@@ -2910,15 +2910,20 @@ export class TownDO extends DurableObject<Env> {
           reviewQueue.agentCompleted(this.sql, agentId, { status: 'completed' });
           continue;
         }
+        // Clear last_activity_at so schedulePendingWork picks this agent
+        // up on the very next tick without waiting for the dispatch
+        // cooldown. The cooldown protects against double-dispatch of live
+        // agents with an in-flight start — a dead agent has no in-flight
+        // dispatch to collide with.
         query(
           this.sql,
           /* sql */ `
             UPDATE ${agent_metadata}
             SET ${agent_metadata.columns.status} = 'idle',
-                ${agent_metadata.columns.last_activity_at} = ?
+                ${agent_metadata.columns.last_activity_at} = NULL
             WHERE ${agent_metadata.bead_id} = ?
           `,
-          [now(), agentId]
+          [agentId]
         );
       }
     }
