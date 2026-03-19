@@ -349,7 +349,9 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       return 'upstream_error';
     }
 
-    return 'unknown';
+    // Return undefined for unrecognized errors so NULL in the DB
+    // differentiates "not yet classified" from a known category.
+    return undefined;
   }
 
   /**
