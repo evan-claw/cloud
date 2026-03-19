@@ -230,19 +230,64 @@ async function processUser(
 
   // 5. Run simulation — use EXPIRY_DATE_OBJ as `now` to project what would happen at expiry
   const entity = { id: user.id, microdollars_used: user.microdollars_used };
-  const { newTransactions } = computeExpiration(simulationInput, entity, EXPIRY_DATE_OBJ, user.id);
+  let { newTransactions } = computeExpiration(simulationInput, entity, EXPIRY_DATE_OBJ, user.id);
 
-  // 6. Map projected expired amounts back to affected credits
-  const expiredByOriginalId = new Map(
-    newTransactions.map(t => [t.original_transaction_id, Math.abs(t.amount_microdollars ?? 0)])
-  );
-
+  // 5a. Floor at zero: if the simulation would push the balance negative (e.g. because
+  //     Orb already clawed back spend via total_microdollars_acquired adjustments),
+  //     inflate baselines on the newly-tagged credits so total expiration never exceeds
+  //     the current balance.
   const currentBalance = user.total_microdollars_acquired - user.microdollars_used;
   const totalExpiredAll = newTransactions.reduce(
     (sum, t) => sum + Math.abs(t.amount_microdollars ?? 0),
     0
   );
-  const projectedBalance = currentBalance - totalExpiredAll;
+  let projectedBalance = currentBalance - totalExpiredAll;
+
+  const baselineBoosts = new Map<string, number>();
+
+  if (projectedBalance < 0) {
+    let deficit = Math.abs(projectedBalance);
+    const affectedIdSet = new Set(affectedCredits.map(t => t.id));
+
+    // Reduce expiration on newly-tagged credits, starting from last (least priority)
+    for (let i = newTransactions.length - 1; i >= 0 && deficit > 0; i--) {
+      const tx = newTransactions[i];
+      if (!affectedIdSet.has(tx.original_transaction_id!)) continue;
+
+      const expiredAmt = Math.abs(tx.amount_microdollars ?? 0);
+      if (expiredAmt === 0) continue;
+
+      const reduction = Math.min(deficit, expiredAmt);
+      baselineBoosts.set(tx.original_transaction_id!, reduction);
+      deficit -= reduction;
+    }
+
+    // Re-run simulation with boosted baselines
+    const boostedAffected: ExpiringTransaction[] = affectedCredits.map(t => ({
+      id: t.id,
+      amount_microdollars: t.amount_microdollars,
+      expiration_baseline_microdollars_used:
+        (t.original_baseline_microdollars_used ?? 0) + (baselineBoosts.get(t.id) ?? 0),
+      expiry_date: EXPIRY_DATE,
+      description: t.description,
+      is_free: t.is_free,
+    }));
+
+    const boostedInput = [...existingExpiring, ...boostedAffected];
+    const rerun = computeExpiration(boostedInput, entity, EXPIRY_DATE_OBJ, user.id);
+    newTransactions = rerun.newTransactions;
+
+    const newTotalExpired = newTransactions.reduce(
+      (sum, t) => sum + Math.abs(t.amount_microdollars ?? 0),
+      0
+    );
+    projectedBalance = currentBalance - newTotalExpired;
+  }
+
+  // 6. Map projected expired amounts back to affected credits
+  const expiredByOriginalId = new Map(
+    newTransactions.map(t => [t.original_transaction_id, Math.abs(t.amount_microdollars ?? 0)])
+  );
 
   const creditsAffectedWithProjection = affectedCredits.map(t => ({
     ...t,
@@ -256,20 +301,25 @@ async function processUser(
     current_balance_microdollars: currentBalance,
     projected_balance_microdollars: projectedBalance,
     credits_affected: creditsAffectedWithProjection,
+    baseline_boosts: baselineBoosts.size > 0 ? Object.fromEntries(baselineBoosts) : undefined,
   });
   output.write(logLine + '\n');
 
   // 8. Execute mode: write DB changes
   if (execute) {
-    const affectedIds = affectedCredits.map(t => t.id);
     await db.transaction(async tx => {
-      await tx
-        .update(credit_transactions)
-        .set({
-          expiry_date: EXPIRY_DATE,
-          expiration_baseline_microdollars_used: sql`COALESCE(${credit_transactions.original_baseline_microdollars_used}, 0)`,
-        })
-        .where(inArray(credit_transactions.id, affectedIds));
+      // Write each credit individually to apply per-credit boosted baselines
+      for (const credit of affectedCredits) {
+        const boost = baselineBoosts.get(credit.id) ?? 0;
+        const baseline = (credit.original_baseline_microdollars_used ?? 0) + boost;
+        await tx
+          .update(credit_transactions)
+          .set({
+            expiry_date: EXPIRY_DATE,
+            expiration_baseline_microdollars_used: baseline,
+          })
+          .where(eq(credit_transactions.id, credit.id));
+      }
 
       // COALESCE needed because LEAST(NULL, x) returns NULL in PostgreSQL
       await tx

@@ -34,6 +34,8 @@ const USER_EXISTING_EXPIRATION = `${TEST_PREFIX}-existing-expiration`;
 const USER_MULTI_BLOCK = `${TEST_PREFIX}-multi-block`;
 const USER_BUY_USE_FREE = `${TEST_PREFIX}-buy-use-free`;
 const USER_FREE_USE_BUY = `${TEST_PREFIX}-free-use-buy`;
+const USER_ORB_DOUBLE_DEDUCT = `${TEST_PREFIX}-orb-double-deduct`;
+const USER_ORB_EXISTING_EXPIRY = `${TEST_PREFIX}-orb-existing-expiry`;
 
 const ALL_USER_IDS = [
   USER_FULLY_SPENT,
@@ -51,6 +53,8 @@ const ALL_USER_IDS = [
   USER_MULTI_BLOCK,
   USER_BUY_USE_FREE,
   USER_FREE_USE_BUY,
+  USER_ORB_DOUBLE_DEDUCT,
+  USER_ORB_EXISTING_EXPIRY,
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -122,6 +126,18 @@ async function setup() {
     // Both have $10 used, $20 acquired ($10 paid + $10 free), balance = $10
     makeUser(USER_BUY_USE_FREE, 10, 20),
     makeUser(USER_FREE_USE_BUY, 10, 20),
+    // Orb double-deduction: user got $5 free, spent it all via Orb (which reduced
+    // total_acquired by $5), balance is now $0. Without the floor-at-zero fix,
+    // expiring the $5 credit would push balance to -$5.
+    makeUser(USER_ORB_DOUBLE_DEDUCT, 0, 0),
+    // Orb double-deduction with existing expiring credit: user got $5 free (already
+    // has expiry from a previous run) + $5 new free credit. Orb adjusted -$5.
+    // acquired=5, used=0, balance=$5. Existing $5 expires fully → $0.
+    // New $5 should NOT push to -$5.
+    {
+      ...makeUser(USER_ORB_EXISTING_EXPIRY, 0, 5),
+      next_credit_expiration_at: EARLIER_EXPIRY,
+    },
   ]);
 
   // Insert credits
@@ -205,6 +221,22 @@ async function setup() {
       // 15. Get $10 free, use $10, buy $10 → original_baseline=0 (spent $0 before free credit)
       makeCredit(USER_FREE_USE_BUY, 10),
       makeCredit(USER_FREE_USE_BUY, 10, { isFree: false }),
+
+      // 16. Orb double-deduction: $5 free credit, Orb already clawed back (balance=0)
+      makeCredit(USER_ORB_DOUBLE_DEDUCT, 5, {
+        category: 'stytch-validation',
+        description: 'Free credits for passing Stytch fraud detection.',
+      }),
+
+      // 17. Orb double-deduction with existing expiry:
+      //     $5 free credit already has expiry (simulates previous script run)
+      makeCredit(USER_ORB_EXISTING_EXPIRY, 5, {
+        category: 'stytch-validation',
+        description: 'Free credits for passing Stytch fraud detection.',
+        expiryDate: EARLIER_EXPIRY,
+      }),
+      //     $5 new free credit (no expiry yet, will be tagged by this script)
+      makeCredit(USER_ORB_EXISTING_EXPIRY, 5),
     ])
     .returning({ id: credit_transactions.id });
 
@@ -543,6 +575,61 @@ async function runAssertions(): Promise<AssertionResult[]> {
       name: 'Free-use-buy: balance is $10 after expiry',
       passed: balanceAfter === 10 * MICRODOLLARS,
       detail: `Expected ${10 * MICRODOLLARS}, got ${balanceAfter}`,
+    });
+  }
+
+  // --- 22. Orb double-deduction: balance stays at $0, never goes negative
+  //     User got $5 free, Orb clawed it back (acquired=0, used=0, balance=$0).
+  //     Without the fix, expiring the $5 credit would push to -$5.
+  //     With the fix, baseline is boosted so $0 expires.
+  {
+    const user = userById(USER_ORB_DOUBLE_DEDUCT);
+    const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
+    const totalExpired = simulateExpiration(USER_ORB_DOUBLE_DEDUCT);
+    const balanceAfter = balanceNow - totalExpired;
+
+    results.push({
+      name: 'Orb double-deduct: balance is $0 today',
+      passed: balanceNow === 0,
+      detail: `Expected 0, got ${balanceNow}`,
+    });
+    results.push({
+      name: 'Orb double-deduct: $0 expires (floor at zero)',
+      passed: totalExpired === 0,
+      detail: `Expected 0, got ${totalExpired}`,
+    });
+    results.push({
+      name: 'Orb double-deduct: balance is $0 after expiry',
+      passed: balanceAfter === 0,
+      detail: `Expected 0, got ${balanceAfter}`,
+    });
+    // Verify the baseline was boosted
+    const credit = creditsFor(USER_ORB_DOUBLE_DEDUCT).find(c => c.expiry_date != null);
+    results.push({
+      name: 'Orb double-deduct: baseline boosted to absorb deficit',
+      passed: (credit?.expiration_baseline_microdollars_used ?? 0) > 0,
+      detail: `Baseline: ${credit?.expiration_baseline_microdollars_used}`,
+    });
+  }
+
+  // --- 23. Orb double-deduction with existing expiring credit:
+  //     User has $5 balance. Existing $5 credit (with expiry) expires all $5.
+  //     New $5 credit should NOT expire anything — floor at zero prevents -$5.
+  {
+    const user = userById(USER_ORB_EXISTING_EXPIRY);
+    const balanceNow = user.total_microdollars_acquired - user.microdollars_used;
+    const totalExpired = simulateExpiration(USER_ORB_EXISTING_EXPIRY);
+    const balanceAfter = balanceNow - totalExpired;
+
+    results.push({
+      name: 'Orb existing-expiry: balance is $5 today',
+      passed: balanceNow === 5 * MICRODOLLARS,
+      detail: `Expected ${5 * MICRODOLLARS}, got ${balanceNow}`,
+    });
+    results.push({
+      name: 'Orb existing-expiry: balance is $0 after expiry (not negative)',
+      passed: balanceAfter >= 0,
+      detail: `Expected >= 0, got ${balanceAfter}`,
     });
   }
 
