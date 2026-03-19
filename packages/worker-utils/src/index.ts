@@ -1,3 +1,5 @@
+export { timingSafeCompare } from './timing-safe-compare.js';
+
 export { withDORetry, DEFAULT_DO_RETRY_CONFIG } from './do-retry.js';
 export type { DORetryConfig } from './do-retry.js';
 
