@@ -822,6 +822,9 @@ importers:
       hono:
         specifier: ^4.12.7
         version: 4.12.7
+      workers-tagged-logger:
+        specifier: 'catalog:'
+        version: 1.0.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
@@ -847,6 +850,9 @@ importers:
       hono:
         specifier: ^4.12.7
         version: 4.12.7
+      workers-tagged-logger:
+        specifier: 'catalog:'
+        version: 1.0.0
       zod:
         specifier: 'catalog:'
         version: 4.3.6
@@ -875,6 +881,9 @@ importers:
       hono:
         specifier: ^4.12.7
         version: 4.12.7
+      workers-tagged-logger:
+        specifier: 'catalog:'
+        version: 1.0.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 'catalog:'

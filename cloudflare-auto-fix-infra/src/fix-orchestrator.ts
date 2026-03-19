@@ -10,6 +10,7 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env, FixTicket, FixRequest, ClassificationResult } from './types';
 import { buildPRPrompt, buildReviewCommentPrompt } from './services/prompt-builder';
 import { CloudAgentNextClient } from './services/cloud-agent-next-client';
+import { logger } from './logger';
 
 export class AutoFixOrchestrator extends DurableObject<Env> {
   private state!: FixTicket;
@@ -48,7 +49,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     await this.loadState();
 
     if (this.state.status !== 'pending') {
-      console.log('[AutoFixOrchestrator] Skipping - already processed', {
+      logger.info('[AutoFixOrchestrator] Skipping - already processed', {
         ticketId: this.state.ticketId,
         status: this.state.status,
       });
@@ -63,7 +64,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      console.error('[AutoFixOrchestrator] Error:', {
+      logger.error('[AutoFixOrchestrator] Error:', {
         ticketId: this.state.ticketId,
         error: errorMessage,
       });
@@ -83,7 +84,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
           errorMessage: errorMessage,
         });
       } catch (statusError) {
-        console.error('[AutoFixOrchestrator] Failed to update ticket to failed state', {
+        logger.error('[AutoFixOrchestrator] Failed to update ticket to failed state', {
           ticketId: this.state.ticketId,
           error: statusError instanceof Error ? statusError.message : String(statusError),
         });
@@ -115,7 +116,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
    * Terminal handling (including PR creation for issue tickets) happens in callback routes.
    */
   private async createPR(): Promise<void> {
-    console.log('[AutoFixOrchestrator] Creating PR', {
+    logger.info('[AutoFixOrchestrator] Creating PR', {
       ticketId: this.state.ticketId,
       issueNumber: this.state.sessionInput.issueNumber,
     });
@@ -247,7 +248,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
       },
     };
 
-    console.log('[AutoFixOrchestrator] Preparing auto-fix session in cloud-agent-next', {
+    logger.info('[AutoFixOrchestrator] Preparing auto-fix session in cloud-agent-next', {
       ticketId: this.state.ticketId,
       triggerSource: this.state.triggerSource,
       cloudAgentBaseUrl,
@@ -272,7 +273,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
       this.state.ticketId
     );
 
-    console.log('[AutoFixOrchestrator] Auto-fix execution started in cloud-agent-next', {
+    logger.info('[AutoFixOrchestrator] Auto-fix execution started in cloud-agent-next', {
       ticketId: this.state.ticketId,
       triggerSource: this.state.triggerSource,
       sessionId: prepareResult.cloudAgentSessionId,
@@ -294,7 +295,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
     sessionId: string | undefined,
     errorMessage: string
   ): Promise<boolean> {
-    console.log('[AutoFixOrchestrator] Notifying review comment failure', {
+    logger.info('[AutoFixOrchestrator] Notifying review comment failure', {
       ticketId: this.state.ticketId,
       sessionId,
       hasError: true,
@@ -317,7 +318,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.warn('[AutoFixOrchestrator] Failed to notify review comment failure', {
+        logger.warn('[AutoFixOrchestrator] Failed to notify review comment failure', {
           ticketId: this.state.ticketId,
           sessionId,
           httpStatus: response.status,
@@ -327,13 +328,13 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
         return false;
       }
 
-      console.log('[AutoFixOrchestrator] Review comment failure notification succeeded', {
+      logger.info('[AutoFixOrchestrator] Review comment failure notification succeeded', {
         ticketId: this.state.ticketId,
         sessionId,
       });
       return true;
     } catch (notifyError) {
-      console.warn('[AutoFixOrchestrator] Error notifying review comment failure', {
+      logger.warn('[AutoFixOrchestrator] Error notifying review comment failure', {
         ticketId: this.state.ticketId,
         sessionId,
         error: notifyError instanceof Error ? notifyError.message : String(notifyError),
@@ -381,7 +382,7 @@ export class AutoFixOrchestrator extends DurableObject<Env> {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'unknown');
-      console.error('[AutoFixOrchestrator] Failed to update status in Next.js database', {
+      logger.error('[AutoFixOrchestrator] Failed to update status in Next.js database', {
         ticketId: this.state.ticketId,
         status,
         httpStatus: response.status,

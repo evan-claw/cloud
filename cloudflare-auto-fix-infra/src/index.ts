@@ -4,13 +4,15 @@
  * Handles HTTP requests to dispatch and manage auto-fix sessions
  */
 
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { useWorkersLogger } from 'workers-tagged-logger';
 import type { Env, FixRequest, FixResponse } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+import { logger } from './logger';
 import { AutoFixOrchestrator } from './fix-orchestrator';
 
 // Export the Durable Object class
@@ -19,6 +21,9 @@ export { AutoFixOrchestrator };
 // Create Hono app with Env type
 type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
+
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+app.use('*', useWorkersLogger('auto-fix-worker') as unknown as MiddlewareHandler);
 
 // Authentication middleware
 app.use(
@@ -61,7 +66,9 @@ app.post('/fix/dispatch', async c => {
       status: result.status as FixResponse['status'],
     });
   } catch (error) {
-    console.error('[AutoFixWorker] Dispatch error:', error);
+    logger.error('[AutoFixWorker] Dispatch error:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return c.json(
       {
         error: 'Failed to dispatch fix',
@@ -89,7 +96,9 @@ app.get('/fix/:ticketId/status', async c => {
 
     return c.json(result);
   } catch (error) {
-    console.error('[AutoFixWorker] Status error:', error);
+    logger.error('[AutoFixWorker] Status error:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return c.json(
       {
         error: 'Failed to get status',
@@ -111,7 +120,9 @@ app.post('/fix/:ticketId/cancel', async c => {
     // TODO: cancel is not yet implemented in the DO
     return c.json({ ticketId, status: 'cancelled' });
   } catch (error) {
-    console.error('[AutoFixWorker] Cancel error:', error);
+    logger.error('[AutoFixWorker] Cancel error:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return c.json(
       {
         error: 'Failed to cancel fix',
@@ -130,6 +141,6 @@ app.notFound(createNotFoundHandler());
 /**
  * Error handler
  */
-app.onError(createErrorHandler());
+app.onError(createErrorHandler(logger));
 
 export default app;

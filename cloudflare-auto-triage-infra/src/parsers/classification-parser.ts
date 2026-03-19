@@ -6,6 +6,7 @@
  */
 
 import { classificationResultSchema, type ClassificationResult } from '../types';
+import { logger } from '../logger';
 
 /**
  * Filter a list of raw label values to only those present in availableLabels
@@ -79,7 +80,7 @@ export const parseClassification = (
   }
   failures.push('tailFallback: no matching content in last 5000 chars');
 
-  console.error('[ClassificationParser] All strategies failed', {
+  logger.error('[ClassificationParser] All strategies failed', {
     textLength: text.length,
     textPreview: text.slice(0, 500),
     textTail: text.slice(-500),

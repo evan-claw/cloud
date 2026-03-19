@@ -5,6 +5,8 @@
  * Handles SSE parsing, buffer management, and error handling.
  */
 
+import { logger } from '../logger';
+
 type StreamEventHandler = {
   onSessionId?: (sessionId: string) => void;
   onTextContent?: (text: string) => void;
@@ -69,7 +71,7 @@ export class SSEStreamProcessor {
       startTime: Date.now(),
     };
 
-    console.log('[SSEStreamProcessor] Starting stream processing');
+    logger.info('[SSEStreamProcessor] Starting stream processing');
 
     try {
       while (true) {
@@ -78,7 +80,7 @@ export class SSEStreamProcessor {
         if (done) {
           metrics.endTime = Date.now();
           const durationMs = metrics.endTime - metrics.startTime;
-          console.log('[SSEStreamProcessor] Stream ended naturally', {
+          logger.info('[SSEStreamProcessor] Stream ended naturally', {
             ...metrics,
             durationMs,
             durationSeconds: Math.floor(durationMs / 1000),
@@ -141,7 +143,7 @@ export class SSEStreamProcessor {
 
               // Handle completion event
               if (event.streamEventType === 'complete') {
-                console.log('[SSEStreamProcessor] Stream completion event received', {
+                logger.info('[SSEStreamProcessor] Stream completion event received', {
                   totalEvents: metrics.totalEvents,
                 });
                 if (handlers.onComplete) {
@@ -158,7 +160,7 @@ export class SSEStreamProcessor {
                 const error = new Error(`Stream error: ${errorMessage}`);
 
                 // Log the error event details for debugging
-                console.warn('[SSEStreamProcessor] Error event received', {
+                logger.warn('[SSEStreamProcessor] Error event received', {
                   message: event.message,
                   errorDetails: event.error,
                   eventNumber: metrics.totalEvents,
@@ -176,12 +178,12 @@ export class SSEStreamProcessor {
             } catch (parseError) {
               metrics.parseErrors++;
               // Enhanced logging for parse errors
-              console.warn('[SSEStreamProcessor] Failed to parse SSE event', {
+              logger.warn('[SSEStreamProcessor] Failed to parse SSE event', {
                 eventNumber: metrics.totalEvents + 1,
                 parseErrorCount: metrics.parseErrors,
                 dataLength: data.length,
                 dataPreview: data.slice(0, 100),
-                errorType: parseError?.constructor?.name,
+                errorType: (parseError as Error | null)?.constructor?.name,
                 errorMessage: parseError instanceof Error ? parseError.message : String(parseError),
               });
               // Skip invalid JSON and continue processing
@@ -196,7 +198,7 @@ export class SSEStreamProcessor {
       // Final summary log
       metrics.endTime = metrics.endTime || Date.now();
       const durationMs = metrics.endTime - metrics.startTime;
-      console.log('[SSEStreamProcessor] Stream processing complete', {
+      logger.info('[SSEStreamProcessor] Stream processing complete', {
         ...metrics,
         durationMs,
         durationSeconds: Math.floor(durationMs / 1000),

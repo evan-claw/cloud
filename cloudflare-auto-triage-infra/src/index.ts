@@ -6,13 +6,15 @@
  *
  */
 
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
+import { useWorkersLogger } from 'workers-tagged-logger';
 import type { Env, TriageRequest, TriageResponse } from './types';
 import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
 } from '@kilocode/worker-utils';
+import { logger } from './logger';
 
 // Import base Durable Object
 import { TriageOrchestrator as TriageOrchestratorBase } from './triage-orchestrator';
@@ -23,6 +25,9 @@ export const TriageOrchestrator = TriageOrchestratorBase;
 // Create Hono app with Env type
 type HonoEnv = { Bindings: Env };
 const app = new Hono<HonoEnv>();
+
+// TODO: remove cast once workers-tagged-logger publishes a version compiled against hono >=4.12.7
+app.use('*', useWorkersLogger('auto-triage-worker') as unknown as MiddlewareHandler);
 
 // Authentication middleware
 app.use(
@@ -50,7 +55,7 @@ app.post('/triage', async (c: Context<HonoEnv>) => {
     );
   }
 
-  console.log('[POST /triage] Received triage request', {
+  logger.info('[POST /triage] Received triage request', {
     ticketId: body.ticketId,
     owner: body.owner,
   });
@@ -58,7 +63,7 @@ app.post('/triage', async (c: Context<HonoEnv>) => {
   // Create DO name from ticketId (concurrency controlled by Next.js dispatch)
   const doName = body.ticketId;
 
-  console.log('[POST /triage] Creating DO', {
+  logger.info('[POST /triage] Creating DO', {
     ticketId: body.ticketId,
     doName,
   });
@@ -79,14 +84,14 @@ app.post('/triage', async (c: Context<HonoEnv>) => {
   // This runs the triage processing without blocking the response
   c.executionCtx.waitUntil(
     stub.runTriage().catch((error: Error) => {
-      console.error('[POST /triage] runTriage failed:', {
+      logger.error('[POST /triage] runTriage failed:', {
         ticketId: body.ticketId,
         error: error.message,
       });
     })
   );
 
-  console.log('[POST /triage] Triage started', {
+  logger.info('[POST /triage] Triage started', {
     ticketId: body.ticketId,
     owner: body.owner,
     status: result.status,
@@ -109,7 +114,7 @@ app.get('/tickets/:ticketId/events', async (c: Context<HonoEnv>) => {
     return c.json({ error: 'ticketId parameter required' }, 400);
   }
 
-  console.log('[GET /tickets/:ticketId/events] Fetching events', { ticketId });
+  logger.info('[GET /tickets/:ticketId/events] Fetching events', { ticketId });
 
   // Get Durable Object stub
   const id = c.env.TRIAGE_ORCHESTRATOR.idFromName(ticketId);
@@ -127,7 +132,7 @@ app.get('/health', (c: Context<HonoEnv>) => {
 });
 
 // Global error handler
-app.onError(createErrorHandler());
+app.onError(createErrorHandler(logger));
 
 // 404 handler
 app.notFound(createNotFoundHandler());
