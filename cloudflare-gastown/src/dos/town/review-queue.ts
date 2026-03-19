@@ -370,21 +370,40 @@ export function completeReviewWithResult(
         conflict: true,
       },
     });
-    // Return source bead to in_progress so the polecat can be re-dispatched
-    // to resolve the conflict (in_review → in_progress rework flow).
-    // Skip if source bead already reached a terminal state.
+    // Return source bead to open so the normal scheduling path handles
+    // rework. Clear assignee so feedStrandedConvoys can match.
     const conflictSourceBead = getBead(sql, entry.bead_id);
     if (conflictSourceBead && conflictSourceBead.status !== 'closed' && conflictSourceBead.status !== 'failed') {
-      updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+      updateBeadStatus(sql, entry.bead_id, 'open', entry.agent_id);
+      query(
+        sql,
+        /* sql */ `
+          UPDATE ${beads}
+          SET ${beads.columns.assignee_agent_bead_id} = NULL
+          WHERE ${beads.bead_id} = ?
+        `,
+        [entry.bead_id]
+      );
     }
   } else if (input.status === 'failed') {
-    // Review failed (rework requested): return source bead to in_progress
-    // so it can be re-dispatched (in_review → in_progress rework flow).
-    // BUT only if the source bead hasn't already reached a terminal state
-    // (e.g. closed by a different MR bead that merged successfully).
+    // Review failed (rework requested): return source bead to open so
+    // the normal scheduling path (feedStrandedConvoys → hookBead →
+    // schedulePendingWork → dispatch) handles rework. Clear the stale
+    // assignee so feedStrandedConvoys can match (requires assignee IS NULL).
+    // This avoids the fire-and-forget rework dispatch race in TownDO
+    // where the dispatch fails and rehookOrphanedBeads churn.
     const sourceBead = getBead(sql, entry.bead_id);
     if (sourceBead && sourceBead.status !== 'closed' && sourceBead.status !== 'failed') {
-      updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+      updateBeadStatus(sql, entry.bead_id, 'open', entry.agent_id);
+      query(
+        sql,
+        /* sql */ `
+          UPDATE ${beads}
+          SET ${beads.columns.assignee_agent_bead_id} = NULL
+          WHERE ${beads.bead_id} = ?
+        `,
+        [entry.bead_id]
+      );
     }
   }
 }
@@ -851,17 +870,18 @@ export function agentCompleted(
 
   if (agent.current_hook_bead_id) {
     if (agent.role === 'refinery') {
-      // NEVER fail an MR bead from agentCompleted. The refinery's lifecycle
-      // is managed by gt_done (success) and recoverStuckReviews (timeout).
+      // NEVER fail or unhook a refinery from agentCompleted.
+      // agentCompleted races with gt_done: the process exits, the
+      // container sends /completed, but gt_done's HTTP request may
+      // still be in flight. If we unhook here, recoverStuckReviews
+      // can fire between agentCompleted and gt_done, resetting the
+      // MR bead that's about to be closed by gt_done.
       //
-      // agentCompleted races with gt_done: the process may exit before
-      // gt_done's HTTP response reaches the DO, causing agentCompleted to
-      // arrive first. If we fail the MR here, we'd undo a successful merge.
+      // Leave the hook intact. gt_done will close + unhook if the
+      // merge succeeded. recoverStuckReviews (which checks for
+      // status='working') handles the case where gt_done never arrives.
       //
-      // Just unhook and idle. If the refinery merged, gt_done will close
-      // the MR bead when it arrives. If the refinery crashed without
-      // merging, recoverStuckReviews resets the MR bead after timeout.
-      unhookBead(sql, agentId);
+      // No-op for the bead — just fall through to mark agent idle.
     } else {
       const beadStatus = input.status === 'completed' ? 'closed' : 'failed';
       updateBeadStatus(sql, agent.current_hook_bead_id, beadStatus, agentId);

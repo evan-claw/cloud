@@ -1242,35 +1242,10 @@ export class TownDO extends DurableObject<Env> {
       });
     }
 
-    // When a review fails or conflicts (rework), the source bead was
-    // returned to in_progress. Re-hook a polecat and re-dispatch so the
-    // rework starts automatically. The original polecat may already be
-    // working on something else, so fall back to getOrCreateAgent.
-    if ((input.status === 'failed' || input.status === 'conflict') && sourceBeadId) {
-      const sourceBead = beadOps.getBead(this.sql, sourceBeadId);
-      if (sourceBead?.rig_id) {
-        try {
-          const reworkAgent = agents.getOrCreateAgent(
-            this.sql,
-            'polecat',
-            sourceBead.rig_id,
-            this.townId
-          );
-          agents.hookBead(this.sql, reworkAgent.id, sourceBeadId);
-          this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
-            console.error(
-              `${TOWN_LOG} completeReviewWithResult: fire-and-forget rework dispatch failed for bead=${sourceBeadId}`,
-              err
-            )
-          );
-        } catch (err) {
-          console.warn(
-            `${TOWN_LOG} completeReviewWithResult: could not dispatch rework for bead=${sourceBeadId}:`,
-            err
-          );
-        }
-      }
-    }
+    // Rework is handled by the normal scheduling path: the failed/conflict
+    // path in completeReviewWithResult sets the source bead to 'open' with
+    // assignee cleared. feedStrandedConvoys or rehookOrphanedBeads will
+    // hook a polecat, and schedulePendingWork will dispatch it.
   }
 
   async agentDone(agentId: string, input: AgentDoneInput): Promise<void> {
@@ -2910,13 +2885,19 @@ export class TownDO extends DurableObject<Env> {
         if (!agent) continue;
 
         if (agent.role === 'refinery') {
-          // Set refinery to idle. Keep the hook intact so
-          // recoverStuckReviews' guard (NOT EXISTS working agent) can
-          // distinguish between "refinery is actively working" (skip)
-          // and "refinery died" (recover after timeout).
-          //
+          // For refineries, only act on definitive 'exited' status.
+          // 'not_found' is ambiguous — the container may be restarting
+          // or the status check may have timed out. Setting the refinery
+          // to idle on not_found would enable recoverStuckReviews to
+          // fire prematurely.
+          if (containerInfo.status === 'not_found') {
+            // Skip — don't touch the refinery. It may still be alive.
+            continue;
+          }
+          // Container confirmed exited. Set to idle, keep hook intact
+          // so recoverStuckReviews' guard works (checks status='working').
           // Exception: if gt_done already closed the MR bead, unhook
-          // the refinery as cleanup so it can be reused immediately.
+          // as cleanup so the refinery can be reused immediately.
           query(
             this.sql,
             /* sql */ `
@@ -3364,14 +3345,11 @@ export class TownDO extends DurableObject<Env> {
   }
 
   /**
-   * Fail an MR bead via the full review lifecycle (completeReviewWithResult)
-   * so that convoy progress is updated and the source bead is returned to
-   * in_progress for rework. Mirrors the rework dispatch in
-   * completeReviewWithResult and agentCompleted.
-   *
-   * Used by processReviewQueue failure paths that previously called
-   * completeReview directly — which bypassed convoy progress and left the
-   * source bead stuck in in_review.
+   * Fail an MR bead via completeReviewWithResult. The source bead is
+   * returned to 'open' with its assignee cleared, so the normal
+   * scheduling path (feedStrandedConvoys → hookBead → schedulePendingWork)
+   * handles rework. No fire-and-forget dispatch — that pattern was prone
+   * to races with patrol recovery functions.
    */
   private failReviewWithRework(entry: ReviewQueueEntry, reason: string): void {
     reviewQueue.completeReviewWithResult(this.sql, {
@@ -3385,36 +3363,6 @@ export class TownDO extends DurableObject<Env> {
       townId: this.townId,
       beadId: entry.id,
     });
-
-    // The source bead was returned to in_progress by completeReviewWithResult.
-    // Attempt to dispatch a polecat for rework (same pattern as the public
-    // completeReviewWithResult method).
-    const sourceBeadId = entry.bead_id;
-    if (sourceBeadId && sourceBeadId !== entry.id) {
-      const sourceBead = beadOps.getBead(this.sql, sourceBeadId);
-      if (sourceBead?.rig_id) {
-        try {
-          const reworkAgent = agents.getOrCreateAgent(
-            this.sql,
-            'polecat',
-            sourceBead.rig_id,
-            this.townId
-          );
-          agents.hookBead(this.sql, reworkAgent.id, sourceBeadId);
-          this.dispatchAgent(reworkAgent, sourceBead).catch(err =>
-            console.error(
-              `${TOWN_LOG} failReviewWithRework: rework dispatch failed for bead=${sourceBeadId}`,
-              err
-            )
-          );
-        } catch (err) {
-          console.warn(
-            `${TOWN_LOG} failReviewWithRework: could not dispatch rework for bead=${sourceBeadId}:`,
-            err
-          );
-        }
-      }
-    }
   }
 
   /**
