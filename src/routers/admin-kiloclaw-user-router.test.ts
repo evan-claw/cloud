@@ -14,6 +14,12 @@ let adminUser: User;
 let targetUser: User;
 const expectedAccessWithoutEntitlement = !KILOCLAW_BILLING_ENFORCEMENT;
 
+function expectSameInstant(actual: string | null | undefined, expected: string) {
+  expect(actual).not.toBeNull();
+  expect(actual).toBeDefined();
+  expect(new Date(actual as string).toISOString()).toBe(new Date(expected).toISOString());
+}
+
 beforeEach(async () => {
   await cleanupDbForTest();
 
@@ -83,7 +89,7 @@ describe('admin.users.getKiloClawState', () => {
     const result = await caller.admin.users.getKiloClawState({ userId: targetUser.id });
 
     expect(result.subscription?.status).toBe('trialing');
-    expect(result.subscription?.trial_ends_at).toBe(futureTrialEnd);
+    expectSameInstant(result.subscription?.trial_ends_at, futureTrialEnd);
     expect(result.hasAccess).toBe(true);
     expect(result.accessReason).toBe('trial');
   });
@@ -102,7 +108,7 @@ describe('admin.users.getKiloClawState', () => {
     const caller = await createCallerForUser(adminUser.id);
     const result = await caller.admin.users.getKiloClawState({ userId: targetUser.id });
 
-    expect(result.subscription?.trial_ends_at).toBe(expiredTrialEnd);
+    expectSameInstant(result.subscription?.trial_ends_at, expiredTrialEnd);
     expect(result.hasAccess).toBe(expectedAccessWithoutEntitlement);
     expect(result.accessReason).toBeNull();
   });
@@ -153,7 +159,7 @@ describe('admin.users.updateKiloClawTrialEndAt', () => {
     const updatedSubscription = await db.query.kiloclaw_subscriptions.findFirst({
       where: eq(kiloclaw_subscriptions.user_id, targetUser.id),
     });
-    expect(updatedSubscription?.trial_ends_at).toBe(newTrialEndsAt);
+    expectSameInstant(updatedSubscription?.trial_ends_at, newTrialEndsAt);
 
     const [auditLog] = await db
       .select()
