@@ -314,11 +314,20 @@ export function completeReviewWithResult(
     });
     // Return source bead to in_progress so the polecat can be re-dispatched
     // to resolve the conflict (in_review → in_progress rework flow).
-    updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+    // Skip if source bead already reached a terminal state.
+    const conflictSourceBead = getBead(sql, entry.bead_id);
+    if (conflictSourceBead && conflictSourceBead.status !== 'closed' && conflictSourceBead.status !== 'failed') {
+      updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+    }
   } else if (input.status === 'failed') {
     // Review failed (rework requested): return source bead to in_progress
     // so it can be re-dispatched (in_review → in_progress rework flow).
-    updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+    // BUT only if the source bead hasn't already reached a terminal state
+    // (e.g. closed by a different MR bead that merged successfully).
+    const sourceBead = getBead(sql, entry.bead_id);
+    if (sourceBead && sourceBead.status !== 'closed' && sourceBead.status !== 'failed') {
+      updateBeadStatus(sql, entry.bead_id, 'in_progress', entry.agent_id);
+    }
   }
 }
 
