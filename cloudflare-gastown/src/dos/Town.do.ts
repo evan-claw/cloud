@@ -3736,9 +3736,9 @@ export class TownDO extends DurableObject<Env> {
       agents.unhookBead(this.sql, refineryAgent.id);
       agents.updateAgentStatus(this.sql, refineryAgent.id, 'idle');
       console.error(
-        `${TOWN_LOG} processReviewQueue: refinery agent failed to start for entry=${entry.id}`
+        `${TOWN_LOG} processReviewQueue: refinery agent failed to start for entry=${entry.id}, resetting to open for retry`
       );
-      reviewQueue.completeReview(this.sql, entry.id, 'failed');
+      beadOps.updateBeadStatus(this.sql, entry.id, 'open', 'system');
     }
   }
 
