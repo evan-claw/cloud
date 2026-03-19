@@ -1,5 +1,3 @@
-// TODO review this file
-
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { captureException, captureMessage, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
@@ -129,15 +127,6 @@ export async function parseMessagesMicrodollarUsageFromStream(
         });
         return;
       }
-
-      //if (json.type === 'error') {
-      //  reportedError = true;
-      //  captureException(new Error(`Messages API error: ${json.error.message}`), {
-      //    tags: { source: 'messages_sse_processing' },
-      //    extra: { json, event },
-      //  });
-      //  return;
-      //}
 
       if (json.type === 'message_start') {
         messageId = json.message.id;
