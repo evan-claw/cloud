@@ -1,11 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronRight, Send, Slack } from 'lucide-react';
+import { ChevronRight, ExternalLink, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { DiscordIcon } from './icons/DiscordIcon';
+import { ChannelTokenInput } from './ChannelTokenInput';
+import SlackIcon from '@/app/(app)/claw/components/icons/SlackIcon';
+import TelegramIcon from '@/app/(app)/claw/components/icons/TelegramIcon';
 
 type ChannelId = 'telegram' | 'discord' | 'slack';
 
@@ -23,7 +26,7 @@ const CHANNEL_OPTIONS: ChannelOption[] = [
   {
     id: 'telegram',
     label: 'Telegram',
-    icon: Send,
+    icon: TelegramIcon,
     description:
       'Chat with your bot directly in Telegram. Just open a conversation with it \u2014 no workspace, no admin access, ready in seconds.',
     effort: 1,
@@ -42,7 +45,7 @@ const CHANNEL_OPTIONS: ChannelOption[] = [
   {
     id: 'slack',
     label: 'Slack',
-    icon: Slack,
+    icon: SlackIcon,
     description:
       'Talk to your bot in a Slack channel. Requires installing it as an app in your workspace.',
     effort: 3,
@@ -69,14 +72,18 @@ export function ChannelSelectionStepView({
   onSkip?: () => void;
 }) {
   const [selected, setSelected] = useState<ChannelId | null>(null);
+  const [tokens, setTokens] = useState<Record<string, string>>({});
 
   const telegram = CHANNEL_OPTIONS[0];
   const others = CHANNEL_OPTIONS.slice(1);
 
+  function setToken(key: string, value: string) {
+    setTokens(prev => ({ ...prev, [key]: value }));
+  }
+
   return (
     <Card className="mt-6">
       <CardContent className="flex flex-col gap-6 p-6 sm:p-8">
-        {/* Step indicator */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
@@ -96,28 +103,37 @@ export function ChannelSelectionStepView({
           </p>
         </div>
 
-        {/* Telegram — full width */}
         {telegram && (
           <ChannelCard
             option={telegram}
             isSelected={selected === telegram.id}
             onSelect={() => setSelected(telegram.id)}
+            expandedContent={
+              <TelegramSetupSection
+                token={tokens.telegramBotToken ?? ''}
+                onTokenChange={v => setToken('telegramBotToken', v)}
+              />
+            }
           />
         )}
 
-        {/* Discord + Slack — side by side */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {others.map(option => (
-            <ChannelCard
-              key={option.id}
-              option={option}
-              isSelected={selected === option.id}
-              onSelect={() => setSelected(option.id)}
-            />
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="border-border flex-1 border-t" />
+          <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+            Other options
+          </span>
+          <div className="border-border flex-1 border-t" />
         </div>
 
-        {/* Continue button */}
+        {others.map(option => (
+          <ChannelCard
+            key={option.id}
+            option={option}
+            isSelected={selected === option.id}
+            onSelect={() => setSelected(option.id)}
+          />
+        ))}
+
         <Button
           className="w-full bg-emerald-600 py-6 text-base text-white hover:bg-emerald-700"
           disabled={selected === null}
@@ -127,7 +143,6 @@ export function ChannelSelectionStepView({
           <ChevronRight className="ml-1 h-5 w-5" />
         </Button>
 
-        {/* Skip link */}
         <button
           type="button"
           className="text-muted-foreground hover:text-foreground mx-auto text-sm transition-colors"
@@ -144,46 +159,124 @@ function ChannelCard({
   option,
   isSelected,
   onSelect,
+  expandedContent,
 }: {
   option: ChannelOption;
   isSelected: boolean;
   onSelect: () => void;
+  expandedContent?: React.ReactNode;
 }) {
   const Icon = option.icon;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={cn(
-        'relative flex cursor-pointer flex-col gap-4 rounded-xl border p-5 text-left transition-colors',
-        isSelected
-          ? 'border-emerald-600 bg-emerald-950/20'
-          : 'border-border hover:border-muted-foreground/40'
+        'relative flex flex-col rounded-xl border transition-colors',
+        isSelected ? 'border-blue-500/60' : 'border-border hover:border-muted-foreground/40'
       )}
+      style={isSelected ? { backgroundColor: '#4f7fff14' } : undefined}
     >
-      {/* Top row: icon + title + badge + radio */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="bg-muted/50 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
-            <Icon className="h-5 w-5 text-blue-400" />
-          </div>
-          <span className="text-sm font-bold">{option.label}</span>
-          {option.recommended && (
-            <span className="rounded-full border border-emerald-700 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-emerald-400 uppercase">
-              Recommended
-            </span>
-          )}
+      <button type="button" onClick={onSelect} className="flex cursor-pointer gap-4 p-5 text-left">
+        <div
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg"
+          style={{ backgroundColor: isSelected ? '#229ed933' : 'var(--color-muted)' }}
+        >
+          <Icon className="h-6 w-6" />
         </div>
-        <RadioIndicator checked={isSelected} />
+
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold">{option.label}</span>
+            {option.recommended && (
+              <span className="rounded-full border border-emerald-700 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-emerald-400 uppercase">
+                Recommended
+              </span>
+            )}
+          </div>
+          <p className="text-xs leading-relaxed text-[#5a5b64]">{option.description}</p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-3">
+          <EffortIndicator level={option.effort} color={option.effortColor} />
+          <RadioIndicator checked={isSelected} />
+        </div>
+      </button>
+
+      {isSelected && expandedContent && <div className="px-5 pb-5">{expandedContent}</div>}
+    </div>
+  );
+}
+
+function TelegramSetupSection({
+  token,
+  onTokenChange,
+}: {
+  token: string;
+  onTokenChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="border-border border-t" />
+
+      <h3 className="text-muted-foreground text-sm font-bold tracking-wider uppercase">
+        Create your bot token
+      </h3>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <StepNumber n={1} />
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Open Telegram and start a chat with{' '}
+            <a
+              href="https://t.me/BotFather"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300"
+            >
+              @BotFather
+              <ExternalLink className="mb-0.5 ml-0.5 inline h-3 w-3" />
+            </a>{' '}
+            &mdash; make sure the handle is exactly{' '}
+            <strong className="text-foreground">@BotFather</strong>.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <StepNumber n={2} />
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Run{' '}
+            <code className="rounded bg-purple-900/40 px-1.5 py-0.5 text-purple-300">/newbot</code>,
+            follow the prompts, and copy the token it gives you.
+          </p>
+        </div>
       </div>
 
-      {/* Description */}
-      <p className="text-muted-foreground text-xs leading-relaxed">{option.description}</p>
+      <a
+        href="https://youtu.be/t2iTYbDsSds"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-muted-foreground flex items-center gap-2 text-xs text-[#5a5b64] transition-colors"
+      >
+        <PlayCircle className="h-5 w-5 shrink-0 text-blue-400" />
+        Prefer a walkthrough? Watch a short video guide
+      </a>
 
-      {/* Effort indicator */}
-      <EffortIndicator level={option.effort} color={option.effortColor} />
-    </button>
+      <ChannelTokenInput
+        id="onboarding-telegram-token"
+        placeholder="Paste your bot token here"
+        value={token}
+        onChange={onTokenChange}
+        maxLength={100}
+      />
+    </div>
+  );
+}
+
+function StepNumber({ n }: { n: number }) {
+  return (
+    <span className="bg-muted text-muted-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold">
+      {n}
+    </span>
   );
 }
 
@@ -192,10 +285,10 @@ function RadioIndicator({ checked }: { checked: boolean }) {
     <div
       className={cn(
         'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors',
-        checked ? 'border-emerald-500' : 'border-muted-foreground/40'
+        checked ? 'border-blue-500 bg-blue-500' : 'border-muted-foreground/40'
       )}
     >
-      {checked && <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />}
+      {checked && <div className="h-2 w-2 rounded-full bg-white" />}
     </div>
   );
 }
