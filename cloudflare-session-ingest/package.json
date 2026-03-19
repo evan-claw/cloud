@@ -10,7 +10,9 @@
     "test:integration": "vitest run --config vitest.workers.config.ts",
     "test:integration:watch": "vitest --config vitest.workers.config.ts",
     "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
+    "lint": "pnpm run lint:oxlint && pnpm run lint:eslint:fallback",
+    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-session-ingest/src",
+    "lint:eslint:fallback": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "dependencies": {
     "@kilocode/db": "workspace:*",
