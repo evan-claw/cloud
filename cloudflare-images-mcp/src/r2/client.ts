@@ -1,5 +1,6 @@
 import { AwsClient } from 'aws4fetch';
 import { XMLParser } from 'fast-xml-parser';
+import { logger } from '../logger';
 
 type R2Config = {
   accessKeyId: string;
@@ -63,7 +64,7 @@ function createR2Client(config: R2Config) {
     const response = await aws.fetch(url.toString(), { method: 'GET' });
 
     if (response.status === 404) {
-      console.log(`R2 GET ${bucket}/${key} → 404`);
+      logger.info('R2 GET: object not found', { bucket, key });
       return null;
     }
     if (!response.ok) {
@@ -76,7 +77,7 @@ function createR2Client(config: R2Config) {
     }
 
     const contentLength = parseInt(response.headers.get('content-length') ?? '0', 10);
-    console.log(`R2 GET ${bucket}/${key} → ${contentLength} bytes`);
+    logger.info('R2 GET: success', { bucket, key, contentLength });
 
     return {
       body,
@@ -101,7 +102,7 @@ function createR2Client(config: R2Config) {
     if (!response.ok) {
       throw new Error(`R2 PUT failed: ${response.status} ${response.statusText}`);
     }
-    console.log(`R2 PUT ${bucket}/${key} → ${options.contentType}`);
+    logger.info('R2 PUT: success', { bucket, key, contentType: options.contentType });
   }
 
   async function listObjects(
@@ -127,7 +128,7 @@ function createR2Client(config: R2Config) {
     const xml = await response.text();
     const parsed = parseListObjectsV2Response(xml);
 
-    console.log(`R2 LIST ${bucket} prefix=${prefix} → ${parsed.objects.length} objects`);
+    logger.info('R2 LIST: success', { bucket, prefix, count: parsed.objects.length });
     return parsed;
   }
 
