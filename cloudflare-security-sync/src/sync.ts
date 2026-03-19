@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { eq, and, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import type { WorkerDb } from '@kilocode/db/client';
+import { logger } from './logger';
 import {
   agent_configs,
   platform_integrations,
@@ -220,7 +221,7 @@ export async function getOwnerConfig(
   // Check vulnerability_alerts permission
   const perms = integration.permissions;
   if (!perms || (perms.vulnerability_alerts !== 'read' && perms.vulnerability_alerts !== 'write')) {
-    console.warn(`Integration ${integration.id} missing vulnerability_alerts permission, skipping`);
+    logger.warn(`Integration ${integration.id} missing vulnerability_alerts permission, skipping`);
     return null;
   }
 
@@ -234,7 +235,7 @@ export async function getOwnerConfig(
 
   const parsed = securityAgentConfigSchema.partial().safeParse(agentConfig.config);
   if (!parsed.success) {
-    console.warn('Invalid security agent config, skipping owner', { error: parsed.error.message });
+    logger.warn('Invalid security agent config, skipping owner', { error: parsed.error.message });
     return null;
   }
   const securityConfig = parsed.data;
@@ -257,7 +258,7 @@ export async function getOwnerConfig(
   if (selectedRepos.length === 0 && missingSelectedRepoCount === 0) return null;
 
   if (missingSelectedRepoCount > 0) {
-    console.warn(`${missingSelectedRepoCount} selected repo(s) no longer accessible for owner`, {
+    logger.warn(`${missingSelectedRepoCount} selected repo(s) no longer accessible for owner`, {
       owner,
     });
   }
@@ -335,7 +336,7 @@ async function fetchAllDependabotAlerts(
     // Check rate limit
     const remaining = response.headers.get('x-ratelimit-remaining');
     if (remaining !== null && Number(remaining) < 100) {
-      console.warn(
+      logger.warn(
         `GitHub API rate limit low: ${remaining} remaining for ${repoOwner}/${repoName}`
       );
     }
@@ -522,7 +523,7 @@ async function supersedeDuplicateFindings(
     return { count: supersededFindingIds.length, supersededFindingIds };
   } catch (error) {
     // Best-effort: don't let dedup failures break the sync.
-    console.error(`Error superseding duplicate findings for ${repoFullName}`, {
+    logger.error(`Error superseding duplicate findings for ${repoFullName}`, {
       error: error instanceof Error ? error.message : String(error),
     });
     return { count: 0, supersededFindingIds: [] };
@@ -582,7 +583,7 @@ async function dequeueSupersededFindings(db: WorkerDb, findingIds: string[]): Pr
 
     return result.length;
   } catch (error) {
-    console.error('Error dequeuing superseded findings from analysis queue', {
+    logger.error('Error dequeuing superseded findings from analysis queue', {
       error: error instanceof Error ? error.message : String(error),
     });
     return 0;
@@ -647,7 +648,7 @@ async function pruneStaleReposFromConfig(
 
   const parsed = securityAgentConfigSchema.partial().safeParse(rows[0].config);
   if (!parsed.success) {
-    console.warn('Invalid security agent config, skipping prune', { error: parsed.error.message });
+    logger.warn('Invalid security agent config, skipping prune', { error: parsed.error.message });
     return;
   }
   const config = parsed.data;
@@ -668,7 +669,7 @@ async function pruneStaleReposFromConfig(
     .set({ config: updatedConfig, updated_at: sql`now()` })
     .where(eq(agent_configs.id, rows[0].id));
 
-  console.warn(
+  logger.warn(
     `Pruned ${config.selected_repository_ids.length - prunedIds.length} stale repo(s) from config`
   );
 }
@@ -720,7 +721,7 @@ async function pruneMissingSelectedRepos(
     .set({ config: updatedConfig, updated_at: sql`now()` })
     .where(eq(agent_configs.id, rows[0].id));
 
-  console.warn(`Pruned ${removedCount} inaccessible repo ID(s) from config`);
+  logger.warn(`Pruned ${removedCount} inaccessible repo ID(s) from config`);
 }
 
 export async function syncOwner(params: {
@@ -734,7 +735,7 @@ export async function syncOwner(params: {
 
   const config = await getOwnerConfig(database, owner);
   if (!config) {
-    console.info(`No enabled config for owner, skipping`, { runId, owner });
+    logger.info(`No enabled config for owner, skipping`, { runId, owner });
     return { synced: 0, errors: 0, skipped: 0, staleRepos: [] };
   }
 
@@ -760,7 +761,7 @@ export async function syncOwner(params: {
       successfulRepos++;
     } catch (error) {
       totalResult.errors++;
-      console.error(`Failed to sync ${repoFullName}`, {
+      logger.error(`Failed to sync ${repoFullName}`, {
         error: error instanceof Error ? error.message : String(error),
       });
       if (!firstError && error instanceof Error) {
@@ -778,7 +779,7 @@ export async function syncOwner(params: {
     try {
       await pruneStaleReposFromConfig(database, owner, totalResult.staleRepos, config.repoNameToId);
     } catch (error) {
-      console.error('Failed to prune stale repos from config', {
+      logger.error('Failed to prune stale repos from config', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -790,7 +791,7 @@ export async function syncOwner(params: {
       const accessibleRepoIds = new Set(config.repoNameToId.values());
       await pruneMissingSelectedRepos(database, owner, accessibleRepoIds);
     } catch (error) {
-      console.error('Failed to prune missing selected repos from config', {
+      logger.error('Failed to prune missing selected repos from config', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -815,7 +816,7 @@ export async function syncOwner(params: {
       },
     });
   } catch (error) {
-    console.error('Failed to write audit log', {
+    logger.error('Failed to write audit log', {
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -850,7 +851,7 @@ export async function syncOwner(params: {
           )
         );
     } catch (error) {
-      console.error('Failed to update last_synced_at in runtime_state', {
+      logger.error('Failed to update last_synced_at in runtime_state', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -869,9 +870,9 @@ export async function syncOwner(params: {
   };
 
   if (totalResult.synced === 0 && totalResult.errors === 0 && totalResult.skipped === 0) {
-    console.warn('Sync completed with zero findings processed across all repos', syncSummary);
+    logger.warn('Sync completed with zero findings processed across all repos', syncSummary);
   } else {
-    console.info('Sync cycle summary', syncSummary);
+    logger.info('Sync cycle summary', syncSummary);
   }
 
   return totalResult;
@@ -906,25 +907,25 @@ async function syncRepo(params: {
   const fetchResult = await fetchAllDependabotAlerts(token, repoOwner, repoName);
 
   if (fetchResult.status === 'repo_not_found') {
-    console.warn(`Repository ${repoFullName} no longer exists, marking as stale`);
+    logger.warn(`Repository ${repoFullName} no longer exists, marking as stale`);
     result.staleRepos.push(repoFullName);
     return result;
   }
 
   if (fetchResult.status === 'alerts_disabled') {
-    console.info(`Dependabot alerts disabled for ${repoFullName}, skipping`);
+    logger.info(`Dependabot alerts disabled for ${repoFullName}, skipping`);
     result.skipped = 1;
     return result;
   }
 
   if (fetchResult.status === 'access_blocked') {
-    console.warn(`Repository ${repoFullName} access blocked, marking as stale`);
+    logger.warn(`Repository ${repoFullName} access blocked, marking as stale`);
     result.staleRepos.push(repoFullName);
     return result;
   }
 
   const findings = fetchResult.alerts.map(alert => parseDependabotAlert(alert));
-  console.info(`Fetched ${fetchResult.alerts.length} alerts, parsed ${findings.length} findings`, {
+  logger.info(`Fetched ${fetchResult.alerts.length} alerts, parsed ${findings.length} findings`, {
     repo: repoFullName,
   });
 
@@ -943,7 +944,7 @@ async function syncRepo(params: {
       result.synced++;
     } catch (error) {
       result.errors++;
-      console.error(`Error upserting finding for ${repoFullName}`, {
+      logger.error(`Error upserting finding for ${repoFullName}`, {
         alertNumber: finding.source_id,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -955,10 +956,10 @@ async function syncRepo(params: {
     repoFullName
   );
   if (supersededCount > 0) {
-    console.info(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
+    logger.info(`Superseded ${supersededCount} duplicate finding(s) for ${repoFullName}`);
     const dequeued = await dequeueSupersededFindings(database, supersededFindingIds);
     if (dequeued > 0) {
-      console.info(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
+      logger.info(`Dequeued ${dequeued} superseded finding(s) from auto-analysis queue`);
     }
   }
 

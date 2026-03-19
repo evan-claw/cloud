@@ -3,6 +3,7 @@ import { getWorkerDb } from '@kilocode/db/client';
 import { agent_configs } from '@kilocode/db/schema';
 import { eq, and, isNotNull, or } from 'drizzle-orm';
 import { syncOwner } from './sync';
+import { logger } from './logger';
 
 const SecuritySyncMessageSchema = z.object({
   schemaVersion: z.literal(1),
@@ -94,14 +95,14 @@ async function processSecuritySyncMessage(
 ): Promise<void> {
   const parsed = SecuritySyncMessageSchema.safeParse(message.body);
   if (!parsed.success) {
-    console.error('Invalid security sync queue message', { errors: parsed.error.issues });
+    logger.error('Invalid security sync queue message', { errors: parsed.error.issues });
     message.ack();
     return;
   }
 
   const body = parsed.data;
 
-  console.info('Security sync queue message received', {
+  logger.info('Security sync queue message received', {
     runId: body.runId,
     ownerKey: body.ownerKey,
     messageId: body.messageId,
@@ -109,7 +110,7 @@ async function processSecuritySyncMessage(
 
   const owner = resolveOwner(body.owner);
   if (!owner) {
-    console.error('Owner has neither organizationId nor userId', { messageId: body.messageId });
+    logger.error('Owner has neither organizationId nor userId', { messageId: body.messageId });
     message.ack();
     return;
   }
@@ -124,7 +125,7 @@ async function processSecuritySyncMessage(
     runId: body.runId,
   });
 
-  console.info('Security sync completed for owner', {
+  logger.info('Security sync completed for owner', {
     runId: body.runId,
     ownerKey: body.ownerKey,
     synced: result.synced,
@@ -204,14 +205,14 @@ export default {
         owners
       );
 
-      console.info('Security sync scheduled dispatch completed', {
+      logger.info('Security sync scheduled dispatch completed', {
         runId,
         ownerCount: owners.length,
         enqueuedMessages,
       });
     } catch (error) {
       failed = true;
-      console.error('Security sync scheduled dispatch failed', {
+      logger.error('Security sync scheduled dispatch failed', {
         runId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -226,7 +227,7 @@ export default {
       try {
         await processSecuritySyncMessage(message, env);
       } catch (error) {
-        console.error('Security sync queue processing failed', {
+        logger.error('Security sync queue processing failed', {
           error: error instanceof Error ? error.message : String(error),
         });
         message.retry();
