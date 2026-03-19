@@ -252,7 +252,6 @@ export class TownDO extends DurableObject<Env> {
       url.pathname.endsWith('/status/ws') &&
       request.headers.get('Upgrade')?.toLowerCase() === 'websocket'
     ) {
-      await this.ensureInitialized();
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       this.ctx.acceptWebSocket(server, ['status']);
@@ -393,7 +392,6 @@ export class TownDO extends DurableObject<Env> {
    * Called by the mayor via the /mayor/ui-action HTTP route.
    */
   async broadcastUiAction(action: UiAction): Promise<void> {
-    await this.ensureInitialized();
     const sockets = this.ctx.getWebSockets('status');
     if (sockets.length === 0) return;
     const frame = JSON.stringify({ channel: 'ui_action', action, ts: now() });
@@ -557,12 +555,10 @@ export class TownDO extends DurableObject<Env> {
     gitUrl: string;
     defaultBranch: string;
   }): Promise<rigs.RigRecord> {
-    await this.ensureInitialized();
     return rigs.addRig(this.sql, input);
   }
 
   async removeRig(rigId: string): Promise<void> {
-    await this.ensureInitialized();
     rigs.removeRig(this.sql, rigId);
     await this.ctx.storage.delete(`rig:${rigId}:config`);
     // Delete all beads belonging to this rig (cascades to satellite tables via deleteBead)
@@ -581,12 +577,10 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async listRigs(): Promise<rigs.RigRecord[]> {
-    await this.ensureInitialized();
     return rigs.listRigs(this.sql);
   }
 
   async getRigAsync(rigId: string): Promise<rigs.RigRecord | null> {
-    await this.ensureInitialized();
     return rigs.getRig(this.sql, rigId);
   }
 
@@ -696,7 +690,6 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async createBead(input: CreateBeadInput): Promise<Bead> {
-    await this.ensureInitialized();
     const bead = beadOps.createBead(this.sql, input);
     this.emitEvent({
       event: 'bead.created',
@@ -716,17 +709,14 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async getBeadAsync(beadId: string): Promise<Bead | null> {
-    await this.ensureInitialized();
     return beadOps.getBead(this.sql, beadId);
   }
 
   async listBeads(filter: BeadFilter): Promise<Bead[]> {
-    await this.ensureInitialized();
     return beadOps.listBeads(this.sql, filter);
   }
 
   async updateBeadStatus(beadId: string, status: string, agentId: string): Promise<Bead> {
-    await this.ensureInitialized();
     // Convoy progress is updated automatically inside beadOps.updateBeadStatus
     // when the bead reaches a terminal status (closed/failed).
     const bead = beadOps.updateBeadStatus(this.sql, beadId, status, agentId);
@@ -792,7 +782,6 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async deleteBead(beadId: string): Promise<void> {
-    await this.ensureInitialized();
     beadOps.deleteBead(this.sql, beadId);
   }
 
@@ -801,7 +790,6 @@ export class TownDO extends DurableObject<Env> {
     since?: string;
     limit?: number;
   }): Promise<BeadEventRecord[]> {
-    await this.ensureInitialized();
     return beadOps.listBeadEvents(this.sql, options);
   }
 
@@ -822,7 +810,6 @@ export class TownDO extends DurableObject<Env> {
     }>,
     actorId: string
   ): Promise<Bead> {
-    await this.ensureInitialized();
     const bead = beadOps.updateBeadFields(this.sql, beadId, fields, actorId);
 
     // When a bead closes via field update, check for newly unblocked beads
@@ -839,8 +826,6 @@ export class TownDO extends DurableObject<Env> {
    * Writes a bead_event for auditability.
    */
   async resetAgent(agentId: string): Promise<void> {
-    await this.ensureInitialized();
-
     const agent = agents.getAgent(this.sql, agentId);
     if (!agent) throw new Error(`Agent ${agentId} not found`);
 
@@ -879,8 +864,6 @@ export class TownDO extends DurableObject<Env> {
     convoyId: string,
     fields: Partial<{ merge_mode: ConvoyMergeMode; feature_branch: string }>
   ): Promise<ConvoyEntry | null> {
-    await this.ensureInitialized();
-
     const convoy = this.getConvoy(convoyId);
     if (!convoy) return null;
 
@@ -925,32 +908,26 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async registerAgent(input: RegisterAgentInput): Promise<Agent> {
-    await this.ensureInitialized();
     return agents.registerAgent(this.sql, input);
   }
 
   async getAgentAsync(agentId: string): Promise<Agent | null> {
-    await this.ensureInitialized();
     return agents.getAgent(this.sql, agentId);
   }
 
   async getAgentByIdentity(identity: string): Promise<Agent | null> {
-    await this.ensureInitialized();
     return agents.getAgentByIdentity(this.sql, identity);
   }
 
   async listAgents(filter?: AgentFilter): Promise<Agent[]> {
-    await this.ensureInitialized();
     return agents.listAgents(this.sql, filter);
   }
 
   async updateAgentStatus(agentId: string, status: string): Promise<void> {
-    await this.ensureInitialized();
     agents.updateAgentStatus(this.sql, agentId, status);
   }
 
   async deleteAgent(agentId: string): Promise<void> {
-    await this.ensureInitialized();
     agents.deleteAgent(this.sql, agentId);
     try {
       const agentDO = getAgentDOStub(this.env, agentId);
@@ -961,23 +938,19 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async hookBead(agentId: string, beadId: string): Promise<void> {
-    await this.ensureInitialized();
     agents.hookBead(this.sql, agentId, beadId);
     await this.armAlarmIfNeeded();
   }
 
   async unhookBead(agentId: string): Promise<void> {
-    await this.ensureInitialized();
     agents.unhookBead(this.sql, agentId);
   }
 
   async getHookedBead(agentId: string): Promise<Bead | null> {
-    await this.ensureInitialized();
     return agents.getHookedBead(this.sql, agentId);
   }
 
   async getOrCreateAgent(role: AgentRole, rigId: string): Promise<Agent> {
-    await this.ensureInitialized();
     return agents.getOrCreateAgent(this.sql, role, rigId, this.townId);
   }
 
@@ -996,30 +969,25 @@ export class TownDO extends DurableObject<Env> {
   // ── Prime & Checkpoint ────────────────────────────────────────────
 
   async prime(agentId: string): Promise<PrimeContext> {
-    await this.ensureInitialized();
     return agents.prime(this.sql, agentId);
   }
 
   async writeCheckpoint(agentId: string, data: unknown): Promise<void> {
-    await this.ensureInitialized();
     agents.writeCheckpoint(this.sql, agentId, data);
   }
 
   async readCheckpoint(agentId: string): Promise<unknown> {
-    await this.ensureInitialized();
     return agents.readCheckpoint(this.sql, agentId);
   }
 
   // ── Heartbeat ─────────────────────────────────────────────────────
 
   async touchAgentHeartbeat(agentId: string): Promise<void> {
-    await this.ensureInitialized();
     agents.touchAgent(this.sql, agentId);
     await this.armAlarmIfNeeded();
   }
 
   async updateAgentStatusMessage(agentId: string, message: string): Promise<void> {
-    await this.ensureInitialized();
     agents.updateAgentStatusMessage(this.sql, agentId, message);
     const agent = agents.getAgent(this.sql, agentId);
     if (agent?.current_hook_bead_id) {
@@ -1046,12 +1014,10 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async sendMail(input: SendMailInput): Promise<void> {
-    await this.ensureInitialized();
     mail.sendMail(this.sql, input);
   }
 
   async checkMail(agentId: string): Promise<Mail[]> {
-    await this.ensureInitialized();
     return mail.checkMail(this.sql, agentId);
   }
 
@@ -1074,8 +1040,6 @@ export class TownDO extends DurableObject<Env> {
       ttlSeconds?: number;
     }
   ): Promise<string> {
-    await this.ensureInitialized();
-
     const nudgeId = crypto.randomUUID();
     const mode = options?.mode ?? 'wait-idle';
     const priority = options?.priority ?? 'normal';
@@ -1143,8 +1107,6 @@ export class TownDO extends DurableObject<Env> {
   ): Promise<
     { nudge_id: string; message: string; mode: string; priority: string; source: string }[]
   > {
-    await this.ensureInitialized();
-
     const rows = [
       ...query(
         this.sql,
@@ -1180,8 +1142,6 @@ export class TownDO extends DurableObject<Env> {
 
   /** Mark a nudge as delivered. */
   async markNudgeDelivered(nudgeId: string): Promise<void> {
-    await this.ensureInitialized();
-
     query(
       this.sql,
       /* sql */ `
@@ -1198,8 +1158,6 @@ export class TownDO extends DurableObject<Env> {
    * Called from the alarm loop. Returns the count of nudges expired.
    */
   async expireStaleNudges(): Promise<number> {
-    await this.ensureInitialized();
-
     const result = [
       ...query(
         this.sql,
@@ -1223,7 +1181,6 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async submitToReviewQueue(input: ReviewQueueInput): Promise<void> {
-    await this.ensureInitialized();
     reviewQueue.submitToReviewQueue(this.sql, input);
     this.emitEvent({
       event: 'review.submitted',
@@ -1235,12 +1192,10 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async popReviewQueue(): Promise<ReviewQueueEntry | null> {
-    await this.ensureInitialized();
     return reviewQueue.popReviewQueue(this.sql);
   }
 
   async completeReview(entryId: string, status: 'merged' | 'failed'): Promise<void> {
-    await this.ensureInitialized();
     reviewQueue.completeReview(this.sql, entryId, status);
   }
 
@@ -1250,8 +1205,6 @@ export class TownDO extends DurableObject<Env> {
     message?: string;
     commit_sha?: string;
   }): Promise<void> {
-    await this.ensureInitialized();
-
     // Resolve the source bead ID before completing the review, so we can
     // trigger dispatchUnblockedBeads for it after the MR closes.
     const mrBead = beadOps.getBead(this.sql, input.entry_id);
@@ -1312,7 +1265,6 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async agentDone(agentId: string, input: AgentDoneInput): Promise<void> {
-    await this.ensureInitialized();
     reviewQueue.agentDone(this.sql, agentId, input);
     await this.armAlarmIfNeeded();
   }
@@ -1321,7 +1273,6 @@ export class TownDO extends DurableObject<Env> {
     agentId: string,
     input: { status: 'completed' | 'failed'; reason?: string }
   ): Promise<void> {
-    await this.ensureInitialized();
     let resolvedAgentId = agentId;
     if (!resolvedAgentId) {
       const mayor = agents.listAgents(this.sql, { role: 'mayor' })[0];
@@ -1379,7 +1330,6 @@ export class TownDO extends DurableObject<Env> {
     action: string;
     resolution_notes: string;
   }): Promise<Bead> {
-    await this.ensureInitialized();
     const triageBead = beadOps.getBead(this.sql, input.triage_request_bead_id);
     if (!triageBead)
       throw new Error(`Triage request bead ${input.triage_request_bead_id} not found`);
@@ -1605,19 +1555,16 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async createMolecule(beadId: string, formula: unknown): Promise<Molecule> {
-    await this.ensureInitialized();
     return reviewQueue.createMolecule(this.sql, beadId, formula);
   }
 
   async getMoleculeCurrentStep(
     agentId: string
   ): Promise<{ molecule: Molecule; step: unknown } | null> {
-    await this.ensureInitialized();
     return reviewQueue.getMoleculeCurrentStep(this.sql, agentId);
   }
 
   async advanceMoleculeStep(agentId: string, summary: string): Promise<Molecule | null> {
-    await this.ensureInitialized();
     return reviewQueue.advanceMoleculeStep(this.sql, agentId, summary);
   }
 
@@ -1632,8 +1579,6 @@ export class TownDO extends DurableObject<Env> {
     priority?: string;
     metadata?: Record<string, unknown>;
   }): Promise<{ bead: Bead; agent: Agent }> {
-    await this.ensureInitialized();
-
     const createdBead = beadOps.createBead(this.sql, {
       type: 'issue',
       title: input.title,
@@ -1686,7 +1631,6 @@ export class TownDO extends DurableObject<Env> {
     _model?: string,
     uiContext?: string
   ): Promise<{ agentId: string; sessionStatus: 'idle' | 'active' | 'starting' }> {
-    await this.ensureInitialized();
     const townId = this.townId;
 
     let mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
@@ -1771,7 +1715,6 @@ export class TownDO extends DurableObject<Env> {
    * without requiring the user to send a message first.
    */
   async ensureMayor(): Promise<{ agentId: string; sessionStatus: 'idle' | 'active' | 'starting' }> {
-    await this.ensureInitialized();
     const townId = this.townId;
 
     let mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
@@ -1855,7 +1798,6 @@ export class TownDO extends DurableObject<Env> {
       lastActivityAt: string;
     } | null;
   }> {
-    await this.ensureInitialized();
     const mayor = agents.listAgents(this.sql, { role: 'mayor' })[0] ?? null;
 
     const mapStatus = (agentStatus: string): 'idle' | 'active' | 'starting' => {
@@ -1914,7 +1856,6 @@ export class TownDO extends DurableObject<Env> {
     beads: Array<{ bead_id: string; rig_id: string }>;
     created_by?: string;
   }): Promise<ConvoyEntry> {
-    await this.ensureInitialized();
     const parsed = z
       .object({
         title: z.string().min(1),
@@ -1996,8 +1937,6 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async onBeadClosed(input: { convoyId: string; beadId: string }): Promise<ConvoyEntry | null> {
-    await this.ensureInitialized();
-
     // Count closed tracked beads
     const closedRows = [
       ...query(
@@ -2063,8 +2002,6 @@ export class TownDO extends DurableObject<Env> {
    * still assigned to those beads so they return to the idle pool.
    */
   async closeConvoy(convoyId: string): Promise<ConvoyEntry | null> {
-    await this.ensureInitialized();
-
     const convoy = this.getConvoy(convoyId);
     if (!convoy) return null;
 
@@ -2152,8 +2089,6 @@ export class TownDO extends DurableObject<Env> {
     merge_mode?: 'review-then-land' | 'review-and-merge';
     staged?: boolean;
   }): Promise<{ convoy: ConvoyEntry; beads: Array<{ bead: Bead; agent: Agent | null }> }> {
-    await this.ensureInitialized();
-
     // Resolve staged: explicit request wins, otherwise fall back to town config default.
     const townConfig = await this.getTownConfig();
     const isStaged = input.staged ?? townConfig.staged_convoys_default;
@@ -2362,8 +2297,6 @@ export class TownDO extends DurableObject<Env> {
   async startConvoy(
     convoyId: string
   ): Promise<{ convoy: ConvoyEntry; beads: Array<{ bead: Bead; agent: Agent }> }> {
-    await this.ensureInitialized();
-
     const convoy = this.getConvoy(convoyId);
     if (!convoy) throw new Error(`Convoy not found: ${convoyId}`);
     if (!convoy.staged) throw new Error(`Convoy is not staged: ${convoyId}`);
@@ -2458,7 +2391,6 @@ export class TownDO extends DurableObject<Env> {
    * List active convoys with progress counts.
    */
   async listConvoys(): Promise<ConvoyEntry[]> {
-    await this.ensureInitialized();
     const rows = [
       ...query(
         this.sql,
@@ -2492,7 +2424,6 @@ export class TownDO extends DurableObject<Env> {
       }
     >
   > {
-    await this.ensureInitialized();
     const convoys = await this.listConvoys();
     const detailed = [];
     for (const convoy of convoys) {
@@ -2521,7 +2452,6 @@ export class TownDO extends DurableObject<Env> {
       })
     | null
   > {
-    await this.ensureInitialized();
     const convoy = this.getConvoy(convoyId);
     if (!convoy) return null;
 
@@ -2579,7 +2509,6 @@ export class TownDO extends DurableObject<Env> {
   // ══════════════════════════════════════════════════════════════════
 
   async acknowledgeEscalation(escalationId: string): Promise<EscalationEntry | null> {
-    await this.ensureInitialized();
     query(
       this.sql,
       /* sql */ `
@@ -2606,7 +2535,6 @@ export class TownDO extends DurableObject<Env> {
   }
 
   async listEscalations(filter?: { acknowledged?: boolean }): Promise<EscalationEntry[]> {
-    await this.ensureInitialized();
     const rows =
       filter?.acknowledged !== undefined
         ? [
@@ -2634,7 +2562,6 @@ export class TownDO extends DurableObject<Env> {
     category?: string;
     message: string;
   }): Promise<EscalationEntry> {
-    await this.ensureInitialized();
     const beadId = generateId();
     const timestamp = now();
 
@@ -2787,7 +2714,6 @@ export class TownDO extends DurableObject<Env> {
       return;
     }
 
-    await this.ensureInitialized();
     const townId = this.townId;
     console.log(`${TOWN_LOG} alarm: fired for town=${townId}`);
 
@@ -4124,7 +4050,6 @@ export class TownDO extends DurableObject<Env> {
     activeAgents: number;
     pendingBeads: number;
   }> {
-    await this.ensureInitialized();
     const townId = this.townId;
 
     // Check if alarm is set
@@ -4196,8 +4121,6 @@ export class TownDO extends DurableObject<Env> {
       message: string;
     }>;
   }> {
-    await this.ensureInitialized();
-
     const currentAlarm = await this.ctx.storage.getAlarm();
     const active = this.hasActiveWork();
     const intervalMs = active ? ACTIVE_ALARM_INTERVAL_MS : IDLE_ALARM_INTERVAL_MS;
