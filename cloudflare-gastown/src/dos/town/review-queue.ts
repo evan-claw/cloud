@@ -436,6 +436,12 @@ const ORPHAN_REVIEW_TIMEOUT_MS = 30 * 60 * 1000;
 export function closeOrphanedReviewBeads(sql: SqlStorage): void {
   const cutoff = new Date(Date.now() - ORPHAN_REVIEW_TIMEOUT_MS).toISOString();
 
+  // Match MR beads with pr_url that are open OR in_progress, stale beyond
+  // the timeout, and whose refinery agent is idle/dead/missing. The
+  // in_progress case covers a gap where the refinery dies mid-review
+  // on a PR-strategy bead: recoverStuckReviews excludes pr_url beads
+  // and schedulePendingWork excludes refineries, so nothing else
+  // recovers them.
   const orphanRows = [
     ...query(
       sql,
@@ -445,7 +451,7 @@ export function closeOrphanedReviewBeads(sql: SqlStorage): void {
         INNER JOIN ${review_metadata} ON ${beads.bead_id} = ${review_metadata.bead_id}
         LEFT JOIN ${agent_metadata} ON ${beads.assignee_agent_bead_id} = ${agent_metadata.bead_id}
         WHERE ${beads.type} = 'merge_request'
-          AND ${beads.status} = 'open'
+          AND ${beads.status} IN ('open', 'in_progress')
           AND ${review_metadata.pr_url} IS NOT NULL
           AND ${beads.updated_at} < ?
           AND (
@@ -525,8 +531,20 @@ export function recoverOrphanedSourceBeads(sql: SqlStorage): void {
     const parsed = z.object({ source_bead_id: z.string() }).parse(row);
     try {
       updateBeadStatus(sql, parsed.source_bead_id, 'open', 'system');
+      // Clear the stale assignee so feedStrandedConvoys (which requires
+      // assignee IS NULL) can pick up convoy beads, and rehookOrphanedBeads
+      // or feedStrandedConvoys can assign a fresh agent.
+      query(
+        sql,
+        /* sql */ `
+          UPDATE ${beads}
+          SET ${beads.columns.assignee_agent_bead_id} = NULL
+          WHERE ${beads.bead_id} = ?
+        `,
+        [parsed.source_bead_id]
+      );
       console.log(
-        `[review-queue] recoverOrphanedSourceBeads: returned bead=${parsed.source_bead_id} to open`
+        `[review-queue] recoverOrphanedSourceBeads: returned bead=${parsed.source_bead_id} to open (assignee cleared)`
       );
     } catch (err) {
       console.warn(
