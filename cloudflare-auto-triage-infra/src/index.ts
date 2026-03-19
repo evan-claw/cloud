@@ -116,7 +116,7 @@ app.get('/tickets/:ticketId/events', async (c: Context<HonoEnv>) => {
   const stub = c.env.TRIAGE_ORCHESTRATOR.get(id);
 
   // Get events via RPC
-  const result = stub.getEvents();
+  const result = await stub.getEvents();
 
   return c.json(result);
 });
