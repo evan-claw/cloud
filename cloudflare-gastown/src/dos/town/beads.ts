@@ -4,7 +4,6 @@
  */
 
 import { z } from 'zod';
-import type { FailureReason } from './types';
 import { beads, BeadRecord, createTableBeads, getIndexesBeads } from '../../db/tables/beads.table';
 import {
   bead_events,
@@ -1005,8 +1004,10 @@ export function addBeadToConvoy(sql: SqlStorage, beadId: string, convoyId: strin
   const metadataPatch: Record<string, unknown> = { convoy_id: convoyId };
   if (featureBranch) metadataPatch.feature_branch = featureBranch;
 
-  const existingMetadata: Record<string, unknown> =
-    typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {});
+  const existingMetadata = z
+    .record(z.string(), z.unknown())
+    .catch({})
+    .parse(typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {}));
   const merged = { ...existingMetadata, ...metadataPatch };
 
   query(
@@ -1077,8 +1078,10 @@ export function removeBeadFromConvoy(sql: SqlStorage, beadId: string): string | 
   // Strip convoy_id + feature_branch from metadata
   const bead = getBead(sql, beadId);
   if (bead) {
-    const existingMetadata: Record<string, unknown> =
-      typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {});
+    const existingMetadata = z
+      .record(z.string(), z.unknown())
+      .catch({})
+      .parse(typeof bead.metadata === 'string' ? JSON.parse(bead.metadata) : (bead.metadata ?? {}));
     delete existingMetadata.convoy_id;
     delete existingMetadata.feature_branch;
     const timestamp = now();
