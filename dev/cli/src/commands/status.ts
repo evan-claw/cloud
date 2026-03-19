@@ -16,11 +16,45 @@ export async function status(root: string) {
   );
 
   const portServices = services.filter(s => s.port && s.type !== 'infra');
+
+  // Group services by port to detect shared-port conflicts
+  const portGroups = new Map<number, typeof portServices>();
   for (const svc of portServices) {
-    const listening = await isPortListening(svc.port!);
-    console.log(
-      `  ${listening ? ui.green('●') : ui.dim('○')} ${svc.name.padEnd(12)} ${listening ? `port ${svc.port}` : ui.dim('not running')}`
-    );
+    const group = portGroups.get(svc.port!) ?? [];
+    group.push(svc);
+    portGroups.set(svc.port!, group);
+  }
+
+  // Check each unique port once
+  const portStatus = new Map<number, boolean>();
+  for (const port of portGroups.keys()) {
+    portStatus.set(port, await isPortListening(port));
+  }
+
+  for (const [port, group] of portGroups) {
+    const listening = portStatus.get(port)!;
+
+    if (group.length === 1) {
+      // Unique port — show definitive status
+      const svc = group[0];
+      console.log(
+        `  ${listening ? ui.green('●') : ui.dim('○')} ${svc.name.padEnd(12)} ${listening ? `port ${port}` : ui.dim('not running')}`
+      );
+    } else {
+      // Shared port — cannot determine which service is actually running
+      const names = group.map(s => s.name);
+      if (listening) {
+        console.log(
+          `  ${ui.yellow('●')} ${names.join(', ').padEnd(12)} port ${port} ${ui.yellow('(shared — cannot distinguish)')}`
+        );
+      } else {
+        for (const svc of group) {
+          console.log(
+            `  ${ui.dim('○')} ${svc.name.padEnd(12)} ${ui.dim('not running')}`
+          );
+        }
+      }
+    }
   }
 
   console.log();
