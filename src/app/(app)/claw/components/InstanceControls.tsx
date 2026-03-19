@@ -46,7 +46,9 @@ export function InstanceControls({
   const isRunning = status.status === 'running';
   const isProvisioned = status.status === 'provisioned';
   const isStarting = status.status === 'starting';
-  const isStopped = status.status === 'stopped' || isProvisioned;
+  const isRestarting = status.status === 'restarting';
+  const isStopped = status.status === 'stopped';
+  const isStartable = isStopped || isProvisioned;
   const isDestroying = status.status === 'destroying';
   // Auto-start runs only on fresh provision (status=provisioned), not re-provision
   const isAutoStarting = isProvisioned && mutations.provision.isPending;
@@ -80,7 +82,12 @@ export function InstanceControls({
           variant="outline"
           className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
           disabled={
-            !isStopped || mutations.start.isPending || isAutoStarting || isDestroying || isStarting
+            !isStartable ||
+            mutations.start.isPending ||
+            isAutoStarting ||
+            isDestroying ||
+            isStarting ||
+            isRestarting
           }
           onClick={() => {
             posthog?.capture('claw_start_instance_clicked', { instance_status: status.status });
@@ -103,7 +110,13 @@ export function InstanceControls({
           size="sm"
           variant="outline"
           className="border-violet-500/30 text-violet-400 hover:bg-violet-500/10 hover:text-violet-300"
-          disabled={!isRunning || mutations.restartOpenClaw.isPending || isDestroying || isStarting}
+          disabled={
+            !isRunning ||
+            mutations.restartOpenClaw.isPending ||
+            isDestroying ||
+            isStarting ||
+            isRestarting
+          }
           onClick={() => {
             posthog?.capture('claw_restart_openclaw_prompted', {
               instance_status: status.status,
@@ -118,7 +131,14 @@ export function InstanceControls({
           size="sm"
           variant="outline"
           className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
-          disabled={!isRunning || mutations.restartMachine.isPending || isDestroying || isStarting}
+          disabled={
+            (!isRunning && !isStopped) ||
+            !status.flyMachineId ||
+            mutations.restartMachine.isPending ||
+            isDestroying ||
+            isStarting ||
+            isRestarting
+          }
           onClick={() => {
             posthog?.capture('claw_redeploy_prompted', { instance_status: status.status });
             setRedeployMode('redeploy');
@@ -132,7 +152,13 @@ export function InstanceControls({
           size="sm"
           variant="outline"
           className="border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
-          disabled={!isRunning || mutations.runDoctor.isPending || isDestroying || isStarting}
+          disabled={
+            !isRunning ||
+            mutations.runDoctor.isPending ||
+            isDestroying ||
+            isStarting ||
+            isRestarting
+          }
           onClick={() => {
             posthog?.capture('claw_doctor_clicked', { instance_status: status.status });
             setDoctorOpen(true);
@@ -238,11 +264,16 @@ export function InstanceControls({
                   onError: err => toast.error(err.message, { duration: 10000 }),
                 });
               }}
-              disabled={mutations.restartMachine.isPending}
+              disabled={mutations.restartMachine.isPending || isRestarting}
             >
               {mutations.restartMachine.isPending ? (
                 <>
                   {redeployMode === 'redeploy' ? 'Redeploying' : 'Upgrading'}
+                  <AnimatedDots />
+                </>
+              ) : isRestarting ? (
+                <>
+                  Restarting
                   <AnimatedDots />
                 </>
               ) : (

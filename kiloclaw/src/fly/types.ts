@@ -5,6 +5,14 @@
 
 // -- Machine types --
 
+/**
+ * Fly Machine states we handle.
+ * Based on https://fly.io/docs/machines/machine-states/
+ *
+ * Only states we encounter in practice are listed here. The full Fly docs
+ * enumerate additional states (creating, suspending, restarting, launch_failed,
+ * replaced, migrated) which can be added when we need to handle them explicitly.
+ */
 export type FlyMachineState =
   | 'created'
   | 'starting'
@@ -13,6 +21,7 @@ export type FlyMachineState =
   | 'stopped'
   | 'suspended'
   | 'replacing'
+  | 'updating'
   | 'destroying'
   | 'destroyed'
   | 'failed';

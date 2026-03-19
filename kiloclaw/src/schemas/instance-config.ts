@@ -117,7 +117,7 @@ export const PersistedStateSchema = z.object({
   userId: z.string().default(''),
   sandboxId: z.string().default(''),
   status: z
-    .enum(['provisioned', 'starting', 'running', 'stopped', 'destroying'])
+    .enum(['provisioned', 'starting', 'restarting', 'running', 'stopped', 'destroying'])
     .default('stopped'),
   envVars: z.record(z.string(), z.string()).nullable().default(null),
   encryptedSecrets: z.record(z.string(), EncryptedEnvelopeSchema).nullable().default(null),
@@ -136,6 +136,8 @@ export const PersistedStateSchema = z.object({
   googleCredentials: GoogleCredentialsSchema.nullable().default(null),
   provisionedAt: z.number().nullable().default(null),
   startingAt: z.number().nullable().default(null),
+  restartingAt: z.number().nullable().default(null),
+  restartUpdateSent: z.boolean().default(false),
   lastStartedAt: z.number().nullable().default(null),
   lastStoppedAt: z.number().nullable().default(null),
   // Fly.io app/machine/volume identifiers
@@ -168,6 +170,8 @@ export const PersistedStateSchema = z.object({
   // Populated by the startAsync() catch handler when start() throws before creating a machine.
   lastStartErrorMessage: z.string().nullable().default(null),
   lastStartErrorAt: z.number().nullable().default(null),
+  lastRestartErrorMessage: z.string().nullable().default(null),
+  lastRestartErrorAt: z.number().nullable().default(null),
   // Cooldown for bound-machine recovery during destroy: avoids repeated getVolume
   // calls when the volume consistently reports no attached machine.
   lastBoundMachineRecoveryAt: z.number().nullable().default(null),

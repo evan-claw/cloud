@@ -39,6 +39,8 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.googleCredentials = d.googleCredentials;
     s.provisionedAt = d.provisionedAt;
     s.startingAt = d.startingAt;
+    s.restartingAt = d.restartingAt;
+    s.restartUpdateSent = d.restartUpdateSent;
     s.lastStartedAt = d.lastStartedAt;
     s.lastStoppedAt = d.lastStoppedAt;
     s.flyAppName = d.flyAppName;
@@ -61,6 +63,8 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.lastDestroyErrorAt = d.lastDestroyErrorAt;
     s.lastStartErrorMessage = d.lastStartErrorMessage;
     s.lastStartErrorAt = d.lastStartErrorAt;
+    s.lastRestartErrorMessage = d.lastRestartErrorMessage;
+    s.lastRestartErrorAt = d.lastRestartErrorAt;
     s.lastBoundMachineRecoveryAt = d.lastBoundMachineRecoveryAt;
     s.instanceFeatures = d.instanceFeatures;
     s.gmailNotificationsEnabled = d.gmailNotificationsEnabled;
@@ -95,6 +99,8 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.googleCredentials = null;
   s.provisionedAt = null;
   s.startingAt = null;
+  s.restartingAt = null;
+  s.restartUpdateSent = false;
   s.lastStartedAt = null;
   s.lastStoppedAt = null;
   s.flyAppName = null;
@@ -117,6 +123,8 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.lastDestroyErrorAt = null;
   s.lastStartErrorMessage = null;
   s.lastStartErrorAt = null;
+  s.lastRestartErrorMessage = null;
+  s.lastRestartErrorAt = null;
   s.lastBoundMachineRecoveryAt = null;
   s.instanceFeatures = [];
   s.gmailNotificationsEnabled = false;
@@ -145,6 +153,8 @@ export function createMutableState(): InstanceMutableState {
     googleCredentials: null,
     provisionedAt: null,
     startingAt: null,
+    restartingAt: null,
+    restartUpdateSent: false,
     lastStartedAt: null,
     lastStoppedAt: null,
     flyAppName: null,
@@ -167,12 +177,13 @@ export function createMutableState(): InstanceMutableState {
     lastDestroyErrorAt: null,
     lastStartErrorMessage: null,
     lastStartErrorAt: null,
+    lastRestartErrorMessage: null,
+    lastRestartErrorAt: null,
     lastBoundMachineRecoveryAt: null,
     instanceFeatures: [],
     gmailNotificationsEnabled: false,
     gmailLastHistoryId: null,
     gmailPushOidcEmail: null,
     lastLiveCheckAt: null,
-    restartingAt: null,
   };
 }

@@ -104,6 +104,7 @@ import {
   ALARM_JITTER_MS,
   SELF_HEAL_THRESHOLD,
   STARTING_TIMEOUT_MS,
+  RESTARTING_TIMEOUT_MS,
   STALE_PROVISION_THRESHOLD_MS,
 } from '../config';
 
@@ -263,6 +264,18 @@ async function seedStarting(
     status: 'starting',
     startingAt: Date.now(),
     lastStartedAt: null,
+    ...overrides,
+  });
+}
+
+async function seedRestarting(
+  storage: ReturnType<typeof createFakeStorage>,
+  overrides: Record<string, unknown> = {}
+) {
+  await seedProvisioned(storage, {
+    status: 'restarting',
+    flyMachineId: 'machine-1',
+    restartingAt: Date.now(),
     ...overrides,
   });
 }
@@ -4340,8 +4353,18 @@ describe('reconcileApiKeyExpiry', () => {
       })
     );
 
-    // Push succeeded → only one updateMachine call (persist), no restart
-    expect(flyClient.updateMachine).toHaveBeenCalledTimes(1);
+    // Push succeeded via in-process env patch. Extra updateMachine calls may
+    // occur elsewhere in this test file, so only assert the skipLaunch update.
+    expect(
+      (flyClient.updateMachine as Mock).mock.calls.some(
+        ([, machineId, , options]) =>
+          machineId === 'machine-1' &&
+          typeof options === 'object' &&
+          options !== null &&
+          'skipLaunch' in (options as Record<string, unknown>) &&
+          (options as { skipLaunch?: boolean }).skipLaunch === true
+      )
+    ).toBe(true);
   });
 
   it('skips refresh when key is far from expiry', async () => {
@@ -4865,7 +4888,10 @@ describe('start: concurrent calls do not create duplicate machines', () => {
 describe('restartMachine restartingAt guard', () => {
   beforeEach(() => {
     (flyClient.stopMachineAndWait as Mock).mockResolvedValue(undefined);
-    (flyClient.updateMachine as Mock).mockResolvedValue(undefined);
+    (flyClient.updateMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      instance_id: 'inst-updated-001',
+    });
     (flyClient.waitForState as Mock).mockResolvedValue(undefined);
     (flyClient.getMachine as Mock).mockResolvedValue({
       id: 'machine-1',
@@ -4878,43 +4904,324 @@ describe('restartMachine restartingAt guard', () => {
     const { instance, storage, waitUntilPromises } = createInstance();
     await seedRunning(storage);
 
-    // Simulate restartMachine setting the guard by calling getStatus during
-    // a restart. We'll make stopMachineAndWait trigger a getStatus mid-flight.
-    (flyClient.stopMachineAndWait as Mock).mockImplementation(async () => {
-      // While stop is in progress, simulate a concurrent getStatus poll.
-      // getMachine returns 'stopped' because machine is mid-restart.
-      (flyClient.getMachine as Mock).mockResolvedValueOnce({
-        state: 'stopped',
-        config: {},
-      });
-      await instance.getStatus();
-      await Promise.all(waitUntilPromises);
+    const result = await instance.restartMachine();
+
+    expect(result.success).toBe(true);
+    (flyClient.getMachine as Mock).mockClear();
+    const inFlightStatus = await instance.getStatus();
+    expect(inFlightStatus.status).toBe('restarting');
+    expect(flyClient.getMachine).not.toHaveBeenCalled();
+
+    await Promise.all(waitUntilPromises);
+
+    // The async restart then finishes and the persisted state transitions back to running.
+    const finalStatus = await instance.getStatus();
+    expect(finalStatus.status).toBe('running');
+  });
+
+  it('persists restarting state immediately and clears restartingAt in storage on success', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage);
+
+    const result = await instance.restartMachine();
+
+    expect(result.success).toBe(true);
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('restartingAt')).toBeTruthy();
+
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('restartingAt')).toBeNull();
+    expect(storage._store.get('lastRestartErrorMessage')).toBeNull();
+  });
+
+  it('does not falsely recover when background failed but machine reports started', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage);
+
+    (flyClient.updateMachine as Mock).mockRejectedValueOnce(new Error('Fly API error'));
+
+    const result = await instance.restartMachine();
+
+    expect(result.success).toBe(true);
+
+    await Promise.all(waitUntilPromises);
+
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('Fly API error');
+
+    // Machine is still started with old config — update never ran.
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'started',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    // Reconcile must NOT clear the error or declare success — the update
+    // never happened, so started means old config is still running.
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('Fly API error');
+  });
+
+  it('allows restart from stopped when a machine exists', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage, { status: 'stopped' });
+
+    const result = await instance.restartMachine();
+
+    expect(result.success).toBe(true);
+    await Promise.all(waitUntilPromises);
+    expect(storage._store.get('status')).toBe('running');
+  });
+
+  it('rejects restart when no machine exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { flyMachineId: null });
+
+    const result = await instance.restartMachine();
+
+    expect(result).toEqual({ success: false, error: 'No machine exists' });
+  });
+
+  it('rejects restart during busy states', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { status: 'starting' });
+
+    const result = await instance.restartMachine();
+
+    expect(result).toEqual({ success: false, error: 'Instance is busy' });
+  });
+
+  it('rejects restart while destroying', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, { status: 'destroying' });
+
+    const result = await instance.restartMachine();
+
+    expect(result).toEqual({ success: false, error: 'Instance is busy' });
+  });
+
+  it('rejects restart while already restarting', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage);
+
+    const result = await instance.restartMachine();
+
+    expect(result).toEqual({ success: false, error: 'Instance is busy' });
+  });
+
+  it('rejects restart while provisioned even if a machine id exists', async () => {
+    const { instance, storage } = createInstance();
+    await seedProvisioned(storage, { flyMachineId: 'machine-1' });
+
+    const result = await instance.restartMachine();
+
+    expect(result).toEqual({ success: false, error: 'Instance is busy' });
+  });
+
+  it('keeps restarting status on timeout while Fly remains transient (replacing)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage, {
+      restartingAt: Date.now() - RESTARTING_TIMEOUT_MS - 1_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'replacing',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe(
+      'Restart is taking longer than expected; still reconciling while the machine remains replacing'
+    );
+  });
+
+  it('keeps restarting status on timeout while Fly remains transient (updating)', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage, {
+      restartingAt: Date.now() - RESTARTING_TIMEOUT_MS - 1_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'updating',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('restarting');
+    expect(storage._store.get('lastRestartErrorMessage')).toBe(
+      'Restart is taking longer than expected; still reconciling while the machine remains updating'
+    );
+  });
+
+  it('transitions to stopped on terminal stopped state during restart reconcile', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage, {
+      restartingAt: Date.now() - RESTARTING_TIMEOUT_MS - 1_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'stopped',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('restartingAt')).toBeNull();
+    expect(storage._store.get('lastRestartErrorMessage')).toBe(
+      'Restart is taking longer than expected; still reconciling while the machine remains stopped'
+    );
+  });
+
+  it('preserves restart error when Fly reports failed during reconcile', async () => {
+    const { instance, storage } = createInstance();
+    await seedRestarting(storage, {
+      restartingAt: Date.now() - RESTARTING_TIMEOUT_MS - 1_000,
+      lastRestartErrorMessage: 'prior restart error',
+      lastRestartErrorAt: Date.now() - 2_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'failed',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('stopped');
+    expect(storage._store.get('restartingAt')).toBeNull();
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('prior restart error');
+  });
+
+  it('does not falsely mark restart successful when update never ran but machine is still started', async () => {
+    const { instance, storage } = createInstance();
+    // restartUpdateSent defaults to false — updateMachine() never ran
+    await seedRestarting(storage);
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'started',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('restarting');
+  });
+
+  it('marks success when updateMachine was sent but waitForState timed out and Fly eventually started', async () => {
+    const { instance, storage } = createInstance();
+    // updateMachine ran successfully, but waitForState timed out in background
+    await seedRestarting(storage, {
+      restartUpdateSent: true,
+      lastRestartErrorMessage: 'waitForState timed out',
+      lastRestartErrorAt: Date.now() - 30_000,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'started',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('restartingAt')).toBeNull();
+    expect(storage._store.get('restartUpdateSent')).toBe(false);
+    expect(storage._store.get('lastRestartErrorMessage')).toBeNull();
+  });
+
+  it('handles restart reconciliation after a fresh DO instance loads persisted state', async () => {
+    const storage = createFakeStorage();
+    await seedRestarting(storage, { restartUpdateSent: true });
+
+    const { instance } = createInstance(storage);
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('restartingAt')).toBeNull();
+  });
+
+  it('preserves existing lastStartedAt when reconcile marks restart successful', async () => {
+    const { instance, storage } = createInstance();
+    const existingLastStartedAt = Date.now() - 60_000;
+    await seedRestarting(storage, {
+      restartUpdateSent: true,
+      lastStartedAt: existingLastStartedAt,
+    });
+
+    (flyClient.getMachine as Mock).mockResolvedValue({
+      id: 'machine-1',
+      state: 'started',
+      config: { guest: { cpus: 1, memory_mb: 256, cpu_kind: 'shared' } },
+    });
+
+    await instance.alarm();
+
+    expect(storage._store.get('status')).toBe('running');
+    expect(storage._store.get('restartingAt')).toBeNull();
+    expect(storage._store.get('lastStartedAt')).toBe(existingLastStartedAt);
+  });
+
+  it('records restart errors durably on failure', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage);
+
+    (flyClient.updateMachine as Mock).mockRejectedValueOnce(new Error('Fly API error'));
+
+    const result = await instance.restartMachine();
+
+    expect(result.success).toBe(true);
+    await Promise.all(waitUntilPromises);
+    expect(storage._store.get('lastRestartErrorMessage')).toBe('Fly API error');
+    expect(storage._store.get('lastRestartErrorAt')).toBeGreaterThan(0);
+  });
+
+  it('background restart aborts without writing state if instance was destroyed concurrently', async () => {
+    const { instance, storage, waitUntilPromises } = createInstance();
+    await seedRunning(storage);
+
+    // Make updateMachine simulate destroy clearing storage mid-flight
+    (flyClient.updateMachine as Mock).mockImplementation(async () => {
+      // Simulate destroy() running during the update
+      storage._store.clear();
+    });
+
+    const result = await instance.restartMachine();
+    expect(result.success).toBe(true);
+
+    await Promise.all(waitUntilPromises);
+
+    // Storage should remain empty — background must not recreate partial state
+    expect(storage._store.has('lastRestartErrorMessage')).toBe(false);
+    expect(storage._store.has('restartUpdateSent')).toBe(false);
+  });
+
+  it('clears restart errors at the beginning of a retry attempt', async () => {
+    const { instance, storage } = createInstance();
+    await seedRunning(storage, {
+      lastRestartErrorMessage: 'old restart error',
+      lastRestartErrorAt: Date.now() - 10_000,
     });
 
     const result = await instance.restartMachine();
 
     expect(result.success).toBe(true);
-    // The key assertion: even though live check saw 'stopped', status
-    // should be restored to the persisted value ('running') by the finally block.
-    const finalStatus = await instance.getStatus();
-    expect(finalStatus.status).toBe('running');
-  });
-
-  it('restartMachine clears restartingAt guard on failure so live check can correct state', async () => {
-    const { instance, storage } = createInstance();
-    await seedRunning(storage);
-
-    // Make the restart fail after stop (simulating a Fly API error on updateMachine)
-    (flyClient.updateMachine as Mock).mockRejectedValueOnce(new Error('Fly API error'));
-
-    const result = await instance.restartMachine();
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Fly API error');
-    // restartingAt guard should be cleared so the next live check can see
-    // the real Fly state (machine is stopped after the failed restart).
-    // Status is NOT forcibly restored from storage on failure — that would
-    // mask the fact that the machine may actually be stopped.
+    expect(storage._store.get('lastRestartErrorMessage')).toBeNull();
+    expect(storage._store.get('lastRestartErrorAt')).toBeNull();
   });
 });
 

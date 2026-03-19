@@ -2,6 +2,7 @@ import type { InstanceMutableState, InstanceStatus } from './types';
 import {
   ALARM_INTERVAL_RUNNING_MS,
   ALARM_INTERVAL_STARTING_MS,
+  ALARM_INTERVAL_RESTARTING_MS,
   ALARM_INTERVAL_DESTROYING_MS,
   ALARM_INTERVAL_IDLE_MS,
   ALARM_JITTER_MS,
@@ -88,7 +89,7 @@ function instanceContext(state: InstanceMutableState): Record<string, unknown> {
  */
 function emitStructuredLog(
   logFn: (...args: unknown[]) => void,
-  level: 'error' | 'warn',
+  level: 'info' | 'error' | 'warn',
   state: InstanceMutableState,
   message: string,
   details: Record<string, unknown>
@@ -108,6 +109,18 @@ function emitStructuredLog(
     // message and context are still captured in the log stream.
     logFn(`[kiloclaw_do] [${level}]`, message, details, instanceContext(state));
   }
+}
+
+/**
+ * Structured info log for DO modules. Instance context fields always
+ * take precedence over caller details to prevent accidental shadowing.
+ */
+export function doLog(
+  state: InstanceMutableState,
+  message: string,
+  details: Record<string, unknown> = {}
+): void {
+  emitStructuredLog(console.log, 'info', state, message, details);
 }
 
 /**
@@ -143,6 +156,8 @@ export function alarmIntervalForStatus(status: InstanceStatus): number {
       return ALARM_INTERVAL_RUNNING_MS;
     case 'starting':
       return ALARM_INTERVAL_STARTING_MS;
+    case 'restarting':
+      return ALARM_INTERVAL_RESTARTING_MS;
     case 'destroying':
       return ALARM_INTERVAL_DESTROYING_MS;
     case 'provisioned':

@@ -119,7 +119,7 @@ export type MachineSize = {
 export type PlatformStatusResponse = {
   userId: string | null;
   sandboxId: string | null;
-  status: 'provisioned' | 'starting' | 'running' | 'stopped' | 'destroying' | null;
+  status: 'provisioned' | 'starting' | 'restarting' | 'running' | 'stopped' | 'destroying' | null;
   provisionedAt: number | null;
   lastStartedAt: number | null;
   lastStoppedAt: number | null;
@@ -151,6 +151,8 @@ export type PlatformDebugStatusResponse = PlatformStatusResponse & {
   lastDestroyErrorStatus: number | null;
   lastDestroyErrorMessage: string | null;
   lastDestroyErrorAt: number | null;
+  lastRestartErrorMessage: string | null;
+  lastRestartErrorAt: number | null;
 };
 
 /** A Fly volume snapshot. */

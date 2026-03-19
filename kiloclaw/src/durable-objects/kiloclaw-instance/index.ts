@@ -17,7 +17,7 @@ import type {
   GoogleCredentials,
   MachineSize,
 } from '../../schemas/instance-config';
-import { DEFAULT_INSTANCE_FEATURES, PersistedStateSchema } from '../../schemas/instance-config';
+import { DEFAULT_INSTANCE_FEATURES } from '../../schemas/instance-config';
 import type { FlyVolume, FlyVolumeSnapshot } from '../../fly/types';
 import * as fly from '../../fly/client';
 import { sandboxIdFromUserId } from '../../auth/sandbox-id';
@@ -46,7 +46,7 @@ import type { GatewayProcessStatus } from '../gateway-controller-types';
 import type { InstanceMutableState, InstanceStatus, DestroyResult } from './types';
 import { getFlyConfig } from './types';
 import { createMutableState, loadState, storageUpdate } from './state';
-import { nextAlarmTime, doError, doWarn, toLoggable } from './log';
+import { nextAlarmTime, doLog, doError, doWarn, toLoggable } from './log';
 import { attemptMetadataRecovery } from './reconcile';
 import { resolveImageTag, getRegistryApp, buildUserEnvVars } from './config';
 import * as gateway from './gateway';
@@ -59,6 +59,7 @@ import {
   tryDeleteVolume,
   finalizeDestroyIfComplete,
   reconcileMachineMount,
+  markRestartSuccessful,
 } from './reconcile';
 import { restoreFromPostgres, markDestroyedInPostgresHelper } from './postgres';
 
@@ -808,6 +809,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     if (this.s.status === 'destroying') {
       throw new Error('Cannot start: instance is being destroyed');
     }
+    if (this.s.status === 'restarting') {
+      throw new Error('Cannot start: instance is restarting');
+    }
 
     // Mark as starting so the UI can show a polling state immediately.
     // Record startingAt so reconcileStarting() can time out after STARTING_TIMEOUT_MS.
@@ -866,6 +870,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.s.status === 'stopped' ||
       this.s.status === 'provisioned' ||
       this.s.status === 'starting' ||
+      this.s.status === 'restarting' ||
       this.s.status === 'destroying'
     ) {
       console.log('[DO] Instance not running (status:', this.s.status, '), no-op');
@@ -1026,6 +1031,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     lastDestroyErrorAt: number | null;
     lastStartErrorMessage: string | null;
     lastStartErrorAt: number | null;
+    lastRestartErrorMessage: string | null;
+    lastRestartErrorAt: number | null;
   }> {
     await this.loadState();
     const alarmScheduledAt = await this.ctx.storage.getAlarm();
@@ -1065,6 +1072,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastDestroyErrorAt: this.s.lastDestroyErrorAt,
       lastStartErrorMessage: this.s.lastStartErrorMessage,
       lastStartErrorAt: this.s.lastStartErrorAt,
+      lastRestartErrorMessage: this.s.lastRestartErrorMessage,
+      lastRestartErrorAt: this.s.lastRestartErrorAt,
     };
   }
 
@@ -1243,23 +1252,30 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   }): Promise<{ success: boolean; error?: string }> {
     await this.loadState();
 
-    if (this.s.status !== 'running' || !this.s.flyMachineId) {
-      return { success: false, error: 'Instance is not running' };
+    if (!this.s.flyMachineId) {
+      return { success: false, error: 'No machine exists' };
     }
 
-    this.s.restartingAt = Date.now();
+    if (
+      this.s.status === 'provisioned' ||
+      this.s.status === 'destroying' ||
+      this.s.status === 'starting' ||
+      this.s.status === 'restarting'
+    ) {
+      return { success: false, error: 'Instance is busy' };
+    }
 
     const action = options?.imageTag
       ? options.imageTag === 'latest'
         ? 'upgrade-to-latest'
         : `pin-to-tag:${options.imageTag}`
       : 'redeploy-same-image';
-    console.log(
-      '[DO] restartMachine:',
+    doLog(this.s, `restartMachine: initiating async restart`, {
       action,
-      '| current trackedImageTag:',
-      this.s.trackedImageTag
-    );
+      currentStatus: this.s.status,
+      trackedImageTag: this.s.trackedImageTag,
+      flyMachineId: this.s.flyMachineId,
+    });
 
     try {
       if (options?.imageTag) {
@@ -1298,24 +1314,61 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         }
       }
 
-      // Try to stop the machine first for a clean config swap.
-      // If the stop times out (e.g. Fly auto-restart races the poll),
-      // fall through — updateMachine on a running machine triggers a
-      // restart with the new config, which achieves the same result.
-      try {
-        await fly.stopMachineAndWait(flyConfig, this.s.flyMachineId);
-      } catch (stopErr) {
-        const isTimeout = stopErr instanceof fly.FlyApiError && stopErr.status === 408;
-        if (!isTimeout) throw stopErr;
-        doWarn(this.s, 'restartMachine: stop timed out, will update in-place', {
-          error: stopErr,
-        });
+      this.s.status = 'restarting';
+      this.s.restartingAt = Date.now();
+      this.s.restartUpdateSent = false;
+      this.s.lastRestartErrorMessage = null;
+      this.s.lastRestartErrorAt = null;
+      await this.ctx.storage.put(
+        storageUpdate({
+          status: 'restarting',
+          restartingAt: this.s.restartingAt,
+          restartUpdateSent: false,
+          lastRestartErrorMessage: null,
+          lastRestartErrorAt: null,
+        })
+      );
+      await this.scheduleAlarm();
+
+      this.ctx.waitUntil(this.restartMachineInBackground());
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  private async restartMachineInBackground(): Promise<void> {
+    try {
+      await this.loadState();
+
+      // Bail if the instance was destroyed (or otherwise left 'restarting')
+      // while this background task was queued. Reading from storage rather
+      // than this.s mirrors the pattern in startAsync's catch handler —
+      // waitUntil runs after the originating request context completes and
+      // other handlers (e.g. destroy) may have mutated storage in the interim.
+      const currentStatus = await this.ctx.storage.get('status');
+      if (currentStatus !== 'restarting') {
+        console.log(
+          '[DO] restartMachine: aborting background restart, status is now',
+          currentStatus
+        );
+        return;
       }
+
+      if (!this.s.flyMachineId) {
+        throw new Error('No machine exists');
+      }
+
+      const flyConfig = getFlyConfig(this.env, this.s);
 
       const { envVars, minSecretsVersion } = await buildUserEnvVars(this.env, this.ctx, this.s);
       const guest = guestFromSize(this.s.machineSize);
       const imageTag = resolveImageTag(this.s, this.env);
-      console.log('[DO] restartMachine: deploying with imageTag:', imageTag);
+      doLog(this.s, 'restartMachine: deploying update', {
+        imageTag,
+        flyMachineId: this.s.flyMachineId,
+      });
       const identity = {
         userId: this.s.userId ?? '',
         sandboxId: this.s.sandboxId ?? '',
@@ -1331,28 +1384,81 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         identity
       );
 
-      await fly.updateMachine(flyConfig, this.s.flyMachineId, machineConfig, {
+      // updateMachine on a running machine triggers a restart with the new
+      // config. On a stopped machine it applies the config without starting,
+      // so we explicitly start afterward.
+      const updated = await fly.updateMachine(flyConfig, this.s.flyMachineId, machineConfig, {
         minSecretsVersion,
       });
-      await fly.waitForState(flyConfig, this.s.flyMachineId, 'started', STARTUP_TIMEOUT_SECONDS);
+
+      // Check ownership before writing — destroy() may have cleared storage.
+      const midStatus = await this.ctx.storage.get('status');
+      if (midStatus !== 'restarting') return;
+
+      this.s.restartUpdateSent = true;
+      await this.ctx.storage.put(storageUpdate({ restartUpdateSent: true }));
+
+      // Check if the machine needs an explicit start (e.g. was stopped).
+      const machine = await fly.getMachine(flyConfig, this.s.flyMachineId);
+      if (machine.state === 'stopped' || machine.state === 'created') {
+        doLog(this.s, 'restartMachine: machine not running after update, starting explicitly', {
+          flyState: machine.state,
+        });
+        await fly.startMachine(flyConfig, this.s.flyMachineId);
+      }
+
+      // Pass the updated instance_id so waitForState waits for the new
+      // version, not a stale pre-update started state.
+      await fly.waitForState(
+        flyConfig,
+        this.s.flyMachineId,
+        'started',
+        STARTUP_TIMEOUT_SECONDS,
+        updated.instance_id
+      );
       await gateway.waitForHealthy(this.s, this.env, flyConfig.appName, this.s.flyMachineId);
 
-      // Restore in-memory status from persisted state, in case a concurrent
-      // live check mutated it while the machine was temporarily stopped.
-      // Only restore on success — on failure the machine may actually be
-      // stopped, so let the next live check see the real Fly state.
-      const persisted = await this.ctx.storage.get('status');
-      const parsed = PersistedStateSchema.shape.status.safeParse(persisted);
-      if (parsed.success) {
-        this.s.status = parsed.data;
-      }
-      return { success: true };
+      // Final ownership check before persisting success.
+      const preSuccessStatus = await this.ctx.storage.get('status');
+      if (preSuccessStatus !== 'restarting') return;
+
+      await markRestartSuccessful(this.ctx, this.s);
+      doLog(this.s, 'restartMachine: background restart completed successfully');
+      await this.scheduleAlarm();
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[DO] restartMachine failed:', errorMessage, err);
-      return { success: false, error: errorMessage };
-    } finally {
-      this.s.restartingAt = null;
+      // A waitForState 408 after updateMachine was sent is expected — the
+      // machine may take minutes to start. Reconciliation will pick it up.
+      const isExpectedTimeout =
+        this.s.restartUpdateSent && err instanceof fly.FlyApiError && err.status === 408;
+
+      if (isExpectedTimeout) {
+        doWarn(
+          this.s,
+          'restartMachine: waitForState timed out after update, reconciliation will handle',
+          {
+            error: toLoggable(err),
+          }
+        );
+      } else {
+        doError(this.s, 'restartMachine: background restart failed', {
+          error: toLoggable(err),
+        });
+      }
+      // Only persist error if we're still in 'restarting'. If destroy()
+      // ran concurrently, storage may have been wiped — writing here would
+      // recreate partial state on a destroyed instance.
+      const postStatus = await this.ctx.storage.get('status');
+      if (postStatus === 'restarting') {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        this.s.lastRestartErrorMessage = errorMessage;
+        this.s.lastRestartErrorAt = Date.now();
+        await this.ctx.storage.put(
+          storageUpdate({
+            lastRestartErrorMessage: errorMessage,
+            lastRestartErrorAt: this.s.lastRestartErrorAt,
+          })
+        );
+      }
     }
   }
 
