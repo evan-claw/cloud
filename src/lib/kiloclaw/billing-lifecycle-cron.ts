@@ -26,7 +26,7 @@ const logError = sentryLogger('kiloclaw-billing-cron', 'error');
 const MS_PER_DAY = 86_400_000;
 const DESTRUCTION_GRACE_DAYS = 7;
 const PAST_DUE_THRESHOLD_DAYS = 14;
-const TRIAL_WARNING_DAYS = 5;
+const TRIAL_WARNING_DAYS = 2;
 const DESTRUCTION_WARNING_DAYS = 2;
 
 /** Format a Date for human-readable email display, e.g. "March 15, 2026". */
@@ -118,8 +118,8 @@ export async function runKiloClawBillingLifecycleCron(
   const client = new KiloClawInternalClient();
   const clawUrl = `${NEXTAUTH_URL}/claw`;
 
-  // ── Sweep 0a: Trial 5-day Warning ───────────────────────────────────
-  const fiveDaysFromNow = new Date(Date.now() + TRIAL_WARNING_DAYS * MS_PER_DAY).toISOString();
+  // ── Sweep 0a: Trial ending-soon warning ─────────────────────────────
+  const trialWarningCutoff = new Date(Date.now() + TRIAL_WARNING_DAYS * MS_PER_DAY).toISOString();
   const trialWarningRows = await database
     .select({
       user_id: kiloclaw_subscriptions.user_id,
@@ -132,7 +132,7 @@ export async function runKiloClawBillingLifecycleCron(
       and(
         eq(kiloclaw_subscriptions.status, 'trialing'),
         gte(kiloclaw_subscriptions.trial_ends_at, now),
-        lte(kiloclaw_subscriptions.trial_ends_at, fiveDaysFromNow),
+        lte(kiloclaw_subscriptions.trial_ends_at, trialWarningCutoff),
         isNull(kiloclaw_subscriptions.suspended_at)
       )
     );
@@ -145,7 +145,7 @@ export async function runKiloClawBillingLifecycleCron(
       );
 
       if (daysRemaining <= 1) {
-        // 1-day warning — more urgent, replaces the 5-day message
+        // 1-day warning — more urgent, replaces the ending-soon message
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -157,8 +157,9 @@ export async function runKiloClawBillingLifecycleCron(
         );
         if (sent) summary.trial_warnings++;
       } else {
-        // 5-day warning (idempotent — skipped if already sent)
-        // daysRemaining is always > 1 here (the <= 1 case is handled above)
+        // Ending-soon warning (idempotent — skipped if already sent).
+        // Key kept as 'claw_trial_5d' so users warned under the old 5-day
+        // threshold aren't re-notified after the threshold changed to 2 days.
         const sent = await trySendEmail(
           database,
           row.user_id,

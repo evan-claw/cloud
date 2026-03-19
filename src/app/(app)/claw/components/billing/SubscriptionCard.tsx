@@ -29,8 +29,8 @@ function ActiveSubscriptionCard({
   if (!sub) return null;
 
   const isCommit = sub.plan === 'commit';
-  const planLabel = isCommit ? 'Commit ($9/mo)' : 'Standard ($25/mo)';
-  const otherPlan = isCommit ? 'Standard ($25/mo)' : 'Commit (save 64%)';
+  const planLabel = isCommit ? 'Commit ($8/mo)' : 'Standard ($9/mo)';
+  const otherPlan = isCommit ? 'Standard ($9/mo)' : 'Commit ($8/mo)';
 
   const hasUserRequestedSwitch = sub.scheduledBy === 'user';
 
@@ -121,7 +121,7 @@ function CancelingSubscriptionCard({
   const sub = billing.subscription;
   if (!sub) return null;
 
-  const planLabel = sub.plan === 'commit' ? 'Commit ($9/mo)' : 'Standard ($25/mo)';
+  const planLabel = sub.plan === 'commit' ? 'Commit ($8/mo)' : 'Standard ($9/mo)';
 
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">

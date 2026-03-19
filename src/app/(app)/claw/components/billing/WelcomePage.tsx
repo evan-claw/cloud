@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/lib/trpc/utils';
 
-const COMMIT_FEATURES = ['Best value', '64% savings vs Standard', 'Auto-renews every 6 months'];
+const COMMIT_FEATURES = ['Best value', 'Auto-renews every 6 months', 'Lower monthly equivalent'];
 const STANDARD_FEATURES = ['Cancel anytime', 'No commitment', 'Pay monthly'];
 
 type PlanCardProps = {
@@ -43,9 +43,12 @@ function PlanCard({ plan, isPending, onSubscribe }: PlanCardProps) {
 
       <div className="mb-6 text-center">
         <div className="text-foreground text-4xl font-bold">
-          {isCommit ? '$9' : '$25'}
+          {isCommit ? '$8' : '$9'}
           <span className="text-muted-foreground text-lg font-normal">/month</span>
         </div>
+        {!isCommit && (
+          <div className="mt-2 text-sm font-medium text-emerald-400">$4 first month</div>
+        )}
       </div>
 
       <ul className="mb-6 space-y-3">
@@ -64,7 +67,7 @@ function PlanCard({ plan, isPending, onSubscribe }: PlanCardProps) {
           variant="primary"
           className="w-full py-4 font-semibold"
         >
-          {isPending ? 'Redirecting to Stripe…' : `Subscribe – ${isCommit ? '$54' : '$25'}`}
+          {isPending ? 'Redirecting to Stripe…' : `Subscribe – ${isCommit ? '$48' : '$9'}`}
         </Button>
         <p className="text-muted-foreground mt-2 text-center text-xs">
           You&apos;ll be redirected to Stripe to pay

@@ -17,6 +17,7 @@ import {
   KILOCLAW_API_URL,
   STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID,
   STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID,
+  STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID,
   STRIPE_KILOCLAW_BILLING_START,
   KILOCLAW_BILLING_ENFORCEMENT,
 } from '@/lib/config.server';
@@ -1192,14 +1193,30 @@ export const kiloclawRouter = createTRPCRouter({
       const priceId = getStripePriceIdForClawPlan(input.plan);
 
       const rewardfulReferral = await getRewardfulReferral();
+      const shouldApplyStandardPlanDiscount =
+        input.plan === 'standard' && existing?.status !== 'canceled';
+      const standardPlanDiscount = shouldApplyStandardPlanDiscount
+        ? (() => {
+            if (!STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID) {
+              throw new TRPCError({
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'Standard plan first-month discount is not configured.',
+              });
+            }
+
+            return {
+              discounts: [{ coupon: STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID }],
+            };
+          })()
+        : {};
 
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         customer: stripeCustomerId,
         ...(rewardfulReferral && { client_reference_id: rewardfulReferral }),
-        allow_promotion_codes: input.plan === 'standard',
         billing_address_collection: 'required',
         line_items: [{ price: priceId, quantity: 1 }],
+        ...standardPlanDiscount,
         customer_update: { name: 'auto', address: 'auto' },
         tax_id_collection: { enabled: true, required: 'never' },
         success_url: `${APP_URL}/payments/kiloclaw/success?session_id={CHECKOUT_SESSION_ID}`,
