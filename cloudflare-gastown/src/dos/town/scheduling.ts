@@ -153,13 +153,11 @@ export async function dispatchAgent(
         role: agent.role,
       });
     } else {
-      // Container failed — roll back agent to idle, bead to open.
-      // Use bead.bead_id (the actual bead being dispatched) rather than
-      // agent.current_hook_bead_id which may be stale if the agent
-      // snapshot was taken before hookBead was called.
-      // Set last_activity_at to now() so the dispatch cooldown prevents
-      // immediate retry — the container may need time to start up after
-      // a deploy/eviction.
+      // Container start returned false — but the container may have
+      // actually started the agent (timeout race). DON'T roll back
+      // the bead to open. Leave it in_progress with the agent idle+hooked.
+      // If the agent truly failed: rehookOrphanedBeads recovers after 2 min.
+      // If the agent actually started: it works and calls gt_done normally.
       query(
         ctx.sql,
         /* sql */ `
@@ -170,7 +168,6 @@ export async function dispatchAgent(
         `,
         [now(), agent.id]
       );
-      beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
       ctx.emitEvent({
         event: 'agent.dispatch_failed',
         townId: ctx.townId,
@@ -195,7 +192,7 @@ export async function dispatchAgent(
         `,
         [now(), agent.id]
       );
-      beadOps.updateBeadStatus(ctx.sql, bead.bead_id, 'open', agent.id);
+      // Don't roll back bead to open — same timeout race rationale
     } catch (rollbackErr) {
       console.error(`${LOG} dispatchAgent: rollback also failed:`, rollbackErr);
     }
