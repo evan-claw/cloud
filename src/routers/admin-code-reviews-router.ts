@@ -586,6 +586,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
         pr_author: cloud_agent_code_reviews.pr_author,
         status: cloud_agent_code_reviews.status,
         error_message: cloud_agent_code_reviews.error_message,
+        terminal_reason: cloud_agent_code_reviews.terminal_reason,
         started_at: cloud_agent_code_reviews.started_at,
         completed_at: cloud_agent_code_reviews.completed_at,
         created_at: cloud_agent_code_reviews.created_at,
