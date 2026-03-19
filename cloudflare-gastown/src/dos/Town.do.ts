@@ -590,9 +590,6 @@ export class TownDO extends DurableObject<Env> {
     console.log(
       `${TOWN_LOG} configureRig: rigId=${rigConfig.rigId} hasKilocodeToken=${!!rigConfig.kilocodeToken}`
     );
-    if (rigConfig.townId) {
-      await this.setTownId(rigConfig.townId);
-    }
     await this.ctx.storage.put(`rig:${rigConfig.rigId}:config`, rigConfig);
 
     if (rigConfig.kilocodeToken) {
@@ -2738,9 +2735,6 @@ export class TownDO extends DurableObject<Env> {
       }
     }
 
-    // Process reviews FIRST so the refinery gets assigned before the
-    // scheduler dispatches new polecats. This prevents downstream beads
-    // from starting before upstream reviews are merged.
     try {
       await this.processReviewQueue();
     } catch (err) {
