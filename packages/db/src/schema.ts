@@ -2062,8 +2062,9 @@ export const cloud_agent_code_reviews = pgTable(
     cli_session_id: text(), // Kilo CLI session ID (ses_xxx from cli_sessions_v2, or legacy UUID from cli_sessions v1)
 
     // Review status
-    status: text().notNull().default('pending'), // 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+    status: text().notNull().default('pending'), // 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
     error_message: text(),
+    terminal_reason: text(),
 
     // Which cloud agent backend executed this review: 'v1' (cloud-agent SSE) or 'v2' (cloud-agent-next)
     agent_version: text().default('v1'),
