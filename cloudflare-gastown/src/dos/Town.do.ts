@@ -3336,19 +3336,25 @@ export class TownDO extends DurableObject<Env> {
     });
 
     if (!started) {
+      // DON'T fail the MR bead — the container may have actually started
+      // the agent (timeout race: the fetch timed out but the container
+      // continued setting up the agent). Leave the MR bead in in_progress.
+      // If the agent truly failed, recoverStuckReviews will reset it to
+      // open after 30 min. If the agent succeeded, it will call gt_done
+      // and close the MR bead normally.
+      //
+      // Just unhook the refinery so processReviewQueue doesn't try to
+      // start a second instance on the next tick.
       agents.unhookBead(this.sql, refineryAgent.id);
       agents.updateAgentStatus(this.sql, refineryAgent.id, 'idle');
 
       const containerError = dispatch.getLastStartError() ?? 'unknown';
-      const errorCtx = `entry=${entry.id} rigId=${rigId} branch=${entry.branch} ` +
-        `containerError=${containerError}`;
-      console.error(
-        `${TOWN_LOG} processReviewQueue: refinery failed to start: ${errorCtx}`
+      console.warn(
+        `${TOWN_LOG} processReviewQueue: refinery start returned false for entry=${entry.id} — ` +
+          `leaving MR bead in_progress for recovery. error=${containerError}`
       );
       agents.updateAgentStatusMessage(this.sql, refineryAgent.id,
-        `[dispatch_failed] ${containerError}`);
-
-      this.failReviewWithRework(entry, 'Refinery container failed to start');
+        `[start_uncertain] ${containerError}`);
     }
   }
 
