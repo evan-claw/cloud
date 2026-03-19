@@ -16,6 +16,7 @@
     "fast-xml-parser": "^5.3.4",
     "fetch-to-node": "^2.1.0",
     "jsonwebtoken": "catalog:",
+    "workers-tagged-logger": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

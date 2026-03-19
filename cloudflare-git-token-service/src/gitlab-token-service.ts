@@ -3,6 +3,7 @@ import { platform_integrations } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
 import * as z from 'zod';
 import type { GitLabIntegrationMetadata } from './gitlab-lookup-service.js';
+import { logger } from './logger.js';
 
 const GitLabOAuthTokenResponseSchema = z.object({
   access_token: z.string(),
@@ -68,7 +69,7 @@ export class GitLabTokenService {
       const clientSecret = metadata.client_secret || this.env.GITLAB_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
-        console.error('GitLab OAuth credentials not configured');
+        logger.error('GitLab OAuth credentials not configured');
         return { success: false, reason: 'token_refresh_failed' };
       }
 
@@ -110,19 +111,19 @@ export class GitLabTokenService {
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        console.error('GitLab OAuth token refresh failed:', { status: response.status, error });
+        const errorText = await response.text();
+        logger.error('GitLab OAuth token refresh failed', { status: response.status, error: errorText });
         return null;
       }
 
       const parsed = GitLabOAuthTokenResponseSchema.safeParse(await response.json());
       if (!parsed.success) {
-        console.error('Unexpected GitLab token response shape:', parsed.error);
+        logger.error('Unexpected GitLab token response shape', { error: parsed.error.message });
         return null;
       }
       return parsed.data;
     } catch (error) {
-      console.error('GitLab OAuth token refresh error:', error);
+      logger.error('GitLab OAuth token refresh error', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
