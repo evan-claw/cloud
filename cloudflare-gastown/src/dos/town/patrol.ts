@@ -587,6 +587,79 @@ export function feedStrandedConvoys(sql: SqlStorage, townId: string): void {
 }
 
 /**
+ * Recover open beads whose assigned agent is no longer hooked to them.
+ *
+ * After container restarts, review failures, or rework cycles, beads
+ * can end up in 'open' with a stale assignee_agent_bead_id — the agent
+ * has been unhooked but the bead still references it. Neither
+ * feedStrandedConvoys (requires assignee IS NULL) nor schedulePendingWork
+ * (requires agent hooked) will pick these up.
+ *
+ * For each orphaned bead, re-hook the assigned agent (or a fresh one
+ * if the original is busy) so schedulePendingWork dispatches it on the
+ * next tick.
+ */
+export function rehookOrphanedBeads(sql: SqlStorage, townId: string): void {
+  const OrphanedBeadRow = z.object({
+    bead_id: z.string(),
+    rig_id: z.string().nullable(),
+    assignee_agent_bead_id: z.string(),
+  });
+
+  // Find open issue beads where the assigned agent's current_hook_bead_id
+  // does NOT point back to this bead (either NULL or hooked elsewhere).
+  const rows = OrphanedBeadRow.array().parse([
+    ...query(
+      sql,
+      /* sql */ `
+        SELECT ${beads.bead_id},
+               ${beads.rig_id},
+               ${beads.assignee_agent_bead_id}
+        FROM ${beads}
+        INNER JOIN ${agent_metadata}
+          ON ${agent_metadata.bead_id} = ${beads.assignee_agent_bead_id}
+        WHERE ${beads.status} = 'open'
+          AND ${beads.type} = 'issue'
+          AND ${beads.assignee_agent_bead_id} IS NOT NULL
+          AND (
+            ${agent_metadata.current_hook_bead_id} IS NULL
+            OR ${agent_metadata.current_hook_bead_id} != ${beads.bead_id}
+          )
+      `,
+      []
+    ),
+  ]);
+
+  if (rows.length === 0) return;
+
+  console.log(`${LOG} rehookOrphanedBeads: found ${rows.length} orphaned bead(s)`);
+
+  for (const row of rows) {
+    const rigId = row.rig_id;
+    if (!rigId) continue;
+
+    try {
+      // Prefer re-using the original agent if it's idle+unhooked.
+      // Otherwise getOrCreateAgent finds or creates a fresh polecat.
+      const agent = getOrCreateAgent(sql, 'polecat', rigId, townId);
+      hookBead(sql, agent.id, row.bead_id);
+      query(
+        sql,
+        /* sql */ `
+          UPDATE ${agent_metadata}
+          SET ${agent_metadata.columns.last_activity_at} = NULL
+          WHERE ${agent_metadata.bead_id} = ?
+        `,
+        [agent.id]
+      );
+      console.log(`${LOG} rehookOrphanedBeads: re-hooked agent=${agent.id} to bead=${row.bead_id}`);
+    } catch (err) {
+      console.warn(`${LOG} rehookOrphanedBeads: failed to re-hook bead=${row.bead_id}:`, err);
+    }
+  }
+}
+
+/**
  * Detect crash loops: agents that have failed repeatedly within a
  * short window. Creates a triage request for LLM assessment.
  *

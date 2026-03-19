@@ -2992,6 +2992,9 @@ export class TownDO extends DurableObject<Env> {
     // ── Stranded convoy feeding ────────────────────────────────────
     patrol.feedStrandedConvoys(this.sql, this.townId);
 
+    // ── Orphaned bead re-hooking ───────────────────────────────────
+    patrol.rehookOrphanedBeads(this.sql, this.townId);
+
     // ── Crash loop detection ───────────────────────────────────────
     patrol.detectCrashLoops(this.sql);
   }
