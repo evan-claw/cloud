@@ -24,6 +24,7 @@ import {
   RpcBeadOutput,
   RpcAgentOutput,
   RpcBeadEventOutput,
+  RpcAgentEventOutput,
   RpcMayorSendResultOutput,
   RpcMayorStatusOutput,
   RpcStreamTicketOutput,
@@ -903,6 +904,22 @@ export const gastownRouter = router({
         since: input.since,
         limit: input.limit,
       });
+    }),
+
+  getAgentEvents: gastownProcedure
+    .input(
+      z.object({
+        rigId: z.string().uuid(),
+        agentId: z.string().uuid(),
+        afterId: z.number().int().nonneg().optional(),
+        limit: z.number().int().positive().max(500).default(100),
+      })
+    )
+    .output(z.array(RpcAgentEventOutput))
+    .query(async ({ ctx, input }) => {
+      const rig = await verifyRigOwnership(ctx.env, ctx.userId, input.rigId, ctx.orgMemberships);
+      const townStub = getTownDOStub(ctx.env, rig.town_id);
+      return townStub.getAgentEvents(input.agentId, input.afterId, input.limit);
     }),
 
   listConvoys: gastownProcedure
