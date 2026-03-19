@@ -911,7 +911,7 @@ export const gastownRouter = router({
       z.object({
         rigId: z.string().uuid(),
         agentId: z.string().uuid(),
-        afterId: z.number().int().nonneg().optional(),
+        afterId: z.number().int().min(0).optional(),
         limit: z.number().int().positive().max(500).default(100),
       })
     )
