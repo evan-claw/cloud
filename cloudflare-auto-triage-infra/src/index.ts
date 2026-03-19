@@ -12,6 +12,7 @@ import {
   backendAuthMiddleware,
   createErrorHandler,
   createNotFoundHandler,
+  withDORetry,
 } from '@kilocode/worker-utils';
 
 // Import base Durable Object
@@ -113,10 +114,12 @@ app.get('/tickets/:ticketId/events', async (c: Context<HonoEnv>) => {
 
   // Get Durable Object stub
   const id = c.env.TRIAGE_ORCHESTRATOR.idFromName(ticketId);
-  const stub = c.env.TRIAGE_ORCHESTRATOR.get(id);
 
-  // Get events via RPC
-  const result = await stub.getEvents();
+  const result = await withDORetry(
+    () => c.env.TRIAGE_ORCHESTRATOR.get(id),
+    stub => stub.getEvents(),
+    'getEvents'
+  );
 
   return c.json(result);
 });
