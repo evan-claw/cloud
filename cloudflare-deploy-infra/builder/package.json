@@ -12,7 +12,9 @@
     "deploy:local": "tsx scripts/deploy-local.ts",
     "types": "wrangler types",
     "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
+    "lint": "pnpm run lint:oxlint && pnpm run lint:eslint:fallback",
+    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-deploy-infra/builder/src",
+    "lint:eslint:fallback": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'",
     "sentry:sourcemaps": "_SENTRY_RELEASE=$(sentry-cli releases propose-version) && sentry-cli releases new $_SENTRY_RELEASE --org=kilo-code --project=kilocode-cloudflare-deploy && sentry-cli sourcemaps upload --org=kilo-code --project=kilocode-cloudflare-deploy --release=$_SENTRY_RELEASE --strip-prefix 'dist/..' dist",
     "postdeploy": "pnpm sentry:sourcemaps"
   },

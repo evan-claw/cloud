@@ -8,7 +8,9 @@
     "dev": "wrangler dev",
     "tail": "wrangler tail",
     "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
+    "lint": "pnpm run lint:oxlint && pnpm run lint:eslint:fallback",
+    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-auto-triage-infra/src",
+    "lint:eslint:fallback": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

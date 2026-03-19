@@ -21,6 +21,7 @@ import { OpenClawButton } from './OpenClawButton';
 import { SettingsTab } from './SettingsTab';
 import { ChangelogCard } from './ChangelogCard';
 import { PairingCard } from './PairingCard';
+import { ChannelSelectionStepView } from './ChannelSelectionStep';
 import { PermissionStep } from './PermissionStep';
 import { ProvisioningStep } from './ProvisioningStep';
 import type { ExecPreset } from './claw.types';
@@ -64,10 +65,11 @@ export function ClawDashboard({
     Date.now() - instanceStatus.provisionedAt < SEVEN_DAYS_MS;
   const configServiceNudgeVisible = !instanceStatus || instanceYoung;
 
-  const [onboardingStep, setOnboardingStep] = useState<'permissions' | 'provisioning' | 'done'>(
-    'permissions'
-  );
+  const [onboardingStep, setOnboardingStep] = useState<
+    'permissions' | 'channels' | 'provisioning' | 'done'
+  >('permissions');
   const [selectedPreset, setSelectedPreset] = useState<ExecPreset | null>(null);
+  const [channelTokens, setChannelTokens] = useState<Record<string, string> | null>(null);
 
   const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
@@ -152,12 +154,24 @@ export function ClawDashboard({
             instanceRunning={isRunning && gatewayStatus?.state === 'running'}
             onSelect={preset => {
               setSelectedPreset(preset);
+              setOnboardingStep('channels');
+            }}
+          />
+        ) : isNewSetup && onboardingStep === 'channels' ? (
+          <ChannelSelectionStepView
+            onSelect={(_channelId, tokens) => {
+              setChannelTokens(tokens);
+              setOnboardingStep('provisioning');
+            }}
+            onSkip={() => {
+              setChannelTokens(null);
               setOnboardingStep('provisioning');
             }}
           />
         ) : isNewSetup && onboardingStep === 'provisioning' && selectedPreset ? (
           <ProvisioningStep
             preset={selectedPreset}
+            channelTokens={channelTokens}
             instanceRunning={isRunning && gatewayStatus?.state === 'running'}
             mutations={mutations}
             onComplete={() => setOnboardingStep('done')}

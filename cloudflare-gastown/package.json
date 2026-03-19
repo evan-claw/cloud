@@ -20,7 +20,9 @@
     "test:integration:watch": "vitest --config vitest.workers.config.ts",
     "typecheck": "tsgo --noEmit --incremental false",
     "build:types": "tsgo -p tsconfig.types.json || true",
-    "lint": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
+    "lint": "pnpm run lint:oxlint && pnpm run lint:eslint:fallback",
+    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-gastown/src",
+    "lint:eslint:fallback": "eslint --config eslint.config.mjs --cache 'src/**/*.ts'"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.1.1",
