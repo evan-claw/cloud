@@ -463,8 +463,16 @@ export function SettingsTab({
     calverAtLeast(latestAvailableVersion, trackedVersion);
   const isPinned = !!myPin;
   const hasVersionInfo = isRunning && trackedVersion && trackedVersion !== ':latest';
+  // Only compare image tags when variants match — latestVersion is always
+  // for the "default" variant, so skip for non-default instances to avoid
+  // false "Update available" badges that would switch their variant.
+  const variantsMatch =
+    !status.imageVariant ||
+    status.imageVariant === 'default' ||
+    status.imageVariant === latestVersion?.variant;
   const imageTagDiffers =
     hasVersionInfo &&
+    variantsMatch &&
     !!status.trackedImageTag &&
     !!latestVersion?.imageTag &&
     status.trackedImageTag !== latestVersion.imageTag;
@@ -576,7 +584,7 @@ export function SettingsTab({
           <div className="mt-4 border-t pt-4">
             <VersionPinCard
               trackedImageTag={status.trackedImageTag}
-              latestImageTag={latestVersion?.imageTag ?? null}
+              latestImageTag={variantsMatch ? (latestVersion?.imageTag ?? null) : null}
             />
           </div>
         )}
