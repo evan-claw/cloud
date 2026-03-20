@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AdminPage from '@/app/admin/components/AdminPage';
 import {
   BreadcrumbItem,
@@ -856,10 +856,12 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
   const [doctorDialogOpen, setDoctorDialogOpen] = useState(false);
   const [restoreConfigDialogOpen, setRestoreConfigDialogOpen] = useState(false);
+  const [awaitingRestartCompletion, setAwaitingRestartCompletion] = useState(false);
 
-  const { data, isLoading, error } = useQuery(
-    trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId })
-  );
+  const { data, isLoading, error } = useQuery({
+    ...trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId }),
+    refetchInterval: awaitingRestartCompletion ? 3000 : false,
+  });
 
   const { mutateAsync: destroyInstance, isPending: isDestroying } = useMutation(
     trpc.admin.kiloclawInstances.destroy.mutationOptions({
@@ -925,6 +927,31 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     '2026.2.26'
   );
 
+  // After a restart/upgrade, poll the machine status until it returns to "running",
+  // then invalidate controllerVersion so supportsConfigRestore reflects the new build.
+  const prevMachineStatus = useRef(data?.workerStatus?.status);
+  useEffect(() => {
+    const status = data?.workerStatus?.status;
+    const wasRestarting = prevMachineStatus.current !== 'running';
+    prevMachineStatus.current = status;
+
+    if (awaitingRestartCompletion && status === 'running' && wasRestarting) {
+      setAwaitingRestartCompletion(false);
+      if (data?.user_id) {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
+            userId: data.user_id,
+          }),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawInstances.gatewayStatus.queryKey({
+            userId: data.user_id,
+          }),
+        });
+      }
+    }
+  }, [data?.workerStatus?.status, data?.user_id, awaitingRestartCompletion, queryClient, trpc]);
+
   const invalidateGatewayQueries = () => {
     if (!data?.user_id) return;
     void queryClient.invalidateQueries({
@@ -969,13 +996,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
         toast.success('Redeploy requested');
         invalidateMachineQueries();
         invalidateGatewayQueries();
-        if (data?.user_id) {
-          void queryClient.invalidateQueries({
-            queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
-              userId: data.user_id,
-            }),
-          });
-        }
+        setAwaitingRestartCompletion(true);
       },
       onError: err => {
         toast.error(`Failed to redeploy: ${err.message}`);
@@ -989,13 +1010,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
         toast.success('Upgrade to latest requested');
         invalidateMachineQueries();
         invalidateGatewayQueries();
-        if (data?.user_id) {
-          void queryClient.invalidateQueries({
-            queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
-              userId: data.user_id,
-            }),
-          });
-        }
+        setAwaitingRestartCompletion(true);
       },
       onError: err => {
         toast.error(`Failed to upgrade: ${err.message}`);
