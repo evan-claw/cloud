@@ -1705,7 +1705,8 @@ export class SessionService {
     kiloUserId: string,
     env: PersistenceEnv,
     organizationId: string | undefined,
-    createdOnPlatform: string
+    createdOnPlatform: string,
+    title?: string
   ): Promise<void> {
     try {
       await env.SESSION_INGEST.createSessionForCloudAgent({
@@ -1714,6 +1715,7 @@ export class SessionService {
         cloudAgentSessionId,
         organizationId,
         createdOnPlatform,
+        title,
       });
     } catch (error) {
       logger
