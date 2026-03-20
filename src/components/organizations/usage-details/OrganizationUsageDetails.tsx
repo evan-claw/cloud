@@ -220,6 +220,15 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
     ];
   }, [metricsTimeseriesData, metricsTotals, metricsLoading]);
 
+  const handleMetricChange = (metric: string) => {
+    setSelectedMetric(metric);
+    // Clear tokenType split when switching away from 'tokens' since
+    // the Input/Output toggle is only available for the 'tokens' metric.
+    if (metric !== 'tokens') {
+      setChartSplitBy(prev => (prev.tokenType ? { ...prev, tokenType: false } : prev));
+    }
+  };
+
   // CSV export handler
   const handleExport = () => {
     exportUsageToCSV(usageDetails, timePeriod, groupByModel);
@@ -251,7 +260,7 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
             adoption={adoption}
             metrics={metricsData}
             selectedMetric={selectedMetric}
-            onMetricChange={setSelectedMetric}
+            onMetricChange={handleMetricChange}
             timeseriesData={filteredTimeseriesData}
             chartSplitBy={chartSplitBy}
             onChartSplitByChange={setChartSplitBy}
