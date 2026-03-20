@@ -252,10 +252,7 @@ function getPreferredProviderOrder(requestedModel: string): string[] {
     return [OpenRouterInferenceProviderIdSchema.enum['xiaomi']];
   }
   if (isZaiModel(requestedModel)) {
-    return [
-      OpenRouterInferenceProviderIdSchema.enum.friendli,
-      OpenRouterInferenceProviderIdSchema.enum['z-ai'],
-    ];
+    return [OpenRouterInferenceProviderIdSchema.enum['z-ai']];
   }
   if (isOpenAiOssModel(requestedModel)) {
     return [
