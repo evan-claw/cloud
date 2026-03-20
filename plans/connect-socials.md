@@ -69,7 +69,7 @@ Spec: [Connecting Socials to Kilo Accounts](https://docs.google.com/document/d/.
 **Task 2: Add Discord as a NextAuth auth provider**
 
 - `src/lib/user.server.ts` — import `DiscordProvider`, add `createDiscordAccountInfo()`, wire into `createAccountInfo()` chain, add to providers array
-- `src/lib/config.server.ts` — add `DISCORD_GUILD_ID` env var
+- `src/lib/config.server.ts` — add `DISCORD_SERVER_ID` env var
 - Reject linking if Discord doesn't provide email
 
 ### Wave 3 — Frontend + Guild Verification (parallel)

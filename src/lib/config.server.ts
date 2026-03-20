@@ -115,7 +115,7 @@ export const DISCORD_CLIENT_ID = getEnvVariable('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = getEnvVariable('DISCORD_CLIENT_SECRET');
 export const DISCORD_BOT_TOKEN = getEnvVariable('DISCORD_BOT_TOKEN');
 export const DISCORD_PUBLIC_KEY = getEnvVariable('DISCORD_PUBLIC_KEY');
-export const DISCORD_GUILD_ID = getEnvVariable('DISCORD_GUILD_ID');
+export const DISCORD_SERVER_ID = getEnvVariable('DISCORD_SERVER_ID');
 
 // Posts user feedback into a fixed Slack channel in the Kilo workspace.
 // Expected to be a Slack Incoming Webhook URL.
