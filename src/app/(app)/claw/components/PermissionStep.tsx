@@ -41,7 +41,7 @@ export function PermissionStep({
             icon={<ShieldAlert className="h-5 w-5 text-amber-400" />}
             iconBg="bg-amber-900/50"
             title="Allow everything"
-            description="The bot acts immediately without asking. Best for autonomous workflows, but review what it can access first."
+            description="The bot acts immediately without asking — a.k.a. YOLO mode. Best for autonomous workflows, but review what it can access first."
             caution="Use with caution"
           />
           <PresetCard
