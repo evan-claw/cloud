@@ -406,9 +406,22 @@ export const kiloclawRouter = createTRPCRouter({
       const result = await client.destroy(ctx.user.id);
       // Clear the destruction lifecycle so the billing cron doesn't
       // send warning emails or attempt a redundant destroy.
+      // Only clear suspended_at for non-past_due subscriptions — nulling it
+      // on a past_due row would re-enable access without fixing payment.
+      const [sub] = await db
+        .select({ status: kiloclaw_subscriptions.status })
+        .from(kiloclaw_subscriptions)
+        .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id))
+        .limit(1);
+      const clearFields: { suspended_at?: null; destruction_deadline: null } = {
+        destruction_deadline: null,
+      };
+      if (sub && sub.status !== 'past_due') {
+        clearFields.suspended_at = null;
+      }
       await db
         .update(kiloclaw_subscriptions)
-        .set({ suspended_at: null, destruction_deadline: null })
+        .set(clearFields)
         .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id));
       return result;
     } catch (error) {
