@@ -968,6 +968,14 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       onSuccess: () => {
         toast.success('Redeploy requested');
         invalidateMachineQueries();
+        invalidateGatewayQueries();
+        if (data?.user_id) {
+          void queryClient.invalidateQueries({
+            queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
+              userId: data.user_id,
+            }),
+          });
+        }
       },
       onError: err => {
         toast.error(`Failed to redeploy: ${err.message}`);
@@ -980,6 +988,14 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       onSuccess: () => {
         toast.success('Upgrade to latest requested');
         invalidateMachineQueries();
+        invalidateGatewayQueries();
+        if (data?.user_id) {
+          void queryClient.invalidateQueries({
+            queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
+              userId: data.user_id,
+            }),
+          });
+        }
       },
       onError: err => {
         toast.error(`Failed to upgrade: ${err.message}`);
