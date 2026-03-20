@@ -102,6 +102,10 @@ export function CreateInstanceCard({
       selected_model: selectedModel,
     });
 
+    // Capture email before the async mutation so the onSuccess closure
+    // doesn't depend on the useUser query still being resolved.
+    const email = user?.google_user_email;
+
     mutations.provision.mutate(
       {
         kilocodeDefaultModel: `kilocode/${selectedModel}`,
@@ -109,6 +113,11 @@ export function CreateInstanceCard({
       {
         onSuccess: () => {
           onProvisionStart?.();
+          // Record a Rewardful lead when an affiliate-referred user starts a trial.
+          // No-op if the visitor is not a referral or rw.js didn't load.
+          if (email && typeof window.rewardful === 'function') {
+            window.rewardful('convert', { email });
+          }
         },
         onError: err => {
           toast.error(`Failed to create: ${err.message}`);
@@ -149,7 +158,7 @@ export function CreateInstanceCard({
         <div className="flex">
           <Button
             onClick={handleCreate}
-            disabled={mutations.provision.isPending || !selectedModel}
+            disabled={mutations.provision.isPending || !selectedModel || isLoadingUser}
             className="grow bg-emerald-600 text-white hover:bg-emerald-700"
           >
             {mutations.provision.isPending ? 'Setting up...' : 'Get Started'}
