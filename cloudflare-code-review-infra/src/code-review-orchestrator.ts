@@ -6,13 +6,13 @@
  * - cloud-agent-next: prepareSession + initiateFromKilocodeSessionV2, callback-based completion
  */
 
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject } from 'cloudflare:workers';
 import {
   createCloudAgentNextFetchClient,
   CloudAgentNextBillingError,
   type CloudAgentNextFetchClient,
   type CloudAgentTerminalReason,
-} from "@kilocode/worker-utils";
+} from '@kilocode/worker-utils';
 import type {
   Env,
   CodeReview,
@@ -20,7 +20,7 @@ import type {
   CodeReviewStatusResponse,
   CodeReviewEvent,
   SessionInput,
-} from "./types";
+} from './types';
 
 /** Shape of an SSE event parsed from the cloud agent stream */
 type SseEventPayload = {
@@ -43,24 +43,22 @@ type SseEvent = {
 
 // Subset of denied patterns for observability; keep in sync with: cloud-agent/src/workspace.ts, cloud-agent-next/src/session-service.ts
 const RISKY_COMMAND_PATTERNS = [
-  "git add",
-  "git commit",
-  "git push",
-  "git merge",
-  "git rebase",
-  "git checkout",
-  "git switch",
-  "gh pr merge",
-  "gh pr review",
-  "pytest",
-  "vitest",
+  'git add',
+  'git commit',
+  'git push',
+  'git merge',
+  'git rebase',
+  'git checkout',
+  'git switch',
+  'gh pr merge',
+  'gh pr review',
+  'pytest',
+  'vitest',
 ];
 
 function findRiskyPattern(command: string): string | null {
   const normalized = command.toLowerCase();
-  const match = RISKY_COMMAND_PATTERNS.find((pattern) =>
-    normalized.includes(pattern),
-  );
+  const match = RISKY_COMMAND_PATTERNS.find(pattern => normalized.includes(pattern));
   return match ?? null;
 }
 
@@ -101,9 +99,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
   }
 
   private getCloudAgentNextClient(): CloudAgentNextFetchClient {
-    this.cloudAgentNextClient ??= createCloudAgentNextFetchClient(
-      this.env.CLOUD_AGENT_NEXT_URL,
-    );
+    this.cloudAgentNextClient ??= createCloudAgentNextFetchClient(this.env.CLOUD_AGENT_NEXT_URL);
     return this.cloudAgentNextClient;
   }
 
@@ -118,35 +114,30 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
       // Guard against missing state (already cleaned up or never initialized)
       if (!this.state) {
-        console.log(
-          "[CodeReviewOrchestrator] Alarm fired but no state found, skipping",
-        );
+        console.log('[CodeReviewOrchestrator] Alarm fired but no state found, skipping');
         return;
       }
 
       if (
-        this.state.status === "completed" ||
-        this.state.status === "failed" ||
-        this.state.status === "cancelled"
+        this.state.status === 'completed' ||
+        this.state.status === 'failed' ||
+        this.state.status === 'cancelled'
       ) {
         // Cleanup: Delete all DO storage after 7 days
-        console.log("[CodeReviewOrchestrator] Cleaning up completed review", {
+        console.log('[CodeReviewOrchestrator] Cleaning up completed review', {
           reviewId: this.state.reviewId,
           status: this.state.status,
         });
         await this.ctx.storage.deleteAll();
       } else {
         // Unexpected state - log for debugging
-        console.warn(
-          "[CodeReviewOrchestrator] Alarm fired for non-terminal state",
-          {
-            reviewId: this.state.reviewId,
-            status: this.state.status,
-          },
-        );
+        console.warn('[CodeReviewOrchestrator] Alarm fired for non-terminal state', {
+          reviewId: this.state.reviewId,
+          status: this.state.status,
+        });
       }
     } catch (error) {
-      console.error("[CodeReviewOrchestrator] Alarm handler crashed:", {
+      console.error('[CodeReviewOrchestrator] Alarm handler crashed:', {
         reviewId: this.state?.reviewId,
         status: this.state?.status,
         errorType: (error as Error)?.constructor?.name,
@@ -159,12 +150,12 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
    * Load state from durable storage.
    */
   private async loadState(): Promise<void> {
-    const storedState = await this.ctx.storage.get<CodeReview>("state");
+    const storedState = await this.ctx.storage.get<CodeReview>('state');
 
     if (storedState) {
       this.state = storedState;
 
-      console.log("[CodeReviewOrchestrator] State loaded from storage", {
+      console.log('[CodeReviewOrchestrator] State loaded from storage', {
         reviewId: storedState.reviewId,
         status: storedState.status,
         agentVersion: storedState.agentVersion,
@@ -172,10 +163,8 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
       // Restore usage accumulators from persisted state so they survive DO eviction
       if (storedState.model != null) this.model = storedState.model;
-      if (storedState.totalTokensIn != null)
-        this.totalTokensIn = storedState.totalTokensIn;
-      if (storedState.totalTokensOut != null)
-        this.totalTokensOut = storedState.totalTokensOut;
+      if (storedState.totalTokensIn != null) this.totalTokensIn = storedState.totalTokensIn;
+      if (storedState.totalTokensOut != null) this.totalTokensOut = storedState.totalTokensOut;
       if (storedState.totalCost != null) this.totalCost = storedState.totalCost;
     }
   }
@@ -184,7 +173,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
    * Save current state to durable storage.
    */
   private async saveState(): Promise<void> {
-    await this.ctx.storage.put("state", this.state);
+    await this.ctx.storage.put('state', this.state);
   }
 
   /**
@@ -197,25 +186,23 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       cliSessionId?: string;
       errorMessage?: string;
       terminalReason?: CloudAgentTerminalReason;
-    },
+    }
   ): Promise<void> {
     // Check if there are any actual changes to process
     const statusChanged = this.state.status !== status;
     const sessionIdChanged =
-      options !== undefined &&
-      "sessionId" in options &&
-      options.sessionId !== this.state.sessionId;
+      options !== undefined && 'sessionId' in options && options.sessionId !== this.state.sessionId;
     const cliSessionIdChanged =
       options !== undefined &&
-      "cliSessionId" in options &&
+      'cliSessionId' in options &&
       options.cliSessionId !== this.state.cliSessionId;
     const errorMessageChanged =
       options !== undefined &&
-      "errorMessage" in options &&
+      'errorMessage' in options &&
       options.errorMessage !== this.state.errorMessage;
     const terminalReasonChanged =
       options !== undefined &&
-      "terminalReason" in options &&
+      'terminalReason' in options &&
       options.terminalReason !== this.state.terminalReason;
 
     // Early return only if nothing has changed
@@ -234,54 +221,48 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       this.state.status = status;
 
       // Update timestamps based on status
-      if (status === "running" && !this.state.startedAt) {
+      if (status === 'running' && !this.state.startedAt) {
         this.state.startedAt = new Date().toISOString();
       }
 
-      if (
-        status === "completed" ||
-        status === "failed" ||
-        status === "cancelled"
-      ) {
+      if (status === 'completed' || status === 'failed' || status === 'cancelled') {
         this.state.completedAt = new Date().toISOString();
 
         // Clear events immediately - no longer needed after completion
         this.state.events = [];
 
         // Schedule cleanup alarm for 7 days from now
-        await this.ctx.storage.setAlarm(
-          Date.now() + CodeReviewOrchestrator.CLEANUP_DELAY_MS,
-        );
+        await this.ctx.storage.setAlarm(Date.now() + CodeReviewOrchestrator.CLEANUP_DELAY_MS);
 
-        console.log("[CodeReviewOrchestrator] Scheduled cleanup alarm", {
+        console.log('[CodeReviewOrchestrator] Scheduled cleanup alarm', {
           reviewId: this.state.reviewId,
           status,
-          cleanupIn: "7 days",
+          cleanupIn: '7 days',
         });
       }
     }
 
     // Update metadata (sessionId, cliSessionId, errorMessage) even if status didn't change
-    if (options !== undefined && "sessionId" in options) {
+    if (options !== undefined && 'sessionId' in options) {
       // Only apply if it's a non-empty string (sessionId should be meaningful)
       if (options.sessionId) {
         this.state.sessionId = options.sessionId;
       }
     }
 
-    if (options !== undefined && "cliSessionId" in options) {
+    if (options !== undefined && 'cliSessionId' in options) {
       // Only apply if it's a non-empty string (cliSessionId should be meaningful)
       if (options.cliSessionId) {
         this.state.cliSessionId = options.cliSessionId;
       }
     }
 
-    if (options !== undefined && "errorMessage" in options) {
+    if (options !== undefined && 'errorMessage' in options) {
       // Error messages can be empty strings (though unusual)
       this.state.errorMessage = options.errorMessage;
     }
 
-    if (options !== undefined && "terminalReason" in options) {
+    if (options !== undefined && 'terminalReason' in options) {
       this.state.terminalReason = options.terminalReason;
     }
 
@@ -292,21 +273,15 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     try {
       await this.updateDBStatus(status, options);
     } catch (error) {
-      console.error(
-        "[CodeReviewOrchestrator] Failed to update DB status:",
-        error,
-      );
+      console.error('[CodeReviewOrchestrator] Failed to update DB status:', error);
 
       // For terminal states (completed/failed/cancelled), DB update MUST succeed
       // Otherwise frontend will poll forever thinking review is still running and also blocking the slot in the queue
       const isTerminalState =
-        status === "completed" || status === "failed" || status === "cancelled";
+        status === 'completed' || status === 'failed' || status === 'cancelled';
       if (isTerminalState) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `Critical: Failed to update DB status to '${status}': ${errorMessage}`,
-        );
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`Critical: Failed to update DB status to '${status}': ${errorMessage}`);
       }
       // For non-terminal states (queued/running), continue - we've saved state locally
     }
@@ -322,7 +297,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       cliSessionId?: string;
       errorMessage?: string;
       terminalReason?: CloudAgentTerminalReason;
-    },
+    }
   ): Promise<void> {
     // Use path-based endpoint (same as callback endpoint for consistency)
     const url = `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`;
@@ -337,27 +312,23 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     };
 
     const response = await fetch(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
-        "X-Internal-Secret": this.env.INTERNAL_API_SECRET,
+        'Content-Type': 'application/json',
+        'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
       },
       body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(
-        `Failed to update DB status: ${response.status} ${errorText}`,
-      );
+      throw new Error(`Failed to update DB status: ${response.status} ${errorText}`);
     }
   }
 
-  private getTerminalReason(
-    error: unknown,
-  ): CloudAgentTerminalReason | undefined {
+  private getTerminalReason(error: unknown): CloudAgentTerminalReason | undefined {
     if (error instanceof CloudAgentNextBillingError) {
-      return "billing";
+      return 'billing';
     }
 
     if (!(error instanceof Error)) {
@@ -366,20 +337,20 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
     const message = error.message.toLowerCase();
     if (
-      message.includes("timeout") ||
-      message.includes("timed out") ||
-      message.includes("etimedout")
+      message.includes('timeout') ||
+      message.includes('timed out') ||
+      message.includes('etimedout')
     ) {
-      return "timeout";
+      return 'timeout';
     }
     if (
-      message.includes("upstream") ||
-      message.includes("internal server") ||
-      message.includes("502") ||
-      message.includes("503") ||
-      message.includes("504")
+      message.includes('upstream') ||
+      message.includes('internal server') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504')
     ) {
-      return "upstream_error";
+      return 'upstream_error';
     }
 
     // Return undefined for unrecognized errors so NULL in the DB
@@ -406,23 +377,23 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       };
 
       const response = await fetch(url, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "X-Internal-Secret": this.env.INTERNAL_API_SECRET,
+          'Content-Type': 'application/json',
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
         },
         body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("[CodeReviewOrchestrator] Failed to report usage:", {
+        console.error('[CodeReviewOrchestrator] Failed to report usage:', {
           reviewId: this.state.reviewId,
           status: response.status,
           error: errorText,
         });
       } else {
-        console.log("[CodeReviewOrchestrator] Usage reported", {
+        console.log('[CodeReviewOrchestrator] Usage reported', {
           reviewId: this.state.reviewId,
           model: this.model,
           totalTokensIn: this.totalTokensIn,
@@ -432,7 +403,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       }
     } catch (error) {
       // Non-blocking — usage reporting failure should not affect review completion
-      console.error("[CodeReviewOrchestrator] Error reporting usage:", {
+      console.error('[CodeReviewOrchestrator] Error reporting usage:', {
         reviewId: this.state.reviewId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -447,7 +418,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     authToken: string;
     sessionInput: SessionInput;
     owner: {
-      type: "user" | "org";
+      type: 'user' | 'org';
       id: string;
       userId: string;
     };
@@ -460,7 +431,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       authToken: params.authToken,
       sessionInput: params.sessionInput,
       owner: params.owner,
-      status: "queued",
+      status: 'queued',
       updatedAt: new Date().toISOString(),
       skipBalanceCheck: params.skipBalanceCheck,
       agentVersion: params.agentVersion,
@@ -468,7 +439,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     };
     await this.saveState();
 
-    console.log("[CodeReviewOrchestrator] Review created and queued", {
+    console.log('[CodeReviewOrchestrator] Review created and queued', {
       reviewId: params.reviewId,
       owner: params.owner,
       agentVersion: params.agentVersion,
@@ -489,7 +460,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     }
 
     if (!this.state) {
-      throw new Error("Review not found");
+      throw new Error('Review not found');
     }
 
     return {
@@ -519,7 +490,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     }
 
     // Only cancel if review is queued or running
-    const cancellableStatuses: CodeReviewStatus[] = ["queued", "running"];
+    const cancellableStatuses: CodeReviewStatus[] = ['queued', 'running'];
     if (!cancellableStatuses.includes(this.state.status)) {
       return false;
     }
@@ -527,39 +498,28 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     // Set cancellation flag to stop stream processing
     this.cancelled = true;
 
-    const errorMessage = reason
-      ? `Review cancelled: ${reason}`
-      : "Review cancelled";
-    await this.updateStatus("cancelled", { errorMessage });
+    const errorMessage = reason ? `Review cancelled: ${reason}` : 'Review cancelled';
+    await this.updateStatus('cancelled', { errorMessage });
 
     // If we have a sessionId, interrupt the cloud agent session to stop it from posting comments
     if (this.state.sessionId) {
       try {
         await this.interruptCloudAgentSession(this.state.sessionId);
-        console.log(
-          "[CodeReviewOrchestrator] Cloud agent session interrupted",
-          {
-            reviewId: this.state.reviewId,
-            sessionId: this.state.sessionId,
-          },
-        );
+        console.log('[CodeReviewOrchestrator] Cloud agent session interrupted', {
+          reviewId: this.state.reviewId,
+          sessionId: this.state.sessionId,
+        });
       } catch (interruptError) {
         // Log but don't fail - the review is already marked as cancelled
-        console.warn(
-          "[CodeReviewOrchestrator] Failed to interrupt cloud agent session",
-          {
-            reviewId: this.state.reviewId,
-            sessionId: this.state.sessionId,
-            error:
-              interruptError instanceof Error
-                ? interruptError.message
-                : String(interruptError),
-          },
-        );
+        console.warn('[CodeReviewOrchestrator] Failed to interrupt cloud agent session', {
+          reviewId: this.state.reviewId,
+          sessionId: this.state.sessionId,
+          error: interruptError instanceof Error ? interruptError.message : String(interruptError),
+        });
       }
     }
 
-    console.log("[CodeReviewOrchestrator] Review cancelled", {
+    console.log('[CodeReviewOrchestrator] Review cancelled', {
       reviewId: this.state.reviewId,
       reason,
     });
@@ -576,26 +536,21 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       Authorization: `Bearer ${this.state.authToken}`,
     };
 
-    if (this.state.agentVersion === "v2") {
+    if (this.state.agentVersion === 'v2') {
       await this.getCloudAgentNextClient().interruptSession(headers, {
         sessionId,
       });
     } else {
       // Legacy cloud-agent path — raw fetch (SSE-based service, not covered by shared client)
-      const response = await fetch(
-        `${this.env.CLOUD_AGENT_URL}/trpc/interruptSession`,
-        {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
-        },
-      );
+      const response = await fetch(`${this.env.CLOUD_AGENT_URL}/trpc/interruptSession`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Cloud agent returned ${response.status}: ${errorText}`,
-        );
+        throw new Error(`Cloud agent returned ${response.status}: ${errorText}`);
       }
     }
   }
@@ -623,27 +578,24 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     await this.loadState();
 
     // Guard: only run if queued (prevents double execution)
-    if (!this.state || this.state.status !== "queued") {
-      console.log(
-        "[CodeReviewOrchestrator] runReview skipped - not in queued state",
-        {
-          reviewId: this.state?.reviewId,
-          status: this.state?.status,
-        },
-      );
+    if (!this.state || this.state.status !== 'queued') {
+      console.log('[CodeReviewOrchestrator] runReview skipped - not in queued state', {
+        reviewId: this.state?.reviewId,
+        status: this.state?.status,
+      });
       return;
     }
 
     // Branch based on agent version
     const agentVersion = this.state.agentVersion;
-    console.log("[CodeReviewOrchestrator] runReview routing decision", {
+    console.log('[CodeReviewOrchestrator] runReview routing decision', {
       reviewId: this.state.reviewId,
       agentVersion,
       agentVersionType: typeof agentVersion,
-      willUseV2: agentVersion === "v2",
+      willUseV2: agentVersion === 'v2',
     });
 
-    if (agentVersion === "v2") {
+    if (agentVersion === 'v2') {
       if (this.state.previousCloudAgentSessionId) {
         await this.runWithCloudAgentNextFollowup();
       } else {
@@ -669,57 +621,56 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     const client = this.getCloudAgentNextClient();
 
     try {
-      await this.updateStatus("running");
+      await this.updateStatus('running');
 
-      console.log(
-        "[CodeReviewOrchestrator] Starting review via cloud-agent-next",
-        {
-          reviewId: this.state.reviewId,
-          timestamp: new Date().toISOString(),
-        },
-      );
+      console.log('[CodeReviewOrchestrator] Starting review via cloud-agent-next', {
+        reviewId: this.state.reviewId,
+        timestamp: new Date().toISOString(),
+      });
 
       // Build common headers for prepareSession (internalApiProtectedProcedure)
       const internalHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.state.authToken}`,
-        "x-internal-api-key": this.env.INTERNAL_API_SECRET,
+        'x-internal-api-key': this.env.INTERNAL_API_SECRET,
       };
       if (this.state.skipBalanceCheck) {
-        internalHeaders["x-skip-balance-check"] = "true";
+        internalHeaders['x-skip-balance-check'] = 'true';
       }
 
       // Step 1: Prepare session with callback target
       const callbackTarget = {
         url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
         headers: {
-          "X-Internal-Secret": this.env.INTERNAL_API_SECRET,
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
         },
       };
 
       const prepareInput = {
         ...this.state.sessionInput,
-        createdOnPlatform: "code-review" as const,
+        createdOnPlatform: 'code-review' as const,
         callbackTarget,
       };
 
-      console.log("[CodeReviewOrchestrator] Calling prepareSession", {
+      console.log('[CodeReviewOrchestrator] Calling prepareSession', {
         reviewId: this.state.reviewId,
         callbackUrl: callbackTarget.url,
         createdOnPlatform: prepareInput.createdOnPlatform,
         skipBalanceCheck: this.state.skipBalanceCheck,
       });
 
-      const { cloudAgentSessionId, kiloSessionId } =
-        await client.prepareSession(internalHeaders, prepareInput);
+      const { cloudAgentSessionId, kiloSessionId } = await client.prepareSession(
+        internalHeaders,
+        prepareInput
+      );
 
-      console.log("[CodeReviewOrchestrator] Session prepared", {
+      console.log('[CodeReviewOrchestrator] Session prepared', {
         reviewId: this.state.reviewId,
         cloudAgentSessionId,
         kiloSessionId,
       });
 
       // Store session IDs immediately (no stream parsing needed)
-      await this.updateStatus("running", {
+      await this.updateStatus('running', {
         sessionId: cloudAgentSessionId,
         cliSessionId: kiloSessionId,
       });
@@ -730,25 +681,19 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         Authorization: `Bearer ${this.state.authToken}`,
       };
       if (this.state.skipBalanceCheck) {
-        userHeaders["x-skip-balance-check"] = "true";
+        userHeaders['x-skip-balance-check'] = 'true';
       }
 
-      console.log(
-        "[CodeReviewOrchestrator] Calling initiateFromKilocodeSessionV2",
-        {
-          reviewId: this.state.reviewId,
-          cloudAgentSessionId,
-        },
-      );
+      console.log('[CodeReviewOrchestrator] Calling initiateFromKilocodeSessionV2', {
+        reviewId: this.state.reviewId,
+        cloudAgentSessionId,
+      });
 
-      const initiateResult = await client.initiateFromPreparedSession(
-        userHeaders,
-        {
-          cloudAgentSessionId,
-        },
-      );
+      const initiateResult = await client.initiateFromPreparedSession(userHeaders, {
+        cloudAgentSessionId,
+      });
 
-      console.log("[CodeReviewOrchestrator] Execution started", {
+      console.log('[CodeReviewOrchestrator] Execution started', {
         reviewId: this.state.reviewId,
         cloudAgentSessionId,
         executionId: initiateResult.executionId,
@@ -756,34 +701,27 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       });
 
       // Done — cloud-agent-next callback will deliver terminal status
-      console.log(
-        "[CodeReviewOrchestrator] Review dispatched to cloud-agent-next",
-        {
-          reviewId: this.state.reviewId,
-          sessionId: cloudAgentSessionId,
-          note: "Callback will update final status",
-        },
-      );
+      console.log('[CodeReviewOrchestrator] Review dispatched to cloud-agent-next', {
+        reviewId: this.state.reviewId,
+        sessionId: cloudAgentSessionId,
+        note: 'Callback will update final status',
+      });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const terminalReason = this.getTerminalReason(error);
 
-      await this.updateStatus("failed", { errorMessage, terminalReason });
+      await this.updateStatus('failed', { errorMessage, terminalReason });
 
-      console.error(
-        "[CodeReviewOrchestrator] Review failed (cloud-agent-next):",
-        {
-          reviewId: this.state.reviewId,
-          error: errorMessage,
-        },
-      );
+      console.error('[CodeReviewOrchestrator] Review failed (cloud-agent-next):', {
+        reviewId: this.state.reviewId,
+        error: errorMessage,
+      });
     } finally {
       const totalExecutionTimeMs = Date.now() - runStartTime;
       const minutes = Math.floor(totalExecutionTimeMs / 60000);
       const seconds = Math.floor((totalExecutionTimeMs % 60000) / 1000);
 
-      console.log("[CodeReviewOrchestrator] Run completed (cloud-agent-next)", {
+      console.log('[CodeReviewOrchestrator] Run completed (cloud-agent-next)', {
         reviewId: this.state.reviewId,
         sessionId: this.state.sessionId,
         status: this.state.status,
@@ -808,30 +746,25 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
   private async runWithCloudAgentNextFollowup(): Promise<void> {
     const previousSessionId = this.state.previousCloudAgentSessionId;
     if (!previousSessionId) {
-      throw new Error(
-        "runWithCloudAgentNextFollowup called without previousCloudAgentSessionId",
-      );
+      throw new Error('runWithCloudAgentNextFollowup called without previousCloudAgentSessionId');
     }
     const client = this.getCloudAgentNextClient();
 
-    console.log(
-      "[CodeReviewOrchestrator] Attempting session continuation via sendMessageV2",
-      {
-        reviewId: this.state.reviewId,
-        previousCloudAgentSessionId: previousSessionId,
-      },
-    );
+    console.log('[CodeReviewOrchestrator] Attempting session continuation via sendMessageV2', {
+      reviewId: this.state.reviewId,
+      previousCloudAgentSessionId: previousSessionId,
+    });
 
     try {
-      await this.updateStatus("running");
+      await this.updateStatus('running');
 
       // Build internal headers (internalApiProtectedProcedure — API key + Bearer token)
       const internalHeaders: Record<string, string> = {
         Authorization: `Bearer ${this.state.authToken}`,
-        "x-internal-api-key": this.env.INTERNAL_API_SECRET,
+        'x-internal-api-key': this.env.INTERNAL_API_SECRET,
       };
       if (this.state.skipBalanceCheck) {
-        internalHeaders["x-skip-balance-check"] = "true";
+        internalHeaders['x-skip-balance-check'] = 'true';
       }
 
       // Step 1: Update callback target via updateSession (internal-only endpoint).
@@ -840,7 +773,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       const callbackTarget = {
         url: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
         headers: {
-          "X-Internal-Secret": this.env.INTERNAL_API_SECRET,
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
         },
       };
 
@@ -854,10 +787,10 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         Authorization: `Bearer ${this.state.authToken}`,
       };
       if (this.state.skipBalanceCheck) {
-        userHeaders["x-skip-balance-check"] = "true";
+        userHeaders['x-skip-balance-check'] = 'true';
       }
 
-      console.log("[CodeReviewOrchestrator] Calling sendMessageV2", {
+      console.log('[CodeReviewOrchestrator] Calling sendMessageV2', {
         reviewId: this.state.reviewId,
         cloudAgentSessionId: previousSessionId,
         callbackUrl: callbackTarget.url,
@@ -874,51 +807,44 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       });
 
       // Store session ID (reusing the previous one) and execution ID
-      await this.updateStatus("running", {
+      await this.updateStatus('running', {
         sessionId: previousSessionId,
       });
 
-      console.log(
-        "[CodeReviewOrchestrator] Follow-up execution started via sendMessageV2",
-        {
-          reviewId: this.state.reviewId,
-          cloudAgentSessionId: previousSessionId,
-          executionId: sendResult.executionId,
-          status: sendResult.status,
-        },
-      );
+      console.log('[CodeReviewOrchestrator] Follow-up execution started via sendMessageV2', {
+        reviewId: this.state.reviewId,
+        cloudAgentSessionId: previousSessionId,
+        executionId: sendResult.executionId,
+        status: sendResult.status,
+      });
 
       // Done — cloud-agent-next callback will deliver terminal status
     } catch (error) {
       if (error instanceof CloudAgentNextBillingError) {
         const errorMessage = error.message;
-        await this.updateStatus("failed", {
+        await this.updateStatus('failed', {
           errorMessage,
-          terminalReason: "billing",
+          terminalReason: 'billing',
         });
 
         console.warn(
-          "[CodeReviewOrchestrator] sendMessageV2 billing failure, skipping fresh session fallback",
+          '[CodeReviewOrchestrator] sendMessageV2 billing failure, skipping fresh session fallback',
           {
             reviewId: this.state.reviewId,
             previousCloudAgentSessionId: previousSessionId,
             error: errorMessage,
-          },
+          }
         );
         return;
       }
 
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      console.warn(
-        "[CodeReviewOrchestrator] sendMessageV2 failed, falling back to fresh session",
-        {
-          reviewId: this.state.reviewId,
-          previousCloudAgentSessionId: previousSessionId,
-          error: errorMessage,
-        },
-      );
+      console.warn('[CodeReviewOrchestrator] sendMessageV2 failed, falling back to fresh session', {
+        reviewId: this.state.reviewId,
+        previousCloudAgentSessionId: previousSessionId,
+        error: errorMessage,
+      });
 
       // Reset status to running (it may have been set to running already, but ensure clean state)
       // Clear previousCloudAgentSessionId so the fresh session path doesn't try followup again
@@ -930,14 +856,11 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         // runWithCloudAgentNext handles its own error/status updates, so this catch
         // is only for unexpected throws that bypass its internal error handling
         const freshErrorMessage =
-          freshError instanceof Error ? freshError.message : "Unknown error";
-        console.error(
-          "[CodeReviewOrchestrator] Fresh session fallback also failed",
-          {
-            reviewId: this.state.reviewId,
-            error: freshErrorMessage,
-          },
-        );
+          freshError instanceof Error ? freshError.message : 'Unknown error';
+        console.error('[CodeReviewOrchestrator] Fresh session fallback also failed', {
+          reviewId: this.state.reviewId,
+          error: freshErrorMessage,
+        });
       }
     }
   }
@@ -956,24 +879,21 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     const runStartTime = Date.now();
 
     try {
-      await this.updateStatus("running");
+      await this.updateStatus('running');
 
-      console.log(
-        "[CodeReviewOrchestrator] Starting review with async streaming",
-        {
-          reviewId: this.state.reviewId,
-          timestamp: new Date().toISOString(),
-        },
-      );
+      console.log('[CodeReviewOrchestrator] Starting review with async streaming', {
+        reviewId: this.state.reviewId,
+        timestamp: new Date().toISOString(),
+      });
 
       // Build session input with callback for reliable completion notification
       // The callback URL includes reviewId in the path so cloud agent stays generic
       const sessionInputWithCallback = {
         ...this.state.sessionInput,
-        createdOnPlatform: "code-review",
+        createdOnPlatform: 'code-review',
         callbackUrl: `${this.env.API_URL}/api/internal/code-review-status/${this.state.reviewId}`,
         callbackHeaders: {
-          "X-Internal-Secret": this.env.INTERNAL_API_SECRET,
+          'X-Internal-Secret': this.env.INTERNAL_API_SECRET,
         },
       };
 
@@ -984,9 +904,9 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       const encodedInput = encodeURIComponent(inputJson);
       const cloudAgentUrl = `${this.env.CLOUD_AGENT_URL}/trpc/initiateSessionAsync?input=${encodedInput}`;
 
-      console.log("[CodeReviewOrchestrator] Initiating fetch to cloud agent", {
+      console.log('[CodeReviewOrchestrator] Initiating fetch to cloud agent', {
         reviewId: this.state.reviewId,
-        url: cloudAgentUrl.split("?")[0], // Log URL without query params
+        url: cloudAgentUrl.split('?')[0], // Log URL without query params
         callbackUrl: sessionInputWithCallback.callbackUrl,
         skipBalanceCheck: this.state.skipBalanceCheck,
         timestamp: new Date().toISOString(),
@@ -995,46 +915,39 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       // Build headers, conditionally adding balance check bypass
       const headers: Record<string, string> = {
         Authorization: `Bearer ${this.state.authToken}`,
-        Accept: "text/event-stream",
+        Accept: 'text/event-stream',
       };
       if (this.state.skipBalanceCheck) {
-        headers["x-skip-balance-check"] = "true";
+        headers['x-skip-balance-check'] = 'true';
       }
 
       const response = await fetch(cloudAgentUrl, {
-        method: "GET",
+        method: 'GET',
         headers,
       });
 
-      console.log("[CodeReviewOrchestrator] Fetch response received", {
+      console.log('[CodeReviewOrchestrator] Fetch response received', {
         reviewId: this.state.reviewId,
         httpStatus: response.status,
-        contentType: response.headers.get("content-type"),
+        contentType: response.headers.get('content-type'),
         timestamp: new Date().toISOString(),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Cloud agent returned ${response.status}: ${errorText}`,
-        );
+        throw new Error(`Cloud agent returned ${response.status}: ${errorText}`);
       }
 
-      console.log("[CodeReviewOrchestrator] Connected to async SSE stream", {
+      console.log('[CodeReviewOrchestrator] Connected to async SSE stream', {
         reviewId: this.state.reviewId,
       });
 
       // Process SSE stream with timeout to prevent indefinite hanging
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
-          () =>
-            reject(
-              new Error(
-                "SSE stream timeout - review exceeded maximum time limit",
-              ),
-            ),
-          CodeReviewOrchestrator.STREAM_TIMEOUT_MS,
-        ),
+          () => reject(new Error('SSE stream timeout - review exceeded maximum time limit')),
+          CodeReviewOrchestrator.STREAM_TIMEOUT_MS
+        )
       );
 
       await Promise.race([this.processEventStream(response), timeoutPromise]);
@@ -1043,43 +956,39 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       // The cloud agent callback will handle that reliably.
       // This ensures completion is recorded even if this DO dies before we reach here.
 
-      console.log("[CodeReviewOrchestrator] SSE stream processing finished", {
+      console.log('[CodeReviewOrchestrator] SSE stream processing finished', {
         reviewId: this.state.reviewId,
         sessionId: this.state.sessionId,
-        note: "Callback will update final status",
+        note: 'Callback will update final status',
       });
     } catch (error) {
       // Handle local errors (connection failures, fetch errors, timeouts)
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error";
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       // Only mark as failed for errors that indicate cloud agent never started
       // or connection was never established. For other errors (like timeout),
       // the cloud agent callback may still fire if the session is running.
       const isConnectionError =
-        errorMessage.includes("Cloud agent returned") ||
-        errorMessage.includes("fetch") ||
-        errorMessage.includes("network");
+        errorMessage.includes('Cloud agent returned') ||
+        errorMessage.includes('fetch') ||
+        errorMessage.includes('network');
 
       if (isConnectionError) {
-        await this.updateStatus("failed", { errorMessage });
+        await this.updateStatus('failed', { errorMessage });
 
-        console.error(
-          "[CodeReviewOrchestrator] Review failed (connection error):",
-          {
-            reviewId: this.state.reviewId,
-            error: errorMessage,
-          },
-        );
+        console.error('[CodeReviewOrchestrator] Review failed (connection error):', {
+          reviewId: this.state.reviewId,
+          error: errorMessage,
+        });
       } else {
         // For other errors (timeout, stream processing), log but don't mark failed
         // The callback from cloud agent will provide the authoritative status
         console.warn(
-          "[CodeReviewOrchestrator] Stream processing error (callback will provide status):",
+          '[CodeReviewOrchestrator] Stream processing error (callback will provide status):',
           {
             reviewId: this.state.reviewId,
             error: errorMessage,
-          },
+          }
         );
       }
     } finally {
@@ -1088,7 +997,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       const minutes = Math.floor(totalExecutionTimeMs / 60000);
       const seconds = Math.floor((totalExecutionTimeMs % 60000) / 1000);
 
-      console.log("[CodeReviewOrchestrator] Run completed", {
+      console.log('[CodeReviewOrchestrator] Run completed', {
         reviewId: this.state.reviewId,
         sessionId: this.state.sessionId,
         status: this.state.status,
@@ -1115,12 +1024,12 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
    */
   private async processEventStream(response: Response): Promise<void> {
     if (!response.body) {
-      throw new Error("No response body from cloud agent");
+      throw new Error('No response body from cloud agent');
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = "";
+    let buffer = '';
 
     // Tracking for logging
     let totalEventsReceived = 0;
@@ -1130,7 +1039,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
     const PROGRESS_LOG_INTERVAL_MS = 30_000; // Log progress every 30 seconds
     const eventTypeCounts: Record<string, number> = {};
 
-    console.log("[CodeReviewOrchestrator] Starting SSE stream processing", {
+    console.log('[CodeReviewOrchestrator] Starting SSE stream processing', {
       reviewId: this.state.reviewId,
       sessionId: this.state.sessionId,
     });
@@ -1139,18 +1048,17 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       while (true) {
         // Check if cancelled before reading next chunk
         if (this.cancelled) {
-          console.log("[CodeReviewOrchestrator] Stream processing cancelled", {
+          console.log('[CodeReviewOrchestrator] Stream processing cancelled', {
             reviewId: this.state.reviewId,
             totalEventsReceived,
           });
           break;
         }
 
-        const { done, value } =
-          (await reader.read()) as ReadableStreamReadResult<Uint8Array>;
+        const { done, value } = (await reader.read()) as ReadableStreamReadResult<Uint8Array>;
 
         if (done) {
-          console.log("[CodeReviewOrchestrator] SSE stream ended", {
+          console.log('[CodeReviewOrchestrator] SSE stream ended', {
             reviewId: this.state.reviewId,
             sessionId: this.state.sessionId,
             totalEventsReceived,
@@ -1164,16 +1072,16 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
         buffer += decoder.decode(value, { stream: true });
 
         // Process complete lines
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
         for (const line of lines) {
           // SSE format: "data: <json>"
-          if (line.startsWith("data: ")) {
+          if (line.startsWith('data: ')) {
             const data = line.slice(6); // Remove 'data: ' prefix
 
             // Skip ping/keepalive messages
-            if (data === "" || data === ":ping") {
+            if (data === '' || data === ':ping') {
               continue;
             }
 
@@ -1182,17 +1090,14 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
               totalEventsReceived++;
 
               // Track event type counts
-              const eventType = event.streamEventType || "unknown";
-              eventTypeCounts[eventType] =
-                (eventTypeCounts[eventType] || 0) + 1;
+              const eventType = event.streamEventType || 'unknown';
+              eventTypeCounts[eventType] = (eventTypeCounts[eventType] || 0) + 1;
               const isFirstEvent = totalEventsReceived === 1;
-              const isStatusEvent = eventType === "status";
-              const isTerminalEvent =
-                eventType === "complete" || eventType === "error";
-              const isApiRequest = event.payload?.say === "api_req_started";
+              const isStatusEvent = eventType === 'status';
+              const isTerminalEvent = eventType === 'complete' || eventType === 'error';
+              const isApiRequest = event.payload?.say === 'api_req_started';
               const isSessionCreated =
-                eventType === "kilocode" &&
-                event.payload?.event === "session_created";
+                eventType === 'kilocode' && event.payload?.event === 'session_created';
 
               if (
                 isFirstEvent ||
@@ -1210,7 +1115,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                     event.payload?.content ||
                     event.payload?.say ||
                     event.message ||
-                    ""
+                    ''
                   ).slice(0, 100),
                 };
 
@@ -1223,19 +1128,16 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
                   // Capture model from the first LLM call (intentionally ignoring subsequent
                   // calls that may use different models — the primary review model is what matters)
-                  if (
-                    !this.model &&
-                    typeof event.payload.metadata.model === "string"
-                  ) {
+                  if (!this.model && typeof event.payload.metadata.model === 'string') {
                     this.model = event.payload.metadata.model;
                   }
-                  if (typeof event.payload.metadata.tokensIn === "number") {
+                  if (typeof event.payload.metadata.tokensIn === 'number') {
                     this.totalTokensIn += event.payload.metadata.tokensIn;
                   }
-                  if (typeof event.payload.metadata.tokensOut === "number") {
+                  if (typeof event.payload.metadata.tokensOut === 'number') {
                     this.totalTokensOut += event.payload.metadata.tokensOut;
                   }
-                  if (typeof event.payload.metadata.cost === "number") {
+                  if (typeof event.payload.metadata.cost === 'number') {
                     this.totalCost += event.payload.metadata.cost;
                   }
 
@@ -1251,13 +1153,13 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                   logData.cliSessionId = event.payload.sessionId;
                 }
 
-                console.log("[CodeReviewOrchestrator] Event received", logData);
+                console.log('[CodeReviewOrchestrator] Event received', logData);
               }
 
               // Periodic progress logging (every 30 seconds)
               const now = Date.now();
               if (now - lastProgressLogTime >= PROGRESS_LOG_INTERVAL_MS) {
-                console.log("[CodeReviewOrchestrator] Stream progress", {
+                console.log('[CodeReviewOrchestrator] Stream progress', {
                   reviewId: this.state.reviewId,
                   sessionId: this.state.sessionId,
                   totalEventsReceived,
@@ -1283,18 +1185,15 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 }
 
                 // Extract meaningful message and content based on event type
-                let message = "";
+                let message = '';
                 let content: string | undefined;
                 const payload = event.payload || {};
                 eventsStored++;
 
-                if (
-                  payload.ask === "command" &&
-                  typeof payload.text === "string"
-                ) {
+                if (payload.ask === 'command' && typeof payload.text === 'string') {
                   const riskyPattern = findRiskyPattern(payload.text);
                   const logFn = riskyPattern ? console.warn : console.log;
-                  logFn("[CodeReviewOrchestrator] Command request observed", {
+                  logFn('[CodeReviewOrchestrator] Command request observed', {
                     reviewId: this.state.reviewId,
                     sessionId: this.state.sessionId,
                     eventNumber: totalEventsReceived,
@@ -1306,10 +1205,9 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 // Prioritize showing content if present
                 if (payload.content) {
                   message = payload.content;
-                } else if (payload.say === "api_req_started") {
+                } else if (payload.say === 'api_req_started') {
                   const rawProvider = payload.metadata?.inferenceProvider;
-                  const provider =
-                    typeof rawProvider === "string" ? rawProvider : "API";
+                  const provider = typeof rawProvider === 'string' ? rawProvider : 'API';
                   const tokensIn = Number(payload.metadata?.tokensIn ?? 0);
                   const tokensOut = Number(payload.metadata?.tokensOut ?? 0);
                   const cost = Number(payload.metadata?.cost ?? 0);
@@ -1317,63 +1215,49 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                   if (cost > 0) {
                     content = `Cost: $${cost.toFixed(4)}`;
                   }
-                } else if (payload.say === "mcp_server_request_started") {
-                  message = "Tool request started";
-                } else if (payload.say === "mcp_server_response") {
-                  message = "Tool response received";
+                } else if (payload.say === 'mcp_server_request_started') {
+                  message = 'Tool request started';
+                } else if (payload.say === 'mcp_server_response') {
+                  message = 'Tool response received';
                   // Store metadata as content if present
-                  if (
-                    payload.metadata &&
-                    typeof payload.metadata === "object"
-                  ) {
+                  if (payload.metadata && typeof payload.metadata === 'object') {
                     try {
                       content = JSON.stringify(payload.metadata, null, 2);
                     } catch (_e) {
                       // Ignore stringify errors
                     }
                   }
-                } else if (
-                  payload.ask === "use_mcp_server" &&
-                  payload.metadata
-                ) {
+                } else if (payload.ask === 'use_mcp_server' && payload.metadata) {
                   const rawServerName = payload.metadata.serverName;
-                  const serverName =
-                    typeof rawServerName === "string" ? rawServerName : "";
+                  const serverName = typeof rawServerName === 'string' ? rawServerName : '';
                   const rawToolName = payload.metadata.toolName;
-                  const toolName =
-                    typeof rawToolName === "string" ? rawToolName : "";
+                  const toolName = typeof rawToolName === 'string' ? rawToolName : '';
                   const args = payload.metadata.arguments;
                   message = `Using ${serverName}/${toolName}`;
 
                   // Log submit_review calls to detect approval issues
-                  if (
-                    toolName === "submit_review" ||
-                    toolName === "pull_request_review_write"
-                  ) {
-                    console.log(
-                      "[CodeReviewOrchestrator] GitHub review submission detected",
-                      {
-                        reviewId: this.state.reviewId,
-                        sessionId: this.state.sessionId,
-                        toolName,
-                        arguments: args,
-                      },
-                    );
+                  if (toolName === 'submit_review' || toolName === 'pull_request_review_write') {
+                    console.log('[CodeReviewOrchestrator] GitHub review submission detected', {
+                      reviewId: this.state.reviewId,
+                      sessionId: this.state.sessionId,
+                      toolName,
+                      arguments: args,
+                    });
                   }
 
-                  if (typeof args === "string") {
+                  if (typeof args === 'string') {
                     content = args;
                   } else if (args != null) {
                     content = JSON.stringify(args);
                   }
                 } else {
-                  message = payload.say || event.message || "";
+                  message = payload.say || event.message || '';
                 }
 
                 if (message) {
                   this.state.events.push({
                     timestamp: new Date().toISOString(),
-                    eventType: event.streamEventType || "unknown",
+                    eventType: event.streamEventType || 'unknown',
                     message,
                     content,
                     sessionId: event.sessionId,
@@ -1382,32 +1266,23 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                   this.unsavedEventCount++;
 
                   // Only save every N events to reduce CPU usage from repeated serialization
-                  if (
-                    this.unsavedEventCount >=
-                    CodeReviewOrchestrator.EVENT_BATCH_SIZE
-                  ) {
+                  if (this.unsavedEventCount >= CodeReviewOrchestrator.EVENT_BATCH_SIZE) {
                     try {
                       await this.saveState();
-                      console.log(
-                        "[CodeReviewOrchestrator] Saved event batch",
-                        {
-                          reviewId: this.state.reviewId,
-                          sessionId: this.state.sessionId,
-                          batchSize: this.unsavedEventCount,
-                          totalEventsStored: this.state.events.length,
-                        },
-                      );
+                      console.log('[CodeReviewOrchestrator] Saved event batch', {
+                        reviewId: this.state.reviewId,
+                        sessionId: this.state.sessionId,
+                        batchSize: this.unsavedEventCount,
+                        totalEventsStored: this.state.events.length,
+                      });
                       this.unsavedEventCount = 0;
                     } catch (saveError) {
-                      console.error(
-                        "[CodeReviewOrchestrator] Failed to save event batch:",
-                        {
-                          reviewId: this.state.reviewId,
-                          sessionId: this.state.sessionId,
-                          eventsCount: this.state.events.length,
-                          error: saveError,
-                        },
-                      );
+                      console.error('[CodeReviewOrchestrator] Failed to save event batch:', {
+                        reviewId: this.state.reviewId,
+                        sessionId: this.state.sessionId,
+                        eventsCount: this.state.events.length,
+                        error: saveError,
+                      });
                       // Continue processing - events are for display only
                     }
                   }
@@ -1417,24 +1292,21 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
               // Extract cloud agent sessionId from first event
               if (!this.state.sessionId && event.sessionId) {
                 const sessionId = event.sessionId;
-                console.log(
-                  "[CodeReviewOrchestrator] Captured sessionId from SSE event",
-                  {
-                    reviewId: this.state.reviewId,
-                    sessionId,
-                    eventNumber: totalEventsReceived,
-                  },
-                );
+                console.log('[CodeReviewOrchestrator] Captured sessionId from SSE event', {
+                  reviewId: this.state.reviewId,
+                  sessionId,
+                  eventNumber: totalEventsReceived,
+                });
                 try {
-                  await this.updateStatus("running", { sessionId });
+                  await this.updateStatus('running', { sessionId });
                 } catch (updateError) {
                   console.error(
-                    "[CodeReviewOrchestrator] Failed to update status with sessionId:",
+                    '[CodeReviewOrchestrator] Failed to update status with sessionId:',
                     {
                       reviewId: this.state.reviewId,
                       sessionId,
                       error: updateError,
-                    },
+                    }
                   );
                   // Continue processing even if status update fails
                 }
@@ -1442,34 +1314,29 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
 
               // Extract CLI session ID from session_created event
               // The CLI session ID is in payload.sessionId when payload.event === 'session_created'
-              if (!this.state.cliSessionId && eventType === "kilocode") {
-                const payload = event.payload as
-                  | Record<string, unknown>
-                  | undefined;
+              if (!this.state.cliSessionId && eventType === 'kilocode') {
+                const payload = event.payload as Record<string, unknown> | undefined;
 
-                if (
-                  payload?.event === "session_created" &&
-                  typeof payload.sessionId === "string"
-                ) {
+                if (payload?.event === 'session_created' && typeof payload.sessionId === 'string') {
                   const cliSessionId = payload.sessionId;
                   console.log(
-                    "[CodeReviewOrchestrator] Captured CLI session ID from session_created event",
+                    '[CodeReviewOrchestrator] Captured CLI session ID from session_created event',
                     {
                       reviewId: this.state.reviewId,
                       cliSessionId,
                       eventNumber: totalEventsReceived,
-                    },
+                    }
                   );
                   try {
-                    await this.updateStatus("running", { cliSessionId });
+                    await this.updateStatus('running', { cliSessionId });
                   } catch (updateError) {
                     console.error(
-                      "[CodeReviewOrchestrator] Failed to update status with cliSessionId:",
+                      '[CodeReviewOrchestrator] Failed to update status with cliSessionId:',
                       {
                         reviewId: this.state.reviewId,
                         cliSessionId,
                         error: updateError,
-                      },
+                      }
                     );
                     // Continue processing even if status update fails
                   }
@@ -1477,32 +1344,26 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
               }
 
               // Handle completion event
-              if (event.streamEventType === "complete") {
+              if (event.streamEventType === 'complete') {
                 // Flush any remaining unsaved events
                 if (this.unsavedEventCount > 0) {
                   try {
                     await this.saveState();
                     this.unsavedEventCount = 0;
                   } catch (saveError) {
-                    console.error(
-                      "[CodeReviewOrchestrator] Failed to save final event batch:",
-                      {
-                        reviewId: this.state.reviewId,
-                        eventsCount: this.state.events?.length,
-                        error: saveError,
-                      },
-                    );
+                    console.error('[CodeReviewOrchestrator] Failed to save final event batch:', {
+                      reviewId: this.state.reviewId,
+                      eventsCount: this.state.events?.length,
+                      error: saveError,
+                    });
                   }
                 }
-                console.log(
-                  "[CodeReviewOrchestrator] Stream completion event received",
-                  {
-                    reviewId: this.state.reviewId,
-                    sessionId: this.state.sessionId,
-                    totalEventsReceived,
-                    eventsStored,
-                  },
-                );
+                console.log('[CodeReviewOrchestrator] Stream completion event received', {
+                  reviewId: this.state.reviewId,
+                  sessionId: this.state.sessionId,
+                  totalEventsReceived,
+                  eventsStored,
+                });
                 break;
               }
             } catch (parseError) {
@@ -1516,19 +1377,12 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
                 dataFirst100: data.slice(0, 100),
                 dataLast50: data.slice(-50),
                 // Error details
-                errorType: parseError?.constructor?.name || "unknown",
-                errorMessage:
-                  parseError instanceof Error
-                    ? parseError.message
-                    : String(parseError),
-                errorName:
-                  parseError instanceof Error ? parseError.name : undefined,
+                errorType: parseError?.constructor?.name || 'unknown',
+                errorMessage: parseError instanceof Error ? parseError.message : String(parseError),
+                errorName: parseError instanceof Error ? parseError.name : undefined,
               };
 
-              console.error(
-                "[CodeReviewOrchestrator] SSE parse error:",
-                errorInfo,
-              );
+              console.error('[CodeReviewOrchestrator] SSE parse error:', errorInfo);
               // Skip this event and continue with the next one
             }
           }
@@ -1538,7 +1392,7 @@ export class CodeReviewOrchestrator extends DurableObject<Env> {
       reader.releaseLock();
 
       // Final summary log
-      console.log("[CodeReviewOrchestrator] Stream processing complete", {
+      console.log('[CodeReviewOrchestrator] Stream processing complete', {
         reviewId: this.state.reviewId,
         sessionId: this.state.sessionId,
         totalEventsReceived,
