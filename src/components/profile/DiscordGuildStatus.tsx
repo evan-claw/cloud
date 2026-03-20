@@ -53,7 +53,16 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
             <div>
               {!hasDiscordLinked && (
                 <p className="text-muted-foreground text-sm">
-                  Link your Discord account to verify Kilo server membership.
+                  Link your Discord account to verify{' '}
+                  <a
+                    href="https://discord.gg/GTPgzUvJ2t"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground underline"
+                  >
+                    Kilo server
+                  </a>{' '}
+                  membership.
                 </p>
               )}
 
@@ -83,7 +92,15 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 <div className="flex items-center gap-2">
                   <XCircle className="text-muted-foreground h-4 w-4 shrink-0" />
                   <span className="text-muted-foreground text-sm">
-                    Not a member of the Kilo Discord server
+                    Not a member of the{' '}
+                    <a
+                      href="https://discord.gg/GTPgzUvJ2t"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-foreground underline"
+                    >
+                      Kilo Discord server
+                    </a>
                   </span>
                 </div>
               )}
