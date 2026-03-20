@@ -99,7 +99,7 @@ export function ClawDashboard({
           <TriangleAlert className="size-4" />
           <AlertDescription className="flex flex-col">
             <span>
-              KiloClaw ended up being really popular! We&apos;re working on getting additional
+              KiloClaw is really popular today. We&apos;re working on getting additional
               capacity. If you have trouble starting a machine, please try again in a few minutes.
             </span>
             <span className="mt-2 flex flex-row gap-1">
