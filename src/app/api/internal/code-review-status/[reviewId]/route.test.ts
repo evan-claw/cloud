@@ -42,6 +42,14 @@ const mockFindKiloReviewNote = jest.fn<any>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockUpdateKiloReviewNote = jest.fn<any>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockCreatePRComment = jest.fn<any>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockHasPRCommentWithMarker = jest.fn<any>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockCreateMRNote = jest.fn<any>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockHasMRNoteWithMarker = jest.fn<any>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockCaptureException = jest.fn<any>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockCaptureMessage = jest.fn<any>();
@@ -74,6 +82,8 @@ jest.mock('@/lib/bot-users/bot-user-service', () => ({
 jest.mock('@/lib/integrations/platforms/github/adapter', () => ({
   updateCheckRun: mockUpdateCheckRun,
   addReactionToPR: mockAddReactionToPR,
+  createPRComment: mockCreatePRComment,
+  hasPRCommentWithMarker: mockHasPRCommentWithMarker,
   findKiloReviewComment: mockFindKiloReviewComment,
   updateKiloReviewComment: mockUpdateKiloReviewComment,
 }));
@@ -81,6 +91,8 @@ jest.mock('@/lib/integrations/platforms/github/adapter', () => ({
 jest.mock('@/lib/integrations/platforms/gitlab/adapter', () => ({
   setCommitStatus: mockSetCommitStatus,
   addReactionToMR: mockAddReactionToMR,
+  createMRNote: mockCreateMRNote,
+  hasMRNoteWithMarker: mockHasMRNoteWithMarker,
   findKiloReviewNote: mockFindKiloReviewNote,
   updateKiloReviewNote: mockUpdateKiloReviewNote,
 }));
@@ -200,6 +212,10 @@ beforeEach(async () => {
   });
   mockUpdateCheckRun.mockResolvedValue(undefined);
   mockAddReactionToPR.mockResolvedValue(undefined);
+  mockCreatePRComment.mockResolvedValue(undefined);
+  mockHasPRCommentWithMarker.mockResolvedValue(false);
+  mockCreateMRNote.mockResolvedValue(undefined);
+  mockHasMRNoteWithMarker.mockResolvedValue(false);
   ({ POST } = await import('./route'));
 });
 
@@ -355,6 +371,142 @@ describe('POST /api/internal/code-review-status/[reviewId]', () => {
             title: 'Insufficient credits to run review',
           }),
         })
+      );
+    });
+  });
+
+  describe('billing PR/MR comment', () => {
+    it('posts billing notice on GitHub PR for billing failures', async () => {
+      mockGetCodeReviewById.mockResolvedValue(makeReview());
+      mockHasPRCommentWithMarker.mockResolvedValue(false);
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Insufficient credits',
+          terminalReason: 'billing',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockHasPRCommentWithMarker).toHaveBeenCalledWith(
+        'inst-1',
+        'owner',
+        'repo',
+        1,
+        '<!-- kilo-billing-notice -->'
+      );
+      expect(mockCreatePRComment).toHaveBeenCalledWith(
+        'inst-1',
+        'owner',
+        'repo',
+        1,
+        expect.stringContaining('your account is out of credits')
+      );
+    });
+
+    it('skips billing notice if already posted on GitHub PR', async () => {
+      mockGetCodeReviewById.mockResolvedValue(makeReview());
+      mockHasPRCommentWithMarker.mockResolvedValue(true);
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Insufficient credits',
+          terminalReason: 'billing',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockHasPRCommentWithMarker).toHaveBeenCalled();
+      expect(mockCreatePRComment).not.toHaveBeenCalled();
+    });
+
+    it('does not post billing notice for non-billing failures', async () => {
+      mockGetCodeReviewById.mockResolvedValue(makeReview());
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Something went wrong',
+          terminalReason: 'upstream_error',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockCreatePRComment).not.toHaveBeenCalled();
+      expect(mockHasPRCommentWithMarker).not.toHaveBeenCalled();
+    });
+
+    it('posts billing notice on GitLab MR for billing failures', async () => {
+      mockGetCodeReviewById.mockResolvedValue(
+        makeReview({ platform: 'gitlab', platform_project_id: 42, check_run_id: null })
+      );
+      mockHasMRNoteWithMarker.mockResolvedValue(false);
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Insufficient credits',
+          terminalReason: 'billing',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockHasMRNoteWithMarker).toHaveBeenCalledWith(
+        'mock-token',
+        'owner/repo',
+        1,
+        '<!-- kilo-billing-notice -->',
+        'https://gitlab.com'
+      );
+      expect(mockCreateMRNote).toHaveBeenCalledWith(
+        'mock-token',
+        'owner/repo',
+        1,
+        expect.stringContaining('your account is out of credits'),
+        'https://gitlab.com'
+      );
+    });
+
+    it('skips billing notice if already posted on GitLab MR', async () => {
+      mockGetCodeReviewById.mockResolvedValue(
+        makeReview({ platform: 'gitlab', platform_project_id: 42, check_run_id: null })
+      );
+      mockHasMRNoteWithMarker.mockResolvedValue(true);
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Insufficient credits',
+          terminalReason: 'billing',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockHasMRNoteWithMarker).toHaveBeenCalled();
+      expect(mockCreateMRNote).not.toHaveBeenCalled();
+    });
+
+    it('includes link to app.kilo.ai in the billing notice', async () => {
+      mockGetCodeReviewById.mockResolvedValue(makeReview());
+      mockHasPRCommentWithMarker.mockResolvedValue(false);
+
+      await POST(
+        makeRequest({
+          status: 'failed',
+          errorMessage: 'Insufficient credits',
+          terminalReason: 'billing',
+        }),
+        makeParams(REVIEW_ID)
+      );
+
+      expect(mockCreatePRComment).toHaveBeenCalledWith(
+        'inst-1',
+        'owner',
+        'repo',
+        1,
+        expect.stringContaining('http://app.kilo.ai/')
       );
     });
   });
