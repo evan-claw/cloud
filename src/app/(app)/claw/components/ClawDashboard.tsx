@@ -158,6 +158,7 @@ export function ClawDashboard({
           />
         ) : isNewSetup && onboardingStep === 'channels' ? (
           <ChannelSelectionStepView
+            instanceRunning={isRunning && gatewayStatus?.state === 'running'}
             onSelect={(_channelId, tokens) => {
               setChannelTokens(tokens);
               setOnboardingStep('provisioning');
