@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useRef, useState } from 'react';
 import { CreditCard, Gift, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -16,14 +16,17 @@ export function CreditsNudge({
   onSwitchToFree: () => void;
 }) {
   const [selectedAmount, setSelectedAmount] = useState<number>(10);
-  const [isPending, startTransition] = useTransition();
+  // Plain boolean that stays true once set — the form submit navigates
+  // away, so we never need to reset it. Using useTransition would flicker
+  // because submitting resets when the server action finishes, before the
+  // browser has actually navigated.
+  const [submitting, setSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  function handlePurchase() {
-    startTransition(async () => {
-      await setClawReturnUrl(selectedModel);
-      formRef.current?.submit();
-    });
+  async function handlePurchase() {
+    setSubmitting(true);
+    await setClawReturnUrl(selectedModel);
+    formRef.current?.submit();
   }
 
   return (
@@ -42,7 +45,7 @@ export function CreditsNudge({
           <button
             key={amount}
             type="button"
-            disabled={isPending}
+            disabled={submitting}
             onClick={() => setSelectedAmount(amount)}
             className={cn(
               'rounded-lg border py-2.5 text-sm font-medium transition-colors',
@@ -68,11 +71,11 @@ export function CreditsNudge({
       <Button
         type="button"
         onClick={handlePurchase}
-        disabled={isPending}
+        disabled={submitting}
         className="w-full bg-emerald-600 py-5 text-white hover:bg-emerald-700"
       >
         <CreditCard className="h-4 w-4" />
-        {isPending ? 'Redirecting...' : `Add $${selectedAmount} & get started`}
+        {submitting ? 'Redirecting...' : `Add $${selectedAmount} & get started`}
       </Button>
 
       {/* Divider */}
@@ -87,7 +90,7 @@ export function CreditsNudge({
         type="button"
         variant="outline"
         onClick={onSwitchToFree}
-        disabled={isPending}
+        disabled={submitting}
         className="w-full py-5"
       >
         <Gift className="h-4 w-4" />
