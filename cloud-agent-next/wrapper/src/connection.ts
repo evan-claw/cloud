@@ -367,7 +367,11 @@ export function createConnectionManager(
 
           // Terminal error detection
           if (isTerminalError(eventType, properties)) {
-            callbacks.onTerminalError(eventType);
+            const errorText =
+              typeof properties.error === 'string'
+                ? properties.error
+                : `Insufficient credits: ${eventType}`;
+            callbacks.onTerminalError(errorText);
             return;
           }
 

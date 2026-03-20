@@ -103,7 +103,8 @@ function normalizePayload(raw: StatusUpdatePayload): {
   gateResult?: 'pass' | 'fail';
 } {
   // Map cloud-agent-next 'interrupted' → 'cancelled'
-  const status = raw.status === 'interrupted' ? 'cancelled' : raw.status;
+  let status: 'running' | 'completed' | 'failed' | 'cancelled' =
+    raw.status === 'interrupted' ? 'cancelled' : raw.status;
 
   // Map cloud-agent-next 'kiloSessionId' → 'cliSessionId'
   const cliSessionId =
@@ -119,8 +120,18 @@ function normalizePayload(raw: StatusUpdatePayload): {
 
   // Validate terminalReason against allowlist to prevent free-form text in the DB
   const validReasons: ReadonlySet<string> = new Set(CODE_REVIEW_TERMINAL_REASONS);
-  const terminalReason =
+  let terminalReason: CodeReviewTerminalReason | undefined =
     raw.terminalReason && validReasons.has(raw.terminalReason) ? raw.terminalReason : undefined;
+
+  // Infer billing when no explicit terminalReason was provided.
+  // v1: billing errors arrive as 'interrupted' (→ cancelled) with billing error text
+  // v2: billing errors arrive as 'failed' with billing error text (after wrapper fix)
+  if (!terminalReason && isBillingCodeReviewTerminalReason(undefined, raw.errorMessage)) {
+    if (status === 'cancelled') {
+      status = 'failed'; // billing is not a user cancellation
+    }
+    terminalReason = 'billing';
+  }
 
   return {
     status,
