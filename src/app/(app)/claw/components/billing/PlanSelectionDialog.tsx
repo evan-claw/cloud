@@ -17,7 +17,7 @@ type PlanSelectionDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-const COMMIT_FEATURES = ['Best value', '64% savings vs Standard', 'Save $96 over 6 months'];
+const COMMIT_FEATURES = ['Best value', 'Auto-renews every 6 months', 'Lower monthly equivalent'];
 const STANDARD_FEATURES = ['Cancel anytime', 'No commitment', 'Pay monthly'];
 
 function PlanCard({
@@ -57,9 +57,12 @@ function PlanCard({
 
       <div className="mb-6 text-center">
         <div className="text-foreground text-4xl font-bold">
-          {isCommit ? '$9' : '$25'}
+          {isCommit ? '$8' : '$9'}
           <span className="text-muted-foreground text-lg font-normal">/month</span>
         </div>
+        {!isCommit && (
+          <div className="mt-2 text-sm font-medium text-emerald-400">$4 first month</div>
+        )}
       </div>
 
       <ul className="mb-6 space-y-3">
@@ -139,7 +142,7 @@ export function PlanSelectionDialog({ open, onOpenChange }: PlanSelectionDialogP
             >
               {checkout.isPending
                 ? 'Redirecting to Stripe…'
-                : `Subscribe to ${planName} Plan – ${selectedPlan === 'commit' ? '$54' : '$25'}`}
+                : `Subscribe to ${planName} Plan – ${selectedPlan === 'commit' ? '$48' : '$9'}`}
             </Button>
             <p className="text-muted-foreground text-center text-xs">
               You&apos;ll be redirected to Stripe to pay

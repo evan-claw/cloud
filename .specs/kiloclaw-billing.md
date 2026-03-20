@@ -3,6 +3,7 @@
 ## Status
 
 Draft -- generated from branch `jdp/kiloclaw-billing` on 2026-03-13.
+Updated 2026-03-19 -- pricing and trial duration changes.
 
 ## Conventions
 
@@ -20,7 +21,7 @@ plans: a discounted six-month commit plan or a month-to-month standard
 plan. The commit plan auto-renews for successive six-month periods at
 the same price; users may switch between plans at any time. New users
 who provision an instance without subscribing first automatically
-receive a 30-day free trial. A legacy earlybird purchase also grants
+receive a 7-day free trial. A legacy earlybird purchase also grants
 access until a fixed expiry date. A periodic background job enforces
 expiry, suspension, and eventual instance destruction when access
 lapses, with email notifications at each stage.
@@ -32,7 +33,7 @@ lapses, with email notifications at each stage.
 1. The system MUST support exactly two user-facing subscription plans:
    commit and standard. A trial plan exists internally but is created
    automatically at provisioning time, not selected by the user.
-2. A trial plan MUST last 30 calendar days from the moment it is created.
+2. A trial plan MUST last 7 calendar days from the moment it is created.
 3. A commit plan MUST cover a six-calendar-month billing period.
 4. A standard plan MUST bill on a monthly recurring cycle.
 5. The system MUST enforce at most one subscription record per user.
@@ -52,7 +53,7 @@ lapses, with email notifications at each stage.
    creates the instance, but the billing status endpoint includes the
    instance check as defense in depth.
 3. When a trial is created, the system MUST record the trial start
-   timestamp and an end timestamp exactly 30 days later.
+   timestamp and an end timestamp exactly 7 days later.
 4. The system MUST NOT require a credit card to start a trial.
 
 ### Access Control
@@ -84,8 +85,9 @@ lapses, with email notifications at each stage.
    customer before creating a new checkout session, to guard against
    concurrent checkouts. This check does not cover provider-side
    subscriptions in past-due status.
-4. The system MUST allow promotional codes only for the standard plan.
-5. The system MUST NOT allow promotional codes for the commit plan.
+4. The system MUST NOT allow promotional codes for either plan.
+5. The system MUST apply a provider-configured first-month discount
+   coupon when creating a standard plan checkout session.
 6. When a configurable billing start date is set and is in the future,
    the system MUST create the subscription with a delayed billing period
    that begins on that date.
@@ -170,11 +172,11 @@ lapses, with email notifications at each stage.
 
 ### Trial Expiry Warnings
 
-1. When a trial has 5 or fewer days remaining and has not been
+1. When a trial has 2 or fewer days remaining and has not been
    suspended, the system MUST send a trial-ending-soon notification.
 2. When a trial has 1 or fewer days remaining, the system MUST send a
    more urgent trial-expires-tomorrow notification instead of the
-   5-day notification.
+   2-day notification.
 
 ### Earlybird Expiry Warnings
 
@@ -294,6 +296,25 @@ lapses, with email notifications at each stage.
    records for that user.
 2. When a user is soft-deleted, the system MUST delete all email
    notification log entries for that user.
+
+### Changelog
+
+#### 2026-03-19 -- Pricing and trial changes
+
+Previous values:
+
+- Trial duration: 30 days
+- Standard plan: $25/month, promotional codes allowed
+- Commit plan: $54/6 months
+- Trial expiry warning: 5 days before expiry
+
+New values:
+
+- Trial duration: 7 days (existing trials keep their original end date)
+- Standard plan: $9/month with $4 first month via coupon, no promotional codes
+- Commit plan: $48/6 months
+- Trial expiry warning: 2 days before expiry
+- 14 existing subscribers migrated to new pricing at next billing cycle
 
 ## Error Handling
 

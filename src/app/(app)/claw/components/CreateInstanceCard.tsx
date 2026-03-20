@@ -46,9 +46,7 @@ export function CreateInstanceCard({
       : undefined;
 
   const canStartTrial = Boolean(billingStatus?.trialEligible);
-  const provisionSubtitle = canStartTrial
-    ? '30-day free trial, no credit card required'
-    : undefined;
+  const provisionSubtitle = canStartTrial ? '7-day free trial, no credit card required' : undefined;
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
