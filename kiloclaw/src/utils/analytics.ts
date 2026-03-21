@@ -31,22 +31,25 @@
  * event names while preserving autocomplete for known events.
  */
 export type KiloClawEventName =
-  // DO lifecycle
+  // DO lifecycle (emitted from index.ts via emitEvent)
   | 'instance.provisioned'
   | 'instance.started'
   | 'instance.stopped'
-  | 'instance.restarted'
   | 'instance.destroy_started'
-  | 'instance.destroy_finalized'
-  // Reconcile corrective actions
-  | 'reconcile.status_drift'
-  | 'reconcile.volume_repaired'
-  | 'reconcile.metadata_recovery'
+  // Reconcile events (emitted via ReconcileContext.log as `reconcile.{action}`)
+  // All reconcileLog actions are automatically prefixed — see log.ts.
+  | 'reconcile.sync_status'
+  | 'reconcile.sync_status_failed'
+  | 'reconcile.mark_stopped'
+  | 'reconcile.replace_lost_volume'
+  | 'reconcile.recover_machine_from_metadata'
   | 'reconcile.api_key_refreshed'
-  | 'reconcile.stale_provision_destroyed'
-  | 'reconcile.machine_mount_repaired'
-  | 'reconcile.bound_machine_recovery'
-  // HTTP-derived (open string)
+  | 'reconcile.auto_destroy_stale_provision'
+  | 'reconcile.repair_mount'
+  | 'reconcile.recover_bound_machine_for_destroy'
+  | 'reconcile.restart_self_healed'
+  | 'reconcile.destroy_complete'
+  // HTTP-derived (open string) and additional reconcile.* events
   | (string & {});
 
 export type KiloClawDelivery = 'http' | 'do' | 'reconcile';

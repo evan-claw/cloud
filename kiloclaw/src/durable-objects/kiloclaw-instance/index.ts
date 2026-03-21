@@ -46,7 +46,7 @@ import type { GatewayProcessStatus } from '../gateway-controller-types';
 import type { InstanceMutableState, InstanceStatus, DestroyResult } from './types';
 import { getFlyConfig } from './types';
 import { createMutableState, loadState, storageUpdate } from './state';
-import { nextAlarmTime, doLog, doError, doWarn, toLoggable } from './log';
+import { nextAlarmTime, doLog, doError, doWarn, toLoggable, createReconcileContext } from './log';
 import { attemptMetadataRecovery } from './reconcile';
 import { resolveImageTag, getRegistryApp, buildUserEnvVars } from './config';
 import * as gateway from './gateway';
@@ -677,7 +677,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         flyConfig,
         this.ctx,
         this.s,
-        'start_recovery'
+        createReconcileContext(this.s, this.env, 'start_recovery')
       );
       if (!recovered && !this.s.flyMachineId) {
         throw new Error(
@@ -716,7 +716,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       try {
         const machine = await fly.getMachine(flyConfig, this.s.flyMachineId);
         if (machine.state === 'started') {
-          await reconcileMachineMount(flyConfig, this.ctx, this.s, machine, 'start');
+          await reconcileMachineMount(
+            flyConfig,
+            this.ctx,
+            this.s,
+            machine,
+            createReconcileContext(this.s, this.env, 'start')
+          );
           console.log('[DO] Machine already running, mount verified');
           await this.scheduleAlarm();
           return;
@@ -982,15 +988,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     });
 
     const flyConfig = getFlyConfig(this.env, this.s);
-    await tryDeleteMachine(flyConfig, this.ctx, this.s, 'destroy');
-    await tryDeleteVolume(flyConfig, this.ctx, this.s, 'destroy');
+    const destroyRctx = createReconcileContext(this.s, this.env, 'destroy');
+    await tryDeleteMachine(flyConfig, this.ctx, this.s, destroyRctx);
+    await tryDeleteVolume(flyConfig, this.ctx, this.s, destroyRctx);
 
     const finalized = await finalizeDestroyIfComplete(
       this.ctx,
       this.s,
+      destroyRctx,
       (userId, sandboxId) =>
-        markDestroyedInPostgresHelper(this.env, this.ctx, this.s, userId, sandboxId),
-      this.env
+        markDestroyedInPostgresHelper(this.env, this.ctx, this.s, userId, sandboxId)
     );
     if (!finalized.finalized) {
       doWarn(this.s, 'Destroy incomplete, alarm will retry', {
@@ -1491,7 +1498,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       const preSuccessStatus = await this.ctx.storage.get('status');
       if (preSuccessStatus !== 'restarting') return;
 
-      await markRestartSuccessful(this.ctx, this.s, this.env);
+      await markRestartSuccessful(
+        this.ctx,
+        this.s,
+        createReconcileContext(this.s, this.env, 'restart')
+      );
       doLog(this.s, 'restartMachine: background restart completed successfully');
       await this.scheduleAlarm();
     } catch (err) {

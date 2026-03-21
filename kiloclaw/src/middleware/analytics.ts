@@ -85,7 +85,7 @@ export async function instrumented(
     }
     return response;
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    error = (err instanceof Error ? err.message : String(err)).slice(0, 200);
     throw err;
   } finally {
     const durationMs = performance.now() - startTime;
