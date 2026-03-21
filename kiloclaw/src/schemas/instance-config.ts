@@ -182,6 +182,10 @@ export const PersistedStateSchema = z.object({
   gmailNotificationsEnabled: z.boolean().default(false),
   gmailLastHistoryId: z.string().nullable().default(null),
   gmailPushOidcEmail: z.string().nullable().default(null),
+  // User-selected exec permissions preset (persisted so it survives restarts).
+  // null = use defaults (security: 'allowlist', ask: 'on-miss').
+  execSecurity: z.string().nullable().default(null),
+  execAsk: z.string().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

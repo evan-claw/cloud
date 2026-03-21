@@ -17,6 +17,7 @@ import {
   KILOCLAW_API_URL,
   STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID,
   STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID,
+  STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID,
   STRIPE_KILOCLAW_BILLING_START,
   KILOCLAW_BILLING_ENFORCEMENT,
 } from '@/lib/config.server';
@@ -399,11 +400,31 @@ export const kiloclawRouter = createTRPCRouter({
     return client.stop(ctx.user.id);
   }),
 
-  destroy: clawAccessProcedure.mutation(async ({ ctx }) => {
+  destroy: baseProcedure.mutation(async ({ ctx }) => {
     const destroyedRow = await markActiveInstanceDestroyed(ctx.user.id);
     const client = new KiloClawInternalClient();
     try {
-      return await client.destroy(ctx.user.id);
+      const result = await client.destroy(ctx.user.id);
+      // Clear the destruction lifecycle so the billing cron doesn't
+      // send warning emails or attempt a redundant destroy.
+      // Only clear suspended_at for non-past_due subscriptions — nulling it
+      // on a past_due row would re-enable access without fixing payment.
+      const [sub] = await db
+        .select({ status: kiloclaw_subscriptions.status })
+        .from(kiloclaw_subscriptions)
+        .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id))
+        .limit(1);
+      const clearFields: { suspended_at?: null; destruction_deadline: null } = {
+        destruction_deadline: null,
+      };
+      if (sub && sub.status !== 'past_due') {
+        clearFields.suspended_at = null;
+      }
+      await db
+        .update(kiloclaw_subscriptions)
+        .set(clearFields)
+        .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id));
+      return result;
     } catch (error) {
       if (destroyedRow) {
         await restoreDestroyedInstance(destroyedRow.id);
@@ -443,6 +464,13 @@ export const kiloclawRouter = createTRPCRouter({
       channels: buildWorkerChannelsPatch(input),
     });
   }),
+
+  patchExecPreset: clawAccessProcedure
+    .input(z.object({ security: z.string().optional(), ask: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const client = new KiloClawInternalClient();
+      return client.patchExecPreset(ctx.user.id, input);
+    }),
 
   /**
    * Generic secret patch — catalog-driven replacement for patchChannels.
@@ -1192,14 +1220,30 @@ export const kiloclawRouter = createTRPCRouter({
       const priceId = getStripePriceIdForClawPlan(input.plan);
 
       const rewardfulReferral = await getRewardfulReferral();
+      const shouldApplyStandardPlanDiscount =
+        input.plan === 'standard' && existing?.status !== 'canceled';
+      const standardPlanDiscount = shouldApplyStandardPlanDiscount
+        ? (() => {
+            if (!STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID) {
+              throw new TRPCError({
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'Standard plan first-month discount is not configured.',
+              });
+            }
+
+            return {
+              discounts: [{ coupon: STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID }],
+            };
+          })()
+        : {};
 
       const session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         customer: stripeCustomerId,
         ...(rewardfulReferral && { client_reference_id: rewardfulReferral }),
-        allow_promotion_codes: input.plan === 'standard',
         billing_address_collection: 'required',
         line_items: [{ price: priceId, quantity: 1 }],
+        ...standardPlanDiscount,
         customer_update: { name: 'auto', address: 'auto' },
         tax_id_collection: { enabled: true, required: 'never' },
         success_url: `${APP_URL}/payments/kiloclaw/success?session_id={CHECKOUT_SESSION_ID}`,

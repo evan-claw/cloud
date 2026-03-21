@@ -1,6 +1,8 @@
 // Set stripe price env vars before any module loads
 process.env.STRIPE_KILOCLAW_COMMIT_PRICE_ID ||= 'price_commit';
 process.env.STRIPE_KILOCLAW_STANDARD_PRICE_ID ||= 'price_standard';
+process.env.STRIPE_KILOCLAW_STANDARD_FIRST_MONTH_COUPON_ID ||=
+  'coupon_test_kiloclaw_standard_first_month';
 process.env.STRIPE_KILOCLAW_BILLING_START ||= '2026-03-23T00:00:00Z';
 
 import {
@@ -238,7 +240,7 @@ describe('getBillingStatus', () => {
 });
 
 describe('createSubscriptionCheckout', () => {
-  it('sets allow_promotion_codes true for standard plan', async () => {
+  it('applies the configured first-month coupon for standard plan', async () => {
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: 'https://checkout.stripe.com/test',
     });
@@ -246,12 +248,15 @@ describe('createSubscriptionCheckout', () => {
     const caller = await createCallerForUser(user.id);
     await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
 
-    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
-      expect.objectContaining({ allow_promotion_codes: true })
-    );
+    const callArgs = stripeMock.checkout.sessions.create.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(callArgs.discounts).toEqual([{ coupon: 'coupon_test_kiloclaw_standard_first_month' }]);
+    expect(callArgs.allow_promotion_codes).toBeUndefined();
   });
 
-  it('sets allow_promotion_codes false for commit plan', async () => {
+  it('does not set discounts or promotion codes for commit plan', async () => {
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: 'https://checkout.stripe.com/test',
     });
@@ -259,9 +264,35 @@ describe('createSubscriptionCheckout', () => {
     const caller = await createCallerForUser(user.id);
     await caller.kiloclaw.createSubscriptionCheckout({ plan: 'commit' });
 
-    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
-      expect.objectContaining({ allow_promotion_codes: false })
-    );
+    const callArgs = stripeMock.checkout.sessions.create.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(callArgs.discounts).toBeUndefined();
+    expect(callArgs.allow_promotion_codes).toBeUndefined();
+  });
+
+  it('does not apply the first-month coupon for returning canceled subscribers', async () => {
+    await db.insert(kiloclaw_subscriptions).values({
+      user_id: user.id,
+      plan: 'standard',
+      status: 'canceled',
+      stripe_subscription_id: 'sub_returning_standard',
+    });
+
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: 'https://checkout.stripe.com/test',
+    });
+
+    const caller = await createCallerForUser(user.id);
+    await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
+
+    const callArgs = stripeMock.checkout.sessions.create.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    expect(callArgs.discounts).toBeUndefined();
+    expect(callArgs.allow_promotion_codes).toBeUndefined();
   });
 
   it('includes client_reference_id when rewardful cookie is set', async () => {
@@ -559,7 +590,7 @@ describe('handleKiloClawSubscriptionCreated', () => {
       plan: 'trial',
       status: 'trialing',
       trial_started_at: new Date().toISOString(),
-      trial_ends_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      trial_ends_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
     });
 
     const subscription = makeStripeSubscription({

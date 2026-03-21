@@ -17,11 +17,28 @@ import {
 } from '@/lib/code-reviews/core/constants';
 
 /**
- * SQL condition to exclude "Insufficient credits" errors from failure metrics.
- * These are expected billing errors (402) that shouldn't count as system failures.
+ * SQL condition that identifies billing/credits errors (402 Payment Required).
+ * Matches multiple error message patterns from different error paths:
+ * - "Insufficient credits" from cloud-agent-next InsufficientCreditsError
+ * - "paid model" / "add credits" / "Credits Required" from the 402 API response body
+ */
+const isBillingError = sql`(
+  ${cloud_agent_code_reviews.terminal_reason} = 'billing'
+  OR ${cloud_agent_code_reviews.error_message} ILIKE '%Insufficient credits%'
+  OR ${cloud_agent_code_reviews.error_message} ILIKE '%paid model%'
+  OR ${cloud_agent_code_reviews.error_message} ILIKE '%add credits%'
+  OR ${cloud_agent_code_reviews.error_message} ILIKE '%Credits Required%'
+)`;
+
+/**
+ * SQL condition to exclude billing errors from failure metrics.
  * Uses COALESCE to handle NULL error_message (NULL NOT LIKE returns NULL, not TRUE).
  */
-const excludeInsufficientCreditsError = sql`COALESCE(${cloud_agent_code_reviews.error_message}, '') NOT LIKE '%Insufficient credits%'`;
+const excludeBillingErrors = sql`COALESCE(${cloud_agent_code_reviews.terminal_reason}, '') <> 'billing'
+  AND COALESCE(${cloud_agent_code_reviews.error_message}, '') NOT ILIKE '%Insufficient credits%'
+  AND COALESCE(${cloud_agent_code_reviews.error_message}, '') NOT ILIKE '%paid model%'
+  AND COALESCE(${cloud_agent_code_reviews.error_message}, '') NOT ILIKE '%add credits%'
+  AND COALESCE(${cloud_agent_code_reviews.error_message}, '') NOT ILIKE '%Credits Required%'`;
 
 /**
  * Categorize error messages into high-level buckets via SQL CASE WHEN.
@@ -113,14 +130,14 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       .select({
         total_reviews: sql<number>`COUNT(*)`,
         completed_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'completed')`,
-        // Exclude "Insufficient credits" errors from failed count - these are expected billing errors, not system failures
-        failed_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeInsufficientCreditsError})`,
+        // Exclude billing errors from system failure count — they get their own KPI
+        failed_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeBillingErrors})`,
         cancelled_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'cancelled')`,
         interrupted_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'interrupted')`,
         in_progress_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} IN ('pending', 'queued', 'running'))`,
         avg_duration_seconds: sql<number>`AVG(EXTRACT(EPOCH FROM (${cloud_agent_code_reviews.completed_at}::timestamp - ${cloud_agent_code_reviews.started_at}::timestamp))) FILTER (WHERE ${cloud_agent_code_reviews.completed_at} IS NOT NULL AND ${cloud_agent_code_reviews.started_at} IS NOT NULL)`,
-        // Separate count for billing errors (for visibility)
-        insufficient_credits_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${cloud_agent_code_reviews.error_message} LIKE '%Insufficient credits%')`,
+        // Billing errors (402): not system failures, not cancellations — separate bucket
+        billing_error_count: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${isBillingError})`,
       })
       .from(cloud_agent_code_reviews)
       .where(and(...conditions));
@@ -132,13 +149,13 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     const cancelledCount = Number(stats.cancelled_count) || 0;
     const interruptedCount = Number(stats.interrupted_count) || 0;
     const inProgressCount = Number(stats.in_progress_count) || 0;
-    const insufficientCreditsCount = Number(stats.insufficient_credits_count) || 0;
+    const billingErrorCount = Number(stats.billing_error_count) || 0;
 
-    // Calculate rates over terminal states only (completed, failed, interrupted, cancelled)
+    // Calculate rates over terminal states only (completed, failed, interrupted, cancelled, billing errors)
     // In-progress states (pending, queued, running) are excluded as they haven't finished yet
-    // Note: insufficientCreditsCount is excluded from failedCount but included in terminal count
+    // billingErrorCount is excluded from failedCount but included in terminal count
     const terminalCount =
-      completedCount + failedCount + interruptedCount + cancelledCount + insufficientCreditsCount;
+      completedCount + failedCount + interruptedCount + cancelledCount + billingErrorCount;
 
     // Per-version breakdown (only when viewing all versions)
     const baseConditions = [
@@ -154,7 +171,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
               agent_version: sql<string>`COALESCE(${cloud_agent_code_reviews.agent_version}, 'v1')`,
               total: sql<number>`COUNT(*)`,
               completed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'completed')`,
-              failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeInsufficientCreditsError})`,
+              failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeBillingErrors})`,
               avg_duration_seconds: sql<number>`AVG(EXTRACT(EPOCH FROM (${cloud_agent_code_reviews.completed_at}::timestamp - ${cloud_agent_code_reviews.started_at}::timestamp))) FILTER (WHERE ${cloud_agent_code_reviews.completed_at} IS NOT NULL AND ${cloud_agent_code_reviews.started_at} IS NOT NULL)`,
             })
             .from(cloud_agent_code_reviews)
@@ -169,7 +186,8 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       cancelledCount,
       interruptedCount,
       inProgressCount,
-      insufficientCreditsCount,
+      billingErrorCount,
+      billingRate: terminalCount > 0 ? (billingErrorCount / terminalCount) * 100 : 0,
       // Success rate = completed / terminal states
       successRate: terminalCount > 0 ? (completedCount / terminalCount) * 100 : 0,
       // Failure rate = (failed + interrupted) / terminal states
@@ -205,12 +223,12 @@ export const adminCodeReviewsRouter = createTRPCRouter({
         day: sql<string>`DATE_TRUNC('day', ${cloud_agent_code_reviews.created_at})::date::text`,
         total: sql<number>`COUNT(*)`,
         completed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'completed')`,
-        // Exclude "Insufficient credits" errors from failed count
-        failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeInsufficientCreditsError})`,
+        // Exclude billing errors from system failure count
+        failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeBillingErrors})`,
         cancelled: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'cancelled')`,
         interrupted: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'interrupted')`,
         in_progress: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} IN ('pending', 'queued', 'running'))`,
-        insufficient_credits: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${cloud_agent_code_reviews.error_message} LIKE '%Insufficient credits%')`,
+        billing_errors: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${isBillingError})`,
       })
       .from(cloud_agent_code_reviews)
       .where(and(...conditions))
@@ -225,7 +243,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
       cancelled: Number(row.cancelled) || 0,
       interrupted: Number(row.interrupted) || 0,
       inProgress: Number(row.in_progress) || 0,
-      insufficientCredits: Number(row.insufficient_credits) || 0,
+      billingErrors: Number(row.billing_errors) || 0,
     }));
   }),
 
@@ -244,12 +262,11 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     ].filter(Boolean) as SQL[];
 
     const cancellationReasonExpr = sql<string>`CASE
-      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%superseded%' THEN 'Superseded by new commit'
-      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%paid model%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%add credits%' THEN 'No credits (billing)'
+      WHEN ${cloud_agent_code_reviews.terminal_reason} = 'superseded' OR ${cloud_agent_code_reviews.error_message} ILIKE '%superseded%' THEN 'Superseded by new commit'
       WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%stream timeout%' THEN 'Stream timeout'
-      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%cancelled%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%canceled%' THEN 'Explicitly cancelled'
+      WHEN ${cloud_agent_code_reviews.terminal_reason} = 'user_cancelled' OR ${cloud_agent_code_reviews.error_message} ILIKE '%cancelled%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%canceled%' THEN 'Explicitly cancelled'
       WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%killed%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigkill%' OR ${cloud_agent_code_reviews.error_message} ILIKE '%sigterm%' THEN 'Process killed'
-      WHEN ${cloud_agent_code_reviews.error_message} ILIKE '%interrupted%' THEN 'User interrupted'
+      WHEN ${cloud_agent_code_reviews.terminal_reason} = 'interrupted' OR ${cloud_agent_code_reviews.error_message} ILIKE '%interrupted%' THEN 'User interrupted'
       WHEN ${cloud_agent_code_reviews.error_message} IS NULL THEN 'No reason provided'
       ELSE 'Other'
     END`;
@@ -274,7 +291,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
     }));
   }),
 
-  // Get error analysis (excludes "Insufficient credits" billing errors from the list)
+  // Get error analysis (excludes billing errors — those have their own KPI bucket)
   getErrorAnalysis: adminProcedure.input(FilterSchema).query(async ({ input }) => {
     const { startDate, endDate, userId, organizationId, ownershipType, agentVersion } = input;
     const ownershipFilter = buildOwnershipFilter(userId, organizationId, ownershipType);
@@ -282,7 +299,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
 
     const conditions = [
       eq(cloud_agent_code_reviews.status, 'failed'),
-      excludeInsufficientCreditsError,
+      excludeBillingErrors,
       gte(cloud_agent_code_reviews.created_at, startDate),
       lt(cloud_agent_code_reviews.created_at, endDate),
       ownershipFilter,
@@ -355,7 +372,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
 
       const conditions = [
         eq(cloud_agent_code_reviews.status, 'failed'),
-        excludeInsufficientCreditsError,
+        excludeBillingErrors,
         gte(cloud_agent_code_reviews.created_at, startDate),
         lt(cloud_agent_code_reviews.created_at, endDate),
         eq(
@@ -415,8 +432,8 @@ export const adminCodeReviewsRouter = createTRPCRouter({
         ownership_type: sql<string>`CASE WHEN ${cloud_agent_code_reviews.owned_by_organization_id} IS NOT NULL THEN 'organization' ELSE 'personal' END`,
         count: sql<number>`COUNT(*)`,
         completed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'completed')`,
-        // Exclude "Insufficient credits" errors from failed count
-        failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeInsufficientCreditsError})`,
+        // Exclude billing errors from failed count
+        failed: sql<number>`COUNT(*) FILTER (WHERE ${cloud_agent_code_reviews.status} = 'failed' AND ${excludeBillingErrors})`,
       })
       .from(cloud_agent_code_reviews)
       .where(and(...baseConditions))
@@ -569,6 +586,7 @@ export const adminCodeReviewsRouter = createTRPCRouter({
         pr_author: cloud_agent_code_reviews.pr_author,
         status: cloud_agent_code_reviews.status,
         error_message: cloud_agent_code_reviews.error_message,
+        terminal_reason: cloud_agent_code_reviews.terminal_reason,
         started_at: cloud_agent_code_reviews.started_at,
         completed_at: cloud_agent_code_reviews.completed_at,
         created_at: cloud_agent_code_reviews.created_at,

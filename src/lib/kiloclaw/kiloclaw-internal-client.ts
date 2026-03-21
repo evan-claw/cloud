@@ -199,6 +199,20 @@ export class KiloClawInternalClient {
     );
   }
 
+  async patchExecPreset(
+    userId: string,
+    patch: { security?: string; ask?: string }
+  ): Promise<{ execSecurity: string | null; execAsk: string | null }> {
+    return this.request(
+      '/api/platform/exec-preset',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ userId, ...patch }),
+      },
+      { userId }
+    );
+  }
+
   async patchSecrets(userId: string, input: SecretsPatchInput): Promise<SecretsPatchResponse> {
     return this.request(
       '/api/platform/secrets',

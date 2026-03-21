@@ -264,6 +264,32 @@ platform.patch('/channels', async c => {
   }
 });
 
+// PATCH /api/platform/exec-preset
+const ExecPresetPatchSchema = z.object({
+  userId: z.string().min(1),
+  security: z.string().optional(),
+  ask: z.string().optional(),
+});
+
+platform.patch('/exec-preset', async c => {
+  const result = await parseBody(c, ExecPresetPatchSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, security, ask } = result.data;
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateExecPreset({ security, ask }),
+      'updateExecPreset'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'exec-preset patch');
+    return jsonError(message, status);
+  }
+});
+
 // POST /api/platform/google-credentials
 const GoogleCredentialsPatchSchema = z.object({
   userId: z.string().min(1),

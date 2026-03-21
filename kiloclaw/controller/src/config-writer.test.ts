@@ -401,6 +401,28 @@ describe('generateBaseConfig', () => {
     expect(config.hooks.presets).toEqual(['gmail']);
     expect(config.hooks.token).toBe('new-token');
   });
+
+  it('reads exec security and ask from env vars', () => {
+    const { deps } = fakeDeps();
+    const env = {
+      ...minimalEnv(),
+      KILOCLAW_EXEC_SECURITY: 'full',
+      KILOCLAW_EXEC_ASK: 'off',
+    };
+    const config = generateBaseConfig(env, '/tmp/openclaw.json', deps);
+
+    expect(config.tools.exec.host).toBe('gateway');
+    expect(config.tools.exec.security).toBe('full');
+    expect(config.tools.exec.ask).toBe('off');
+  });
+
+  it('falls back to defaults when exec env vars are not set', () => {
+    const { deps } = fakeDeps();
+    const config = generateBaseConfig(minimalEnv(), '/tmp/openclaw.json', deps);
+
+    expect(config.tools.exec.security).toBe('allowlist');
+    expect(config.tools.exec.ask).toBe('on-miss');
+  });
 });
 
 describe('backupConfigFile', () => {

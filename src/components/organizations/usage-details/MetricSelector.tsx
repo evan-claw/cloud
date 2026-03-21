@@ -22,7 +22,7 @@ type Props = {
 
 export function MetricSelector({ metrics, selectedMetric, onSelectedMetricChange }: Props) {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
       {metrics.map(metric => {
         const isSelected = metric.key === selectedMetric;
         const IconComponent = metric.icon;

@@ -28,6 +28,8 @@ export type UserConfig = {
   channels?: EncryptedChannelTokens;
   googleCredentials?: GoogleCredentials;
   instanceFeatures?: string[];
+  execSecurity?: string | null;
+  execAsk?: string | null;
 };
 
 /**
@@ -193,6 +195,10 @@ export async function buildEnvVars(
   // Layer 5: Reserved system vars (cannot be overridden by any user config)
   sensitive.OPENCLAW_GATEWAY_TOKEN = await deriveGatewayToken(sandboxId, gatewayTokenSecret);
   plainEnv.AUTO_APPROVE_DEVICES = 'true';
+
+  // User-selected exec permissions preset (non-sensitive, survives restarts).
+  if (userConfig?.execSecurity) plainEnv.KILOCLAW_EXEC_SECURITY = userConfig.execSecurity;
+  if (userConfig?.execAsk) plainEnv.KILOCLAW_EXEC_ASK = userConfig.execAsk;
 
   // Instance feature flags → env vars (non-sensitive, not user-overridable).
   // Applied after user env vars so users cannot suppress features via envVars config.

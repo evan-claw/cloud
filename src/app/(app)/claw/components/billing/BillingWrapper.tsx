@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTRPC } from '@/lib/trpc/utils';
 import { Button } from '@/components/ui/button';
 import { BillingBanner } from './BillingBanner';
@@ -51,6 +52,16 @@ export function BillingWrapper({ children, hideBanners }: BillingWrapperProps) {
 
   const reactivate = useMutation(trpc.kiloclaw.reactivateSubscription.mutationOptions());
   const billingPortal = useMutation(trpc.kiloclaw.createBillingPortalSession.mutationOptions());
+  const destroy = useMutation(
+    trpc.kiloclaw.destroy.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: trpc.kiloclaw.getStatus.queryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.kiloclaw.getBillingStatus.queryKey(),
+        });
+      },
+    })
+  );
 
   if (!billing) {
     return <>{children}</>;
@@ -104,6 +115,13 @@ export function BillingWrapper({ children, hideBanners }: BillingWrapperProps) {
         reason={lockReason}
         onSubscribeClick={handleSubscribe}
         onUpdatePaymentClick={handleUpdatePayment}
+        onDestroyClick={() =>
+          destroy.mutate(undefined, {
+            onSuccess: () => toast.success('Instance destroyed'),
+            onError: err => toast.error(err.message),
+          })
+        }
+        isDestroying={destroy.isPending}
       />
 
       {/* Dashboard content */}

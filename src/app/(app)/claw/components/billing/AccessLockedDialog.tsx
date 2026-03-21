@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, CreditCard } from 'lucide-react';
+import { Lock, CreditCard, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,8 @@ type AccessLockedDialogProps = {
   reason: ClawLockReason;
   onSubscribeClick: () => void;
   onUpdatePaymentClick: () => void;
+  onDestroyClick: () => void;
+  isDestroying?: boolean;
 };
 
 function getLockContent(reason: ClawLockReason) {
@@ -101,12 +104,20 @@ function getInfoBoxMessage(reason: ClawLockReason): string {
   return 'Your KiloClaw will resume automatically once you subscribe.';
 }
 
+const INSTANCE_ALIVE_REASONS = new Set<ClawLockReason>([
+  'trial_expired_instance_alive',
+  'subscription_expired_instance_alive',
+]);
+
 export function AccessLockedDialog({
   reason,
   onSubscribeClick,
   onUpdatePaymentClick,
+  onDestroyClick,
+  isDestroying,
 }: AccessLockedDialogProps) {
   const router = useRouter();
+  const [confirmDestroy, setConfirmDestroy] = useState(false);
 
   if (!reason) return null;
 
@@ -114,6 +125,7 @@ export function AccessLockedDialog({
   if (!content) return null;
 
   const Icon = content.icon;
+  const canDestroy = INSTANCE_ALIVE_REASONS.has(reason);
 
   function handleCta() {
     if (content?.action === 'update_payment') {
@@ -158,6 +170,38 @@ export function AccessLockedDialog({
               ? "You'll be redirected to Stripe to update your payment method"
               : "You'll be redirected to Stripe to complete your purchase"}
           </p>
+
+          {canDestroy &&
+            (confirmDestroy ? (
+              <div className="flex w-full gap-2">
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  disabled={isDestroying}
+                  onClick={onDestroyClick}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  {isDestroying ? 'Destroying...' : 'Yes, destroy'}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  disabled={isDestroying}
+                  onClick={() => setConfirmDestroy(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="link"
+                onClick={() => setConfirmDestroy(true)}
+                className="text-muted-foreground hover:text-destructive w-full"
+              >
+                Destroy Instance
+              </Button>
+            ))}
+
           <Button
             variant="link"
             onClick={handleDismiss}
