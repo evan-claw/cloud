@@ -43,7 +43,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 <p className="text-muted-foreground text-sm">
                   Link your Discord account to verify{' '}
                   <a
-                    href="https://discord.gg/GTPgzUvJ2t"
+                    href="https://kilo.ai/discord"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-foreground underline"
@@ -83,7 +83,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                   <span className="text-muted-foreground text-sm">
                     Not a member of the{' '}
                     <a
-                      href="https://discord.gg/GTPgzUvJ2t"
+                      href="https://kilo.ai/discord"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="hover:text-foreground underline"
