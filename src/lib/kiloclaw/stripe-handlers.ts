@@ -161,6 +161,55 @@ async function persistAutoIntroSchedule(scheduleId: string, userId: string): Pro
 }
 
 /**
+ * Validate that an auto-intro schedule has the expected 2-phase structure
+ * (phase 1 = current price, phase 2 = regular standard price). If the schedule
+ * is half-configured (e.g., created from_subscription but the 2-phase rewrite
+ * never completed), rewrite it now and persist. Returns true if the schedule
+ * is valid (or was repaired), false if unrecoverable.
+ */
+async function validateOrRepairAutoIntroSchedule(
+  schedule: Stripe.SubscriptionSchedule,
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<boolean> {
+  const regularPriceId = getStripePriceIdForClawPlan('standard');
+  const phase2Price = schedule.phases[1] ? resolvePhasePrice(schedule.phases[1]) : null;
+
+  if (schedule.phases.length >= 2 && phase2Price === regularPriceId) {
+    await persistAutoIntroSchedule(schedule.id, userId);
+    return true;
+  }
+
+  // Half-configured: rewrite to add the regular-price phase
+  const existingPhase = schedule.phases[0];
+  const existingPhasePrice = existingPhase ? resolvePhasePrice(existingPhase) : null;
+  if (!existingPhase || !existingPhasePrice) {
+    logError('Half-configured auto-intro schedule has no usable phase', {
+      stripe_subscription_id: stripeSubscriptionId,
+      schedule_id: schedule.id,
+      user_id: userId,
+    });
+    return false;
+  }
+
+  await stripe.subscriptionSchedules.update(schedule.id, {
+    phases: [
+      {
+        items: [{ price: existingPhasePrice }],
+        start_date: existingPhase.start_date,
+        end_date: existingPhase.end_date,
+      },
+      {
+        items: [{ price: regularPriceId }],
+      },
+    ],
+    end_behavior: 'release',
+  });
+  await persistAutoIntroSchedule(schedule.id, userId);
+  return true;
+}
+
+/**
  * Ensure an intro-price subscription has a 2-phase schedule that automatically
  * transitions to the regular standard price at the end of the intro period.
  *
@@ -183,7 +232,7 @@ export async function ensureAutoIntroSchedule(
     const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
 
     if (schedule.metadata?.origin === 'auto-intro') {
-      await persistAutoIntroSchedule(schedule.id, userId);
+      await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
       return;
     }
 
@@ -229,7 +278,7 @@ export async function ensureAutoIntroSchedule(
     if (refetchedScheduleId) {
       const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
       if (existingSchedule.metadata?.origin === 'auto-intro') {
-        await persistAutoIntroSchedule(existingSchedule.id, userId);
+        await validateOrRepairAutoIntroSchedule(existingSchedule, stripeSubscriptionId, userId);
       }
     }
     return;

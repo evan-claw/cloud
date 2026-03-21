@@ -743,6 +743,60 @@ describe('handleKiloClawSubscriptionCreated', () => {
     expect(row.scheduled_by).toBe('auto');
   });
 
+  it('repairs half-configured auto-intro schedule on retry', async () => {
+    // Simulate: first attempt created the schedule (from_subscription) and tagged
+    // it auto-intro, but the 2-phase rewrite never completed. On retry, the
+    // subscription has a schedule attached with auto-intro metadata but only 1 phase.
+    stripeMock.subscriptions.retrieve.mockResolvedValue({
+      schedule: 'sched_half',
+      items: { data: [{ price: { id: 'price_standard_intro' } }] },
+    });
+    stripeMock.subscriptionSchedules.retrieve.mockResolvedValue({
+      id: 'sched_half',
+      metadata: { origin: 'auto-intro' },
+      // Only 1 phase — the 2-phase rewrite never completed
+      phases: [{ items: [{ price: 'price_standard_intro' }], start_date: 1000, end_date: 2000 }],
+      status: 'active',
+    });
+    stripeMock.subscriptionSchedules.update.mockResolvedValue({});
+
+    const subscription = makeStripeSubscription({
+      id: 'sub_half_repair',
+      metadata: { type: 'kiloclaw', plan: 'standard', kiloUserId: user.id },
+      status: 'active',
+      priceId: 'price_standard_intro',
+    });
+
+    await handleKiloClawSubscriptionCreated({
+      eventId: 'evt_half_repair',
+      subscription,
+    });
+
+    // Should have rewritten the schedule with 2 phases
+    expect(stripeMock.subscriptionSchedules.update).toHaveBeenCalledWith(
+      'sched_half',
+      expect.objectContaining({
+        end_behavior: 'release',
+        phases: expect.arrayContaining([
+          expect.objectContaining({
+            items: [{ price: 'price_standard_intro' }],
+          }),
+          expect.objectContaining({
+            items: [{ price: 'price_test_kiloclaw' }],
+          }),
+        ]),
+      })
+    );
+
+    const [row] = await db
+      .select()
+      .from(kiloclaw_subscriptions)
+      .where(eq(kiloclaw_subscriptions.user_id, user.id))
+      .limit(1);
+    expect(row.stripe_schedule_id).toBe('sched_half');
+    expect(row.scheduled_by).toBe('auto');
+  });
+
   it('does not create auto schedule for regular-price subscription (returning subscriber)', async () => {
     await db.insert(kiloclaw_subscriptions).values({
       user_id: user.id,
@@ -1189,6 +1243,68 @@ describe('switchPlan', () => {
     await expect(caller.kiloclaw.switchPlan({ toPlan: 'standard' })).rejects.toThrow(
       'Already on this plan'
     );
+  });
+
+  it('aborts when releasing hidden non-auto schedule fails with transient error', async () => {
+    await db.insert(kiloclaw_subscriptions).values({
+      user_id: user.id,
+      stripe_subscription_id: 'sub_hidden_fail',
+      plan: 'standard',
+      status: 'active',
+    });
+
+    stripeMock.subscriptions.retrieve.mockResolvedValue({
+      schedule: 'sched_hidden_transient',
+      items: { data: [{ price: { id: 'price_standard' } }] },
+    });
+    stripeMock.subscriptionSchedules.retrieve.mockResolvedValue({
+      id: 'sched_hidden_transient',
+      metadata: {},
+      phases: [{ items: [{ price: 'price_standard' }], start_date: 1000, end_date: 2000 }],
+      status: 'active',
+    });
+    // Transient error — not "not active" or "released" or "canceled"
+    stripeMock.subscriptionSchedules.release.mockRejectedValue(new Error('Stripe API timeout'));
+
+    const caller = await createCallerForUser(user.id);
+    await expect(caller.kiloclaw.switchPlan({ toPlan: 'commit' })).rejects.toThrow(
+      'Unable to switch plan: failed to release existing schedule'
+    );
+  });
+
+  it('derives phase-1 price from the newly created schedule, not the stale live fetch', async () => {
+    await db.insert(kiloclaw_subscriptions).values({
+      user_id: user.id,
+      stripe_subscription_id: 'sub_fresh_price',
+      plan: 'standard',
+      status: 'active',
+    });
+
+    // Live fetch returns the old intro price (stale by the time the schedule is created)
+    stripeMock.subscriptions.retrieve.mockResolvedValue({
+      schedule: null,
+      items: { data: [{ price: { id: 'price_standard_intro' } }] },
+    });
+    // But from_subscription mirrors the subscription's current state at create time,
+    // which has already rolled over to the regular price
+    stripeMock.subscriptionSchedules.create.mockResolvedValue({
+      id: 'sched_fresh_price',
+      phases: [{ items: [{ price: 'price_standard' }], start_date: 1000, end_date: 2000 }],
+    });
+    stripeMock.subscriptionSchedules.update.mockResolvedValue({});
+
+    const caller = await createCallerForUser(user.id);
+    const result = await caller.kiloclaw.switchPlan({ toPlan: 'commit' });
+
+    expect(result).toEqual({ success: true });
+    // Phase 1 should use the fresh price from the schedule ('price_standard'),
+    // not the stale intro price from the earlier subscriptions.retrieve()
+    const updateArgs = stripeMock.subscriptionSchedules.update.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    const phases = updateArgs.phases as Array<{ items: Array<{ price: string }> }>;
+    expect(phases[0].items[0].price).toBe('price_standard');
   });
 });
 

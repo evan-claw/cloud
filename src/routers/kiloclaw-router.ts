@@ -1375,7 +1375,17 @@ export const kiloclawRouter = createTRPCRouter({
         if (hiddenSchedule.metadata?.origin === 'auto-intro') {
           effectiveScheduledBy = 'auto';
         } else {
-          await releaseScheduleIfActive(effectiveScheduleId);
+          // Hidden non-auto schedule — must release before creating a fresh one,
+          // otherwise Stripe rejects the create because the subscription is still
+          // attached to the old schedule.
+          const released = await releaseScheduleIfActive(effectiveScheduleId);
+          if (!released) {
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message:
+                'Unable to switch plan: failed to release existing schedule. Please try again.',
+            });
+          }
           effectiveScheduledBy = null;
         }
       }
@@ -1441,17 +1451,10 @@ export const kiloclawRouter = createTRPCRouter({
         }
       }
 
-      // Fresh schedule creation: no existing schedule (or stale one was cleared above)
-      const liveCurrentPriceId = liveSub.items.data[0]?.price?.id;
-      if (!liveCurrentPriceId) {
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Cannot determine current subscription price.',
-        });
-      }
-
-      // from_subscription creates one phase matching the current billing period.
-      // We must preserve that phase's start/end dates so the switch happens at renewal, not immediately.
+      // Fresh schedule creation: no existing schedule (or stale one was cleared above).
+      // from_subscription mirrors the subscription's current state at create-time,
+      // so the phase price reflects the actual current price even if a schedule
+      // released at a billing boundary since our earlier subscriptions.retrieve().
       let stripeScheduleId: string | null = null;
       try {
         const schedule = await stripe.subscriptionSchedules.create({
@@ -1467,11 +1470,24 @@ export const kiloclawRouter = createTRPCRouter({
           });
         }
 
+        const freshPhase1PriceRef = currentPhase.items[0]?.price;
+        const freshPhase1Price = freshPhase1PriceRef
+          ? typeof freshPhase1PriceRef === 'string'
+            ? freshPhase1PriceRef
+            : freshPhase1PriceRef.id
+          : null;
+        if (!freshPhase1Price) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Cannot determine current subscription price from schedule.',
+          });
+        }
+
         await stripe.subscriptionSchedules.update(schedule.id, {
           end_behavior: 'release',
           phases: [
             {
-              items: [{ price: liveCurrentPriceId }],
+              items: [{ price: freshPhase1Price }],
               start_date: currentPhase.start_date,
               end_date: currentPhase.end_date,
             },
