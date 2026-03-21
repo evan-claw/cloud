@@ -126,6 +126,7 @@ export type CreateOrUpdateUserArgs = {
   hosted_domain: string | null;
   provider: AuthProviderId;
   provider_account_id: string;
+  display_name?: string | null;
 };
 
 export async function findAndSyncExistingUser(args: CreateOrUpdateUserArgs) {
@@ -310,6 +311,7 @@ export async function createOrUpdateUser(
       provider_account_id: args.provider_account_id,
       avatar_url: args.google_user_image_url,
       email: args.google_user_email,
+      display_name: args.display_name ?? null,
       hosted_domain: args.hosted_domain,
     });
 
@@ -362,6 +364,7 @@ export async function linkAccountToExistingUser(
     provider_account_id: authProviderData.provider_account_id,
     email: authProviderData.google_user_email,
     avatar_url: authProviderData.google_user_image_url,
+    display_name: authProviderData.display_name ?? null,
     hosted_domain: authProviderData.hosted_domain,
   });
 
@@ -505,8 +508,7 @@ export async function softDeleteUser(userId: string) {
         hosted_domain: null,
         linkedin_url: null,
         github_url: null,
-        discord_server_member: null,
-        discord_server_member_at: null,
+        discord_server_membership_verified_at: null,
         api_token_pepper: null,
         default_model: null,
         blocked_reason: `soft-deleted at ${new Date().toISOString()}`,
@@ -844,6 +846,14 @@ export async function unlinkAuthProviderFromUser(
         eq(user_auth_provider.provider, provider)
       )
     );
+
+  // Clear Discord guild membership verification when unlinking Discord
+  if (provider === 'discord') {
+    await db
+      .update(kilocode_users)
+      .set({ discord_server_membership_verified_at: null })
+      .where(eq(kilocode_users.id, kiloUserId));
+  }
 
   return successResult();
 }

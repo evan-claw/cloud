@@ -360,16 +360,15 @@ export const userRouter = createTRPCRouter({
     const user = await db.query.kilocode_users.findFirst({
       where: eq(kilocode_users.id, ctx.user.id),
       columns: {
-        discord_server_member: true,
-        discord_server_member_at: true,
+        discord_server_membership_verified_at: true,
       },
     });
 
     return successResult({
       linked: !!discordProvider,
       discord_avatar_url: discordProvider?.avatar_url ?? null,
-      discord_server_member: user?.discord_server_member ?? null,
-      discord_server_member_at: user?.discord_server_member_at ?? null,
+      discord_display_name: discordProvider?.display_name ?? null,
+      discord_server_membership_verified_at: user?.discord_server_membership_verified_at ?? null,
     });
   }),
 
@@ -402,11 +401,10 @@ export const userRouter = createTRPCRouter({
     await db
       .update(kilocode_users)
       .set({
-        discord_server_member: isMember,
-        discord_server_member_at: new Date().toISOString(),
+        discord_server_membership_verified_at: isMember ? new Date().toISOString() : null,
       })
       .where(eq(kilocode_users.id, ctx.user.id));
 
-    return successResult({ discord_server_member: isMember });
+    return successResult({ is_member: isMember });
   }),
 });

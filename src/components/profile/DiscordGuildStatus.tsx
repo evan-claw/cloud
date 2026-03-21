@@ -34,17 +34,15 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
   const { mutate: verifyMutate } = verifyMutation;
 
   const data = guildStatus.data;
-  const isMember = data?.discord_server_member === true;
-  const isNotMember = data?.discord_server_member === false;
-  const hasVerified = data?.discord_server_member != null;
+  const isMember = data?.discord_server_membership_verified_at != null;
 
-  // Auto-verify guild membership when Discord is linked but never verified
+  // Auto-verify guild membership when Discord is first linked
   useEffect(() => {
-    if (hasDiscordLinked && data?.linked && !hasVerified && !autoVerifiedRef.current) {
+    if (hasDiscordLinked && data?.linked && !isMember && !autoVerifiedRef.current) {
       autoVerifiedRef.current = true;
       verifyMutate();
     }
-  }, [hasDiscordLinked, data?.linked, hasVerified, verifyMutate]);
+  }, [hasDiscordLinked, data?.linked, isMember, verifyMutate]);
 
   return (
     <Card className="w-full rounded-xl shadow-sm">
@@ -68,7 +66,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 </p>
               )}
 
-              {hasDiscordLinked && !hasVerified && !guildStatus.isLoading && (
+              {hasDiscordLinked && !isMember && !guildStatus.isLoading && verifyMutation.isIdle && (
                 <p className="text-sm font-medium">Discord Server Membership</p>
               )}
 
@@ -76,21 +74,19 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 <p className="text-muted-foreground text-sm">Loading Discord status…</p>
               )}
 
-              {hasDiscordLinked && isMember && (
+              {hasDiscordLinked && isMember && data.discord_server_membership_verified_at && (
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
                   <span className="text-sm font-medium text-green-700 dark:text-green-400">
                     Kilo Discord Member
                   </span>
-                  {data.discord_server_member_at && (
-                    <span className="text-muted-foreground text-xs">
-                      · Verified {format(new Date(data.discord_server_member_at), 'MMM d, yyyy')}
-                    </span>
-                  )}
+                  <span className="text-muted-foreground text-xs">
+                    · Verified {format(new Date(data.discord_server_membership_verified_at), 'MMM d, yyyy')}
+                  </span>
                 </div>
               )}
 
-              {hasDiscordLinked && isNotMember && (
+              {hasDiscordLinked && !isMember && !verifyMutation.isIdle && (
                 <div className="flex items-center gap-2">
                   <XCircle className="text-muted-foreground h-4 w-4 shrink-0" />
                   <span className="text-muted-foreground text-sm">
@@ -109,19 +105,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
             </div>
           </div>
 
-          {hasDiscordLinked && !hasVerified && !guildStatus.isLoading && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={verifyMutation.isPending}
-              onClick={() => verifyMutation.mutate()}
-            >
-              {verifyMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Verify Kilo Discord Membership
-            </Button>
-          )}
-
-          {hasDiscordLinked && isNotMember && (
+          {hasDiscordLinked && !isMember && !guildStatus.isLoading && !verifyMutation.isIdle && (
             <Button
               variant="outline"
               size="sm"
@@ -130,6 +114,18 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
             >
               {verifyMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               Re-verify
+            </Button>
+          )}
+
+          {hasDiscordLinked && !isMember && !guildStatus.isLoading && verifyMutation.isIdle && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={verifyMutation.isPending}
+              onClick={() => verifyMutation.mutate()}
+            >
+              {verifyMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              Verify Kilo Discord Membership
             </Button>
           )}
         </div>

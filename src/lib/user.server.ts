@@ -179,6 +179,7 @@ function createDiscordAccountInfo(
     google_user_image_url: user.image || '',
     provider: account.provider as AuthProviderId,
     provider_account_id: account.providerAccountId,
+    display_name: user.name || null,
   };
 }
 

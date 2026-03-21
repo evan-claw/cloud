@@ -1,5 +1,5 @@
 {
-  "id": "522cde75-578a-4e01-a1fa-f9a90db3c670",
+  "id": "1be81a4f-1ff7-4c46-b9c4-6bb0a52c35df",
   "prevId": "9f8097fb-5b85-4082-b143-b8363447c8c8",
   "version": "7",
   "dialect": "postgresql",
@@ -8172,14 +8172,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "discord_server_member": {
-          "name": "discord_server_member",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "discord_server_member_at": {
-          "name": "discord_server_member_at",
+        "discord_server_membership_verified_at": {
+          "name": "discord_server_membership_verified_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -13450,6 +13444,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "hosted_domain": {
           "name": "hosted_domain",
