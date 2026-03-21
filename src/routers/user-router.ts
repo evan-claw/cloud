@@ -2,6 +2,7 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { getUserAuthProviders, unlinkAuthProviderFromUser } from '@/lib/user';
 import { createAccountLinkingSession } from '@/lib/account-linking-session';
 import { TRPCError } from '@trpc/server';
+import { captureException } from '@sentry/nextjs';
 import * as z from 'zod';
 import { assertNoTrpcError, successResult } from '@/lib/maybe-result';
 import { db, readDb } from '@/lib/drizzle';
@@ -391,7 +392,7 @@ export const userRouter = createTRPCRouter({
     try {
       isMember = await checkDiscordGuildMembership(discordProvider.provider_account_id);
     } catch (error) {
-      console.error('Discord guild membership check failed:', error);
+      captureException(error);
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to verify Discord guild membership. Please try again later.',

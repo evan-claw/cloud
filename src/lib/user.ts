@@ -64,6 +64,7 @@ import type { OptionalError, Result } from '@/lib/maybe-result';
 import { failureResult, successResult, trpcFailure } from '@/lib/maybe-result';
 import type { TRPCError } from '@trpc/server';
 import type { UUID } from 'node:crypto';
+import { checkDiscordGuildMembership } from '@/lib/integrations/discord-guild-membership';
 import type { AuthProviderId } from '@/lib/auth/provider-metadata';
 import { generateOpenRouterUpstreamSafetyIdentifier } from '@/lib/providerHash';
 
@@ -346,6 +347,8 @@ export async function createOrUpdateUser(
   // Set up user identification via user ID
   posthogClient.alias({ distinctId: savedUser.google_user_email, alias: savedUser.id });
 
+  await tryVerifyDiscordGuildMembership(args.provider, args.provider_account_id, savedUser.id);
+
   return successResult({ user: savedUser, isNew: true });
 }
 
@@ -384,6 +387,8 @@ export async function linkAccountToExistingUser(
 
     return linkResult;
   }
+
+  await tryVerifyDiscordGuildMembership(authProviderData.provider, authProviderData.provider_account_id, existingKiloUserId);
 
   // Log the account linking event
   posthogClient.capture({
@@ -815,6 +820,25 @@ export async function linkAuthProviderToUser(
   }
 
   return successResult();
+}
+
+async function tryVerifyDiscordGuildMembership(
+  provider: AuthProviderId,
+  providerAccountId: string,
+  kiloUserId: string
+) {
+  if (provider !== 'discord') return;
+  try {
+    const isMember = await checkDiscordGuildMembership(providerAccountId);
+    if (isMember) {
+      await db
+        .update(kilocode_users)
+        .set({ discord_server_membership_verified_at: new Date().toISOString() })
+        .where(eq(kilocode_users.id, kiloUserId));
+    }
+  } catch {
+    // Non-critical — user can manually verify later
+  }
 }
 
 export async function unlinkAuthProviderFromUser(

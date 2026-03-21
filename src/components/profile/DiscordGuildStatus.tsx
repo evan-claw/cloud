@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { CheckCircle2, XCircle, Shield, Loader2 } from 'lucide-react';
 import { useTRPC } from '@/lib/trpc/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 
 type DiscordGuildStatusProps = {
@@ -15,7 +14,6 @@ type DiscordGuildStatusProps = {
 export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const autoVerifiedRef = useRef(false);
 
   const guildStatus = useQuery({
     ...trpc.user.getDiscordGuildStatus.queryOptions(),
@@ -31,18 +29,8 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
     },
   });
 
-  const { mutate: verifyMutate } = verifyMutation;
-
   const data = guildStatus.data;
   const isMember = data?.discord_server_membership_verified_at != null;
-
-  // Auto-verify guild membership when Discord is first linked
-  useEffect(() => {
-    if (hasDiscordLinked && data?.linked && !isMember && !autoVerifiedRef.current) {
-      autoVerifiedRef.current = true;
-      verifyMutate();
-    }
-  }, [hasDiscordLinked, data?.linked, isMember, verifyMutate]);
 
   return (
     <Card className="w-full rounded-xl shadow-sm">
@@ -66,10 +54,6 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 </p>
               )}
 
-              {hasDiscordLinked && !isMember && !guildStatus.isLoading && verifyMutation.isIdle && (
-                <p className="text-sm font-medium">Discord Server Membership</p>
-              )}
-
               {hasDiscordLinked && guildStatus.isLoading && (
                 <p className="text-muted-foreground text-sm">Loading Discord status…</p>
               )}
@@ -86,7 +70,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
                 </div>
               )}
 
-              {hasDiscordLinked && !isMember && !verifyMutation.isIdle && (
+              {hasDiscordLinked && !isMember && !guildStatus.isLoading && (
                 <div className="flex items-center gap-2">
                   <XCircle className="text-muted-foreground h-4 w-4 shrink-0" />
                   <span className="text-muted-foreground text-sm">
@@ -105,7 +89,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
             </div>
           </div>
 
-          {hasDiscordLinked && !isMember && !guildStatus.isLoading && !verifyMutation.isIdle && (
+          {hasDiscordLinked && !isMember && !guildStatus.isLoading && (
             <Button
               variant="outline"
               size="sm"
@@ -113,19 +97,7 @@ export function DiscordGuildStatus({ hasDiscordLinked }: DiscordGuildStatusProps
               onClick={() => verifyMutation.mutate()}
             >
               {verifyMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Re-verify
-            </Button>
-          )}
-
-          {hasDiscordLinked && !isMember && !guildStatus.isLoading && verifyMutation.isIdle && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={verifyMutation.isPending}
-              onClick={() => verifyMutation.mutate()}
-            >
-              {verifyMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Verify Kilo Discord Membership
+              {verifyMutation.isIdle ? 'Verify Kilo Discord Membership' : 'Re-verify'}
             </Button>
           )}
         </div>
