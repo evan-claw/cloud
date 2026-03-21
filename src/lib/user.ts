@@ -153,6 +153,21 @@ export async function findAndSyncExistingUser(args: CreateOrUpdateUserArgs) {
     );
     existingUser.hosted_domain = args.hosted_domain;
   }
+
+  // Sync display_name from OAuth on every sign-in
+  if (args.display_name) {
+    await db
+      .update(user_auth_provider)
+      .set({ display_name: args.display_name })
+      .where(
+        and(
+          eq(user_auth_provider.kilo_user_id, existingUser.id),
+          eq(user_auth_provider.provider, args.provider),
+          eq(user_auth_provider.provider_account_id, args.provider_account_id)
+        )
+      );
+  }
+
   timer.log(`findFirst user with id ${existingUser.id}`);
   return existingUser;
 }
