@@ -675,6 +675,15 @@ const encryptedSelfServicePromos: readonly EncryptedSelfServicePromoCreditCatego
     description: 'Austin ClawCon Credits',
     total_redemptions_allowed: 2000,
   },
+  {
+    encrypted_credit_category: 'RFk4Mcj/NAJbHZoMe9zs2Q==:80p2tRoXKZS91Rd4DFeLVg==:aVXBzgFw/2Ppmg==',
+    is_user_selfservicable: true,
+    is_idempotent: true,
+    amount_usd: 100,
+    expiry_hours: 30 * 24,
+    description: 'Creator promo',
+    total_redemptions_allowed: 30,
+  },
 ];
 
 const selfServicePromos: readonly SelfServicePromoCreditCategoryConfig[] =

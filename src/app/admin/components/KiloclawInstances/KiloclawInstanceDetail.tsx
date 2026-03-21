@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import AdminPage from '@/app/admin/components/AdminPage';
 import {
   BreadcrumbItem,
@@ -48,6 +48,8 @@ import {
   Play,
   Square,
   RotateCcw,
+  RotateCw,
+  ArrowUpCircle,
   RefreshCw,
   Pin,
   Stethoscope,
@@ -854,10 +856,12 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   const [destroyDialogOpen, setDestroyDialogOpen] = useState(false);
   const [doctorDialogOpen, setDoctorDialogOpen] = useState(false);
   const [restoreConfigDialogOpen, setRestoreConfigDialogOpen] = useState(false);
+  const [awaitingRestartCompletion, setAwaitingRestartCompletion] = useState(false);
 
-  const { data, isLoading, error } = useQuery(
-    trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId })
-  );
+  const { data, isLoading, error } = useQuery({
+    ...trpc.admin.kiloclawInstances.get.queryOptions({ id: instanceId }),
+    refetchInterval: awaitingRestartCompletion ? 3000 : false,
+  });
 
   const { mutateAsync: destroyInstance, isPending: isDestroying } = useMutation(
     trpc.admin.kiloclawInstances.destroy.mutationOptions({
@@ -923,6 +927,31 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     '2026.2.26'
   );
 
+  // After a restart/upgrade, poll the machine status until it returns to "running",
+  // then invalidate controllerVersion so supportsConfigRestore reflects the new build.
+  const prevMachineStatus = useRef(data?.workerStatus?.status);
+  useEffect(() => {
+    const status = data?.workerStatus?.status;
+    const wasRestarting = prevMachineStatus.current !== 'running';
+    prevMachineStatus.current = status;
+
+    if (awaitingRestartCompletion && status === 'running' && wasRestarting) {
+      setAwaitingRestartCompletion(false);
+      if (data?.user_id) {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawInstances.controllerVersion.queryKey({
+            userId: data.user_id,
+          }),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.admin.kiloclawInstances.gatewayStatus.queryKey({
+            userId: data.user_id,
+          }),
+        });
+      }
+    }
+  }, [data?.workerStatus?.status, data?.user_id, awaitingRestartCompletion, queryClient, trpc]);
+
   const invalidateGatewayQueries = () => {
     if (!data?.user_id) return;
     void queryClient.invalidateQueries({
@@ -957,6 +986,34 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       },
       onError: err => {
         toast.error(`Failed to stop machine: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: machineRedeploy, isPending: isMachineRedeploying } = useMutation(
+    trpc.admin.kiloclawInstances.restartMachine.mutationOptions({
+      onSuccess: () => {
+        toast.success('Redeploy requested');
+        invalidateMachineQueries();
+        invalidateGatewayQueries();
+        setAwaitingRestartCompletion(true);
+      },
+      onError: err => {
+        toast.error(`Failed to redeploy: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: machineUpgrade, isPending: isMachineUpgrading } = useMutation(
+    trpc.admin.kiloclawInstances.restartMachine.mutationOptions({
+      onSuccess: () => {
+        toast.success('Upgrade to latest requested');
+        invalidateMachineQueries();
+        invalidateGatewayQueries();
+        setAwaitingRestartCompletion(true);
+      },
+      onError: err => {
+        toast.error(`Failed to upgrade: ${err.message}`);
       },
     })
   );
@@ -1061,7 +1118,14 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   }
 
   const isActive = data.destroyed_at === null;
-  const machineActionPending = isMachineStarting || isMachineStopping;
+  const machineStatus = data.workerStatus?.status ?? null;
+  const machineRestartBlocked =
+    machineStatus === 'provisioned' ||
+    machineStatus === 'destroying' ||
+    machineStatus === 'starting' ||
+    machineStatus === 'restarting';
+  const machineActionPending =
+    isMachineStarting || isMachineStopping || isMachineRedeploying || isMachineUpgrading;
   const gatewayActionPending =
     isGatewayStarting ||
     isGatewayStopping ||
@@ -1397,6 +1461,32 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                     <Square className="mr-1 h-4 w-4" />
                   )}
                   Stop Machine
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending || machineRestartBlocked}
+                  onClick={() => void machineRedeploy({ instanceId: data.id, imageTag: undefined })}
+                >
+                  {isMachineRedeploying ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="mr-1 h-4 w-4" />
+                  )}
+                  Redeploy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={machineActionPending || machineRestartBlocked}
+                  onClick={() => void machineUpgrade({ instanceId: data.id, imageTag: 'latest' })}
+                >
+                  {isMachineUpgrading ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUpCircle className="mr-1 h-4 w-4" />
+                  )}
+                  Upgrade to Latest
                 </Button>
               </div>
             </CardContent>

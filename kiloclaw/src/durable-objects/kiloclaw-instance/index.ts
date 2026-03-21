@@ -38,7 +38,7 @@ import {
   ALL_SECRET_FIELD_KEYS,
   type SecretFieldKey,
 } from '@kilocode/kiloclaw-secret-catalog';
-import { parseRegions, shuffleRegions } from '../regions';
+import { parseRegions } from '../regions';
 import { buildMachineConfig, guestFromSize, volumeNameFromSandboxId } from '../machine-config';
 import type { GatewayProcessStatus } from '../gateway-controller-types';
 
@@ -125,9 +125,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // Create Fly Volume on first provision.
     if (isNew && !this.s.flyVolumeId) {
       const flyConfig = getFlyConfig(this.env, this.s);
-      const regions = shuffleRegions(
-        parseRegions(config.region ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION)
-      );
+      const regions = parseRegions(config.region ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION);
       const guest = guestFromSize(config.machineSize ?? null);
       const volume = await fly.createVolumeWithFallback(
         flyConfig,
@@ -341,6 +339,33 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       kilocodeApiKey: this.s.kilocodeApiKey,
       kilocodeApiKeyExpiresAt: this.s.kilocodeApiKeyExpiresAt,
       kilocodeDefaultModel: this.s.kilocodeDefaultModel,
+    };
+  }
+
+  async updateExecPreset(patch: {
+    security?: string;
+    ask?: string;
+  }): Promise<{ execSecurity: string | null; execAsk: string | null }> {
+    await this.loadState();
+
+    const pending: Partial<PersistedState> = {};
+
+    if (patch.security !== undefined) {
+      this.s.execSecurity = patch.security;
+      pending.execSecurity = patch.security;
+    }
+    if (patch.ask !== undefined) {
+      this.s.execAsk = patch.ask;
+      pending.execAsk = patch.ask;
+    }
+
+    if (Object.keys(pending).length > 0) {
+      await this.ctx.storage.put(pending);
+    }
+
+    return {
+      execSecurity: this.s.execSecurity,
+      execAsk: this.s.execAsk,
     };
   }
 

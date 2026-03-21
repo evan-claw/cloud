@@ -185,7 +185,7 @@ export function modelNotAllowedResponse() {
 }
 
 export function forbiddenFreeModelResponse() {
-  const error = `This is not a free model. Please use ${KILO_AUTO_BALANCED_MODEL.id} for affordable inference or ${KILO_AUTO_FREE_MODEL.id} for limited free inference.`;
+  const error = `The free period of this model ended. Please use ${KILO_AUTO_BALANCED_MODEL.id} for affordable inference or ${KILO_AUTO_FREE_MODEL.id} for limited free inference.`;
   return NextResponse.json({ error, message: error }, { status: 404 });
 }
 

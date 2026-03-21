@@ -144,6 +144,8 @@ export async function buildUserEnvVars(
       channels: state.channels ?? undefined,
       googleCredentials: state.googleCredentials ?? undefined,
       instanceFeatures: state.instanceFeatures,
+      execSecurity: state.execSecurity ?? undefined,
+      execAsk: state.execAsk ?? undefined,
     }
   );
 

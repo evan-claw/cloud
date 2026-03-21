@@ -204,12 +204,13 @@ export function generateBaseConfig(
   }
 
   // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
-  // gateway host directly. Allowlist mode gates unknown commands via the
-  // Control UI approval dialog; safe bins auto-allow without approval.
+  // gateway host directly. Security and ask are user-configurable via the
+  // provisioning preset, persisted in DO state and transported as env vars.
+  // Defaults match the 'always-ask' preset (allowlist + on-miss).
   config.tools.exec = config.tools.exec ?? {};
   config.tools.exec.host = 'gateway';
-  config.tools.exec.security = 'allowlist';
-  config.tools.exec.ask = 'on-miss';
+  config.tools.exec.security = env.KILOCLAW_EXEC_SECURITY || 'allowlist';
+  config.tools.exec.ask = env.KILOCLAW_EXEC_ASK || 'on-miss';
 
   // Browser: headless Chromium for the browser tool in Docker.
   // OpenClaw auto-detects /usr/bin/chromium and adds --disable-dev-shm-usage on Linux.

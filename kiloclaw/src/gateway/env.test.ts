@@ -451,4 +451,36 @@ describe('buildEnvVars', () => {
       ).toBeDefined();
     }
   });
+
+  // ─── Exec preset env vars ─────────────────────────────────────────────
+
+  it('passes KILOCLAW_EXEC_SECURITY and KILOCLAW_EXEC_ASK in env when set', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      execSecurity: 'full',
+      execAsk: 'off',
+    });
+
+    expect(result.env.KILOCLAW_EXEC_SECURITY).toBe('full');
+    expect(result.env.KILOCLAW_EXEC_ASK).toBe('off');
+  });
+
+  it('does not set exec env vars when execSecurity and execAsk are null', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {
+      execSecurity: null,
+      execAsk: null,
+    });
+
+    expect(result.env.KILOCLAW_EXEC_SECURITY).toBeUndefined();
+    expect(result.env.KILOCLAW_EXEC_ASK).toBeUndefined();
+  });
+
+  it('does not set exec env vars when not provided in userConfig', async () => {
+    const env = createMockEnv();
+    const result = await buildEnvVars(env, SANDBOX_ID, SECRET, {});
+
+    expect(result.env.KILOCLAW_EXEC_SECURITY).toBeUndefined();
+    expect(result.env.KILOCLAW_EXEC_ASK).toBeUndefined();
+  });
 });

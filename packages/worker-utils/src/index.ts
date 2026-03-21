@@ -27,6 +27,7 @@ export { createCloudAgentNextFetchClient } from './cloud-agent-next-client.js';
 export type {
   CloudAgentNextFetchClient,
   CallbackTarget,
+  CloudAgentTerminalReason,
   CloudAgentPrepareSessionInput,
   CloudAgentPrepareSessionOutput,
   CloudAgentInitiateInput,
@@ -37,6 +38,7 @@ export type {
   CloudAgentInterruptInput,
   CloudAgentInterruptOutput,
 } from './cloud-agent-next-client.js';
+export { CloudAgentNextBillingError, CloudAgentNextError } from './cloud-agent-next-client.js';
 
 export {
   signKiloToken,

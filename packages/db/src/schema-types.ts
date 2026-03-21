@@ -151,6 +151,7 @@ export type KiloClawSubscriptionStatus =
 // NOTE: Do not change these action names. Use present tense for consistency.
 export const KiloClawAdminAuditAction = z.enum([
   'kiloclaw.volume.reassociate',
+  'kiloclaw.subscription.update_trial_end',
   'kiloclaw.machine.start',
   'kiloclaw.machine.stop',
   'kiloclaw.instance.destroy',
@@ -902,3 +903,22 @@ export type StripeSubscriptionStatus =
   | 'canceled'
   | 'unpaid'
   | 'paused';
+
+// --- Code review terminal reasons ---
+
+/**
+ * Valid values for cloud_agent_code_reviews.terminal_reason.
+ * Canonical list — keep in sync with CloudAgentTerminalReason in
+ * packages/worker-utils/src/cloud-agent-next-client.ts if that copy diverges.
+ */
+export const CODE_REVIEW_TERMINAL_REASONS = [
+  'billing',
+  'user_cancelled',
+  'superseded',
+  'interrupted',
+  'timeout',
+  'upstream_error',
+  'unknown',
+] as const;
+
+export type CodeReviewTerminalReason = (typeof CODE_REVIEW_TERMINAL_REASONS)[number];

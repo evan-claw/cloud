@@ -85,13 +85,44 @@ export type CloudAgentInterruptOutput = {
 // tRPC HTTP helpers
 // ---------------------------------------------------------------------------
 
-class CloudAgentNextError extends Error {
+/**
+ * Valid terminal reasons for code review failures.
+ * Keep in sync with CodeReviewTerminalReason in packages/db/src/schema-types.ts.
+ */
+export type CloudAgentTerminalReason =
+  | 'billing'
+  | 'user_cancelled'
+  | 'superseded'
+  | 'interrupted'
+  | 'timeout'
+  | 'upstream_error'
+  | 'unknown';
+
+export class CloudAgentNextError extends Error {
   readonly status: number;
+  readonly body: string;
+
   constructor(procedure: string, status: number, body: string) {
     super(`${procedure} failed (${status}): ${body}`);
     this.name = 'CloudAgentNextError';
     this.status = status;
+    this.body = body;
   }
+}
+
+export class CloudAgentNextBillingError extends CloudAgentNextError {
+  readonly terminalReason = 'billing' satisfies CloudAgentTerminalReason;
+
+  constructor(procedure: string, status: number, body: string) {
+    super(procedure, status, body);
+    this.name = 'CloudAgentNextBillingError';
+  }
+}
+
+function isBillingErrorBody(body: string): boolean {
+  return ['insufficient credits', 'paid model', 'add credits', 'credits required'].some(pattern =>
+    body.toLowerCase().includes(pattern)
+  );
 }
 
 /**
@@ -112,6 +143,9 @@ async function trpcPost<T>(
 
   if (!response.ok) {
     const errorText = await response.text();
+    if (response.status === 402 || isBillingErrorBody(errorText)) {
+      throw new CloudAgentNextBillingError(procedure, response.status, errorText);
+    }
     throw new CloudAgentNextError(procedure, response.status, errorText);
   }
 

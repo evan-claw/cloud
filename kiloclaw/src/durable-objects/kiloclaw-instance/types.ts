@@ -82,6 +82,8 @@ export type InstanceMutableState = {
   gmailNotificationsEnabled: boolean;
   gmailLastHistoryId: string | null;
   gmailPushOidcEmail: string | null;
+  execSecurity: string | null;
+  execAsk: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };
