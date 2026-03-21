@@ -45,19 +45,21 @@ export function EditProfileDialog({
   const trpc = useTRPC();
 
   const [linkedinValue, setLinkedinValue] = useState(linkedinUrl ?? '');
-  const [githubValue, setGithubValue] = useState(githubUrl ?? '');
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
+  const [githubValue, setGithubValue] = useState(githubUrl ?? '');
   const [githubError, setGithubError] = useState<string | null>(null);
 
   // Reset form state when dialog opens
   useEffect(() => {
     if (open) {
       setLinkedinValue(linkedinUrl ?? '');
-      setGithubValue(githubUrl ?? '');
       setLinkedinError(null);
-      setGithubError(null);
+      if (!githubLinkedViaOAuth) {
+        setGithubValue(githubUrl ?? '');
+        setGithubError(null);
+      }
     }
-  }, [open, linkedinUrl, githubUrl]);
+  }, [open, linkedinUrl, githubUrl, githubLinkedViaOAuth]);
 
   const updateProfileMutation = useMutation(
     trpc.user.updateProfile.mutationOptions({
@@ -70,7 +72,6 @@ export function EditProfileDialog({
 
   function handleSave() {
     const trimmedLinkedin = linkedinValue.trim();
-    const trimmedGithub = githubValue.trim();
 
     let hasError = false;
 
@@ -81,21 +82,28 @@ export function EditProfileDialog({
       setLinkedinError(null);
     }
 
-    if (trimmedGithub !== '' && !isValidHttpUrlOrEmpty(trimmedGithub)) {
-      setGithubError('URL must start with http:// or https://');
-      hasError = true;
+    if (!githubLinkedViaOAuth) {
+      const trimmedGithub = githubValue.trim();
+      if (trimmedGithub !== '' && !isValidHttpUrlOrEmpty(trimmedGithub)) {
+        setGithubError('URL must start with http:// or https://');
+        hasError = true;
+      } else {
+        setGithubError(null);
+      }
+
+      if (hasError) return;
+
+      updateProfileMutation.mutate({
+        linkedin_url: trimmedLinkedin === '' ? null : trimmedLinkedin,
+        github_url: trimmedGithub === '' ? null : trimmedGithub,
+      });
     } else {
-      setGithubError(null);
+      if (hasError) return;
+
+      updateProfileMutation.mutate({
+        linkedin_url: trimmedLinkedin === '' ? null : trimmedLinkedin,
+      });
     }
-
-    if (hasError) return;
-
-    updateProfileMutation.mutate({
-      linkedin_url: trimmedLinkedin === '' ? null : trimmedLinkedin,
-      ...(githubLinkedViaOAuth
-        ? {}
-        : { github_url: trimmedGithub === '' ? null : trimmedGithub }),
-    });
   }
 
   return (

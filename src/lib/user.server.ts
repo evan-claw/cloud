@@ -104,7 +104,7 @@ function createGoogleAccountInfo(
     hosted_domain: googleProfile.hd ?? hosted_domain_specials.non_workspace_google_account,
     provider: account.provider,
     provider_account_id: account.providerAccountId,
-    display_name: null, // Google has no public profile page
+    display_name: null, // Google OAuth does not provide a public profile URL
   };
 }
 
@@ -118,6 +118,8 @@ function createGitHubAccountInfo(
   assert(user.name, 'User name is required for GitHub auth');
 
   const githubProfile = profile as { login?: string } | undefined;
+  const login = githubProfile?.login;
+  const validLogin = login && /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(login) ? login : null;
 
   return {
     google_user_email: user.email,
@@ -126,7 +128,7 @@ function createGitHubAccountInfo(
     google_user_image_url: user.image || '',
     provider: account.provider,
     provider_account_id: account.providerAccountId,
-    display_name: githubProfile?.login ?? null,
+    display_name: validLogin,
   };
 }
 
@@ -164,7 +166,7 @@ function createLinkedInAccountInfo(
     google_user_image_url: user.image || '',
     provider: account.provider,
     provider_account_id: account.providerAccountId,
-    display_name: null, // LinkedIn API does not expose public profile URLs
+    display_name: null, // LinkedIn OAuth response does not include the vanity URL slug needed to construct a profile link
   };
 }
 
@@ -204,7 +206,7 @@ function createSSOAccountInfo(
     google_user_image_url: user.image || '',
     provider: account.provider,
     provider_account_id: account.providerAccountId,
-    display_name: null, // SSO providers don't have public profile pages
+    display_name: null, // WorkOS SSO does not provide an upstream IdP profile URL
   };
 }
 
@@ -248,7 +250,7 @@ function createEmailAccountInfo(
     hosted_domain,
     provider: account.provider,
     provider_account_id: user.email,
-    display_name: null, // Email auth has no profile page
+    display_name: null,
   };
 }
 
