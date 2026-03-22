@@ -92,11 +92,21 @@ function ActiveSubscriptionCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         {hasUserRequestedSwitch ? (
-          <Button variant="outline" size="sm" onClick={handleCancelSwitch}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCancelSwitch}
+            disabled={cancelSwitchMutation.isPending}
+          >
             Cancel Switch
           </Button>
         ) : !sub.scheduledPlan ? (
-          <Button variant="outline" size="sm" onClick={handleSwitchPlan}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSwitchPlan}
+            disabled={switchPlanMutation.isPending}
+          >
             Switch to {otherPlan}
           </Button>
         ) : null}
