@@ -1389,8 +1389,19 @@ export const kiloclawRouter = createTRPCRouter({
       if (existingScheduleId) {
         try {
           await stripe.subscriptionSchedules.release(existingScheduleId);
-        } catch {
-          // Schedule may already be released/canceled — safe to proceed.
+        } catch (error) {
+          // Only ignore errors that mean the schedule is already gone
+          // (released, canceled, not found). Transient failures (network,
+          // rate-limit) must abort so we don't try to create() while a
+          // schedule is still attached.
+          if (
+            error instanceof stripe.errors.StripeInvalidRequestError &&
+            /already|released|canceled|not_found|does not exist/.test(error.message)
+          ) {
+            // safe to proceed
+          } else {
+            throw error;
+          }
         }
       }
 
@@ -1500,7 +1511,7 @@ export const kiloclawRouter = createTRPCRouter({
       // proceed to clear the DB so the user isn't stuck.
       if (
         error instanceof stripe.errors.StripeInvalidRequestError &&
-        /already|released|not_found|does not exist/.test(error.message)
+        /already|released|canceled|not_found|does not exist/.test(error.message)
       ) {
         // fall through to clear DB
       } else {

@@ -996,6 +996,55 @@ describe('switchPlan', () => {
     });
   });
 
+  it('aborts when orphaned schedule release fails with a transient error', async () => {
+    await setupActiveSubscription('commit');
+
+    stripeMock.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_switch_test',
+      schedule: 'sub_sched_orphaned',
+    });
+    stripeMock.subscriptionSchedules.release.mockRejectedValue(new Error('Stripe network timeout'));
+
+    const caller = await createCallerForUser(user.id);
+    await expect(caller.kiloclaw.switchPlan({ toPlan: 'standard' })).rejects.toThrow(
+      'Stripe network timeout'
+    );
+
+    // Should NOT have attempted to create a new schedule
+    expect(stripeMock.subscriptionSchedules.create).not.toHaveBeenCalled();
+  });
+
+  it('proceeds when orphaned schedule release says already released', async () => {
+    await setupActiveSubscription('commit');
+
+    const alreadyReleasedError = new stripeMock.errors.StripeInvalidRequestError({
+      message: 'This schedule has already been released',
+      type: 'invalid_request_error',
+    });
+
+    stripeMock.subscriptions.retrieve.mockResolvedValue({
+      id: 'sub_switch_test',
+      schedule: 'sub_sched_orphaned',
+    });
+    stripeMock.subscriptionSchedules.release.mockRejectedValueOnce(alreadyReleasedError);
+    // Subsequent release calls (cleanup) succeed
+    stripeMock.subscriptionSchedules.release.mockResolvedValue({});
+    stripeMock.subscriptionSchedules.create.mockResolvedValue({
+      id: 'sub_sched_new',
+      phases: [{ start_date: now, end_date: now + 86400 * 30 }],
+    });
+    stripeMock.subscriptionSchedules.update.mockResolvedValue({
+      id: 'sub_sched_new',
+      status: 'active',
+    });
+
+    const caller = await createCallerForUser(user.id);
+    const result = await caller.kiloclaw.switchPlan({ toPlan: 'standard' });
+
+    expect(result).toEqual({ success: true });
+    expect(stripeMock.subscriptionSchedules.create).toHaveBeenCalled();
+  });
+
   it('cleans up orphaned schedule when stripe schedule update fails', async () => {
     await setupActiveSubscription('commit');
 
@@ -1154,6 +1203,38 @@ describe('cancelPlanSwitch', () => {
       type: 'invalid_request_error',
     });
     stripeMock.subscriptionSchedules.release.mockRejectedValue(alreadyReleasedError);
+
+    const caller = await createCallerForUser(user.id);
+    const result = await caller.kiloclaw.cancelPlanSwitch();
+
+    expect(result).toEqual({ success: true });
+
+    const [row] = await db
+      .select()
+      .from(kiloclaw_subscriptions)
+      .where(eq(kiloclaw_subscriptions.user_id, user.id))
+      .limit(1);
+
+    expect(row.stripe_schedule_id).toBeNull();
+    expect(row.scheduled_plan).toBeNull();
+  });
+
+  it('clears DB when Stripe says schedule is already canceled', async () => {
+    await db.insert(kiloclaw_subscriptions).values({
+      user_id: user.id,
+      stripe_subscription_id: 'sub_already_canceled',
+      plan: 'commit',
+      status: 'active',
+      stripe_schedule_id: 'sub_sched_canceled',
+      scheduled_plan: 'standard',
+      scheduled_by: 'user',
+    });
+
+    const alreadyCanceledError = new stripeMock.errors.StripeInvalidRequestError({
+      message: 'This schedule has already been canceled',
+      type: 'invalid_request_error',
+    });
+    stripeMock.subscriptionSchedules.release.mockRejectedValue(alreadyCanceledError);
 
     const caller = await createCallerForUser(user.id);
     const result = await caller.kiloclaw.cancelPlanSwitch();
