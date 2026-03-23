@@ -15,7 +15,7 @@ import type { Context, Next } from 'hono';
 import { Hono } from 'hono';
 
 import type { AppEnv, KiloClawEnv } from './types';
-import { accessGatewayRoutes, publicRoutes, api, kiloclaw, platform } from './routes';
+import { accessGatewayRoutes, publicRoutes, api, kiloclaw, platform, controller } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import { authMiddleware, internalApiMiddleware } from './auth';
 import { sandboxIdFromUserId } from './auth/sandbox-id';
@@ -141,6 +141,9 @@ app.use('*', logRequest);
 // Public routes (no auth)
 app.route('/', publicRoutes);
 app.route('/', accessGatewayRoutes);
+
+// Controller check-in routes (machine-to-worker, custom auth)
+app.route('/api/controller', controller);
 
 // Debug routes are removed.
 app.all('/debug', c => c.notFound());
