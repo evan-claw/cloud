@@ -1,33 +1,34 @@
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
-import { ScrollView, View } from '@/tw';
+import { useAuth } from '@/lib/auth/auth-context';
+import { View } from '@/tw';
+
+function getNameFromToken(token: string): string | undefined {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return undefined;
+    const decoded = JSON.parse(atob(payload)) as { name?: string };
+    return decoded.name;
+  } catch {
+    return undefined;
+  }
+}
 
 export default function HomeScreen() {
+  const { token, signOut } = useAuth();
+  const name = token ? getNameFromToken(token) : undefined;
+
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerClassName="flex-1">
-      <View className="flex-1 items-center justify-center gap-8 px-6">
-        <View className="items-center gap-3">
-          <Text variant="h1">Kilo</Text>
-          <Text variant="muted" className="text-lg">
-            Powered by NativeWind
-          </Text>
-        </View>
-
-        <View className="w-full max-w-sm gap-3">
-          <Button size="lg">
-            <Text>Get Started</Text>
-          </Button>
-
-          <Button variant="outline" size="lg">
-            <Text>Learn More</Text>
-          </Button>
-        </View>
-
-        <View className="flex-row items-center gap-4">
-          <View className="h-2 w-2 rounded-full bg-emerald-500" />
-          <Text variant="muted">Tailwind CSS v4 + React Native</Text>
-        </View>
-      </View>
-    </ScrollView>
+    <View className="flex-1 items-center justify-center gap-6 bg-background px-6">
+      <Text variant="h1">{name ? `${name}, welcome to Kilo!` : 'Welcome to Kilo!'}</Text>
+      <Button
+        variant="outline"
+        onPress={() => {
+          void signOut();
+        }}
+      >
+        <Text>Sign Out</Text>
+      </Button>
+    </View>
   );
 }
