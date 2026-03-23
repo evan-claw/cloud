@@ -75,6 +75,11 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     // Legacy instances pre-dating this field treat absence as already-sent
     // to avoid spurious emails after deploy.
     s.instanceReadyEmailSent = 'instanceReadyEmailSent' in raw ? d.instanceReadyEmailSent : true;
+    s.streamChatApiKey = d.streamChatApiKey;
+    s.streamChatBotUserId = d.streamChatBotUserId;
+    s.streamChatBotUserToken = d.streamChatBotUserToken;
+    s.streamChatChannelId = d.streamChatChannelId;
+    s.streamChatUserToken = d.streamChatUserToken;
   } else {
     const hasAnyData = entries.size > 0;
     if (hasAnyData) {
@@ -138,6 +143,11 @@ export function resetMutableState(s: InstanceMutableState): void {
   s.execSecurity = null;
   s.execAsk = null;
   s.instanceReadyEmailSent = false;
+  s.streamChatApiKey = null;
+  s.streamChatBotUserId = null;
+  s.streamChatBotUserToken = null;
+  s.streamChatChannelId = null;
+  s.streamChatUserToken = null;
   s.lastLiveCheckAt = null;
   s.restartingAt = null;
   s.loaded = false;
@@ -195,6 +205,11 @@ export function createMutableState(): InstanceMutableState {
     execSecurity: null,
     execAsk: null,
     instanceReadyEmailSent: false,
+    streamChatApiKey: null,
+    streamChatBotUserId: null,
+    streamChatBotUserToken: null,
+    streamChatChannelId: null,
+    streamChatUserToken: null,
     lastLiveCheckAt: null,
   };
 }

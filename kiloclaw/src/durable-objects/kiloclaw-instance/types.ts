@@ -85,6 +85,12 @@ export type InstanceMutableState = {
   execSecurity: string | null;
   execAsk: string | null;
   instanceReadyEmailSent: boolean;
+  // Stream Chat default channel (auto-provisioned)
+  streamChatApiKey: string | null;
+  streamChatBotUserId: string | null;
+  streamChatBotUserToken: string | null;
+  streamChatChannelId: string | null;
+  streamChatUserToken: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };

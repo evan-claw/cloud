@@ -61,6 +61,7 @@ import {
   markRestartSuccessful,
 } from './reconcile';
 import { restoreFromPostgres, markDestroyedInPostgresHelper } from './postgres';
+import { setupDefaultStreamChatChannel } from '../../stream-chat/client';
 import { writeEvent } from '../../utils/analytics';
 import type { KiloClawEventData, KiloClawEventName } from '../../utils/analytics';
 
@@ -379,6 +380,37 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.s.instanceReadyEmailSent = false;
     }
     this.s.loaded = true;
+
+    // Set up the default Stream Chat channel on first provision (best-effort).
+    // The bot and channel are created server-side here so the API secret never
+    // reaches the Fly Machine. Failure is non-fatal: the instance will start
+    // without the Stream Chat channel rather than blocking provisioning.
+    if (isNew && this.env.STREAM_CHAT_API_KEY && this.env.STREAM_CHAT_API_SECRET) {
+      try {
+        const streamChat = await setupDefaultStreamChatChannel(
+          this.env.STREAM_CHAT_API_KEY,
+          this.env.STREAM_CHAT_API_SECRET,
+          sandboxId
+        );
+        this.s.streamChatApiKey = streamChat.apiKey;
+        this.s.streamChatBotUserId = streamChat.botUserId;
+        this.s.streamChatBotUserToken = streamChat.botUserToken;
+        this.s.streamChatChannelId = streamChat.channelId;
+        this.s.streamChatUserToken = streamChat.userToken;
+        await this.persist({
+          streamChatApiKey: streamChat.apiKey,
+          streamChatBotUserId: streamChat.botUserId,
+          streamChatBotUserToken: streamChat.botUserToken,
+          streamChatChannelId: streamChat.channelId,
+          streamChatUserToken: streamChat.userToken,
+        });
+        console.log('[DO] Stream Chat default channel provisioned:', streamChat.channelId);
+      } catch (err) {
+        doWarn(this.s, 'Stream Chat default channel setup failed (non-fatal)', {
+          error: toLoggable(err),
+        });
+      }
+    }
 
     if (isNew) {
       await this.scheduleAlarm();
@@ -1194,6 +1226,31 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
       execSecurity: this.s.execSecurity,
       execAsk: this.s.execAsk,
+    };
+  }
+
+  async getStreamChatCredentials(): Promise<{
+    apiKey: string;
+    userId: string;
+    userToken: string;
+    channelId: string;
+  } | null> {
+    await this.loadState();
+
+    if (
+      !this.s.streamChatApiKey ||
+      !this.s.streamChatUserToken ||
+      !this.s.streamChatChannelId ||
+      !this.s.sandboxId
+    ) {
+      return null;
+    }
+
+    return {
+      apiKey: this.s.streamChatApiKey,
+      userId: this.s.sandboxId,
+      userToken: this.s.streamChatUserToken,
+      channelId: this.s.streamChatChannelId,
     };
   }
 
