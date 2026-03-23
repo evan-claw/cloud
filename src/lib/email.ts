@@ -46,7 +46,7 @@ export const subjects: Record<TemplateName, string> = {
   ossInviteExistingUser: 'Kilo: OSS Sponsorship Offer',
   ossExistingOrgProvisioned: 'Kilo: OSS Sponsorship Offer',
   deployFailed: 'Kilo: Your Deployment Failed',
-  clawTrialEndingSoon: 'Your KiloClaw Trial Ends in 5 Days',
+  clawTrialEndingSoon: 'Your KiloClaw Trial Ends in 2 Days',
   clawTrialExpiresTomorrow: 'Your KiloClaw Trial Expires Tomorrow',
   clawSuspendedTrial: 'Your KiloClaw Trial Has Ended',
   clawSuspendedSubscription: 'Your KiloClaw Subscription Has Ended',

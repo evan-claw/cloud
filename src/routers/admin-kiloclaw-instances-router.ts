@@ -2,6 +2,7 @@ import { adminProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/i
 import { db } from '@/lib/drizzle';
 import { kiloclaw_instances, kilocode_users } from '@kilocode/db/schema';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import {
   markActiveInstanceDestroyed,
   restoreDestroyedInstance,
@@ -17,6 +18,7 @@ import type {
   CandidateVolumesResponse,
   ReassociateVolumeResponse,
 } from '@/lib/kiloclaw/types';
+import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
 import { eq, and, or, desc, asc, ilike, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
@@ -530,6 +532,46 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       throwKiloclawAdminError(err, fallbackMessage);
     }
   }),
+
+  restartMachine: adminProcedure
+    .input(
+      z.object({
+        instanceId: z.string().uuid(),
+        imageTag: z
+          .string()
+          .max(128, 'Image tag too long')
+          .regex(
+            /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/,
+            'Image tag must be alphanumeric with dots, hyphens, or underscores'
+          )
+          .optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const [row] = await db
+        .select({ user: kilocode_users })
+        .from(kiloclaw_instances)
+        .innerJoin(kilocode_users, eq(kiloclaw_instances.user_id, kilocode_users.id))
+        .where(eq(kiloclaw_instances.id, input.instanceId))
+        .limit(1);
+
+      if (!row) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Instance not found' });
+      }
+
+      const token = generateApiToken(row.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes });
+      const client = new KiloClawUserClient(token);
+      const fallbackMessage = 'Failed to restart machine';
+      try {
+        return await client.restartMachine(
+          input.imageTag ? { imageTag: input.imageTag } : undefined,
+          { userId: row.user.id }
+        );
+      } catch (err) {
+        console.error('Failed to restart machine for user:', row.user.id, err);
+        throwKiloclawAdminError(err, fallbackMessage);
+      }
+    }),
 
   destroy: adminProcedure.input(DestroyInstanceSchema).mutation(async ({ input, ctx }) => {
     const [instance] = await db

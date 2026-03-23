@@ -184,7 +184,8 @@ export function generateBaseConfig(
   if (env.KILOCODE_DEFAULT_MODEL) {
     config.agents = config.agents ?? {};
     config.agents.defaults = config.agents.defaults ?? {};
-    config.agents.defaults.model = { primary: env.KILOCODE_DEFAULT_MODEL };
+    config.agents.defaults.model = config.agents.defaults.model ?? {};
+    config.agents.defaults.model.primary = env.KILOCODE_DEFAULT_MODEL;
     console.log(`Overriding default model: ${env.KILOCODE_DEFAULT_MODEL}`);
   }
 
@@ -204,12 +205,13 @@ export function generateBaseConfig(
   }
 
   // Exec: KiloClaw machines have no Docker sandbox, so exec must target the
-  // gateway host directly. Allowlist mode gates unknown commands via the
-  // Control UI approval dialog; safe bins auto-allow without approval.
+  // gateway host directly. Security and ask are user-configurable via the
+  // provisioning preset, persisted in DO state and transported as env vars.
+  // Defaults match the 'always-ask' preset (allowlist + on-miss).
   config.tools.exec = config.tools.exec ?? {};
   config.tools.exec.host = 'gateway';
-  config.tools.exec.security = 'allowlist';
-  config.tools.exec.ask = 'on-miss';
+  config.tools.exec.security = env.KILOCLAW_EXEC_SECURITY || 'allowlist';
+  config.tools.exec.ask = env.KILOCLAW_EXEC_ASK || 'on-miss';
 
   // Browser: headless Chromium for the browser tool in Docker.
   // OpenClaw auto-detects /usr/bin/chromium and adds --disable-dev-shm-usage on Linux.
@@ -222,17 +224,17 @@ export function generateBaseConfig(
   // Telegram
   if (env.TELEGRAM_BOT_TOKEN) {
     const dmPolicy = env.TELEGRAM_DM_POLICY || 'pairing';
-    const telegram: ConfigObject = {
-      botToken: env.TELEGRAM_BOT_TOKEN,
-      enabled: true,
-      dmPolicy,
-    };
+    config.channels.telegram = config.channels.telegram ?? {};
+    config.channels.telegram.botToken = env.TELEGRAM_BOT_TOKEN;
+    config.channels.telegram.enabled = true;
+    config.channels.telegram.dmPolicy = dmPolicy;
+    // Explicit env override always wins; otherwise only seed allowFrom on
+    // first boot (when the key is absent) so user edits are preserved.
     if (env.TELEGRAM_DM_ALLOW_FROM) {
-      telegram.allowFrom = env.TELEGRAM_DM_ALLOW_FROM.split(',');
-    } else if (dmPolicy === 'open') {
-      telegram.allowFrom = ['*'];
+      config.channels.telegram.allowFrom = env.TELEGRAM_DM_ALLOW_FROM.split(',');
+    } else if (!('allowFrom' in config.channels.telegram)) {
+      config.channels.telegram.allowFrom = dmPolicy === 'open' ? ['*'] : [];
     }
-    config.channels.telegram = telegram;
 
     config.plugins = config.plugins ?? {};
     config.plugins.entries = config.plugins.entries ?? {};
@@ -243,15 +245,15 @@ export function generateBaseConfig(
   // Discord
   if (env.DISCORD_BOT_TOKEN) {
     const dmPolicy = env.DISCORD_DM_POLICY || 'pairing';
-    const dm: ConfigObject = { policy: dmPolicy };
-    if (dmPolicy === 'open') {
-      dm.allowFrom = ['*'];
+    config.channels.discord = config.channels.discord ?? {};
+    config.channels.discord.token = env.DISCORD_BOT_TOKEN;
+    config.channels.discord.enabled = true;
+    config.channels.discord.dm = config.channels.discord.dm ?? {};
+    config.channels.discord.dm.policy = dmPolicy;
+    // Only seed allowFrom on first boot so user edits are preserved.
+    if (!('allowFrom' in config.channels.discord.dm)) {
+      config.channels.discord.dm.allowFrom = dmPolicy === 'open' ? ['*'] : [];
     }
-    config.channels.discord = {
-      token: env.DISCORD_BOT_TOKEN,
-      enabled: true,
-      dm,
-    };
 
     config.plugins = config.plugins ?? {};
     config.plugins.entries = config.plugins.entries ?? {};
@@ -261,11 +263,10 @@ export function generateBaseConfig(
 
   // Slack
   if (env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN) {
-    config.channels.slack = {
-      botToken: env.SLACK_BOT_TOKEN,
-      appToken: env.SLACK_APP_TOKEN,
-      enabled: true,
-    };
+    config.channels.slack = config.channels.slack ?? {};
+    config.channels.slack.botToken = env.SLACK_BOT_TOKEN;
+    config.channels.slack.appToken = env.SLACK_APP_TOKEN;
+    config.channels.slack.enabled = true;
 
     config.plugins = config.plugins ?? {};
     config.plugins.entries = config.plugins.entries ?? {};

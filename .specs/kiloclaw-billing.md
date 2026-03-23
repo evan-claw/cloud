@@ -3,6 +3,8 @@
 ## Status
 
 Draft -- generated from branch `jdp/kiloclaw-billing` on 2026-03-13.
+Updated 2026-03-19 -- pricing and trial duration changes.
+Updated 2026-03-20 -- promotional codes and introductory pricing.
 
 ## Conventions
 
@@ -20,7 +22,7 @@ plans: a discounted six-month commit plan or a month-to-month standard
 plan. The commit plan auto-renews for successive six-month periods at
 the same price; users may switch between plans at any time. New users
 who provision an instance without subscribing first automatically
-receive a 30-day free trial. A legacy earlybird purchase also grants
+receive a 7-day free trial. A legacy earlybird purchase also grants
 access until a fixed expiry date. A periodic background job enforces
 expiry, suspension, and eventual instance destruction when access
 lapses, with email notifications at each stage.
@@ -32,7 +34,7 @@ lapses, with email notifications at each stage.
 1. The system MUST support exactly two user-facing subscription plans:
    commit and standard. A trial plan exists internally but is created
    automatically at provisioning time, not selected by the user.
-2. A trial plan MUST last 30 calendar days from the moment it is created.
+2. A trial plan MUST last 7 calendar days from the moment it is created.
 3. A commit plan MUST cover a six-calendar-month billing period.
 4. A standard plan MUST bill on a monthly recurring cycle.
 5. The system MUST enforce at most one subscription record per user.
@@ -40,6 +42,21 @@ lapses, with email notifications at each stage.
    MUST NOT independently validate or enforce specific price amounts.
 7. The system MUST fail with an error at checkout time if a required
    plan price identifier is not configured.
+
+### Standard Plan Introductory Pricing
+
+1. New standard plan subscribers who do not have a prior canceled
+   subscription MUST receive an introductory price for their first
+   billing period. Returning subscribers with a previously canceled
+   subscription MUST receive the regular standard price.
+2. The system MUST automatically transition introductory-price
+   subscribers to the regular standard price at the end of the
+   introductory billing period.
+3. The automatic price transition MUST be transparent to the user: it
+   MUST NOT appear as a pending plan switch in billing status and MUST
+   NOT prevent the user from initiating a plan switch or canceling.
+4. Failure to set up the automatic price transition during subscription
+   creation MUST NOT block checkout completion.
 
 ### Trial Eligibility and Creation
 
@@ -52,7 +69,7 @@ lapses, with email notifications at each stage.
    creates the instance, but the billing status endpoint includes the
    instance check as defense in depth.
 3. When a trial is created, the system MUST record the trial start
-   timestamp and an end timestamp exactly 30 days later.
+   timestamp and an end timestamp exactly 7 days later.
 4. The system MUST NOT require a credit card to start a trial.
 
 ### Access Control
@@ -84,8 +101,11 @@ lapses, with email notifications at each stage.
    customer before creating a new checkout session, to guard against
    concurrent checkouts. This check does not cover provider-side
    subscriptions in past-due status.
-4. The system MUST allow promotional codes only for the standard plan.
-5. The system MUST NOT allow promotional codes for the commit plan.
+4. The system MUST allow promotional codes on checkout for both plans.
+5. For standard plan checkout, the system MUST use the introductory
+   price when the user has no prior canceled subscription, and the
+   regular price when the user has a previously canceled subscription
+   (see Standard Plan Introductory Pricing).
 6. When a configurable billing start date is set and is in the future,
    the system MUST create the subscription with a delayed billing period
    that begins on that date.
@@ -143,6 +163,15 @@ lapses, with email notifications at each stage.
    the commit-period end date to six calendar months from the
    transition date.
 8. The system MUST allow cancellation of user-initiated plan switches.
+9. The system MUST reject a plan switch if a user-initiated plan switch
+   is already pending.
+10. If an automatic price transition is pending when the user requests a
+    plan switch, the system MUST replace the automatic transition with
+    the user's requested switch.
+11. After canceling a user-initiated plan switch, if the subscription is
+    still on the introductory price, the system MUST restore the
+    automatic price transition. Failure to restore the transition MUST
+    NOT prevent the switch cancellation from succeeding.
 
 ### Cancellation and Reactivation
 
@@ -150,14 +179,19 @@ lapses, with email notifications at each stage.
    subscription with a payment provider ID exists.
 2. The system MUST reject a cancellation request if cancellation is
    already pending.
-3. When canceling a subscription that has a pending schedule, the system
-   MUST release the schedule before setting the cancel-at-period-end
-   flag.
+3. When canceling a subscription that has a pending schedule — whether
+   a user-initiated plan switch or an automatic price transition — the
+   system MUST release the schedule before setting the
+   cancel-at-period-end flag.
 4. Cancellation MUST NOT terminate access immediately; access MUST
    continue until the current billing period ends.
 5. The system MUST allow reactivation of a subscription that is pending
    cancellation.
 6. On reactivation, the system MUST clear the cancel-at-period-end flag.
+7. On reactivation, if the subscription is still on the introductory
+   price, the system MUST restore the automatic price transition.
+   Failure to restore the transition MUST NOT prevent the reactivation
+   from succeeding.
 
 ### Billing Lifecycle Background Job
 
@@ -167,14 +201,17 @@ lapses, with email notifications at each stage.
 2. Each sweep in the background job MUST process users independently;
    a failure for one user MUST NOT prevent processing of other users.
 3. All errors during sweep processing MUST be captured for monitoring.
+4. The background job MUST detect active subscriptions on the
+   introductory price that have no automatic price transition pending
+   and MUST set up the missing transition.
 
 ### Trial Expiry Warnings
 
-1. When a trial has 5 or fewer days remaining and has not been
+1. When a trial has 2 or fewer days remaining and has not been
    suspended, the system MUST send a trial-ending-soon notification.
 2. When a trial has 1 or fewer days remaining, the system MUST send a
    more urgent trial-expires-tomorrow notification instead of the
-   5-day notification.
+   2-day notification.
 
 ### Earlybird Expiry Warnings
 
@@ -294,6 +331,38 @@ lapses, with email notifications at each stage.
    records for that user.
 2. When a user is soft-deleted, the system MUST delete all email
    notification log entries for that user.
+
+### Changelog
+
+#### 2026-03-20 -- Promotional codes and introductory pricing
+
+Previous values:
+
+- Standard plan first-month discount: coupon applied at checkout
+- Promotional codes: not allowed on either plan
+
+New values:
+
+- Standard plan first-month discount: introductory price with automatic
+  transition to regular price at period end
+- Promotional codes: allowed on both plans at checkout
+
+#### 2026-03-19 -- Pricing and trial changes
+
+Previous values:
+
+- Trial duration: 30 days
+- Standard plan: $25/month, promotional codes allowed
+- Commit plan: $54/6 months
+- Trial expiry warning: 5 days before expiry
+
+New values:
+
+- Trial duration: 7 days (existing trials keep their original end date)
+- Standard plan: $9/month with $4 first month via coupon, no promotional codes
+- Commit plan: $48/6 months
+- Trial expiry warning: 2 days before expiry
+- 14 existing subscribers migrated to new pricing at next billing cycle
 
 ## Error Handling
 

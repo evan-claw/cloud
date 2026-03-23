@@ -16,6 +16,9 @@ import { format } from 'date-fns';
 import type { TemplateName } from '@/lib/email';
 import { send as sendEmail } from '@/lib/email';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { ensureAutoIntroSchedule } from '@/lib/kiloclaw/stripe-handlers';
+import { isIntroPriceId } from '@/lib/kiloclaw/stripe-price-ids.server';
+import { client as stripe } from '@/lib/stripe-client';
 import { KILOCLAW_EARLYBIRD_EXPIRY_DATE } from '@/lib/kiloclaw/constants';
 import { NEXTAUTH_URL, KILOCLAW_BILLING_ENFORCEMENT } from '@/lib/config.server';
 import { sentryLogger } from '@/lib/utils.server';
@@ -26,7 +29,7 @@ const logError = sentryLogger('kiloclaw-billing-cron', 'error');
 const MS_PER_DAY = 86_400_000;
 const DESTRUCTION_GRACE_DAYS = 7;
 const PAST_DUE_THRESHOLD_DAYS = 14;
-const TRIAL_WARNING_DAYS = 5;
+const TRIAL_WARNING_DAYS = 2;
 const DESTRUCTION_WARNING_DAYS = 2;
 
 /** Format a Date for human-readable email display, e.g. "March 15, 2026". */
@@ -42,6 +45,7 @@ type CronSummary = {
   destruction_warnings: number;
   sweep3_instance_destruction: number;
   sweep4_past_due_cleanup: number;
+  sweep5_intro_schedules_repaired: number;
   emails_sent: number;
   emails_skipped: number;
   errors: number;
@@ -104,6 +108,7 @@ export async function runKiloClawBillingLifecycleCron(
     destruction_warnings: 0,
     sweep3_instance_destruction: 0,
     sweep4_past_due_cleanup: 0,
+    sweep5_intro_schedules_repaired: 0,
     emails_sent: 0,
     emails_skipped: 0,
     errors: 0,
@@ -118,8 +123,8 @@ export async function runKiloClawBillingLifecycleCron(
   const client = new KiloClawInternalClient();
   const clawUrl = `${NEXTAUTH_URL}/claw`;
 
-  // ── Sweep 0a: Trial 5-day Warning ───────────────────────────────────
-  const fiveDaysFromNow = new Date(Date.now() + TRIAL_WARNING_DAYS * MS_PER_DAY).toISOString();
+  // ── Sweep 0a: Trial ending-soon warning ─────────────────────────────
+  const trialWarningCutoff = new Date(Date.now() + TRIAL_WARNING_DAYS * MS_PER_DAY).toISOString();
   const trialWarningRows = await database
     .select({
       user_id: kiloclaw_subscriptions.user_id,
@@ -132,7 +137,7 @@ export async function runKiloClawBillingLifecycleCron(
       and(
         eq(kiloclaw_subscriptions.status, 'trialing'),
         gte(kiloclaw_subscriptions.trial_ends_at, now),
-        lte(kiloclaw_subscriptions.trial_ends_at, fiveDaysFromNow),
+        lte(kiloclaw_subscriptions.trial_ends_at, trialWarningCutoff),
         isNull(kiloclaw_subscriptions.suspended_at)
       )
     );
@@ -145,7 +150,7 @@ export async function runKiloClawBillingLifecycleCron(
       );
 
       if (daysRemaining <= 1) {
-        // 1-day warning — more urgent, replaces the 5-day message
+        // 1-day warning — more urgent, replaces the ending-soon message
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -157,8 +162,9 @@ export async function runKiloClawBillingLifecycleCron(
         );
         if (sent) summary.trial_warnings++;
       } else {
-        // 5-day warning (idempotent — skipped if already sent)
-        // daysRemaining is always > 1 here (the <= 1 case is handled above)
+        // Ending-soon warning (idempotent — skipped if already sent).
+        // Key kept as 'claw_trial_5d' so users warned under the old 5-day
+        // threshold aren't re-notified after the threshold changed to 2 days.
         const sent = await trySendEmail(
           database,
           row.user_id,
@@ -570,6 +576,47 @@ export async function runKiloClawBillingLifecycleCron(
       summary.errors++;
       captureException(error);
       logError('Sweep 4 (past-due cleanup) failed for user', {
+        user_id: row.user_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // ── Sweep 5: Repair stranded intro-price subscriptions ─────────────
+  const strandedIntroRows = await database
+    .select({
+      user_id: kiloclaw_subscriptions.user_id,
+      stripe_subscription_id: kiloclaw_subscriptions.stripe_subscription_id,
+    })
+    .from(kiloclaw_subscriptions)
+    .where(
+      and(
+        eq(kiloclaw_subscriptions.status, 'active'),
+        isNull(kiloclaw_subscriptions.stripe_schedule_id),
+        isNotNull(kiloclaw_subscriptions.stripe_subscription_id),
+        eq(kiloclaw_subscriptions.cancel_at_period_end, false)
+      )
+    );
+
+  for (const row of strandedIntroRows) {
+    try {
+      const stripeSubId = row.stripe_subscription_id;
+      if (!stripeSubId) continue;
+      const liveSub = await stripe.subscriptions.retrieve(stripeSubId);
+      const priceId = liveSub.items.data[0]?.price?.id;
+      if (!priceId || !isIntroPriceId(priceId)) continue;
+      if (liveSub.schedule) continue;
+
+      await ensureAutoIntroSchedule(stripeSubId, row.user_id);
+      summary.sweep5_intro_schedules_repaired++;
+      logInfo('Sweep 5: repaired stranded intro-price subscription', {
+        user_id: row.user_id,
+        stripe_subscription_id: row.stripe_subscription_id,
+      });
+    } catch (error) {
+      summary.errors++;
+      captureException(error);
+      logError('Sweep 5 (intro schedule repair) failed for user', {
         user_id: row.user_id,
         error: error instanceof Error ? error.message : String(error),
       });

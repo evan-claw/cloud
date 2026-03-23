@@ -10,7 +10,7 @@ export const giga_potato_model: KiloFreeModel = {
     '**Note:** Prompts and completions are logged and may be used to improve the model.',
   context_length: 256_000,
   max_completion_tokens: 32_000,
-  status: 'public',
+  status: 'disabled',
   flags: ['prompt_cache', 'vision'],
   gateway: 'gigapotato',
   internal_id: 'ep-20260109111813-hztxv',

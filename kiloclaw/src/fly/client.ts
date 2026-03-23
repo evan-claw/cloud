@@ -202,12 +202,8 @@ export async function createVolume(
 /**
  * Create a volume, walking a list of regions until one succeeds.
  *
- * Fly doesn't support meta-regions (us, eu) for volume creation, so callers
- * must provide an explicit list of regions to try. On capacity-related 412
- * errors, the next region is tried. Any other error is thrown immediately.
- *
- * The compute hint tells Fly what machine spec will attach to this volume,
- * so it can pick a host with capacity for both.
+ * On capacity-related 412 errors the next region is tried.
+ * Any other error is thrown immediately.
  */
 export async function createVolumeWithFallback(
   config: FlyClientConfig,

@@ -84,8 +84,8 @@ export function deriveBannerState(billing: ClawBillingStatus): ClawBannerState {
   if (billing.trial && !billing.trial.expired) {
     const d = billing.trial.daysRemaining;
     if (d === 0) return 'trial_expires_today';
-    if (d <= 3) return 'trial_ending_very_soon';
-    if (d <= 7) return 'trial_ending_soon';
+    if (d <= 1) return 'trial_ending_very_soon';
+    if (d <= 2) return 'trial_ending_soon';
     return 'trial_active';
   }
 

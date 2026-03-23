@@ -183,6 +183,9 @@ export const STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID = getEnvVariable(
 export const STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID = getEnvVariable(
   'STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID'
 );
+export const STRIPE_KILOCLAW_STANDARD_INTRO_PRICE_ID = getEnvVariable(
+  'STRIPE_KILOCLAW_STANDARD_INTRO_PRICE_ID'
+);
 
 // KiloClaw Billing — ISO 8601 date after which new checkouts are billed immediately
 // (before this date, new subscriptions get a delayed trial_end so billing starts on launch day).

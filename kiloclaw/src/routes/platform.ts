@@ -26,6 +26,9 @@ import { upsertCatalogVersion } from '../lib/catalog-registration';
 import { z } from 'zod';
 import { withDORetry } from '@kilocode/worker-utils';
 import { deriveGatewayToken } from '../auth/gateway-token';
+import { sandboxIdFromUserId } from '../auth/sandbox-id';
+import { writeEvent } from '../utils/analytics';
+import { deriveHttpEventName } from '../middleware/analytics';
 
 const GmailHistoryIdSchema = z.object({
   userId: z.string().min(1),
@@ -47,6 +50,69 @@ const KiloCodeConfigPatchSchema = z.object({
 });
 
 const platform = new Hono<AppEnv>();
+
+// Analytics middleware — runs for every platform route. Captures timing and
+// error state. Skips emitting for routes with no user context (e.g. /versions)
+// unless an error occurred.
+platform.use('*', async (c, next) => {
+  const start = c.get('requestStartTime') ?? performance.now();
+  let error: string | undefined;
+  try {
+    await next();
+    if (c.res.status >= 400) {
+      error = `HTTP ${c.res.status}`;
+    }
+  } catch (err) {
+    error = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+    throw err;
+  } finally {
+    const durationMs = performance.now() - start;
+    const method = c.req.method;
+    const path = c.req.path;
+
+    // userId is always read from Hono context — set by parseBody() for
+    // POST/PATCH routes, or by setValidatedQueryUserId() for GET/DELETE routes.
+    const userId = c.get('userId') || '';
+
+    // Skip analytics for routes with no user context (e.g. /versions) unless
+    // they errored — no userId means nothing useful to attribute.
+    if (userId || error) {
+      let sandboxId = '';
+      if (userId) {
+        try {
+          sandboxId = sandboxIdFromUserId(userId);
+        } catch {
+          // ignore
+        }
+      }
+
+      writeEvent(c.env, {
+        event: deriveHttpEventName(method, path),
+        delivery: 'http',
+        route: `${method} ${path}`,
+        error,
+        userId,
+        sandboxId,
+        durationMs,
+      });
+    }
+  }
+});
+
+/**
+ * Validate and set userId from the query string onto the Hono context.
+ * GET/DELETE routes use this so the analytics middleware can read userId
+ * from context without falling back to raw unvalidated query params.
+ */
+function setValidatedQueryUserId(c: Context<AppEnv>): string | null {
+  const parsed = UserIdRequestSchema.safeParse({ userId: c.req.query('userId') });
+  if (!parsed.success) {
+    return null;
+  }
+
+  c.set('userId', parsed.data.userId);
+  return parsed.data.userId;
+}
 
 /**
  * Create a fresh KiloClawInstance DO stub for a userId.
@@ -169,6 +235,19 @@ async function parseBody<T extends z.ZodTypeAny>(
     };
   }
 
+  // Expose userId on the Hono context so the analytics middleware can
+  // read it after the handler completes. Platform routes use
+  // x-internal-api-key auth (no JWT), so userId comes from the body.
+  if (
+    parsed.data &&
+    typeof parsed.data === 'object' &&
+    'userId' in parsed.data &&
+    typeof parsed.data.userId === 'string' &&
+    parsed.data.userId
+  ) {
+    c.set('userId', parsed.data.userId);
+  }
+
   return { data: parsed.data };
 }
 
@@ -264,6 +343,32 @@ platform.patch('/channels', async c => {
   }
 });
 
+// PATCH /api/platform/exec-preset
+const ExecPresetPatchSchema = z.object({
+  userId: z.string().min(1),
+  security: z.string().optional(),
+  ask: z.string().optional(),
+});
+
+platform.patch('/exec-preset', async c => {
+  const result = await parseBody(c, ExecPresetPatchSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, security, ask } = result.data;
+
+  try {
+    const updated = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.updateExecPreset({ security, ask }),
+      'updateExecPreset'
+    );
+    return c.json(updated, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'exec-preset patch');
+    return jsonError(message, status);
+  }
+});
+
 // POST /api/platform/google-credentials
 const GoogleCredentialsPatchSchema = z.object({
   userId: z.string().min(1),
@@ -291,7 +396,7 @@ platform.post('/google-credentials', async c => {
 
 // DELETE /api/platform/google-credentials?userId=...
 platform.delete('/google-credentials', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) return c.json({ error: 'userId is required' }, 400);
 
   try {
@@ -329,7 +434,7 @@ platform.post('/gmail-notifications', async c => {
 
 // DELETE /api/platform/gmail-notifications?userId=...
 platform.delete('/gmail-notifications', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) return c.json({ error: 'userId is required' }, 400);
 
   try {
@@ -368,7 +473,7 @@ platform.post('/gmail-history-id', async c => {
 // GET /api/platform/gmail-oidc-email?userId=...
 // Lightweight lookup for the push worker — no Fly live check.
 platform.get('/gmail-oidc-email', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) return c.json({ error: 'userId is required' }, 400);
 
   try {
@@ -406,7 +511,7 @@ platform.patch('/secrets', async c => {
 
 // GET /api/platform/pairing?userId=...&refresh=true
 platform.get('/pairing', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) return c.json({ error: 'userId is required' }, 400);
 
   const forceRefresh = c.req.query('refresh') === 'true';
@@ -452,7 +557,7 @@ platform.post('/pairing/approve', async c => {
 
 // GET /api/platform/device-pairing?userId=...&refresh=true
 platform.get('/device-pairing', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) return c.json({ error: 'userId is required' }, 400);
 
   const forceRefresh = c.req.query('refresh') === 'true';
@@ -497,7 +602,7 @@ platform.post('/device-pairing/approve', async c => {
 
 // GET /api/platform/gateway/status?userId=...
 platform.get('/gateway/status', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -517,7 +622,7 @@ platform.get('/gateway/status', async c => {
 
 // GET /api/platform/controller-version?userId=...
 platform.get('/controller-version', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -622,7 +727,7 @@ platform.post('/config/restore', async c => {
 // GET /api/platform/openclaw-config?userId=...
 // Returns the live openclaw.json from the running machine.
 platform.get('/openclaw-config', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -701,7 +806,7 @@ platform.patch('/openclaw-config', async c => {
 
 // GET /api/platform/files/tree?userId=...
 platform.get('/files/tree', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -727,7 +832,7 @@ platform.get('/files/tree', async c => {
 
 // GET /api/platform/files/read?userId=...&path=...
 platform.get('/files/read', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   const filePath = c.req.query('path');
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
@@ -857,7 +962,7 @@ platform.post('/destroy', async c => {
 
 // GET /api/platform/status?userId=...
 platform.get('/status', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -878,7 +983,7 @@ platform.get('/status', async c => {
 // GET /api/platform/debug-status?userId=...
 // Internal/admin-only debug status that includes DO destroy internals.
 platform.get('/debug-status', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -900,7 +1005,7 @@ platform.get('/debug-status', async c => {
 // Returns the derived gateway token for a user's sandbox. The Next.js
 // dashboard calls this so it never needs GATEWAY_TOKEN_SECRET directly.
 platform.get('/gateway-token', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -931,7 +1036,7 @@ platform.get('/gateway-token', async c => {
 // GET /api/platform/volume-snapshots?userId=...
 // Returns the list of Fly volume snapshots for the user's instance.
 platform.get('/volume-snapshots', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
@@ -952,7 +1057,7 @@ platform.get('/volume-snapshots', async c => {
 // GET /api/platform/candidate-volumes?userId=...
 // Returns all usable volumes in the user's Fly app for admin volume reassociation.
 platform.get('/candidate-volumes', async c => {
-  const userId = c.req.query('userId');
+  const userId = setValidatedQueryUserId(c);
   if (!userId) {
     return c.json({ error: 'userId query parameter is required' }, 400);
   }
