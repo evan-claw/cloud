@@ -2,7 +2,6 @@
 process.env.STRIPE_KILOCLAW_COMMIT_PRICE_ID ||= 'price_commit';
 process.env.STRIPE_KILOCLAW_STANDARD_PRICE_ID ||= 'price_standard';
 process.env.STRIPE_KILOCLAW_STANDARD_INTRO_PRICE_ID ||= 'price_standard_intro';
-process.env.STRIPE_KILOCLAW_BILLING_START ||= '2026-03-23T00:00:00Z';
 
 import {
   describe,
@@ -306,6 +305,28 @@ describe('createSubscriptionCheckout', () => {
     expect(callArgs.line_items).toEqual([{ price: 'price_test_kiloclaw', quantity: 1 }]);
     expect(callArgs.allow_promotion_codes).toBe(true);
     expect(callArgs.discounts).toBeUndefined();
+  });
+
+  it('uses the intro price for users whose trial expired without a paid subscription', async () => {
+    await db.insert(kiloclaw_subscriptions).values({
+      user_id: user.id,
+      plan: 'trial',
+      status: 'canceled',
+    });
+
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: 'https://checkout.stripe.com/test',
+    });
+
+    const caller = await createCallerForUser(user.id);
+    await caller.kiloclaw.createSubscriptionCheckout({ plan: 'standard' });
+
+    const callArgs = stripeMock.checkout.sessions.create.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    // A canceled trial is not a prior paid subscription — should get intro price
+    expect(callArgs.line_items).toEqual([{ price: 'price_standard_intro', quantity: 1 }]);
   });
 
   it('uses allow_promotion_codes for commit plan', async () => {

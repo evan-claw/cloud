@@ -82,8 +82,11 @@ const STRIPE_TO_CLAW_STATUS: Record<string, KiloClawSubscriptionStatus> = {
 
 /**
  * Map a Stripe subscription status to our internal status.
- * Only called for paid plans (commit/standard). Subscriptions created with
- * trial_end (delayed billing) arrive as 'trialing' — treat as active.
+ * Only called for paid plans (commit/standard). Pre-launch subscriptions
+ * were created with a delayed trial_end — treat 'trialing' as active.
+ *
+ * TODO: Remove the trialing→active mapping once all pre-launch trial_end
+ * subscriptions have transitioned (after ~2026-03-23).
  */
 function mapStripeStatus(stripeStatus: string): KiloClawSubscriptionStatus {
   if (stripeStatus === 'trialing') return 'active';
@@ -158,6 +161,28 @@ async function persistAutoIntroSchedule(scheduleId: string, userId: string): Pro
       scheduled_by: 'auto',
     })
     .where(eq(kiloclaw_subscriptions.user_id, userId));
+}
+
+/**
+ * Determine whether a schedule is auto-intro (already tagged) or a claimable
+ * orphan (untagged, single-phase — likely a half-created auto-intro where
+ * create succeeded but the update that sets metadata + phases never ran).
+ * If orphaned, tags it as auto-intro before returning. Returns true when the
+ * schedule should be treated as auto-intro, false otherwise.
+ */
+async function claimIfAutoIntro(schedule: Stripe.SubscriptionSchedule): Promise<boolean> {
+  if (schedule.metadata?.origin === 'auto-intro') return true;
+
+  // Only claim untagged schedules with a single phase (the from_subscription
+  // default). Schedules with 2+ phases were already configured by another code
+  // path (user plan switch, kilo-pass) and must not be claimed.
+  const isOrphan = !schedule.metadata?.origin && schedule.phases.length === 1;
+  if (!isOrphan) return false;
+
+  await stripe.subscriptionSchedules.update(schedule.id, {
+    metadata: { origin: 'auto-intro' },
+  });
+  return true;
 }
 
 /**
@@ -244,7 +269,7 @@ export async function ensureAutoIntroSchedule(
     if (!scheduleId) return;
     const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
 
-    if (schedule.metadata?.origin === 'auto-intro') {
+    if (await claimIfAutoIntro(schedule)) {
       const valid = await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
       if (!valid) {
         logError('Auto-intro schedule is unrecoverable, skipping', {
@@ -294,7 +319,6 @@ async function createAutoIntroSchedule(
   try {
     newSchedule = await stripe.subscriptionSchedules.create({
       from_subscription: stripeSubscriptionId,
-      metadata: { origin: 'auto-intro' },
     });
   } catch (error) {
     await handleAutoIntroCreateRace(error, stripeSubscriptionId, userId);
@@ -314,19 +338,31 @@ async function createAutoIntroSchedule(
     return;
   }
 
-  await stripe.subscriptionSchedules.update(newSchedule.id, {
-    phases: [
-      {
-        items: [{ price: phase1Price }],
-        start_date: currentPhase.start_date,
-        end_date: currentPhase.end_date,
-      },
-      {
-        items: [{ price: getStripePriceIdForClawPlan('standard') }],
-      },
-    ],
-    end_behavior: 'release',
-  });
+  try {
+    await stripe.subscriptionSchedules.update(newSchedule.id, {
+      metadata: { origin: 'auto-intro' },
+      phases: [
+        {
+          items: [{ price: phase1Price }],
+          start_date: currentPhase.start_date,
+          end_date: currentPhase.end_date,
+        },
+        {
+          items: [{ price: getStripePriceIdForClawPlan('standard') }],
+        },
+      ],
+      end_behavior: 'release',
+    });
+  } catch (error) {
+    // Release the half-created schedule so retry can start fresh — without
+    // metadata, recovery paths cannot identify it as auto-intro.
+    try {
+      await stripe.subscriptionSchedules.release(newSchedule.id);
+    } catch {
+      // best-effort cleanup
+    }
+    throw error;
+  }
 
   await persistAutoIntroSchedule(newSchedule.id, userId);
 }
@@ -359,7 +395,8 @@ async function handleAutoIntroCreateRace(
   });
 
   const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
-  if (existingSchedule.metadata?.origin === 'auto-intro') {
+
+  if (await claimIfAutoIntro(existingSchedule)) {
     const valid = await validateOrRepairAutoIntroSchedule(
       existingSchedule,
       stripeSubscriptionId,
@@ -439,9 +476,9 @@ export async function handleKiloClawSubscriptionCreated(params: {
     // Captured after the stale guard so stale events don't auto-resume
     wasSuspended = !!existingRow?.suspended_at;
 
-    // For commit plans, derive commit_ends_at. If the subscription has a
-    // delayed-billing trial_end, the 6-month commit term starts after the
-    // trial boundary, not at subscription creation time.
+    // For commit plans, derive commit_ends_at. Pre-launch subscriptions
+    // had a delayed-billing trial_end — the 6-month commit term starts
+    // after the trial boundary, not at subscription creation time.
     const commitEndsAt =
       plan === 'commit'
         ? addMonths(

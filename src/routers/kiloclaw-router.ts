@@ -10,6 +10,7 @@ import { encryptKiloClawSecret } from '@/lib/kiloclaw/encryption';
 import {
   ALL_SECRET_FIELD_KEYS,
   FIELD_KEY_TO_ENTRY,
+  MAX_SECRET_FIELD_LENGTH,
   validateFieldValue,
   type SecretFieldKey,
 } from '@kilocode/kiloclaw-secret-catalog';
@@ -17,7 +18,6 @@ import {
   KILOCLAW_API_URL,
   STRIPE_KILOCLAW_EARLYBIRD_PRICE_ID,
   STRIPE_KILOCLAW_EARLYBIRD_COUPON_ID,
-  STRIPE_KILOCLAW_BILLING_START,
   KILOCLAW_BILLING_ENFORCEMENT,
 } from '@/lib/config.server';
 import { db } from '@/lib/drizzle';
@@ -515,7 +515,7 @@ export const kiloclawRouter = createTRPCRouter({
     .input(
       z.object({
         secrets: z
-          .record(z.string(), z.string().max(500).nullable())
+          .record(z.string(), z.string().max(MAX_SECRET_FIELD_LENGTH).nullable())
           .refine(obj => Object.keys(obj).every(k => ALL_SECRET_FIELD_KEYS.has(k)), {
             message: 'Unknown secret field key',
           }),
@@ -1194,7 +1194,7 @@ export const kiloclawRouter = createTRPCRouter({
       // Reject checkout if any non-ended subscription exists (active, past_due, unpaid).
       // The trialing status is exempted so trial users can convert to paid.
       const [existing] = await db
-        .select({ status: kiloclaw_subscriptions.status })
+        .select({ status: kiloclaw_subscriptions.status, plan: kiloclaw_subscriptions.plan })
         .from(kiloclaw_subscriptions)
         .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id))
         .limit(1);
@@ -1230,10 +1230,12 @@ export const kiloclawRouter = createTRPCRouter({
         staleKiloClawSessions.map(s => stripe.checkout.sessions.expire(s.id).catch(() => {}))
       );
 
-      // New standard subscribers get the intro price; returning (canceled) standard
-      // subscribers and all commit subscribers get the regular price.
+      // New standard subscribers get the intro price; returning subscribers who
+      // previously had a paid subscription get the regular price. A canceled trial
+      // (plan === 'trial') does not count as a prior paid subscription.
+      const hadPaidSubscription = existing?.status === 'canceled' && existing.plan !== 'trial';
       const priceId =
-        input.plan === 'standard' && existing?.status !== 'canceled'
+        input.plan === 'standard' && !hadPaidSubscription
           ? getStripePriceIdForClawPlanIntro('standard')
           : getStripePriceIdForClawPlan(input.plan);
 
@@ -1252,10 +1254,6 @@ export const kiloclawRouter = createTRPCRouter({
         cancel_url: `${APP_URL}/claw?checkout=cancelled`,
         subscription_data: {
           metadata: { type: 'kiloclaw', plan: input.plan, kiloUserId: ctx.user.id },
-          ...(STRIPE_KILOCLAW_BILLING_START &&
-          Date.now() < new Date(STRIPE_KILOCLAW_BILLING_START).getTime()
-            ? { trial_end: Math.floor(new Date(STRIPE_KILOCLAW_BILLING_START).getTime() / 1000) }
-            : {}),
         },
         metadata: { type: 'kiloclaw', plan: input.plan, kiloUserId: ctx.user.id },
       });
@@ -1479,6 +1477,7 @@ export const kiloclawRouter = createTRPCRouter({
         }
 
         await stripe.subscriptionSchedules.update(schedule.id, {
+          metadata: { origin: 'user-switch' },
           end_behavior: 'release',
           phases: [
             {

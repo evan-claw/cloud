@@ -45,9 +45,10 @@ lapses, with email notifications at each stage.
 
 ### Standard Plan Introductory Pricing
 
-1. New standard plan subscribers who do not have a prior canceled
+1. New standard plan subscribers who do not have a prior canceled paid
    subscription MUST receive an introductory price for their first
-   billing period. Returning subscribers with a previously canceled
+   billing period. A canceled trial does not count as a prior paid
+   subscription. Returning subscribers with a previously canceled paid
    subscription MUST receive the regular standard price.
 2. The system MUST automatically transition introductory-price
    subscribers to the regular standard price at the end of the
@@ -97,23 +98,18 @@ lapses, with email notifications at each stage.
 2. The system MUST allow checkout when the existing subscription status
    is trialing or canceled.
 3. The system MUST verify with the payment provider that no subscription
-   in active or trialing (delayed-billing) status already exists for the
-   customer before creating a new checkout session, to guard against
-   concurrent checkouts. This check does not cover provider-side
-   subscriptions in past-due status.
+   in active or trialing status already exists for the customer before
+   creating a new checkout session, to guard against concurrent
+   checkouts. This check does not cover provider-side subscriptions in
+   past-due status.
 4. The system MUST allow promotional codes on checkout for both plans.
 5. For standard plan checkout, the system MUST use the introductory
-   price when the user has no prior canceled subscription, and the
-   regular price when the user has a previously canceled subscription
-   (see Standard Plan Introductory Pricing).
-6. When a configurable billing start date is set and is in the future,
-   the system MUST create the subscription with a delayed billing period
-   that begins on that date.
-7. When the billing start date is unset or is in the past, the system
-   MUST start billing immediately with no delayed period.
-8. The system SHOULD include referral tracking data in checkout sessions
+   price when the user has no prior canceled paid subscription, and the
+   regular price when the user has a previously canceled paid
+   subscription (see Standard Plan Introductory Pricing).
+6. The system SHOULD include referral tracking data in checkout sessions
    when a referral cookie is present.
-9. The system SHOULD attempt to expire open checkout sessions tagged as
+7. The system SHOULD attempt to expire open checkout sessions tagged as
    KiloClaw before creating a new checkout session, so users who
    abandoned a previous checkout can start fresh. Expiration is
    best-effort: errors from the payment provider (e.g. the session was
@@ -129,9 +125,8 @@ lapses, with email notifications at each stage.
    the subscription to the standard plan.
 2. When a commit subscription is created, the system MUST record a
    commit-period end date six calendar months from the billing start.
-   When a delayed-billing period is configured, the six months MUST
-   start from the delayed-billing end date, not from subscription
-   creation.
+   For pre-launch subscriptions that had a delayed-billing trial_end,
+   the six months starts from that trial boundary.
 3. When a subscription update is received and the commit-period end
    date is in the past, the system MUST extend it by six calendar
    months from the previous boundary, keeping the subscription on the
@@ -293,8 +288,9 @@ lapses, with email notifications at each stage.
 ### Payment Provider Status Mapping
 
 1. When the payment provider reports a subscription as "trialing"
-   (delayed billing), the system MUST map this to active status
-   internally, since delayed billing is not a product-level trial.
+   (e.g. pre-launch delayed billing), the system MUST map this to
+   active status internally, since delayed billing is not a
+   product-level trial.
 2. When the payment provider reports "incomplete" or "paused" status,
    the system MUST map these to terminal statuses (unpaid or canceled
    respectively).
@@ -333,6 +329,15 @@ lapses, with email notifications at each stage.
    notification log entries for that user.
 
 ### Changelog
+
+#### 2026-03-21 -- Remove delayed-billing start date
+
+- Removed configurable billing start date (`STRIPE_KILOCLAW_BILLING_START`)
+  and associated checkout rules (former rules 6–7). New subscriptions now
+  always bill immediately.
+- Pre-launch subscriptions created with a delayed `trial_end` are still
+  handled correctly; the trialing→active status mapping remains until those
+  subscriptions transition.
 
 #### 2026-03-20 -- Promotional codes and introductory pricing
 
