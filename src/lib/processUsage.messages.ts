@@ -14,11 +14,10 @@ import type { GatewayMessagesRequest } from '@/lib/providers/openrouter/types';
 import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
 import type Anthropic from '@anthropic-ai/sdk';
 
-// ref: https://docs.anthropic.com/en/api/messages
 // Anthropic usage combined with OpenRouter cost fields
 // ref: https://docs.anthropic.com/en/api/messages
 // ref: https://openrouter.ai/docs/use-cases/usage-accounting#response-format
-type MessagesApiUsage = Anthropic.Messages.Usage & {
+type MessagesApiUsage = Anthropic.Messages.MessageDeltaUsage & {
   cost?: number;
   is_byok?: boolean | null;
   cost_details?: { upstream_inference_cost: number };
@@ -97,8 +96,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
   const reportedError = statusCode >= 400;
   const startedAt = performance.now();
   let firstTokenReceived = false;
-  let inputUsage: MessagesApiUsage | null = null;
-  let outputTokens = 0;
+  let usage: MessagesApiUsage | null = null;
   let finish_reason: string | null = null;
 
   const reader = stream.getReader();
@@ -131,7 +129,6 @@ export async function parseMessagesMicrodollarUsageFromStream(
       if (json.type === 'message_start') {
         messageId = json.message.id;
         model = json.message.model;
-        inputUsage = json.message.usage;
       }
 
       if (
@@ -144,7 +141,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
 
       if (json.type === 'message_delta') {
         finish_reason = json.delta.stop_reason;
-        outputTokens = json.usage.output_tokens;
+        usage ??= json.usage;
       }
     },
   });
@@ -167,17 +164,13 @@ export async function parseMessagesMicrodollarUsageFromStream(
     streamProcessingSpan.end();
   }
 
-  if (!reportedError && !inputUsage) {
+  if (!reportedError && !usage) {
     captureMessage('SUSPICIOUS: No usage in Messages API stream', {
       level: 'warning',
       tags: { source: 'messages_usage_processing' },
       extra: { kiloUserId, provider, messageId, model },
     });
   }
-
-  // Merge input and output usage together
-  const usage: MessagesApiUsage | null =
-    inputUsage !== null ? Object.assign({}, inputUsage, { output_tokens: outputTokens }) : null;
 
   const coreProps = {
     messageId,
