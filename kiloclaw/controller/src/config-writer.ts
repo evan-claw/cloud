@@ -228,10 +228,12 @@ export function generateBaseConfig(
     config.channels.telegram.botToken = env.TELEGRAM_BOT_TOKEN;
     config.channels.telegram.enabled = true;
     config.channels.telegram.dmPolicy = dmPolicy;
+    // Explicit env override always wins; otherwise only seed allowFrom on
+    // first boot (when the key is absent) so user edits are preserved.
     if (env.TELEGRAM_DM_ALLOW_FROM) {
       config.channels.telegram.allowFrom = env.TELEGRAM_DM_ALLOW_FROM.split(',');
-    } else if (dmPolicy === 'open') {
-      config.channels.telegram.allowFrom = ['*'];
+    } else if (!('allowFrom' in config.channels.telegram)) {
+      config.channels.telegram.allowFrom = dmPolicy === 'open' ? ['*'] : [];
     }
 
     config.plugins = config.plugins ?? {};
@@ -248,8 +250,9 @@ export function generateBaseConfig(
     config.channels.discord.enabled = true;
     config.channels.discord.dm = config.channels.discord.dm ?? {};
     config.channels.discord.dm.policy = dmPolicy;
-    if (dmPolicy === 'open') {
-      config.channels.discord.dm.allowFrom = ['*'];
+    // Only seed allowFrom on first boot so user edits are preserved.
+    if (!('allowFrom' in config.channels.discord.dm)) {
+      config.channels.discord.dm.allowFrom = dmPolicy === 'open' ? ['*'] : [];
     }
 
     config.plugins = config.plugins ?? {};
