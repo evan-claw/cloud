@@ -154,6 +154,8 @@ jobs:
 
       - name: Drizzle check
         run: pnpm drizzle check
+        env:
+          POSTGRES_URL: postgresql://unused:unused@localhost:5432/unused
 
   dependency-cycle-check:
     runs-on: ${{ vars.RUNNER_DEFAULT_LABEL || 'ubuntu-latest' }}
