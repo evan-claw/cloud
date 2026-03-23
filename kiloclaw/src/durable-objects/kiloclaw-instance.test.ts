@@ -183,7 +183,7 @@ function createFakeEnv() {
   return {
     FLY_API_TOKEN: 'test-token',
     FLY_APP_NAME: 'test-app',
-    FLY_REGION: 'dfw,ewr,iad,lax,sjc,eu',
+    FLY_REGION: 'eu,us',
     GATEWAY_TOKEN_SECRET: 'test-secret',
     NEXTAUTH_SECRET: 'test-nextauth-secret-at-least-32-chars',
     WORKER_ENV: 'development',
@@ -2643,16 +2643,9 @@ describe('start: 412 insufficient resources recovery', () => {
         compute: expect.objectContaining({ cpus: 2, memory_mb: 3072 }) as unknown,
       })
     );
-    // Regions are shuffled, so just check the set (deprioritize is a no-op here
-    // because 'iad' is not in FLY_REGION='dfw,ewr,iad,lax,sjc,eu')
-    expect((regions412Call[2] as string[]).sort()).toEqual([
-      'dfw',
-      'eu',
-      'ewr',
-      'iad',
-      'lax',
-      'sjc',
-    ]);
+    // Regions are passed in configured order, and deprioritize is a no-op here
+    // because 'iad' is not in FLY_REGION='eu,us'.
+    expect(regions412Call[2] as string[]).toEqual(['eu', 'us']);
     // source_volume_id should NOT be set for fresh provision
     const createVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
       .calls[0][1] as Record<string, unknown>;
@@ -2701,15 +2694,8 @@ describe('start: 412 insufficient resources recovery', () => {
     const forkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
       .calls[0][1] as Record<string, unknown>;
     expect(forkCreateVolumeCall.size_gb).toBeUndefined();
-    // Regions are shuffled — check the set
-    expect((regionsForkCall[2] as string[]).sort()).toEqual([
-      'dfw',
-      'eu',
-      'ewr',
-      'iad',
-      'lax',
-      'sjc',
-    ]);
+    // Regions are passed in configured order.
+    expect(regionsForkCall[2] as string[]).toEqual(['eu', 'us']);
     // Old volume was deleted
     expect(flyClient.deleteVolume).toHaveBeenCalledWith(expect.anything(), 'vol-1');
     // Machine was retried
@@ -2776,15 +2762,8 @@ describe('start: 412 insufficient resources recovery', () => {
     const updateForkCreateVolumeCall = (flyClient.createVolumeWithFallback as Mock).mock
       .calls[0][1] as Record<string, unknown>;
     expect(updateForkCreateVolumeCall.size_gb).toBeUndefined();
-    // Regions are shuffled then deprioritized — check the set
-    expect((regionsUpdateCall[2] as string[]).sort()).toEqual([
-      'dfw',
-      'eu',
-      'ewr',
-      'iad',
-      'lax',
-      'sjc',
-    ]);
+    // Regions are passed in configured order then deprioritized.
+    expect(regionsUpdateCall[2] as string[]).toEqual(['eu', 'us']);
     // New machine was created
     expect(storage._store.get('flyMachineId')).toBe('machine-new');
     expect(storage._store.get('flyVolumeId')).toBe('vol-new');
