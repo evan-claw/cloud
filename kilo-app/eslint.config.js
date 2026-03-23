@@ -118,6 +118,15 @@ module.exports = defineConfig([
     },
   },
 
+  // CSS wrapper components use `className` (standard React convention) and `Props` suffix
+  {
+    files: ['src/tw/**/*.tsx'],
+    rules: {
+      'unicorn/no-keyword-prefix': 'off',
+      'unicorn/prevent-abbreviations': 'off',
+    },
+  },
+
   {
     ignores: ['dist/*'],
   },

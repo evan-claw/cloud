@@ -3,7 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "typecheck": "tsgo --noEmit --incremental false",
@@ -14,14 +14,23 @@
   "dependencies": {
     "@kilocode/trpc": "workspace:*",
     "@react-navigation/native": "^7.1.33",
+    "@tailwindcss/postcss": "^4.2.1",
+    "clsx": "^2.1.1",
     "expo": "~55.0.8",
     "expo-dev-client": "~55.0.18",
+    "expo-image": "~55.0.6",
     "expo-linking": "~55.0.8",
     "expo-router": "~55.0.7",
+    "nativewind": "5.0.0-preview.2",
     "react": "19.2.0",
     "react-native": "0.83.2",
+    "react-native-css": "0.0.0-nightly.5ce6396",
+    "react-native-reanimated": "4.2.1",
     "react-native-safe-area-context": "~5.6.2",
-    "react-native-screens": "~4.23.0"
+    "react-native-screens": "~4.23.0",
+    "react-native-worklets": "0.7.2",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

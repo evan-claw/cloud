@@ -1,21 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Text, View } from '@/tw';
 
 export default function HomeScreen() {
   return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Hello, World!</Text>
+    <View className="flex-1 items-center justify-center bg-white">
+      <Text className="text-2xl font-bold text-black">Hello, NativeWind!</Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  text: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-});
