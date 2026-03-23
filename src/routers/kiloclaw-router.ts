@@ -276,10 +276,15 @@ const STATUS_PAGE_TIMEOUT_MS = 5_000;
 const logStatusPageWarning = sentryLogger('kiloclaw-status-page', 'warning');
 const logBillingError = sentryLogger('kiloclaw-billing', 'error');
 
-/** Returns true if a Stripe error indicates the schedule is already released/canceled. */
+/** Returns true if a Stripe error indicates the schedule is already in a terminal state. */
 function isScheduleAlreadyInactive(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes('not active') || msg.includes('released') || msg.includes('canceled');
+  return (
+    msg.includes('not active') ||
+    msg.includes('released') ||
+    msg.includes('canceled') ||
+    msg.includes('completed')
+  );
 }
 
 /**
@@ -1547,12 +1552,9 @@ export const kiloclawRouter = createTRPCRouter({
 
     const released = await releaseScheduleIfActive(sub.stripe_schedule_id);
     if (!released) {
-      // Schedule release failed with a non-recognized error. Proceed to clear
-      // DB state anyway so the user isn't stuck — the schedule may have been
-      // completed or is in an unexpected terminal state.
-      console.error('Failed to release schedule during cancelPlanSwitch, clearing local state', {
-        userId: ctx.user.id,
-        stripeScheduleId: sub.stripe_schedule_id,
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to release pending plan schedule. Please try again.',
       });
     }
 

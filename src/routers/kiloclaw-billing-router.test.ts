@@ -1820,7 +1820,7 @@ describe('cancelPlanSwitch', () => {
     expect(row.scheduled_plan).toBeNull();
   });
 
-  it('proceeds to clear DB state when schedule release fails with a non-recognized error', async () => {
+  it('rethrows non-already-released Stripe errors', async () => {
     await db.insert(kiloclaw_subscriptions).values({
       user_id: user.id,
       stripe_subscription_id: 'sub_stripe_fail',
@@ -1834,18 +1834,17 @@ describe('cancelPlanSwitch', () => {
     stripeMock.subscriptionSchedules.release.mockRejectedValue(new Error('Stripe network timeout'));
 
     const caller = await createCallerForUser(user.id);
-    const result = await caller.kiloclaw.cancelPlanSwitch();
+    await expect(caller.kiloclaw.cancelPlanSwitch()).rejects.toThrow(
+      'Failed to release pending plan schedule'
+    );
 
-    expect(result).toEqual({ success: true });
-
-    // DB should still be cleared so the user isn't stuck
+    // DB should NOT have been cleared since Stripe failed
     const [row] = await db
       .select()
       .from(kiloclaw_subscriptions)
       .where(eq(kiloclaw_subscriptions.user_id, user.id))
       .limit(1);
 
-    expect(row.stripe_schedule_id).toBeNull();
-    expect(row.scheduled_plan).toBeNull();
+    expect(row.stripe_schedule_id).toBe('sub_sched_fail');
   });
 });
