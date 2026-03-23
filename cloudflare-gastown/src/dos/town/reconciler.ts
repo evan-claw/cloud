@@ -1267,6 +1267,7 @@ export function reconcileGUPP(sql: SqlStorage): Action[] {
         FROM ${agent_metadata}
         LEFT JOIN ${beads} b ON b.${beads.columns.bead_id} = ${agent_metadata.bead_id}
         WHERE ${agent_metadata.status} IN ('working', 'stalled')
+          AND ${agent_metadata.role} != 'mayor'
       `,
       []
     ),
@@ -1456,7 +1457,9 @@ function getIdleAgentHookedTo(sql: SqlStorage, beadId: string): string | null {
 function hasRecentNudge(sql: SqlStorage, agentId: string, tier: string): boolean {
   // Check if a nudge with this exact tier source was created in the last 60 min.
   // The source is set to `reconciler:${tier}` by applyAction('send_nudge').
-  const cutoff = new Date(Date.now() - 60 * 60_000).toISOString();
+  // Use SQLite's datetime() for the cutoff so the comparison works regardless
+  // of whether created_at was stored in SQLite's native 'YYYY-MM-DD HH:MM:SS'
+  // format (old rows) or ISO 8601 'YYYY-MM-DDTHH:MM:SS.000Z' (new rows).
   const rows = [
     ...query(
       sql,
@@ -1464,10 +1467,10 @@ function hasRecentNudge(sql: SqlStorage, agentId: string, tier: string): boolean
         SELECT 1 FROM ${agent_nudges}
         WHERE ${agent_nudges.agent_bead_id} = ?
           AND ${agent_nudges.source} = ?
-          AND ${agent_nudges.created_at} > ?
+          AND datetime(${agent_nudges.created_at}) > datetime('now', '-60 minutes')
         LIMIT 1
       `,
-      [agentId, `reconciler:${tier}`, cutoff]
+      [agentId, `reconciler:${tier}`]
     ),
   ];
   return rows.length > 0;
