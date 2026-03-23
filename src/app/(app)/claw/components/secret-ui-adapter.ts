@@ -6,6 +6,7 @@ import { DiscordIcon } from './icons/DiscordIcon';
 import { SlackIcon } from './icons/SlackIcon';
 import { GitHubIcon } from './icons/GitHubIcon';
 import { AgentCardIcon } from './icons/AgentCardIcon';
+import { BraveSearchIcon } from './icons/BraveSearchIcon';
 
 const ICON_MAP: Record<SecretIconKey, React.ComponentType<{ className?: string }>> = {
   send: TelegramIcon,
@@ -15,6 +16,7 @@ const ICON_MAP: Record<SecretIconKey, React.ComponentType<{ className?: string }
   github: GitHubIcon,
   'credit-card': AgentCardIcon,
   lock: Lock,
+  brave: BraveSearchIcon,
 };
 
 export function getIcon(iconKey: SecretIconKey): React.ComponentType<{ className?: string }> {
@@ -29,6 +31,7 @@ const DESCRIPTION_MAP: Record<string, string> = {
   github: 'Connect a GitHub account for code operations',
   agentcard: 'Give your bot virtual debit cards for spending',
   onepassword: 'Look up credentials and manage vault items via the op CLI',
+  'brave-search': 'Add a Brave Search API key for web search',
 };
 
 export function getDescription(entryId: string): string {

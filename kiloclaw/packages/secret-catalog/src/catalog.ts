@@ -176,6 +176,27 @@ const SECRET_CATALOG_RAW = [
     helpText: 'Create a service account at 1password.com with access to a dedicated vault.',
     helpUrl: 'https://developer.1password.com/docs/service-accounts/get-started/',
   },
+  {
+    id: 'brave-search',
+    label: 'Brave Search',
+    category: 'tool',
+    icon: 'brave',
+    order: 4,
+    fields: [
+      {
+        key: 'braveSearchApiKey',
+        label: 'API Key',
+        placeholder: 'BSA-...',
+        placeholderConfigured: 'Enter new key to replace',
+        envVar: 'BRAVE_SEARCH_API_KEY',
+        validationPattern: '^BSA-[A-Za-z0-9]{20,}$',
+        validationMessage: 'Brave Search keys start with BSA- followed by alphanumeric characters.',
+        maxLength: 200,
+      },
+    ],
+    helpText: 'Get an API key from the Brave Search dashboard.',
+    helpUrl: 'https://brave.com/search/api/',
+  },
 ] as const satisfies readonly SecretCatalogEntry[];
 
 // Runtime validation — fails fast at module load if catalog data is malformed
