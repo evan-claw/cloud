@@ -1463,7 +1463,9 @@ describe('switchPlan', () => {
     });
     stripeMock.subscriptionSchedules.create.mockResolvedValue({
       id: 'sub_sched_new',
-      phases: [{ start_date: now, end_date: now + 86400 * 30 }],
+      phases: [
+        { start_date: now, end_date: now + 86400 * 30, items: [{ price: 'price_test_kiloclaw' }] },
+      ],
     });
     stripeMock.subscriptionSchedules.update.mockResolvedValue({
       id: 'sub_sched_new',
@@ -1568,7 +1570,7 @@ describe('switchPlan', () => {
 
     const caller = await createCallerForUser(user.id);
     await expect(caller.kiloclaw.switchPlan({ toPlan: 'standard' })).rejects.toThrow(
-      'Stripe network timeout'
+      'Unable to switch plan: failed to release existing schedule'
     );
 
     // Should NOT have attempted to create a new schedule
@@ -1592,7 +1594,9 @@ describe('switchPlan', () => {
     stripeMock.subscriptionSchedules.release.mockResolvedValue({});
     stripeMock.subscriptionSchedules.create.mockResolvedValue({
       id: 'sub_sched_new',
-      phases: [{ start_date: now, end_date: now + 86400 * 30 }],
+      phases: [
+        { start_date: now, end_date: now + 86400 * 30, items: [{ price: 'price_test_kiloclaw' }] },
+      ],
     });
     stripeMock.subscriptionSchedules.update.mockResolvedValue({
       id: 'sub_sched_new',
@@ -1615,7 +1619,9 @@ describe('switchPlan', () => {
     });
     stripeMock.subscriptionSchedules.create.mockResolvedValue({
       id: 'sub_sched_orphan',
-      phases: [{ start_date: now, end_date: now + 86400 * 30 }],
+      phases: [
+        { start_date: now, end_date: now + 86400 * 30, items: [{ price: 'price_test_kiloclaw' }] },
+      ],
     });
     stripeMock.subscriptionSchedules.update.mockRejectedValue(new Error('Stripe update failed'));
     stripeMock.subscriptionSchedules.release.mockResolvedValue({});
@@ -1647,7 +1653,9 @@ describe('switchPlan', () => {
     });
     stripeMock.subscriptionSchedules.create.mockResolvedValue({
       id: 'sub_sched_race',
-      phases: [{ start_date: now, end_date: now + 86400 * 30 }],
+      phases: [
+        { start_date: now, end_date: now + 86400 * 30, items: [{ price: 'price_test_kiloclaw' }] },
+      ],
     });
     // Simulate a concurrent request writing a schedule to the DB while our
     // Stripe schedule update is in-flight — after the DB guard passed but
@@ -1812,7 +1820,7 @@ describe('cancelPlanSwitch', () => {
     expect(row.scheduled_plan).toBeNull();
   });
 
-  it('rethrows non-already-released Stripe errors', async () => {
+  it('proceeds to clear DB state when schedule release fails with a non-recognized error', async () => {
     await db.insert(kiloclaw_subscriptions).values({
       user_id: user.id,
       stripe_subscription_id: 'sub_stripe_fail',
@@ -1826,15 +1834,18 @@ describe('cancelPlanSwitch', () => {
     stripeMock.subscriptionSchedules.release.mockRejectedValue(new Error('Stripe network timeout'));
 
     const caller = await createCallerForUser(user.id);
-    await expect(caller.kiloclaw.cancelPlanSwitch()).rejects.toThrow('Stripe network timeout');
+    const result = await caller.kiloclaw.cancelPlanSwitch();
 
-    // DB should NOT have been cleared since Stripe failed
+    expect(result).toEqual({ success: true });
+
+    // DB should still be cleared so the user isn't stuck
     const [row] = await db
       .select()
       .from(kiloclaw_subscriptions)
       .where(eq(kiloclaw_subscriptions.user_id, user.id))
       .limit(1);
 
-    expect(row.stripe_schedule_id).toBe('sub_sched_fail');
+    expect(row.stripe_schedule_id).toBeNull();
+    expect(row.scheduled_plan).toBeNull();
   });
 });
