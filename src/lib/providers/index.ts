@@ -119,7 +119,7 @@ async function checkBYOK(
 
 export async function getProvider(
   requestedModel: string,
-  request: OpenRouterChatCompletionRequest | GatewayResponsesRequest | GatewayMessagesRequest,
+  request: GatewayRequest,
   user: User | AnonymousUserContext,
   organizationId: string | undefined,
   taskId: string | undefined
