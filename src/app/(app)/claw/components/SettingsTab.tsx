@@ -435,11 +435,13 @@ export function SettingsTab({
   mutations,
   onSecretsChanged,
   dirtySecrets,
+  onRequestUpgrade,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
   onSecretsChanged?: (entryId: string) => void;
   dirtySecrets: Set<string>;
+  onRequestUpgrade?: () => void;
 }) {
   const posthog = usePostHog();
   const { data: config } = useKiloClawConfig();
@@ -547,14 +549,27 @@ export function SettingsTab({
     !!latestAvailableVersion &&
     latestAvailableVersion !== trackedVersion &&
     calverAtLeast(latestAvailableVersion, trackedVersion);
-  const updateAvailable =
-    catalogNewerThanImage &&
-    (!isModified ||
-      (!!runningVersion &&
-        calverAtLeast(latestAvailableVersion, runningVersion) &&
-        latestAvailableVersion !== runningVersion));
   const isPinned = !!myPin;
   const hasVersionInfo = isRunning && trackedVersion && trackedVersion !== ':latest';
+  // Only compare image tags when variants match — latestVersion is always
+  // for the "default" variant, so skip for non-default instances to avoid
+  // false "Update available" badges that would switch their variant.
+  const variantsMatch =
+    !status.imageVariant ||
+    status.imageVariant === 'default' ||
+    status.imageVariant === latestVersion?.variant;
+  const imageTagDiffers =
+    hasVersionInfo &&
+    variantsMatch &&
+    !!status.trackedImageTag &&
+    !!latestVersion?.imageTag &&
+    status.trackedImageTag !== latestVersion.imageTag;
+  const updateAvailable = catalogNewerThanImage
+    ? !isModified ||
+      (!!runningVersion &&
+        calverAtLeast(latestAvailableVersion, runningVersion) &&
+        latestAvailableVersion !== runningVersion)
+    : imageTagDiffers;
 
   return (
     <div className="flex flex-col gap-6">
@@ -607,17 +622,20 @@ export function SettingsTab({
                   {updateAvailable && (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Badge
-                          variant="outline"
-                          className="border-orange-500/30 bg-orange-500/15 text-orange-400"
-                        >
-                          Update available
-                        </Badge>
+                        <button type="button" onClick={onRequestUpgrade} className="cursor-pointer">
+                          <Badge
+                            variant="outline"
+                            className="border-orange-500/30 bg-orange-500/15 text-orange-400 hover:bg-orange-500/25"
+                          >
+                            Update available
+                          </Badge>
+                        </button>
                       </TooltipTrigger>
                       <TooltipContent>
                         <p>
-                          A newer OpenClaw version ({latestAvailableVersion}) is available —
-                          redeploy to upgrade
+                          {catalogNewerThanImage
+                            ? `A newer OpenClaw version (${latestAvailableVersion}) is available — click to upgrade`
+                            : `A newer image (${latestVersion?.imageTag ?? 'unknown'}) is available — click to upgrade`}
                         </p>
                       </TooltipContent>
                     </Tooltip>
@@ -652,7 +670,10 @@ export function SettingsTab({
         {/* Expandable version pinning */}
         {manageVersionOpen && (
           <div className="mt-4 border-t pt-4">
-            <VersionPinCard />
+            <VersionPinCard
+              trackedImageTag={status.trackedImageTag}
+              latestImageTag={variantsMatch ? (latestVersion?.imageTag ?? null) : null}
+            />
           </div>
         )}
       </div>
