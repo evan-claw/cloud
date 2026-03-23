@@ -164,6 +164,28 @@ async function persistAutoIntroSchedule(scheduleId: string, userId: string): Pro
 }
 
 /**
+ * Determine whether a schedule is auto-intro (already tagged) or a claimable
+ * orphan (untagged, single-phase — likely a half-created auto-intro where
+ * create succeeded but the update that sets metadata + phases never ran).
+ * If orphaned, tags it as auto-intro before returning. Returns true when the
+ * schedule should be treated as auto-intro, false otherwise.
+ */
+async function claimIfAutoIntro(schedule: Stripe.SubscriptionSchedule): Promise<boolean> {
+  if (schedule.metadata?.origin === 'auto-intro') return true;
+
+  // Only claim untagged schedules with a single phase (the from_subscription
+  // default). Schedules with 2+ phases were already configured by another code
+  // path (user plan switch, kilo-pass) and must not be claimed.
+  const isOrphan = !schedule.metadata?.origin && schedule.phases.length === 1;
+  if (!isOrphan) return false;
+
+  await stripe.subscriptionSchedules.update(schedule.id, {
+    metadata: { origin: 'auto-intro' },
+  });
+  return true;
+}
+
+/**
  * Validate that an auto-intro schedule has the expected 2-phase structure
  * (phase 1 = current price, phase 2 = regular standard price). If the schedule
  * is half-configured (e.g., created from_subscription but the 2-phase rewrite
@@ -247,24 +269,7 @@ export async function ensureAutoIntroSchedule(
     if (!scheduleId) return;
     const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
 
-    const isAutoIntro = schedule.metadata?.origin === 'auto-intro';
-
-    // A schedule created via from_subscription without metadata AND with only
-    // 1 phase is likely a half-created auto-intro schedule (create succeeded
-    // but the subsequent update that sets metadata + phases hasn't run yet, or
-    // the worker died before it could). We require exactly 1 phase because
-    // createAutoIntroSchedule sets metadata and phases in the same update call
-    // — so a fully-updated schedule always has both. User-initiated plan
-    // switches and kilo-pass changes also create untagged schedules but their
-    // update writes 2+ phases, so the phase-count guard avoids claiming them.
-    const isUntagged = !schedule.metadata?.origin && schedule.phases.length === 1;
-    if (isUntagged) {
-      await stripe.subscriptionSchedules.update(schedule.id, {
-        metadata: { origin: 'auto-intro' },
-      });
-    }
-
-    if (isAutoIntro || isUntagged) {
+    if (await claimIfAutoIntro(schedule)) {
       const valid = await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
       if (!valid) {
         logError('Auto-intro schedule is unrecoverable, skipping', {
@@ -391,20 +396,7 @@ async function handleAutoIntroCreateRace(
 
   const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
 
-  // The race winner may not have tagged the schedule yet (metadata is set in
-  // a separate update call). Only claim untagged schedules that still have a
-  // single phase — the from_subscription default. Schedules with 2+ phases
-  // were already fully configured by another code path (user plan switch,
-  // kilo-pass) and must not be claimed.
-  const isAutoIntro = existingSchedule.metadata?.origin === 'auto-intro';
-  const isUntagged = !existingSchedule.metadata?.origin && existingSchedule.phases.length === 1;
-  if (isUntagged) {
-    await stripe.subscriptionSchedules.update(existingSchedule.id, {
-      metadata: { origin: 'auto-intro' },
-    });
-  }
-
-  if (isAutoIntro || isUntagged) {
+  if (await claimIfAutoIntro(existingSchedule)) {
     const valid = await validateOrRepairAutoIntroSchedule(
       existingSchedule,
       stripeSubscriptionId,

@@ -1476,6 +1476,7 @@ export const kiloclawRouter = createTRPCRouter({
         }
 
         await stripe.subscriptionSchedules.update(schedule.id, {
+          metadata: { origin: 'user-switch' },
           end_behavior: 'release',
           phases: [
             {
