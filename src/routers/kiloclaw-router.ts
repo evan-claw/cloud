@@ -44,7 +44,7 @@ import {
   getStripePriceIdForClawPlan,
   getStripePriceIdForClawPlanIntro,
 } from '@/lib/kiloclaw/stripe-price-ids.server';
-import { ensureAutoIntroSchedule } from '@/lib/kiloclaw/stripe-handlers';
+import { ensureAutoIntroSchedule, resolvePhasePrice } from '@/lib/kiloclaw/stripe-handlers';
 import {
   KILOCLAW_EARLYBIRD_EXPIRY_DATE,
   KILOCLAW_TRIAL_DURATION_DAYS,
@@ -1404,12 +1404,7 @@ export const kiloclawRouter = createTRPCRouter({
         try {
           const existingSchedule = await stripe.subscriptionSchedules.retrieve(effectiveScheduleId);
           const autoCurrentPhase = existingSchedule.phases[0];
-          const phase1PriceRef = autoCurrentPhase?.items[0]?.price;
-          const phase1Price = phase1PriceRef
-            ? typeof phase1PriceRef === 'string'
-              ? phase1PriceRef
-              : phase1PriceRef.id
-            : null;
+          const phase1Price = autoCurrentPhase ? resolvePhasePrice(autoCurrentPhase) : null;
 
           if (!autoCurrentPhase || !phase1Price) {
             throw new TRPCError({
@@ -1470,12 +1465,7 @@ export const kiloclawRouter = createTRPCRouter({
           });
         }
 
-        const freshPhase1PriceRef = currentPhase.items[0]?.price;
-        const freshPhase1Price = freshPhase1PriceRef
-          ? typeof freshPhase1PriceRef === 'string'
-            ? freshPhase1PriceRef
-            : freshPhase1PriceRef.id
-          : null;
+        const freshPhase1Price = resolvePhasePrice(currentPhase);
         if (!freshPhase1Price) {
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
@@ -1557,9 +1547,12 @@ export const kiloclawRouter = createTRPCRouter({
 
     const released = await releaseScheduleIfActive(sub.stripe_schedule_id);
     if (!released) {
-      throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Failed to release pending plan schedule. Please try again.',
+      // Schedule release failed with a non-recognized error. Proceed to clear
+      // DB state anyway so the user isn't stuck — the schedule may have been
+      // completed or is in an unexpected terminal state.
+      console.error('Failed to release schedule during cancelPlanSwitch, clearing local state', {
+        userId: ctx.user.id,
+        stripeScheduleId: sub.stripe_schedule_id,
       });
     }
 

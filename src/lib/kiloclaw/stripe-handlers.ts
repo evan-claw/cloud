@@ -143,7 +143,7 @@ function resolveScheduleId(
   return typeof schedule === 'string' ? schedule : schedule.id;
 }
 
-function resolvePhasePrice(phase: Stripe.SubscriptionSchedule.Phase): string | null {
+export function resolvePhasePrice(phase: Stripe.SubscriptionSchedule.Phase): string | null {
   const priceRef = phase.items[0]?.price;
   if (!priceRef) return null;
   return typeof priceRef === 'string' ? priceRef : (priceRef.id ?? null);
@@ -245,7 +245,14 @@ export async function ensureAutoIntroSchedule(
     const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
 
     if (schedule.metadata?.origin === 'auto-intro') {
-      await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
+      const valid = await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
+      if (!valid) {
+        logError('Auto-intro schedule is unrecoverable, skipping', {
+          stripe_subscription_id: stripeSubscriptionId,
+          schedule_id: schedule.id,
+          user_id: userId,
+        });
+      }
       return;
     }
 
@@ -271,7 +278,18 @@ export async function ensureAutoIntroSchedule(
       .where(eq(kiloclaw_subscriptions.user_id, userId));
   }
 
-  // Create the 2-phase schedule (intro → regular standard)
+  await createAutoIntroSchedule(stripeSubscriptionId, userId);
+}
+
+/**
+ * Create a new 2-phase auto-intro schedule (intro → regular standard) for a
+ * subscription. Handles the race where a concurrent caller attaches a schedule
+ * between our check and the create call.
+ */
+async function createAutoIntroSchedule(
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<void> {
   let newSchedule: Stripe.SubscriptionSchedule;
   try {
     newSchedule = await stripe.subscriptionSchedules.create({
@@ -279,51 +297,19 @@ export async function ensureAutoIntroSchedule(
       metadata: { origin: 'auto-intro' },
     });
   } catch (error) {
-    // Race guard: if a schedule was attached concurrently, the create fails
-    // because Stripe only allows one schedule per subscription. Re-fetch to
-    // check whether a concurrent caller won the race.
-    const refetched = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-    const refetchedScheduleId = resolveScheduleId(refetched.schedule);
-    if (!refetchedScheduleId) {
-      // No concurrent schedule — this was a transient Stripe/API error, not a
-      // race. Re-throw so callers can observe the failure and retry.
-      logError('Failed to create auto-intro schedule (non-race error)', {
-        stripe_subscription_id: stripeSubscriptionId,
-        user_id: userId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-
-    logWarning('Race creating auto-intro schedule, re-checking subscription', {
-      stripe_subscription_id: stripeSubscriptionId,
-      user_id: userId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
-    if (existingSchedule.metadata?.origin === 'auto-intro') {
-      await validateOrRepairAutoIntroSchedule(existingSchedule, stripeSubscriptionId, userId);
-    }
+    await handleAutoIntroCreateRace(error, stripeSubscriptionId, userId);
     return;
   }
 
   const currentPhase = newSchedule.phases[0];
-  if (!currentPhase) {
-    logError('Auto-intro schedule created with no phases', {
+  const phase1Price = currentPhase ? resolvePhasePrice(currentPhase) : null;
+  if (!currentPhase || !phase1Price) {
+    logError('Auto-intro schedule created with unusable phase', {
       stripe_subscription_id: stripeSubscriptionId,
       schedule_id: newSchedule.id,
       user_id: userId,
-    });
-    return;
-  }
-
-  const phase1Price = resolvePhasePrice(currentPhase);
-  if (!phase1Price) {
-    logError('Auto-intro schedule current phase has no price', {
-      stripe_subscription_id: stripeSubscriptionId,
-      schedule_id: newSchedule.id,
-      user_id: userId,
+      has_phase: !!currentPhase,
+      has_price: !!phase1Price,
     });
     return;
   }
@@ -343,6 +329,50 @@ export async function ensureAutoIntroSchedule(
   });
 
   await persistAutoIntroSchedule(newSchedule.id, userId);
+}
+
+/**
+ * Handle a failed subscriptionSchedules.create call during auto-intro setup.
+ * If the failure was a race (another caller attached a schedule concurrently),
+ * validate/repair the winning schedule. Otherwise re-throw.
+ */
+async function handleAutoIntroCreateRace(
+  error: unknown,
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<void> {
+  const refetched = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+  const refetchedScheduleId = resolveScheduleId(refetched.schedule);
+  if (!refetchedScheduleId) {
+    logError('Failed to create auto-intro schedule (non-race error)', {
+      stripe_subscription_id: stripeSubscriptionId,
+      user_id: userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  logWarning('Race creating auto-intro schedule, re-checking subscription', {
+    stripe_subscription_id: stripeSubscriptionId,
+    user_id: userId,
+    error: error instanceof Error ? error.message : String(error),
+  });
+
+  const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
+  if (existingSchedule.metadata?.origin === 'auto-intro') {
+    const valid = await validateOrRepairAutoIntroSchedule(
+      existingSchedule,
+      stripeSubscriptionId,
+      userId
+    );
+    if (!valid) {
+      logError('Race-recovered auto-intro schedule is unrecoverable', {
+        stripe_subscription_id: stripeSubscriptionId,
+        schedule_id: existingSchedule.id,
+        user_id: userId,
+      });
+    }
+  }
 }
 
 /**
