@@ -54,11 +54,3 @@ export const Approving: Story = {
     isApproving: true,
   },
 };
-
-export const Loading: Story = {
-  args: {
-    channelId: 'telegram',
-    matchingRequest: null,
-    isLoading: true,
-  },
-};
