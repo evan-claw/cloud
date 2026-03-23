@@ -29,6 +29,7 @@ export function SecretEntrySection({
   actionRowExtra,
   defaultOpen,
   onRedeploy,
+  onUpgrade,
   redeployLabel = 'Redeploy',
 }: {
   entry: SecretCatalogEntry;
@@ -39,6 +40,8 @@ export function SecretEntrySection({
   actionRowExtra?: React.ReactNode;
   defaultOpen?: boolean;
   onRedeploy?: () => void;
+  /** Callback that triggers an image upgrade (pull latest) instead of a plain restart. */
+  onUpgrade?: () => void;
   /** Label for the toast action button. Defaults to "Redeploy". */
   redeployLabel?: string;
 }) {
@@ -94,6 +97,9 @@ export function SecretEntrySection({
               ...(onRedeploy && {
                 action: { label: redeployLabel, onClick: onRedeploy },
               }),
+              ...(onUpgrade && {
+                cancel: { label: 'Upgrade', onClick: onUpgrade },
+              }),
             }
           );
           setTokens({});
@@ -120,6 +126,9 @@ export function SecretEntrySection({
               duration: 8000,
               ...(onRedeploy && {
                 action: { label: redeployLabel, onClick: onRedeploy },
+              }),
+              ...(onUpgrade && {
+                cancel: { label: 'Upgrade', onClick: onUpgrade },
               }),
             }
           );

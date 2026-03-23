@@ -827,8 +827,8 @@ export function SettingsTab({
                   mutations={mutations}
                   onSecretsChanged={onSecretsChanged}
                   isDirty={dirtySecrets.has(entry.id)}
-                  onRedeploy={onUpgrade ?? onRedeploy}
-                  redeployLabel="Upgrade"
+                  onRedeploy={onRedeploy}
+                  onUpgrade={onUpgrade}
                   actionRowExtra={<AgentCardSetupGuide />}
                 />
               ))}
