@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
+import { ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -139,8 +141,20 @@ export function UserAdminKiloClaw({ userId }: { userId: string }) {
     return (
       <Card className="lg:col-span-2">
         <CardHeader>
-          <CardTitle>KiloClaw</CardTitle>
-          <CardDescription>No KiloClaw subscription</CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>KiloClaw</CardTitle>
+              <CardDescription>n/a</CardDescription>
+            </div>
+            {data?.activeInstanceId && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/admin/kiloclaw/${data.activeInstanceId}`}>
+                  <ExternalLink className="mr-1 h-3 w-3" />
+                  View KiloClaw
+                </Link>
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {data?.earlybird ? (
@@ -185,11 +199,21 @@ export function UserAdminKiloClaw({ userId }: { userId: string }) {
               <CardTitle>KiloClaw</CardTitle>
               <CardDescription>KiloClaw subscription and trial status</CardDescription>
             </div>
-            {canEditTrialEnd && (
-              <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
-                {isTrialReset ? 'Reset Trial' : 'Edit Trial End'}
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {data.activeInstanceId && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/admin/kiloclaw/${data.activeInstanceId}`}>
+                    <ExternalLink className="mr-1 h-3 w-3" />
+                    View KiloClaw
+                  </Link>
+                </Button>
+              )}
+              {canEditTrialEnd && (
+                <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+                  {isTrialReset ? 'Reset Trial' : 'Edit Trial End'}
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">

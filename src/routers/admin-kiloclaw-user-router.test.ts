@@ -5,6 +5,7 @@ import { insertTestUser } from '@/tests/helpers/user.helper';
 import {
   kiloclaw_admin_audit_logs,
   kiloclaw_earlybird_purchases,
+  kiloclaw_instances,
   kiloclaw_subscriptions,
 } from '@kilocode/db/schema';
 import { eq } from 'drizzle-orm';
@@ -53,6 +54,7 @@ describe('admin.users.getKiloClawState', () => {
       hasAccess: expectedAccessWithoutEntitlement,
       accessReason: null,
       earlybird: null,
+      activeInstanceId: null,
     });
   });
 
@@ -132,6 +134,34 @@ describe('admin.users.getKiloClawState', () => {
         daysRemaining: expect.any(Number),
       })
     );
+  });
+
+  it('returns activeInstanceId when the user has an active instance', async () => {
+    const [instance] = await db
+      .insert(kiloclaw_instances)
+      .values({
+        user_id: targetUser.id,
+        sandbox_id: 'sandbox-test-active',
+      })
+      .returning({ id: kiloclaw_instances.id });
+
+    const caller = await createCallerForUser(adminUser.id);
+    const result = await caller.admin.users.getKiloClawState({ userId: targetUser.id });
+
+    expect(result.activeInstanceId).toBe(instance.id);
+  });
+
+  it('returns null activeInstanceId when the user only has destroyed instances', async () => {
+    await db.insert(kiloclaw_instances).values({
+      user_id: targetUser.id,
+      sandbox_id: 'sandbox-test-destroyed',
+      destroyed_at: new Date().toISOString(),
+    });
+
+    const caller = await createCallerForUser(adminUser.id);
+    const result = await caller.admin.users.getKiloClawState({ userId: targetUser.id });
+
+    expect(result.activeInstanceId).toBeNull();
   });
 });
 

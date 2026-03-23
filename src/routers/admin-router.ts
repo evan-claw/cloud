@@ -469,13 +469,20 @@ export const adminRouter = createTRPCRouter({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
       }
 
-      const [subscription, earlybird] = await Promise.all([
+      const [subscription, earlybird, activeInstance] = await Promise.all([
         db.query.kiloclaw_subscriptions.findFirst({
           where: eq(kiloclaw_subscriptions.user_id, input.userId),
         }),
         db.query.kiloclaw_earlybird_purchases.findFirst({
           columns: { id: true },
           where: eq(kiloclaw_earlybird_purchases.user_id, input.userId),
+        }),
+        db.query.kiloclaw_instances.findFirst({
+          columns: { id: true },
+          where: and(
+            eq(kiloclaw_instances.user_id, input.userId),
+            isNull(kiloclaw_instances.destroyed_at)
+          ),
         }),
       ]);
 
@@ -518,6 +525,7 @@ export const adminRouter = createTRPCRouter({
               daysRemaining: earlybirdDaysRemaining,
             }
           : null,
+        activeInstanceId: activeInstance?.id ?? null,
       };
     }),
 
