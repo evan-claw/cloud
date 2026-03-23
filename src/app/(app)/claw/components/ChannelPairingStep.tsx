@@ -10,15 +10,10 @@ import { OnboardingStepView } from './OnboardingStepView';
 import { TelegramIcon } from './icons/TelegramIcon';
 import { DiscordIcon } from './icons/DiscordIcon';
 
-type ChannelPairingStepProps = {
-  channelId: 'telegram' | 'discord';
-  mutations: ClawMutations;
-  onComplete: () => void;
-  onSkip: () => void;
-};
+type PairingChannelId = 'telegram' | 'discord';
 
 const CHANNEL_META: Record<
-  'telegram' | 'discord',
+  PairingChannelId,
   {
     label: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -37,15 +32,19 @@ const CHANNEL_META: Record<
   },
 };
 
+// ── Stateful wrapper (hooks + mutations) ────────────────────────────
+
 export function ChannelPairingStep({
   channelId,
   mutations,
   onComplete,
   onSkip,
-}: ChannelPairingStepProps) {
-  const meta = CHANNEL_META[channelId];
-  const Icon = meta.icon;
-
+}: {
+  channelId: PairingChannelId;
+  mutations: ClawMutations;
+  onComplete: () => void;
+  onSkip: () => void;
+}) {
   // Subscribe to the normal pairing query (shared cache with Settings tab)
   const { data: pairingData, isLoading } = useKiloClawPairing(true);
 
@@ -87,6 +86,40 @@ export function ChannelPairingStep({
       }
     );
   }
+
+  return (
+    <ChannelPairingStepView
+      channelId={channelId}
+      matchingRequest={matchingRequest ?? null}
+      isLoading={isLoading}
+      isApproving={isApproving}
+      onApprove={handleApprove}
+      onSkip={onSkip}
+    />
+  );
+}
+
+// ── Pure visual component (no hooks — Storybook-friendly) ───────────
+
+type ChannelPairingStepViewProps = {
+  channelId: PairingChannelId;
+  matchingRequest: { code: string; channel: string; id: string } | null;
+  isLoading?: boolean;
+  isApproving?: boolean;
+  onApprove?: (channel: string, code: string) => void;
+  onSkip?: () => void;
+};
+
+export function ChannelPairingStepView({
+  channelId,
+  matchingRequest,
+  isLoading = false,
+  isApproving = false,
+  onApprove,
+  onSkip,
+}: ChannelPairingStepViewProps) {
+  const meta = CHANNEL_META[channelId];
+  const Icon = meta.icon;
 
   return (
     <OnboardingStepView
@@ -135,7 +168,7 @@ export function ChannelPairingStep({
             <Button
               size="sm"
               className="bg-emerald-600 text-white hover:bg-emerald-700"
-              onClick={() => handleApprove(matchingRequest.channel, matchingRequest.code)}
+              onClick={() => onApprove?.(matchingRequest.channel, matchingRequest.code)}
               disabled={isApproving}
             >
               {isApproving ? (
