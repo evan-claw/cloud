@@ -990,7 +990,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   async destroy(): Promise<DestroyResult> {
     await this.loadState();
 
-    if (!this.s.userId) {
+    if (!this.s.userId || !this.s.sandboxId) {
       throw Object.assign(new Error('Instance not provisioned'), { status: 404 });
     }
 
