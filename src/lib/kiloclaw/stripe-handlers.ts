@@ -82,8 +82,11 @@ const STRIPE_TO_CLAW_STATUS: Record<string, KiloClawSubscriptionStatus> = {
 
 /**
  * Map a Stripe subscription status to our internal status.
- * Only called for paid plans (commit/standard). Subscriptions created with
- * trial_end (delayed billing) arrive as 'trialing' — treat as active.
+ * Only called for paid plans (commit/standard). Pre-launch subscriptions
+ * were created with a delayed trial_end — treat 'trialing' as active.
+ *
+ * TODO: Remove the trialing→active mapping once all pre-launch trial_end
+ * subscriptions have transitioned (after ~2026-03-23).
  */
 function mapStripeStatus(stripeStatus: string): KiloClawSubscriptionStatus {
   if (stripeStatus === 'trialing') return 'active';
@@ -439,9 +442,9 @@ export async function handleKiloClawSubscriptionCreated(params: {
     // Captured after the stale guard so stale events don't auto-resume
     wasSuspended = !!existingRow?.suspended_at;
 
-    // For commit plans, derive commit_ends_at. If the subscription has a
-    // delayed-billing trial_end, the 6-month commit term starts after the
-    // trial boundary, not at subscription creation time.
+    // For commit plans, derive commit_ends_at. Pre-launch subscriptions
+    // had a delayed-billing trial_end — the 6-month commit term starts
+    // after the trial boundary, not at subscription creation time.
     const commitEndsAt =
       plan === 'commit'
         ? addMonths(
