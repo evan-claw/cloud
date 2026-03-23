@@ -11,9 +11,14 @@ import {
   kiloclaw_email_log,
 } from '@kilocode/db/schema';
 import type { KiloClawSubscriptionStatus } from '@kilocode/db/schema-types';
-import { getClawPlanForStripePriceId } from '@/lib/kiloclaw/stripe-price-ids.server';
+import {
+  getClawPlanForStripePriceId,
+  getStripePriceIdForClawPlan,
+  isIntroPriceId,
+} from '@/lib/kiloclaw/stripe-price-ids.server';
 import { sentryLogger } from '@/lib/utils.server';
 import { KiloClawInternalClient } from '@/lib/kiloclaw/kiloclaw-internal-client';
+import { client as stripe } from '@/lib/stripe-client';
 
 const logInfo = sentryLogger('kiloclaw-stripe', 'info');
 const logWarning = sentryLogger('kiloclaw-stripe', 'warning');
@@ -131,11 +136,248 @@ async function autoResumeIfSuspended(kiloUserId: string): Promise<void> {
     .where(eq(kiloclaw_subscriptions.user_id, kiloUserId));
 }
 
+function resolveScheduleId(
+  schedule: string | Stripe.SubscriptionSchedule | null | undefined
+): string | null {
+  if (!schedule) return null;
+  return typeof schedule === 'string' ? schedule : schedule.id;
+}
+
+export function resolvePhasePrice(phase: Stripe.SubscriptionSchedule.Phase): string | null {
+  const priceRef = phase.items[0]?.price;
+  if (!priceRef) return null;
+  return typeof priceRef === 'string' ? priceRef : (priceRef.id ?? null);
+}
+
+async function persistAutoIntroSchedule(scheduleId: string, userId: string): Promise<void> {
+  await db
+    .update(kiloclaw_subscriptions)
+    .set({
+      stripe_schedule_id: scheduleId,
+      scheduled_plan: 'standard',
+      scheduled_by: 'auto',
+    })
+    .where(eq(kiloclaw_subscriptions.user_id, userId));
+}
+
+/**
+ * Validate that an auto-intro schedule has the expected 2-phase structure
+ * (phase 1 = current price, phase 2 = regular standard price). If the schedule
+ * is half-configured (e.g., created from_subscription but the 2-phase rewrite
+ * never completed), rewrite it now and persist. Returns true if the schedule
+ * is valid (or was repaired), false if unrecoverable.
+ */
+async function validateOrRepairAutoIntroSchedule(
+  schedule: Stripe.SubscriptionSchedule,
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<boolean> {
+  // If the user has repurposed this schedule via switchPlan (scheduled_by = 'user'),
+  // do not overwrite their pending plan switch. switchPlan reuses the auto-intro
+  // schedule but doesn't change metadata.origin, so it still reads as 'auto-intro'.
+  const [dbRow] = await db
+    .select({ scheduled_by: kiloclaw_subscriptions.scheduled_by })
+    .from(kiloclaw_subscriptions)
+    .where(eq(kiloclaw_subscriptions.user_id, userId))
+    .limit(1);
+
+  if (dbRow?.scheduled_by === 'user') {
+    return true;
+  }
+
+  const regularPriceId = getStripePriceIdForClawPlan('standard');
+  const phase2Price = schedule.phases[1] ? resolvePhasePrice(schedule.phases[1]) : null;
+
+  if (schedule.phases.length >= 2 && phase2Price === regularPriceId) {
+    await persistAutoIntroSchedule(schedule.id, userId);
+    return true;
+  }
+
+  // Half-configured: rewrite to add the regular-price phase
+  const existingPhase = schedule.phases[0];
+  const existingPhasePrice = existingPhase ? resolvePhasePrice(existingPhase) : null;
+  if (!existingPhase || !existingPhasePrice) {
+    logError('Half-configured auto-intro schedule has no usable phase', {
+      stripe_subscription_id: stripeSubscriptionId,
+      schedule_id: schedule.id,
+      user_id: userId,
+    });
+    return false;
+  }
+
+  await stripe.subscriptionSchedules.update(schedule.id, {
+    phases: [
+      {
+        items: [{ price: existingPhasePrice }],
+        start_date: existingPhase.start_date,
+        end_date: existingPhase.end_date,
+      },
+      {
+        items: [{ price: regularPriceId }],
+      },
+    ],
+    end_behavior: 'release',
+  });
+  await persistAutoIntroSchedule(schedule.id, userId);
+  return true;
+}
+
+/**
+ * Ensure an intro-price subscription has a 2-phase schedule that automatically
+ * transitions to the regular standard price at the end of the intro period.
+ *
+ * No-ops if the subscription is not on an intro price or already has a valid
+ * auto-intro schedule attached.
+ */
+export async function ensureAutoIntroSchedule(
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<void> {
+  const liveSub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+
+  const priceId = liveSub.items.data[0]?.price?.id;
+  if (!priceId || !isIntroPriceId(priceId)) return;
+
+  // Schedule already attached — persist if auto-intro, skip otherwise
+  if (liveSub.schedule) {
+    const scheduleId = resolveScheduleId(liveSub.schedule);
+    if (!scheduleId) return;
+    const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+
+    if (schedule.metadata?.origin === 'auto-intro') {
+      const valid = await validateOrRepairAutoIntroSchedule(schedule, stripeSubscriptionId, userId);
+      if (!valid) {
+        logError('Auto-intro schedule is unrecoverable, skipping', {
+          stripe_subscription_id: stripeSubscriptionId,
+          schedule_id: schedule.id,
+          user_id: userId,
+        });
+      }
+      return;
+    }
+
+    logWarning('Subscription has non-auto-intro schedule attached, skipping auto schedule', {
+      stripe_subscription_id: stripeSubscriptionId,
+      user_id: userId,
+      schedule_id: schedule.id,
+    });
+    return;
+  }
+
+  // Clear stale schedule pointer if Stripe says no schedule
+  const [existingRow] = await db
+    .select({ stripe_schedule_id: kiloclaw_subscriptions.stripe_schedule_id })
+    .from(kiloclaw_subscriptions)
+    .where(eq(kiloclaw_subscriptions.user_id, userId))
+    .limit(1);
+
+  if (existingRow?.stripe_schedule_id) {
+    await db
+      .update(kiloclaw_subscriptions)
+      .set({ stripe_schedule_id: null, scheduled_plan: null, scheduled_by: null })
+      .where(eq(kiloclaw_subscriptions.user_id, userId));
+  }
+
+  await createAutoIntroSchedule(stripeSubscriptionId, userId);
+}
+
+/**
+ * Create a new 2-phase auto-intro schedule (intro → regular standard) for a
+ * subscription. Handles the race where a concurrent caller attaches a schedule
+ * between our check and the create call.
+ */
+async function createAutoIntroSchedule(
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<void> {
+  let newSchedule: Stripe.SubscriptionSchedule;
+  try {
+    newSchedule = await stripe.subscriptionSchedules.create({
+      from_subscription: stripeSubscriptionId,
+      metadata: { origin: 'auto-intro' },
+    });
+  } catch (error) {
+    await handleAutoIntroCreateRace(error, stripeSubscriptionId, userId);
+    return;
+  }
+
+  const currentPhase = newSchedule.phases[0];
+  const phase1Price = currentPhase ? resolvePhasePrice(currentPhase) : null;
+  if (!currentPhase || !phase1Price) {
+    logError('Auto-intro schedule created with unusable phase', {
+      stripe_subscription_id: stripeSubscriptionId,
+      schedule_id: newSchedule.id,
+      user_id: userId,
+      has_phase: !!currentPhase,
+      has_price: !!phase1Price,
+    });
+    return;
+  }
+
+  await stripe.subscriptionSchedules.update(newSchedule.id, {
+    phases: [
+      {
+        items: [{ price: phase1Price }],
+        start_date: currentPhase.start_date,
+        end_date: currentPhase.end_date,
+      },
+      {
+        items: [{ price: getStripePriceIdForClawPlan('standard') }],
+      },
+    ],
+    end_behavior: 'release',
+  });
+
+  await persistAutoIntroSchedule(newSchedule.id, userId);
+}
+
+/**
+ * Handle a failed subscriptionSchedules.create call during auto-intro setup.
+ * If the failure was a race (another caller attached a schedule concurrently),
+ * validate/repair the winning schedule. Otherwise re-throw.
+ */
+async function handleAutoIntroCreateRace(
+  error: unknown,
+  stripeSubscriptionId: string,
+  userId: string
+): Promise<void> {
+  const refetched = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+  const refetchedScheduleId = resolveScheduleId(refetched.schedule);
+  if (!refetchedScheduleId) {
+    logError('Failed to create auto-intro schedule (non-race error)', {
+      stripe_subscription_id: stripeSubscriptionId,
+      user_id: userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  logWarning('Race creating auto-intro schedule, re-checking subscription', {
+    stripe_subscription_id: stripeSubscriptionId,
+    user_id: userId,
+    error: error instanceof Error ? error.message : String(error),
+  });
+
+  const existingSchedule = await stripe.subscriptionSchedules.retrieve(refetchedScheduleId);
+  if (existingSchedule.metadata?.origin === 'auto-intro') {
+    const valid = await validateOrRepairAutoIntroSchedule(
+      existingSchedule,
+      stripeSubscriptionId,
+      userId
+    );
+    if (!valid) {
+      logError('Race-recovered auto-intro schedule is unrecoverable', {
+        stripe_subscription_id: stripeSubscriptionId,
+        schedule_id: existingSchedule.id,
+        user_id: userId,
+      });
+    }
+  }
+}
+
 /**
  * Handle customer.subscription.created for KiloClaw subscriptions.
- *
- * Stripe propagates subscription_data.metadata from the checkout session
- * to the subscription object, so we can read kiloUserId and plan from metadata.
+ * After persisting, creates an auto intro→regular schedule if on an intro price.
  */
 export async function handleKiloClawSubscriptionCreated(params: {
   eventId: string;
@@ -157,9 +399,8 @@ export async function handleKiloClawSubscriptionCreated(params: {
   const periods = getSubscriptionPeriods(subscription, kiloUserId);
   const status = mapStripeStatus(subscription.status);
 
-  // Capture suspension state before the upsert clears it, so auto-resume
-  // can fire for re-subscribing users who were previously suspended.
   let wasSuspended = false;
+  let didProcess = false;
 
   await db.transaction(async tx => {
     // Guard against stale subscription.created retries: if the user already has
@@ -195,8 +436,7 @@ export async function handleKiloClawSubscriptionCreated(params: {
       return;
     }
 
-    // Set wasSuspended only after passing the stale guard — stale events
-    // must not trigger auto-resume for the current subscription.
+    // Captured after the stale guard so stale events don't auto-resume
     wasSuspended = !!existingRow?.suspended_at;
 
     // For commit plans, derive commit_ends_at. If the subscription has a
@@ -249,13 +489,16 @@ export async function handleKiloClawSubscriptionCreated(params: {
           destruction_deadline: null,
         },
       });
+
+    didProcess = true;
   });
 
-  // Auto-resume: if user was suspended before this re-subscription, start their
-  // instance and clear suspension cycle emails. wasSuspended was captured inside
-  // the transaction before the upsert cleared suspended_at.
   if (wasSuspended) {
     await autoResumeIfSuspended(kiloUserId);
+  }
+
+  if (didProcess) {
+    await ensureAutoIntroSchedule(subscription.id, kiloUserId);
   }
 
   logInfo('KiloClaw subscription.created processed', {
@@ -412,9 +655,8 @@ export async function handleKiloClawSubscriptionDeleted(params: {
 
 /**
  * Handle subscription_schedule.updated for KiloClaw subscriptions.
- * Schedules are only created by user-initiated plan switches.
- * When a schedule completes: apply the scheduled plan transition.
- * When released/canceled: clear schedule tracking fields without changing plan.
+ * On completed: apply the scheduled plan transition.
+ * On released/canceled: clear schedule tracking fields without changing plan.
  */
 export async function handleKiloClawScheduleEvent(params: {
   eventId: string;
