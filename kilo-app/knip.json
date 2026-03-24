@@ -3,7 +3,7 @@
   "entry": ["src/app/**/*.{ts,tsx}"],
   "project": ["src/**/*.{ts,tsx}"],
   "ignoreDependencies": ["react-native-worklets", "expo-updates", "expo-system-ui", "postcss"],
-  "ignoreBinaries": ["eas", "oxfmt"],
+  "ignoreBinaries": ["oxfmt"],
   "ignore": ["src/components/ui/**"],
   "eslint": {
     "config": ["eslint.config.js"]
