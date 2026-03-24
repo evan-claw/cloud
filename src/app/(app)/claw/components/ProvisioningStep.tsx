@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { useControllerHealth } from '@/hooks/useKiloClaw';
 import {
   type ExecPreset,
   type ClawMutations,
@@ -119,6 +120,15 @@ export function ProvisioningStep({
       }
     );
   }, [instanceRunning, preset]);
+
+  // Poll the controller health endpoint to track bootstrap progress.
+  const { data: controllerHealth } = useControllerHealth(instanceRunning);
+
+  useEffect(() => {
+    if (controllerHealth) {
+      console.log('[ProvisioningStep] controller health:', controllerHealth);
+    }
+  }, [controllerHealth]);
 
   // Advance to the next step only when both the config is applied
   // and the boot delay has elapsed, giving the gateway time to start.

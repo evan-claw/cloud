@@ -219,6 +219,14 @@ export type ConfigRestoreResponse = {
   signaled: boolean;
 };
 
+/** Response from GET /api/platform/controller-health */
+export type ControllerHealthResponse = {
+  status: 'ok';
+  state: 'bootstrapping' | 'starting' | 'ready' | 'degraded';
+  phase?: string;
+  error?: string;
+};
+
 /** Response from GET /api/platform/controller-version. Null fields = old controller. */
 export type ControllerVersionResponse = {
   version: string | null;

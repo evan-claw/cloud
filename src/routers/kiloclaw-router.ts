@@ -659,6 +659,24 @@ export const kiloclawRouter = createTRPCRouter({
     }
   }),
 
+  controllerHealth: baseProcedure.query(async ({ ctx }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.getControllerHealth(ctx.user.id);
+    } catch (err) {
+      if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Controller health unavailable',
+        });
+      }
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch controller health',
+      });
+    }
+  }),
+
   controllerVersion: baseProcedure.query(async ({ ctx }) => {
     const client = new KiloClawInternalClient();
     return client.getControllerVersion(ctx.user.id);

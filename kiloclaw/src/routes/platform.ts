@@ -620,6 +620,26 @@ platform.get('/gateway/status', async c => {
   }
 });
 
+// GET /api/platform/controller-health?userId=...
+platform.get('/controller-health', async c => {
+  const userId = setValidatedQueryUserId(c);
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+
+  try {
+    const result = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getControllerHealth(),
+      'getControllerHealth'
+    );
+    return c.json(result ?? { status: 'ok', state: 'starting' }, 200);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'controller health');
+    return jsonError(message, status);
+  }
+});
+
 // GET /api/platform/controller-version?userId=...
 platform.get('/controller-version', async c => {
   const userId = setValidatedQueryUserId(c);
