@@ -83,6 +83,9 @@ export function ClawDashboard({
   // by page.tsx before this component mounts. ClawDashboard always renders
   // the full dashboard with BillingWrapper handling lock dialogs and banners.
 
+  const tabTriggerClass =
+    'border-border text-muted-foreground hover:bg-muted hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-md border px-4 py-2 text-sm font-medium transition-colors data-[state=active]:shadow-none';
+
   return (
     <div className="container m-auto flex w-full max-w-[1140px] flex-col gap-6 p-4 md:p-6">
       <ClawHeader
@@ -240,23 +243,14 @@ export function ClawDashboard({
             </CardContent>
             <Tabs defaultValue="instance">
               <div className="px-5">
-                <TabsList className="h-auto w-full justify-start gap-1 rounded-none border-b bg-transparent p-0 pb-3">
-                  <TabsTrigger
-                    value="instance"
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors data-[state=active]:shadow-none"
-                  >
+                <TabsList className="mt-4 h-auto w-full justify-start gap-2 rounded-none border-b bg-transparent p-0 pb-3">
+                  <TabsTrigger value="instance" className={tabTriggerClass}>
                     Gateway Process
                   </TabsTrigger>
-                  <TabsTrigger
-                    value="settings"
-                    className="text-muted-foreground hover:bg-muted hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground rounded-md px-3 py-1.5 text-sm font-medium transition-colors data-[state=active]:shadow-none"
-                  >
+                  <TabsTrigger value="settings" className={tabTriggerClass}>
                     Settings
                   </TabsTrigger>
-                  <TabsTrigger
-                    value="changelog"
-                    className="text-muted-foreground hover:text-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground rounded-none border-b-2 border-transparent px-0 py-3 text-sm font-medium transition-colors data-[state=active]:border-0 data-[state=active]:border-b-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-                  >
+                  <TabsTrigger value="changelog" className={tabTriggerClass}>
                     What&apos;s New <Sparkles className="ml-1 inline h-3 w-3 text-amber-400" />
                   </TabsTrigger>
                 </TabsList>
