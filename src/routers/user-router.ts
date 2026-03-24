@@ -14,7 +14,7 @@ import {
   auto_top_up_configs,
   user_auth_provider,
 } from '@kilocode/db/schema';
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, gte } from 'drizzle-orm';
 import crypto from 'crypto';
 import { checkDiscordGuildMembership } from '@/lib/integrations/discord-guild-membership';
 import { AuthProviderIdSchema } from '@/lib/auth/provider-metadata';
@@ -31,8 +31,30 @@ import { getCreditBlocks } from '@/lib/getCreditBlocks';
 
 const ViewTypeSchema = z.union([z.literal('personal'), z.literal('all'), z.uuid()]);
 
+export const PeriodSchema = z.enum(['week', 'month', 'year', 'all']);
+export type Period = z.infer<typeof PeriodSchema>;
+
+function daysAgo(days: number): string {
+  const now = new Date();
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function getDateThreshold(period: Period): string | null {
+  switch (period) {
+    case 'week':
+      return daysAgo(7);
+    case 'month':
+      return daysAgo(30);
+    case 'year':
+      return daysAgo(365);
+    case 'all':
+      return null;
+  }
+}
+
 const AutocompleteMetricsInputSchema = z.object({
   viewType: ViewTypeSchema.default('personal'),
+  period: PeriodSchema.default('week'),
 });
 
 const AutocompleteMetricsOutputSchema = z.object({
@@ -134,32 +156,29 @@ export const userRouter = createTRPCRouter({
     .input(AutocompleteMetricsInputSchema)
     .output(AutocompleteMetricsOutputSchema)
     .query(async ({ ctx, input }) => {
-      const { viewType } = input;
+      const { viewType, period } = input;
       const userId = ctx.user.id;
 
       if (viewType !== 'personal' && viewType !== 'all') {
         await ensureOrganizationAccess(ctx, viewType);
       }
 
-      // Build where clause based on view type, filtering for autocomplete model
-      let whereClause;
+      const dateThreshold = getDateThreshold(period);
+
+      // Build where conditions based on view type, filtering for autocomplete model
+      const conditions = [
+        eq(microdollar_usage.kilo_user_id, userId),
+        eq(microdollar_usage.model, AUTOCOMPLETE_MODEL),
+      ];
+
       if (viewType === 'personal') {
-        whereClause = and(
-          eq(microdollar_usage.kilo_user_id, userId),
-          isNull(microdollar_usage.organization_id),
-          eq(microdollar_usage.model, AUTOCOMPLETE_MODEL)
-        );
-      } else if (viewType === 'all') {
-        whereClause = and(
-          eq(microdollar_usage.kilo_user_id, userId),
-          eq(microdollar_usage.model, AUTOCOMPLETE_MODEL)
-        );
-      } else {
-        whereClause = and(
-          eq(microdollar_usage.kilo_user_id, userId),
-          eq(microdollar_usage.organization_id, viewType),
-          eq(microdollar_usage.model, AUTOCOMPLETE_MODEL)
-        );
+        conditions.push(isNull(microdollar_usage.organization_id));
+      } else if (viewType !== 'all') {
+        conditions.push(eq(microdollar_usage.organization_id, viewType));
+      }
+
+      if (dateThreshold) {
+        conditions.push(gte(microdollar_usage.created_at, dateThreshold));
       }
 
       const result = await timedUsageQuery(
@@ -168,7 +187,7 @@ export const userRouter = createTRPCRouter({
           route: 'user.getAutocompleteMetrics',
           queryLabel: 'user_autocomplete_aggregate',
           scope: 'user',
-          period: null,
+          period,
         },
         tx =>
           tx
@@ -178,10 +197,14 @@ export const userRouter = createTRPCRouter({
               total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
             })
             .from(microdollar_usage)
-            .where(whereClause)
+            .where(and(...conditions))
       );
 
-      const metrics = result[0] || { total_cost: 0, request_count: 0, total_tokens: 0 };
+      const metrics = result[0] || {
+        total_cost: 0,
+        request_count: 0,
+        total_tokens: 0,
+      };
 
       return {
         cost: metrics.total_cost,
@@ -192,7 +215,10 @@ export const userRouter = createTRPCRouter({
 
   toggleAutoTopUp: baseProcedure
     .input(
-      z.object({ currentEnabled: z.boolean(), amountCents: AutoTopUpAmountCentsSchema.optional() })
+      z.object({
+        currentEnabled: z.boolean(),
+        amountCents: AutoTopUpAmountCentsSchema.optional(),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       if (input.currentEnabled) {
@@ -269,7 +295,11 @@ export const userRouter = createTRPCRouter({
     const paymentMethod = await retrievePaymentMethodInfo(config?.stripe_payment_method_id);
     const amountCents =
       (config?.amount_cents as AutoTopUpAmountCents) ?? DEFAULT_AUTO_TOP_UP_AMOUNT_CENTS;
-    return { enabled: ctx.user.auto_top_up_enabled, amountCents, paymentMethod };
+    return {
+      enabled: ctx.user.auto_top_up_enabled,
+      amountCents,
+      paymentMethod,
+    };
   }),
 
   updateAutoTopUpAmount: baseProcedure
@@ -325,13 +355,17 @@ export const userRouter = createTRPCRouter({
         linkedin_url: z
           .string()
           .url()
-          .refine(val => /^https?:\/\//i.test(val), { message: 'URL must use http or https' })
+          .refine(val => /^https?:\/\//i.test(val), {
+            message: 'URL must use http or https',
+          })
           .nullable()
           .optional(),
         github_url: z
           .string()
           .url()
-          .refine(val => /^https?:\/\//i.test(val), { message: 'URL must use http or https' })
+          .refine(val => /^https?:\/\//i.test(val), {
+            message: 'URL must use http or https',
+          })
           .nullable()
           .optional(),
       })

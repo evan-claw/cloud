@@ -120,6 +120,13 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       | 'flyRegion'
     > & { event: KiloClawEventName }
   ): void {
+    doLog(this.s, data.event, {
+      ...(data.status ? { status: data.status } : undefined),
+      ...(data.label ? { label: data.label } : undefined),
+      ...(data.error ? { error: data.error } : undefined),
+      ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : undefined),
+      ...(data.value !== undefined ? { value: data.value } : undefined),
+    });
     writeEvent(this.env, {
       ...data,
       delivery: 'do',
