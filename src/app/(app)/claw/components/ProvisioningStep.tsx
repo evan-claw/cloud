@@ -110,17 +110,19 @@ export function ProvisioningStep({
     );
   }, [instanceRunning, preset]);
 
-  // Poll the gateway /ready endpoint to know when channels are fully set up.
+  // Poll the gateway /ready endpoint to know when channels are fully set up
+  // and the system's CPU load has settled after boot.
   const { data: gatewayReady } = useGatewayReady(instanceRunning);
-  const isGatewayReady = gatewayReady?.ready === true;
+  const isGatewaySettled = gatewayReady?.ready === true && gatewayReady?.settled === true;
 
-  // Advance to the next step when both config is applied and gateway reports ready.
+  // Advance to the next step when config is applied, gateway reports ready,
+  // and boot CPU pressure has subsided (settled === true).
   useEffect(() => {
-    if (configReady && isGatewayReady) {
+    if (configReady && isGatewaySettled) {
       playChime();
       onCompleteRef.current();
     }
-  }, [configReady, isGatewayReady]);
+  }, [configReady, isGatewaySettled]);
 
   return <ProvisioningStepView totalSteps={totalSteps} />;
 }
