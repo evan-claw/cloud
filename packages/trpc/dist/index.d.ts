@@ -7592,6 +7592,14 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
             };
             meta: object;
         }>;
+        getBalance: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: {
+                balance: number;
+                isDepleted: boolean;
+            };
+            meta: object;
+        }>;
         getAutocompleteMetrics: _trpc_server.TRPCQueryProcedure<{
             input: {
                 viewType?: string | undefined;
