@@ -1,30 +1,24 @@
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { CircleUserRound } from 'lucide-react-native';
+import { Pressable } from 'react-native';
 
-import logo from '@/../assets/images/logo.png';
-import { Image } from '@/components/ui/image';
-import { cn } from '@/lib/utils';
+import { useThemeColors } from '@/lib/hooks/use-theme-colors';
 
-interface ProfileAvatarButtonProps {
-  className?: string;
-}
-
-export function ProfileAvatarButton({ className }: Readonly<ProfileAvatarButtonProps>) {
+export function ProfileAvatarButton() {
   const router = useRouter();
+  const colors = useThemeColors();
 
   return (
-    <View className={cn(className)}>
-      <Pressable
-        onPress={() => {
-          void Haptics.selectionAsync();
-          router.push('/(app)/profile');
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Open profile"
-      >
-        <Image source={logo} className="h-7 w-7" transition={0} />
-      </Pressable>
-    </View>
+    <Pressable
+      onPress={() => {
+        void Haptics.selectionAsync();
+        router.push('/(app)/profile');
+      }}
+      accessibilityRole="button"
+      accessibilityLabel="Open profile"
+    >
+      <CircleUserRound size={22} color={colors.foreground} />
+    </Pressable>
   );
 }
