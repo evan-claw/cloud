@@ -5,16 +5,11 @@ import { toast } from 'sonner-native';
 
 import { useThemeColors } from '@/lib/hooks/use-theme-colors';
 
-export const unstable_settings = {
-  initialRouteName: '(kiloclaw)',
-};
-
 export default function TabsLayout() {
   const colors = useThemeColors();
 
   return (
     <Tabs
-      initialRouteName="(kiloclaw)"
       screenOptions={{
         headerShown: false,
         freezeOnBlur: true,
@@ -32,14 +27,14 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="(kiloclaw)"
+        name="(1_kiloclaw)"
         options={{
           title: 'KiloClaw',
           tabBarIcon: ({ color, size }) => <MessageSquare size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="(agents)"
+        name="(2_agents)"
         options={{
           title: 'Agents',
           tabBarIcon: ({ color, size }) => <Bot size={size} color={color} />,
