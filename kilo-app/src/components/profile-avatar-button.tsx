@@ -23,7 +23,7 @@ export function ProfileAvatarButton({ className }: Readonly<ProfileAvatarButtonP
       accessibilityRole="button"
       accessibilityLabel="Open profile"
     >
-      <Image source={logo} className="h-7 w-7 rounded-md" transition={0} />
+      <Image source={logo} className="h-7 w-7" transition={0} />
     </Pressable>
   );
 }
