@@ -3,6 +3,9 @@
  *
  * Read from disk once per invocation (~every 24h). All fields have safe
  * defaults so callers never see an exception.
+ *
+ * Each top-level section is parsed independently so a malformed `tools`
+ * block (for example) does not zero out unrelated fields like `defaultModel`.
  */
 import fs from 'node:fs';
 import { z } from 'zod';
@@ -22,33 +25,22 @@ export type ProductTelemetry = {
   browserEnabled: boolean;
 };
 
-/** Loose schema — extract only the fields we care about, ignore the rest. */
-const OpenclawConfigSchema = z
-  .object({
-    agents: z
-      .object({
-        defaults: z
-          .object({
-            model: z.object({ primary: z.string() }).catch({ primary: '' }),
-          })
-          .catch({ model: { primary: '' } }),
-      })
-      .catch({ defaults: { model: { primary: '' } } }),
-    tools: z
-      .object({
-        profile: z.string().catch(''),
-        exec: z.object({ security: z.string().catch('') }).catch({ security: '' }),
-      })
-      .catch({ profile: '', exec: { security: '' } }),
-    browser: z.object({ enabled: z.boolean().catch(false) }).catch({ enabled: false }),
-    channels: z.unknown().optional(),
-  })
-  .catch({
-    agents: { defaults: { model: { primary: '' } } },
-    tools: { profile: '', exec: { security: '' } },
-    browser: { enabled: false },
-    channels: undefined,
-  });
+// Per-section schemas — each is parsed independently so one bad section
+// doesn't drop the rest.
+const AgentsSchema = z.object({
+  defaults: z.object({
+    model: z.object({ primary: z.string() }),
+  }),
+});
+
+const ToolsSchema = z.object({
+  profile: z.string().optional(),
+  exec: z.object({ security: z.string() }).optional(),
+});
+
+const BrowserSchema = z.object({
+  enabled: z.boolean(),
+});
 
 export type ProductTelemetryDeps = {
   readConfigFile: () => string;
@@ -60,7 +52,7 @@ const defaultDeps: ProductTelemetryDeps = {
 
 export function collectProductTelemetry(
   openclawVersion: string | null,
-  deps: ProductTelemetryDeps = defaultDeps,
+  deps: ProductTelemetryDeps = defaultDeps
 ): ProductTelemetry {
   const empty: ProductTelemetry = {
     openclawVersion,
@@ -79,18 +71,21 @@ export function collectProductTelemetry(
     return empty;
   }
 
-  const config = OpenclawConfigSchema.safeParse(raw);
-  if (!config.success) return empty;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return empty;
+  const obj = raw as Record<string, unknown>;
 
+  const agents = AgentsSchema.safeParse(obj.agents);
+  const tools = ToolsSchema.safeParse(obj.tools);
+  const browser = BrowserSchema.safeParse(obj.browser);
   const enabledChannels = detectChannels(raw);
 
   return {
     openclawVersion,
-    defaultModel: config.data.agents.defaults.model.primary || null,
+    defaultModel: (agents.success && agents.data.defaults.model.primary) || null,
     channelCount: enabledChannels.length,
     enabledChannels,
-    toolsProfile: config.data.tools.profile || null,
-    execSecurity: config.data.tools.exec.security || null,
-    browserEnabled: config.data.browser.enabled,
+    toolsProfile: (tools.success && tools.data.profile) || null,
+    execSecurity: (tools.success && tools.data.exec?.security) || null,
+    browserEnabled: browser.success ? browser.data.enabled : false,
   };
 }

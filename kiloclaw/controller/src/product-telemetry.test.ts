@@ -128,6 +128,25 @@ describe('collectProductTelemetry', () => {
     expect(result.channelCount).toBe(0);
   });
 
+  it('still extracts valid sections when a sibling section is malformed', () => {
+    const config = {
+      agents: 'not an object',
+      tools: { profile: 'coding', exec: { security: 'allowlist' } },
+      browser: { enabled: true },
+      channels: {
+        telegram: { enabled: true, botToken: 'tg-tok' },
+      },
+    };
+    const deps = { readConfigFile: () => JSON.stringify(config) };
+    const result = collectProductTelemetry('2026.3.13', deps);
+
+    expect(result.defaultModel).toBeNull();
+    expect(result.toolsProfile).toBe('coding');
+    expect(result.execSecurity).toBe('allowlist');
+    expect(result.browserEnabled).toBe(true);
+    expect(result.enabledChannels).toEqual(['telegram']);
+  });
+
   it('passes through openclawVersion even when null', () => {
     const deps = { readConfigFile: () => '{}' };
     const result = collectProductTelemetry(null, deps);
