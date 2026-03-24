@@ -190,7 +190,10 @@ export const AUTO_MODELS = [
 ];
 
 export function isKiloAutoModel(model: string) {
-  return AUTO_MODELS.some(m => m.id === model) || legacyMapping[model] !== undefined;
+  return (
+    AUTO_MODELS.some(m => m.id === model) ||
+    (Object.hasOwn(legacyMapping, model) && legacyMapping[model] !== undefined)
+  );
 }
 
 export const KILO_AUTO_FREE_MODEL_DEPRECATED = 'kilo/auto-free';
@@ -202,7 +205,8 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
 };
 
 export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
-  const mappedModel = legacyMapping[model]?.id ?? model;
+  const mappedModel =
+    (Object.hasOwn(legacyMapping, model) ? legacyMapping[model] : null)?.id ?? model;
   if (mappedModel === KILO_AUTO_FREE_MODEL.id) {
     return { model: minimax_m25_free_model.public_id };
   }
@@ -211,9 +215,15 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
   if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
-    return BALANCED_MODE_TO_MODEL[mode] ?? BALANCED_CODE_MODEL;
+    return (
+      (Object.hasOwn(BALANCED_MODE_TO_MODEL, mode) ? BALANCED_MODE_TO_MODEL[mode] : null) ??
+      BALANCED_CODE_MODEL
+    );
   }
-  return FRONTIER_MODE_TO_MODEL[mode] ?? FRONTIER_CODE_MODEL;
+  return (
+    (Object.hasOwn(FRONTIER_MODE_TO_MODEL, mode) ? FRONTIER_MODE_TO_MODEL[mode] : null) ??
+    FRONTIER_CODE_MODEL
+  );
 }
 
 export function applyResolvedAutoModel(
