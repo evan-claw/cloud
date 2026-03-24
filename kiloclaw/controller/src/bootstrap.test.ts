@@ -7,6 +7,7 @@ import {
   generateHooksToken,
   configureGitHub,
   runOnboardOrDoctor,
+  updateToolsMdKiloCliSection,
   updateToolsMd1PasswordSection,
   buildGatewayArgs,
   bootstrap,
@@ -565,6 +566,48 @@ describe('runOnboardOrDoctor', () => {
     expect(doctorCall?.args).toContain('--fix');
     expect(doctorCall?.args).toContain('--non-interactive');
     expect(env.KILOCLAW_FRESH_INSTALL).toBe('false');
+  });
+});
+
+// ---- updateToolsMdKiloCliSection ----
+
+describe('updateToolsMdKiloCliSection', () => {
+  it('adds Kilo CLI section unconditionally', () => {
+    const harness = fakeDeps();
+    (harness.deps.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue('# TOOLS\n');
+
+    const env: Record<string, string | undefined> = {};
+
+    updateToolsMdKiloCliSection(env, harness.deps);
+
+    expect(harness.writeCalls).toHaveLength(1);
+    expect(harness.writeCalls[0]!.data).toContain('<!-- BEGIN:kilo-cli -->');
+    expect(harness.writeCalls[0]!.data).toContain('kilo run --auto');
+    expect(harness.writeCalls[0]!.data).toContain('<!-- END:kilo-cli -->');
+  });
+
+  it('skips adding when section already present', () => {
+    const harness = fakeDeps();
+    (harness.deps.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(
+      '# TOOLS\n<!-- BEGIN:kilo-cli -->\nexisting\n<!-- END:kilo-cli -->'
+    );
+
+    const env: Record<string, string | undefined> = {};
+
+    updateToolsMdKiloCliSection(env, harness.deps);
+
+    expect(harness.writeCalls).toHaveLength(0);
+  });
+
+  it('no-ops when TOOLS.md does not exist', () => {
+    const harness = fakeDeps();
+    (harness.deps.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+    const env: Record<string, string | undefined> = {};
+
+    updateToolsMdKiloCliSection(env, harness.deps);
+
+    expect(harness.writeCalls).toHaveLength(0);
   });
 });
 

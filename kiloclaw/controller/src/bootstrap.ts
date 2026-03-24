@@ -442,7 +442,44 @@ export function updateToolsMdGoogleSection(env: EnvLike, deps: BootstrapDeps): v
   }
 }
 
-// ---- Step 8: TOOLS.md 1Password section ----
+// ---- Step 8: TOOLS.md Kilo CLI section ----
+
+const KILO_CLI_MARKER_BEGIN = '<!-- BEGIN:kilo-cli -->';
+const KILO_CLI_MARKER_END = '<!-- END:kilo-cli -->';
+
+const KILO_CLI_TOOLS_SECTION = `
+${KILO_CLI_MARKER_BEGIN}
+## Kilo CLI
+
+The Kilo CLI (\`kilo\`) is an agentic coding assistant for the terminal, pre-configured with your KiloCode account.
+
+- Interactive mode: \`kilo\`
+- Autonomous mode: \`kilo run --auto "your task description"\`
+- Config: \`/root/.config/kilo/opencode.json\` (customizable, persists across restarts)
+- Shares your KiloCode API key and model access with OpenClaw
+${KILO_CLI_MARKER_END}`;
+
+/**
+ * Ensure the Kilo CLI section is present in TOOLS.md.
+ *
+ * The kilo binary is always in the image, so this runs unconditionally
+ * (not gated on a feature flag). Idempotent: skips if the marker is
+ * already present.
+ */
+export function updateToolsMdKiloCliSection(_env: EnvLike, deps: BootstrapDeps): void {
+  if (!deps.existsSync(TOOLS_MD_DEST)) return;
+
+  const content = deps.readFileSync(TOOLS_MD_DEST, 'utf8');
+
+  if (!content.includes(KILO_CLI_MARKER_BEGIN)) {
+    deps.writeFileSync(TOOLS_MD_DEST, content + KILO_CLI_TOOLS_SECTION);
+    console.log('TOOLS.md: added Kilo CLI section');
+  } else {
+    console.log('TOOLS.md: Kilo CLI section already present');
+  }
+}
+
+// ---- Step 9: TOOLS.md 1Password section ----
 
 const OP_MARKER_BEGIN = '<!-- BEGIN:1password -->';
 const OP_MARKER_END = '<!-- END:1password -->';
@@ -502,7 +539,7 @@ export function updateToolsMd1PasswordSection(env: EnvLike, deps: BootstrapDeps)
   }
 }
 
-// ---- Step 9: Gateway args ----
+// ---- Step 10: Gateway args ----
 
 /**
  * Build the gateway CLI arguments array.
@@ -556,6 +593,7 @@ export async function bootstrap(
   runOnboardOrDoctor(env, deps);
   await yieldToEventLoop();
 
+  updateToolsMdKiloCliSection(env, deps);
   updateToolsMdGoogleSection(env, deps);
   updateToolsMd1PasswordSection(env, deps);
 
