@@ -43,9 +43,7 @@ export function LoginScreen() {
     <View className="flex-1 items-center justify-center gap-6 bg-background px-6">
       <View className="items-center gap-2">
         <Image source={logo} className="mb-1 h-16 w-16" accessibilityLabel="Kilo logo" />
-        <Text variant="muted" className="text-lg">
-          Sign in to continue
-        </Text>
+        <Text className="text-lg">Sign in to continue</Text>
       </View>
 
       <Animated.View className="w-full max-w-sm gap-3" layout={LinearTransition}>
