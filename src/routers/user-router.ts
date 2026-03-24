@@ -1,41 +1,37 @@
-import { baseProcedure, createTRPCRouter } from "@/lib/trpc/init";
-import { getUserAuthProviders, unlinkAuthProviderFromUser } from "@/lib/user";
-import { createAccountLinkingSession } from "@/lib/account-linking-session";
-import { TRPCError } from "@trpc/server";
-import { captureException } from "@sentry/nextjs";
-import * as z from "zod";
-import { assertNoTrpcError, successResult } from "@/lib/maybe-result";
-import { db, readDb } from "@/lib/drizzle";
-import { timedUsageQuery } from "@/lib/usage-query";
+import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
+import { getUserAuthProviders, unlinkAuthProviderFromUser } from '@/lib/user';
+import { createAccountLinkingSession } from '@/lib/account-linking-session';
+import { TRPCError } from '@trpc/server';
+import { captureException } from '@sentry/nextjs';
+import * as z from 'zod';
+import { assertNoTrpcError, successResult } from '@/lib/maybe-result';
+import { db, readDb } from '@/lib/drizzle';
+import { timedUsageQuery } from '@/lib/usage-query';
 import {
   kilocode_users,
   microdollar_usage,
   credit_transactions,
   auto_top_up_configs,
   user_auth_provider,
-} from "@kilocode/db/schema";
-import { eq, and, isNull, sql, gte } from "drizzle-orm";
-import crypto from "crypto";
-import { checkDiscordGuildMembership } from "@/lib/integrations/discord-guild-membership";
-import { AuthProviderIdSchema } from "@/lib/auth/provider-metadata";
-import { AUTOCOMPLETE_MODEL } from "@/lib/constants";
-import { ensureOrganizationAccess } from "@/routers/organizations/utils";
-import { createAutoTopUpSetupCheckoutSession } from "@/lib/stripe";
-import { retrievePaymentMethodInfo } from "@/lib/stripePaymentMethodInfo";
-import type { AutoTopUpAmountCents } from "@/lib/autoTopUpConstants";
+} from '@kilocode/db/schema';
+import { eq, and, isNull, sql, gte } from 'drizzle-orm';
+import crypto from 'crypto';
+import { checkDiscordGuildMembership } from '@/lib/integrations/discord-guild-membership';
+import { AuthProviderIdSchema } from '@/lib/auth/provider-metadata';
+import { AUTOCOMPLETE_MODEL } from '@/lib/constants';
+import { ensureOrganizationAccess } from '@/routers/organizations/utils';
+import { createAutoTopUpSetupCheckoutSession } from '@/lib/stripe';
+import { retrievePaymentMethodInfo } from '@/lib/stripePaymentMethodInfo';
+import type { AutoTopUpAmountCents } from '@/lib/autoTopUpConstants';
 import {
   AutoTopUpAmountCentsSchema,
   DEFAULT_AUTO_TOP_UP_AMOUNT_CENTS,
-} from "@/lib/autoTopUpConstants";
-import { getCreditBlocks } from "@/lib/getCreditBlocks";
+} from '@/lib/autoTopUpConstants';
+import { getCreditBlocks } from '@/lib/getCreditBlocks';
 
-const ViewTypeSchema = z.union([
-  z.literal("personal"),
-  z.literal("all"),
-  z.uuid(),
-]);
+const ViewTypeSchema = z.union([z.literal('personal'), z.literal('all'), z.uuid()]);
 
-export const PeriodSchema = z.enum(["week", "month", "year", "all"]);
+export const PeriodSchema = z.enum(['week', 'month', 'year', 'all']);
 export type Period = z.infer<typeof PeriodSchema>;
 
 function daysAgo(days: number): string {
@@ -45,20 +41,20 @@ function daysAgo(days: number): string {
 
 export function getDateThreshold(period: Period): string | null {
   switch (period) {
-    case "week":
+    case 'week':
       return daysAgo(7);
-    case "month":
+    case 'month':
       return daysAgo(30);
-    case "year":
+    case 'year':
       return daysAgo(365);
-    case "all":
+    case 'all':
       return null;
   }
 }
 
 const AutocompleteMetricsInputSchema = z.object({
-  viewType: ViewTypeSchema.default("personal"),
-  period: PeriodSchema.default("week"),
+  viewType: ViewTypeSchema.default('personal'),
+  period: PeriodSchema.default('week'),
 });
 
 const AutocompleteMetricsOutputSchema = z.object({
@@ -95,7 +91,7 @@ export const userRouter = createTRPCRouter({
     const providers = await getUserAuthProviders(ctx.user.id);
 
     return successResult({
-      providers: providers.map((provider) => ({
+      providers: providers.map(provider => ({
         provider: provider.provider,
         email: provider.email,
         avatar_url: provider.avatar_url,
@@ -114,10 +110,10 @@ export const userRouter = createTRPCRouter({
 
         return successResult();
       } catch (error) {
-        console.error("Error initiating account link:", error);
+        console.error('Error initiating account link:', error);
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to initiate account linking",
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to initiate account linking',
         });
       }
     }),
@@ -125,9 +121,7 @@ export const userRouter = createTRPCRouter({
   unlinkAuthProvider: baseProcedure
     .input(LinkAuthProviderInputSchema)
     .mutation(async ({ ctx, input }) => {
-      return assertNoTrpcError(
-        await unlinkAuthProviderFromUser(ctx.user.id, input.provider),
-      );
+      return assertNoTrpcError(await unlinkAuthProviderFromUser(ctx.user.id, input.provider));
     }),
 
   resetAPIKey: baseProcedure.mutation(async ({ ctx }) => {
@@ -148,7 +142,7 @@ export const userRouter = createTRPCRouter({
       const transactions = await db.query.credit_transactions.findMany({
         where: and(
           eq(credit_transactions.kilo_user_id, ctx.user.id),
-          isNull(credit_transactions.organization_id),
+          isNull(credit_transactions.organization_id)
         ),
       });
 
@@ -165,7 +159,7 @@ export const userRouter = createTRPCRouter({
       const { viewType, period } = input;
       const userId = ctx.user.id;
 
-      if (viewType !== "personal" && viewType !== "all") {
+      if (viewType !== 'personal' && viewType !== 'all') {
         await ensureOrganizationAccess(ctx, viewType);
       }
 
@@ -177,9 +171,9 @@ export const userRouter = createTRPCRouter({
         eq(microdollar_usage.model, AUTOCOMPLETE_MODEL),
       ];
 
-      if (viewType === "personal") {
+      if (viewType === 'personal') {
         conditions.push(isNull(microdollar_usage.organization_id));
-      } else if (viewType !== "all") {
+      } else if (viewType !== 'all') {
         conditions.push(eq(microdollar_usage.organization_id, viewType));
       }
 
@@ -190,12 +184,12 @@ export const userRouter = createTRPCRouter({
       const result = await timedUsageQuery(
         {
           db: readDb,
-          route: "user.getAutocompleteMetrics",
-          queryLabel: "user_autocomplete_aggregate",
-          scope: "user",
+          route: 'user.getAutocompleteMetrics',
+          queryLabel: 'user_autocomplete_aggregate',
+          scope: 'user',
           period,
         },
-        (tx) =>
+        tx =>
           tx
             .select({
               total_cost: sql<number>`COALESCE(SUM(${microdollar_usage.cost}), 0)::float`,
@@ -203,7 +197,7 @@ export const userRouter = createTRPCRouter({
               total_tokens: sql<number>`COALESCE(SUM(${microdollar_usage.input_tokens}) + SUM(${microdollar_usage.output_tokens}), 0)::float`,
             })
             .from(microdollar_usage)
-            .where(and(...conditions)),
+            .where(and(...conditions))
       );
 
       const metrics = result[0] || {
@@ -224,7 +218,7 @@ export const userRouter = createTRPCRouter({
       z.object({
         currentEnabled: z.boolean(),
         amountCents: AutoTopUpAmountCentsSchema.optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       if (input.currentEnabled) {
@@ -250,9 +244,7 @@ export const userRouter = createTRPCRouter({
             .set({
               disabled_reason: null,
               attempt_started_at: null,
-              ...(input.amountCents != null
-                ? { amount_cents: input.amountCents }
-                : {}),
+              ...(input.amountCents != null ? { amount_cents: input.amountCents } : {}),
             })
             .where(eq(auto_top_up_configs.owned_by_user_id, ctx.user.id));
           return { enabled: true } as const;
@@ -261,13 +253,13 @@ export const userRouter = createTRPCRouter({
           const redirectUrl = await createAutoTopUpSetupCheckoutSession(
             ctx.user.id,
             ctx.user.stripe_customer_id,
-            amountCents,
+            amountCents
           );
 
           if (!redirectUrl) {
             throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Failed to create checkout session",
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'Failed to create checkout session',
             });
           }
 
@@ -283,13 +275,13 @@ export const userRouter = createTRPCRouter({
       const redirectUrl = await createAutoTopUpSetupCheckoutSession(
         ctx.user.id,
         ctx.user.stripe_customer_id,
-        amountCents,
+        amountCents
       );
 
       if (!redirectUrl) {
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to create checkout session",
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create checkout session',
         });
       }
 
@@ -300,12 +292,9 @@ export const userRouter = createTRPCRouter({
     const config = await db.query.auto_top_up_configs.findFirst({
       where: eq(auto_top_up_configs.owned_by_user_id, ctx.user.id),
     });
-    const paymentMethod = await retrievePaymentMethodInfo(
-      config?.stripe_payment_method_id,
-    );
+    const paymentMethod = await retrievePaymentMethodInfo(config?.stripe_payment_method_id);
     const amountCents =
-      (config?.amount_cents as AutoTopUpAmountCents) ??
-      DEFAULT_AUTO_TOP_UP_AMOUNT_CENTS;
+      (config?.amount_cents as AutoTopUpAmountCents) ?? DEFAULT_AUTO_TOP_UP_AMOUNT_CENTS;
     return {
       enabled: ctx.user.auto_top_up_enabled,
       amountCents,
@@ -355,13 +344,8 @@ export const userRouter = createTRPCRouter({
   skipCustomerSource: baseProcedure.mutation(async ({ ctx }) => {
     await db
       .update(kilocode_users)
-      .set({ customer_source: "" })
-      .where(
-        and(
-          eq(kilocode_users.id, ctx.user.id),
-          isNull(kilocode_users.customer_source),
-        ),
-      );
+      .set({ customer_source: '' })
+      .where(and(eq(kilocode_users.id, ctx.user.id), isNull(kilocode_users.customer_source)));
     return successResult();
   }),
 
@@ -371,35 +355,31 @@ export const userRouter = createTRPCRouter({
         linkedin_url: z
           .string()
           .url()
-          .refine((val) => /^https?:\/\//i.test(val), {
-            message: "URL must use http or https",
+          .refine(val => /^https?:\/\//i.test(val), {
+            message: 'URL must use http or https',
           })
           .nullable()
           .optional(),
         github_url: z
           .string()
           .url()
-          .refine((val) => /^https?:\/\//i.test(val), {
-            message: "URL must use http or https",
+          .refine(val => /^https?:\/\//i.test(val), {
+            message: 'URL must use http or https',
           })
           .nullable()
           .optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const updates: Partial<typeof kilocode_users.$inferInsert> = {};
-      if (input.linkedin_url !== undefined)
-        updates.linkedin_url = input.linkedin_url;
+      if (input.linkedin_url !== undefined) updates.linkedin_url = input.linkedin_url;
       if (input.github_url !== undefined) updates.github_url = input.github_url;
 
       if (Object.keys(updates).length === 0) {
         return successResult();
       }
 
-      await db
-        .update(kilocode_users)
-        .set(updates)
-        .where(eq(kilocode_users.id, ctx.user.id));
+      await db.update(kilocode_users).set(updates).where(eq(kilocode_users.id, ctx.user.id));
 
       return successResult();
     }),
@@ -408,7 +388,7 @@ export const userRouter = createTRPCRouter({
     const discordProvider = await db.query.user_auth_provider.findFirst({
       where: and(
         eq(user_auth_provider.kilo_user_id, ctx.user.id),
-        eq(user_auth_provider.provider, "discord"),
+        eq(user_auth_provider.provider, 'discord')
       ),
     });
 
@@ -423,8 +403,7 @@ export const userRouter = createTRPCRouter({
       linked: !!discordProvider,
       discord_avatar_url: discordProvider?.avatar_url ?? null,
       discord_display_name: discordProvider?.display_name ?? null,
-      discord_server_membership_verified_at:
-        user?.discord_server_membership_verified_at ?? null,
+      discord_server_membership_verified_at: user?.discord_server_membership_verified_at ?? null,
     });
   }),
 
@@ -432,38 +411,32 @@ export const userRouter = createTRPCRouter({
     const discordProvider = await db.query.user_auth_provider.findFirst({
       where: and(
         eq(user_auth_provider.kilo_user_id, ctx.user.id),
-        eq(user_auth_provider.provider, "discord"),
+        eq(user_auth_provider.provider, 'discord')
       ),
     });
 
     if (!discordProvider) {
       throw new TRPCError({
-        code: "BAD_REQUEST",
-        message:
-          "No Discord account linked. Please connect your Discord account first.",
+        code: 'BAD_REQUEST',
+        message: 'No Discord account linked. Please connect your Discord account first.',
       });
     }
 
     let isMember: boolean;
     try {
-      isMember = await checkDiscordGuildMembership(
-        discordProvider.provider_account_id,
-      );
+      isMember = await checkDiscordGuildMembership(discordProvider.provider_account_id);
     } catch (error) {
       captureException(error);
       throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message:
-          "Failed to verify Discord guild membership. Please try again later.",
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to verify Discord guild membership. Please try again later.',
       });
     }
 
     await db
       .update(kilocode_users)
       .set({
-        discord_server_membership_verified_at: isMember
-          ? new Date().toISOString()
-          : null,
+        discord_server_membership_verified_at: isMember ? new Date().toISOString() : null,
       })
       .where(eq(kilocode_users.id, ctx.user.id));
 
