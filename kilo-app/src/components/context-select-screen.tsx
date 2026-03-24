@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Building2, User } from 'lucide-react-native';
 import { View } from 'react-native';
+import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 
 import logo from '@/../assets/images/logo.png';
 import { Button } from '@/components/ui/button';
@@ -33,7 +34,7 @@ export function ContextSelectScreen() {
         <Text variant="muted">Select which workspace to use</Text>
       </View>
 
-      <View className="w-full max-w-sm gap-3">
+      <Animated.View className="w-full max-w-sm gap-3" layout={LinearTransition}>
         <Button
           size="lg"
           variant="outline"
@@ -69,21 +70,22 @@ export function ContextSelectScreen() {
         )}
 
         {data?.map(org => (
-          <Button
-            key={org.organizationId}
-            size="lg"
-            variant="outline"
-            className="flex-row gap-2"
-            onPress={() => {
-              handleOrganization(org.organizationId);
-            }}
-            accessibilityLabel={`Use ${org.organizationName} workspace`}
-          >
-            <Building2 size={18} color={colors.foreground} />
-            <Text>{org.organizationName}</Text>
-          </Button>
+          <Animated.View key={org.organizationId} entering={FadeIn.duration(200)}>
+            <Button
+              size="lg"
+              variant="outline"
+              className="flex-row gap-2"
+              onPress={() => {
+                handleOrganization(org.organizationId);
+              }}
+              accessibilityLabel={`Use ${org.organizationName} workspace`}
+            >
+              <Building2 size={18} color={colors.foreground} />
+              <Text>{org.organizationName}</Text>
+            </Button>
+          </Animated.View>
         ))}
-      </View>
+      </Animated.View>
     </View>
   );
 }
