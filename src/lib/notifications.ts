@@ -368,7 +368,7 @@ async function generateLiteLLMSecurityNotification(
       z.array(z.tuple([z.string()]).transform(([userId]) => userId))
     )(
       'litellm-security-incident-users',
-      'select kilo_user_id from notification_litellm_security_mar_24 limit 5e5'
+      'select id from notification_litellm_mar_24 limit 5e5'
     );
 
     if (!litellmUsers.includes(user.id)) {
