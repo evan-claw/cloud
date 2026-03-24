@@ -2,6 +2,7 @@ import { baseProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { getUserAuthProviders, unlinkAuthProviderFromUser } from '@/lib/user';
 import { createAccountLinkingSession } from '@/lib/account-linking-session';
 import { TRPCError } from '@trpc/server';
+import { captureException } from '@sentry/nextjs';
 import * as z from 'zod';
 import { assertNoTrpcError, successResult } from '@/lib/maybe-result';
 import { db, readDb } from '@/lib/drizzle';
@@ -11,9 +12,11 @@ import {
   microdollar_usage,
   credit_transactions,
   auto_top_up_configs,
+  user_auth_provider,
 } from '@kilocode/db/schema';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import crypto from 'crypto';
+import { checkDiscordGuildMembership } from '@/lib/integrations/discord-guild-membership';
 import { AuthProviderIdSchema } from '@/lib/auth/provider-metadata';
 import { AUTOCOMPLETE_MODEL } from '@/lib/constants';
 import { ensureOrganizationAccess } from '@/routers/organizations/utils';
@@ -346,4 +349,63 @@ export const userRouter = createTRPCRouter({
 
       return successResult();
     }),
+
+  getDiscordGuildStatus: baseProcedure.query(async ({ ctx }) => {
+    const discordProvider = await db.query.user_auth_provider.findFirst({
+      where: and(
+        eq(user_auth_provider.kilo_user_id, ctx.user.id),
+        eq(user_auth_provider.provider, 'discord')
+      ),
+    });
+
+    const user = await db.query.kilocode_users.findFirst({
+      where: eq(kilocode_users.id, ctx.user.id),
+      columns: {
+        discord_server_membership_verified_at: true,
+      },
+    });
+
+    return successResult({
+      linked: !!discordProvider,
+      discord_avatar_url: discordProvider?.avatar_url ?? null,
+      discord_display_name: discordProvider?.display_name ?? null,
+      discord_server_membership_verified_at: user?.discord_server_membership_verified_at ?? null,
+    });
+  }),
+
+  verifyDiscordGuildMembership: baseProcedure.mutation(async ({ ctx }) => {
+    const discordProvider = await db.query.user_auth_provider.findFirst({
+      where: and(
+        eq(user_auth_provider.kilo_user_id, ctx.user.id),
+        eq(user_auth_provider.provider, 'discord')
+      ),
+    });
+
+    if (!discordProvider) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'No Discord account linked. Please connect your Discord account first.',
+      });
+    }
+
+    let isMember: boolean;
+    try {
+      isMember = await checkDiscordGuildMembership(discordProvider.provider_account_id);
+    } catch (error) {
+      captureException(error);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to verify Discord guild membership. Please try again later.',
+      });
+    }
+
+    await db
+      .update(kilocode_users)
+      .set({
+        discord_server_membership_verified_at: isMember ? new Date().toISOString() : null,
+      })
+      .where(eq(kilocode_users.id, ctx.user.id));
+
+    return successResult({ is_member: isMember });
+  }),
 });
