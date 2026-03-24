@@ -84,7 +84,7 @@ declare const OrganizationPlanSchema: z.ZodEnum<{
     enterprise: "enterprise";
 }>;
 type OrganizationPlan = z.infer<typeof OrganizationPlanSchema>;
-type AuthProviderId = 'email' | 'google' | 'github' | 'gitlab' | 'linkedin' | 'fake-login' | 'workos';
+type AuthProviderId = 'email' | 'google' | 'github' | 'gitlab' | 'linkedin' | 'discord' | 'fake-login' | 'workos';
 type IntegrationPermissions = Record<string, string>;
 type PlatformRepository = {
     id: number;
@@ -612,6 +612,23 @@ declare const kilocode_users: drizzle_orm_pg_core.PgTableWithColumns<{
             isAutoincrement: false;
             hasRuntimeDefault: false;
             enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        discord_server_membership_verified_at: drizzle_orm_pg_core.PgColumn<{
+            name: "discord_server_membership_verified_at";
+            tableName: "kilocode_users";
+            dataType: "string";
+            columnType: "PgTimestampString";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
             baseColumn: never;
             identity: undefined;
             generated: undefined;
@@ -4562,6 +4579,7 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
             getAutocomplete: _trpc_server.TRPCQueryProcedure<{
                 input: {
                     organizationId: string;
+                    period?: "all" | "year" | "month" | "week" | undefined;
                 };
                 output: {
                     cost: number;
@@ -7552,7 +7570,7 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
         }>;
         linkAuthProvider: _trpc_server.TRPCMutationProcedure<{
             input: {
-                provider: "email" | "google" | "github" | "gitlab" | "linkedin" | "fake-login" | "workos";
+                provider: "email" | "google" | "github" | "gitlab" | "linkedin" | "discord" | "fake-login" | "workos";
             };
             output: {
                 success: true;
@@ -7561,7 +7579,7 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
         }>;
         unlinkAuthProvider: _trpc_server.TRPCMutationProcedure<{
             input: {
-                provider: "email" | "google" | "github" | "gitlab" | "linkedin" | "fake-login" | "workos";
+                provider: "email" | "google" | "github" | "gitlab" | "linkedin" | "discord" | "fake-login" | "workos";
             };
             output: {
                 success: true;
@@ -7691,6 +7709,23 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
             output: {
                 success: true;
             };
+            meta: object;
+        }>;
+        getDiscordGuildStatus: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: SuccessResult<{
+                linked: boolean;
+                discord_avatar_url: string | null;
+                discord_display_name: string | null;
+                discord_server_membership_verified_at: string | null;
+            }>;
+            meta: object;
+        }>;
+        verifyDiscordGuildMembership: _trpc_server.TRPCMutationProcedure<{
+            input: void;
+            output: SuccessResult<{
+                is_member: boolean;
+            }>;
             meta: object;
         }>;
     }>>;
@@ -7893,6 +7928,7 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
                         completed_welcome_form: boolean;
                         linkedin_url: string | null;
                         github_url: string | null;
+                        discord_server_membership_verified_at: string | null;
                         openrouter_upstream_safety_identifier: string | null;
                         customer_source: string | null;
                     };
@@ -10435,46 +10471,26 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
                 input: void;
                 output: {
                     name: "orgSubscription" | "orgRenewed" | "orgCancelled" | "orgSSOUserJoined" | "orgInvitation" | "magicLink" | "balanceAlert" | "autoTopUpFailed" | "ossInviteNewUser" | "ossInviteExistingUser" | "ossExistingOrgProvisioned" | "deployFailed" | "clawTrialEndingSoon" | "clawTrialExpiresTomorrow" | "clawSuspendedTrial" | "clawSuspendedSubscription" | "clawSuspendedPayment" | "clawDestructionWarning" | "clawInstanceDestroyed" | "clawEarlybirdEndingSoon" | "clawEarlybirdExpiresTomorrow";
-                    subject: string;
+                    subject: "Welcome to Kilo for Teams!" | "Kilo: Your Teams Subscription Renewal" | "Kilo: Your Teams Subscription is Cancelled" | "Kilo: New SSO User Joined Your Organization" | "Kilo: Teams Invitation" | "Sign in to Kilo Code" | "Kilo: Low Balance Alert" | "Kilo: Auto Top-Up Failed" | "Kilo: OSS Sponsorship Offer" | "Kilo: Your Deployment Failed" | "Your KiloClaw Trial Ends in 2 Days" | "Your KiloClaw Trial Expires Tomorrow" | "Your KiloClaw Trial Has Ended" | "Your KiloClaw Subscription Has Ended" | "Action Required: KiloClaw Payment Overdue" | "Your KiloClaw Instance Will Be Deleted in 2 Days" | "Your KiloClaw Instance Has Been Deleted" | "Your KiloClaw Earlybird Access Ends Soon" | "Your KiloClaw Earlybird Access Expires Tomorrow";
                 }[];
-                meta: object;
-            }>;
-            getProviders: _trpc_server.TRPCQueryProcedure<{
-                input: void;
-                output: ("customerio" | "mailgun")[];
                 meta: object;
             }>;
             getPreview: _trpc_server.TRPCQueryProcedure<{
                 input: {
                     template: "orgSubscription" | "orgRenewed" | "orgCancelled" | "orgSSOUserJoined" | "orgInvitation" | "magicLink" | "balanceAlert" | "autoTopUpFailed" | "ossInviteNewUser" | "ossInviteExistingUser" | "ossExistingOrgProvisioned" | "deployFailed" | "clawTrialEndingSoon" | "clawTrialExpiresTomorrow" | "clawSuspendedTrial" | "clawSuspendedSubscription" | "clawSuspendedPayment" | "clawDestructionWarning" | "clawInstanceDestroyed" | "clawEarlybirdEndingSoon" | "clawEarlybirdExpiresTomorrow";
-                    provider: "customerio" | "mailgun";
                 };
                 output: {
-                    type: "mailgun";
-                    subject: string;
+                    subject: "Welcome to Kilo for Teams!" | "Kilo: Your Teams Subscription Renewal" | "Kilo: Your Teams Subscription is Cancelled" | "Kilo: New SSO User Joined Your Organization" | "Kilo: Teams Invitation" | "Sign in to Kilo Code" | "Kilo: Low Balance Alert" | "Kilo: Auto Top-Up Failed" | "Kilo: OSS Sponsorship Offer" | "Kilo: Your Deployment Failed" | "Your KiloClaw Trial Ends in 2 Days" | "Your KiloClaw Trial Expires Tomorrow" | "Your KiloClaw Trial Has Ended" | "Your KiloClaw Subscription Has Ended" | "Action Required: KiloClaw Payment Overdue" | "Your KiloClaw Instance Will Be Deleted in 2 Days" | "Your KiloClaw Instance Has Been Deleted" | "Your KiloClaw Earlybird Access Ends Soon" | "Your KiloClaw Earlybird Access Expires Tomorrow";
                     html: string;
-                    transactional_message_id?: undefined;
-                    message_data?: undefined;
-                } | {
-                    type: "customerio";
-                    transactional_message_id: "6" | "10" | "11" | "12" | "13" | "14" | "16" | "17" | "18" | "19" | "20" | "21" | "22" | "23" | "24" | "25" | "26" | "27" | "28" | "29" | "30";
-                    subject: string;
-                    message_data: Record<string, string>;
-                    html?: undefined;
                 };
                 meta: object;
             }>;
             sendTest: _trpc_server.TRPCMutationProcedure<{
                 input: {
                     template: "orgSubscription" | "orgRenewed" | "orgCancelled" | "orgSSOUserJoined" | "orgInvitation" | "magicLink" | "balanceAlert" | "autoTopUpFailed" | "ossInviteNewUser" | "ossInviteExistingUser" | "ossExistingOrgProvisioned" | "deployFailed" | "clawTrialEndingSoon" | "clawTrialExpiresTomorrow" | "clawSuspendedTrial" | "clawSuspendedSubscription" | "clawSuspendedPayment" | "clawDestructionWarning" | "clawInstanceDestroyed" | "clawEarlybirdEndingSoon" | "clawEarlybirdExpiresTomorrow";
-                    provider: "customerio" | "mailgun";
                     recipient: string;
                 };
                 output: {
-                    provider: "customerio";
-                    recipient: string;
-                } | {
-                    provider: "mailgun";
                     recipient: string;
                 };
                 meta: object;
