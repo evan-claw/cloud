@@ -68,13 +68,25 @@ import {
   type KiloclawEventRow,
 } from '@/app/admin/api/kiloclaw-analytics/hooks';
 
+function parseTimestamp(timestamp: string): Date {
+  const normalized = timestamp.includes('T') ? timestamp : timestamp.replace(' ', 'T');
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized);
+  const parsed = new Date(hasTimezone ? normalized : `${normalized}Z`);
+
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return new Date(timestamp);
+}
+
 function formatRelativeTime(timestamp: string | null): string {
   if (!timestamp) return '—';
-  return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
+  return formatDistanceToNow(parseTimestamp(timestamp), { addSuffix: true });
 }
 
 function formatAbsoluteTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleString();
+  return parseTimestamp(timestamp).toLocaleString();
 }
 
 function formatEpochTime(epoch: number | null): string {
@@ -924,51 +936,54 @@ function InstanceEventsCard({ sandboxId }: { sandboxId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {data.data.map((row: KiloclawEventRow, i: number) => (
-                  <tr key={`${row.timestamp}-${i}`} className="border-b last:border-0">
-                    <td className="py-2 pr-4 whitespace-nowrap">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="text-xs">
-                            {formatDistanceToNow(new Date(row.timestamp), { addSuffix: true })}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{new Date(row.timestamp).toLocaleString()}</TooltipContent>
-                      </Tooltip>
-                    </td>
-                    <td className="py-2 pr-4">
-                      <code className="text-xs">{row.event}</code>
-                    </td>
-                    <td className="py-2 pr-4">
-                      <DeliveryBadge delivery={row.delivery} />
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span className="text-xs">{row.status || '—'}</span>
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span className="text-xs">{row.label || '—'}</span>
-                    </td>
-                    <td className="py-2 pr-4 whitespace-nowrap">
-                      <span className="text-xs">{formatDuration(row.duration_ms)}</span>
-                    </td>
-                    <td className="py-2">
-                      {row.error ? (
+                {data.data.map((row: KiloclawEventRow, i: number) => {
+                  const eventTimestamp = parseTimestamp(row.timestamp);
+                  return (
+                    <tr key={`${row.timestamp}-${i}`} className="border-b last:border-0">
+                      <td className="py-2 pr-4 whitespace-nowrap">
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="text-destructive block max-w-[200px] truncate text-xs">
-                              {row.error}
+                            <span className="text-xs">
+                              {formatDistanceToNow(eventTimestamp, { addSuffix: true })}
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent className="max-w-[400px]">
-                            <p className="break-words text-xs">{row.error}</p>
-                          </TooltipContent>
+                          <TooltipContent>{eventTimestamp.toLocaleString()}</TooltipContent>
                         </Tooltip>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="py-2 pr-4">
+                        <code className="text-xs">{row.event}</code>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <DeliveryBadge delivery={row.delivery} />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <span className="text-xs">{row.status || '—'}</span>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <span className="text-xs">{row.label || '—'}</span>
+                      </td>
+                      <td className="py-2 pr-4 whitespace-nowrap">
+                        <span className="text-xs">{formatDuration(row.duration_ms)}</span>
+                      </td>
+                      <td className="py-2">
+                        {row.error ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-destructive block max-w-[200px] truncate text-xs">
+                                {row.error}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-[400px]">
+                              <p className="break-words text-xs">{row.error}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
