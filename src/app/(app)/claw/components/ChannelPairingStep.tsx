@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Send, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKiloClawPairing, useRefreshPairing } from '@/hooks/useKiloClaw';
@@ -59,9 +59,21 @@ export function ChannelPairingStep({
     (r: { channel: string; code: string; id: string }) => r.channel === channelId
   );
 
-  const isApproving = mutations.approvePairingRequest.isPending;
+  // Preserve the request being approved so the approval card stays visible
+  // while the mutation's onSuccess invalidates the pairing query. Without
+  // this, matchingRequest goes null from the refetch before onComplete fires,
+  // causing a brief flash of the "waiting" state.
+  const [pendingApproval, setPendingApproval] = useState<{
+    code: string;
+    channel: string;
+    id: string;
+  } | null>(null);
+
+  const displayedRequest = matchingRequest ?? pendingApproval;
+  const isApproving = mutations.approvePairingRequest.isPending || pendingApproval !== null;
 
   function handleApprove(channel: string, code: string) {
+    if (matchingRequest) setPendingApproval(matchingRequest);
     mutations.approvePairingRequest.mutate(
       { channel, code },
       {
@@ -70,10 +82,14 @@ export function ChannelPairingStep({
             toast.success('Pairing approved');
             onComplete();
           } else {
+            setPendingApproval(null);
             toast.error(result.message || 'Approval failed');
           }
         },
-        onError: err => toast.error(`Failed to approve: ${err.message}`),
+        onError: err => {
+          setPendingApproval(null);
+          toast.error(`Failed to approve: ${err.message}`);
+        },
       }
     );
   }
@@ -81,7 +97,7 @@ export function ChannelPairingStep({
   return (
     <ChannelPairingStepView
       channelId={channelId}
-      matchingRequest={matchingRequest ?? null}
+      matchingRequest={displayedRequest ?? null}
       isApproving={isApproving}
       onApprove={handleApprove}
       onSkip={onSkip}
@@ -214,9 +230,7 @@ export function ChannelPairingStepView({
           <h2 className="text-foreground text-lg font-semibold">
             Waiting for you to message the bot...
           </h2>
-          <p className="text-muted-foreground text-sm">
-            This page will update as soon as the bot responds
-          </p>
+          <p className="text-muted-foreground text-sm">This page will update automatically.</p>
         </div>
         <button
           type="button"

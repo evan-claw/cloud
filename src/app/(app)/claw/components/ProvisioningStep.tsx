@@ -12,6 +12,11 @@ import {
 } from './claw.types';
 import { OnboardingStepView } from './OnboardingStepView';
 
+// Let the instance boot in peace before advancing to the pairing step.
+// Config mutations fire immediately, but we hold onComplete until this
+// timer elapses so the gateway has time to fully initialize.
+const BOOT_DELAY_MS = 60_000;
+
 /** Play a short chime via the Web Audio API. */
 function playChime() {
   try {
@@ -46,6 +51,8 @@ export function ProvisioningStep({
   onComplete: () => void;
 }) {
   const completedRef = useRef(false);
+  const [configReady, setConfigReady] = useState(false);
+  const [bootDelayElapsed, setBootDelayElapsed] = useState(false);
 
   // Keep stable references to callbacks so the effect only re-runs
   // when data values change, not when the parent re-renders or mutation
@@ -60,6 +67,11 @@ export function ProvisioningStep({
   patchExecPresetRef.current = mutations.patchExecPreset.mutate;
   const channelTokensRef = useRef(channelTokens);
   channelTokensRef.current = channelTokens;
+
+  useEffect(() => {
+    const timer = setTimeout(() => setBootDelayElapsed(true), BOOT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (!instanceRunning || completedRef.current) return;
@@ -92,18 +104,14 @@ export function ProvisioningStep({
     }
 
     if (Object.keys(configPatch).length === 0) {
-      playChime();
-      onCompleteRef.current();
+      setConfigReady(true);
       return;
     }
 
     patchOpenclawConfigRef.current(
       { patch: configPatch },
       {
-        onSuccess: () => {
-          playChime();
-          onCompleteRef.current();
-        },
+        onSuccess: () => setConfigReady(true),
         onError: (err: { message: string }) => {
           completedRef.current = false;
           toast.error(err.message);
@@ -111,6 +119,15 @@ export function ProvisioningStep({
       }
     );
   }, [instanceRunning, preset]);
+
+  // Advance to the next step only when both the config is applied
+  // and the boot delay has elapsed, giving the gateway time to start.
+  useEffect(() => {
+    if (configReady && bootDelayElapsed) {
+      playChime();
+      onCompleteRef.current();
+    }
+  }, [configReady, bootDelayElapsed]);
 
   return <ProvisioningStepView totalSteps={totalSteps} />;
 }
