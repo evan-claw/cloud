@@ -19,21 +19,22 @@ function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
 
+  const inAuthGroup = segments[0] === '(auth)';
+  const needsRedirect = !isLoading && ((!token && !inAuthGroup) || (token && inAuthGroup));
+
   useEffect(() => {
     if (isLoading) return;
-
-    const inAuthGroup = segments[0] === '(auth)';
 
     if (!token && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (token && inAuthGroup) {
       router.replace('/(app)');
+    } else {
+      void SplashScreen.hideAsync();
     }
+  }, [token, isLoading, inAuthGroup, router]);
 
-    void SplashScreen.hideAsync();
-  }, [token, isLoading, segments, router]);
-
-  if (isLoading) {
+  if (isLoading || needsRedirect) {
     return;
   }
 
