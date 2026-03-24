@@ -22,7 +22,6 @@ import type {
   GatewayProcessActionResponse,
   ConfigRestoreResponse,
   GatewayReadyResponse,
-  ControllerHealthResponse,
   ControllerVersionResponse,
   OpenclawConfigResponse,
   GoogleCredentialsInput,
@@ -300,14 +299,6 @@ export class KiloClawInternalClient {
   async getGatewayReady(userId: string): Promise<GatewayReadyResponse> {
     return this.request(
       `/api/platform/gateway/ready?userId=${encodeURIComponent(userId)}`,
-      undefined,
-      { userId }
-    );
-  }
-
-  async getControllerHealth(userId: string): Promise<ControllerHealthResponse> {
-    return this.request(
-      `/api/platform/controller-health?userId=${encodeURIComponent(userId)}`,
       undefined,
       { userId }
     );

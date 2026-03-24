@@ -642,28 +642,6 @@ platform.get('/gateway/ready', async c => {
   }
 });
 
-// GET /api/platform/controller-health?userId=...
-// Non-fatal polling endpoint — always returns 200 so the frontend poll
-// doesn't generate a wall of errors during startup.
-platform.get('/controller-health', async c => {
-  const userId = setValidatedQueryUserId(c);
-  if (!userId) {
-    return c.json({ error: 'userId query parameter is required' }, 400);
-  }
-
-  try {
-    const result = await withDORetry(
-      instanceStubFactory(c.env, userId),
-      stub => stub.getControllerHealth(),
-      'getControllerHealth'
-    );
-    return c.json(result ?? { status: 'ok', state: 'starting' }, 200);
-  } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    return c.json({ status: 'ok', state: 'starting', error: raw }, 200);
-  }
-});
-
 // GET /api/platform/controller-version?userId=...
 platform.get('/controller-version', async c => {
   const userId = setValidatedQueryUserId(c);

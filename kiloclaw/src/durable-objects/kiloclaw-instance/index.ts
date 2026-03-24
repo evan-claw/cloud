@@ -1306,16 +1306,6 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     return gateway.getControllerVersion(this.s, this.env);
   }
 
-  async getControllerHealth(): Promise<{
-    status: 'ok';
-    state: 'bootstrapping' | 'starting' | 'ready' | 'degraded';
-    phase?: string;
-    error?: string;
-  } | null> {
-    await this.loadState();
-    return gateway.getControllerHealth(this.s, this.env);
-  }
-
   async getGatewayReady(): Promise<Record<string, unknown> | null> {
     await this.loadState();
     return gateway.getGatewayReady(this.s, this.env);

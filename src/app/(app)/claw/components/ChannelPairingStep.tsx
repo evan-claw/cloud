@@ -49,7 +49,7 @@ export function ChannelPairingStep({
         await new Promise(r => setTimeout(r, 1_000));
       }
     }
-    poll();
+    void poll();
     return () => {
       cancelled = true;
     };

@@ -3,12 +3,10 @@ import type { KiloClawEnv } from '../../types';
 import { deriveGatewayToken } from '../../auth/gateway-token';
 import {
   type GatewayProcessStatus,
-  type ControllerHealthResponse,
   GatewayProcessStatusSchema,
   GatewayCommandResponseSchema,
   ConfigRestoreResponseSchema,
   ControllerVersionResponseSchema,
-  ControllerHealthResponseSchema,
   GatewayReadyResponseSchema,
   EnvPatchResponseSchema,
   OpenclawConfigResponseSchema,
@@ -233,26 +231,6 @@ export async function getControllerVersion(
       '/_kilo/version',
       'GET',
       ControllerVersionResponseSchema
-    );
-  } catch (error) {
-    if (isErrorUnknownRoute(error)) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-export async function getControllerHealth(
-  state: InstanceMutableState,
-  env: KiloClawEnv
-): Promise<ControllerHealthResponse | null> {
-  try {
-    return await callGatewayController(
-      state,
-      env,
-      '/_kilo/health',
-      'GET',
-      ControllerHealthResponseSchema
     );
   } catch (error) {
     if (isErrorUnknownRoute(error)) {

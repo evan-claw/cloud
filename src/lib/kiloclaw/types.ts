@@ -222,14 +222,6 @@ export type ConfigRestoreResponse = {
 /** Response from GET /api/platform/gateway/ready (opaque — shape depends on OpenClaw version) */
 export type GatewayReadyResponse = Record<string, unknown>;
 
-/** Response from GET /api/platform/controller-health */
-export type ControllerHealthResponse = {
-  status: 'ok';
-  state: 'bootstrapping' | 'starting' | 'ready' | 'degraded';
-  phase?: string;
-  error?: string;
-};
-
 /** Response from GET /api/platform/controller-version. Null fields = old controller. */
 export type ControllerVersionResponse = {
   version: string | null;
