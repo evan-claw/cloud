@@ -694,6 +694,20 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
   // ── Lifecycle ───────────────────────────────────────────────────────
 
+  async forceRetryRecovery(): Promise<{ ok: true }> {
+    await this.loadState();
+
+    if (this.s.status === 'destroying') {
+      throw new Error('Cannot retry recovery: instance is being destroyed');
+    }
+
+    this.s.lastMetadataRecoveryAt = null;
+    await this.persist({ lastMetadataRecoveryAt: null });
+    await this.scheduleAlarm();
+
+    return { ok: true };
+  }
+
   async start(userId?: string): Promise<{ started: boolean }> {
     // Guard against concurrent start() calls — two overlapping invocations
     // (e.g. startAsync via waitUntil + a direct RPC start) can both see
@@ -743,7 +757,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         flyConfig,
         this.ctx,
         this.s,
-        createReconcileContext(this.s, this.env, 'start_recovery')
+        createReconcileContext(this.s, this.env, 'start_recovery'),
+        true
       );
       if (!recovered && !this.s.flyMachineId) {
         throw new Error(

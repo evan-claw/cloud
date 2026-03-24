@@ -549,6 +549,17 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
     }
   }),
 
+  forceRetryRecovery: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
+    const fallbackMessage = 'Failed to retry recovery';
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.forceRetryRecovery(input.userId);
+    } catch (err) {
+      console.error('Failed to retry recovery for user:', input.userId, err);
+      throwKiloclawAdminError(err, fallbackMessage);
+    }
+  }),
+
   machineStop: adminProcedure.input(GatewayProcessSchema).mutation(async ({ input }) => {
     const fallbackMessage = 'Failed to stop machine';
     try {

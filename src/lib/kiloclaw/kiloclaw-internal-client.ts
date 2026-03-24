@@ -451,6 +451,17 @@ export class KiloClawInternalClient {
     );
   }
 
+  async forceRetryRecovery(userId: string): Promise<{ ok: true }> {
+    return this.request(
+      '/api/platform/force-retry-recovery',
+      {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      },
+      { userId }
+    );
+  }
+
   async listCandidateVolumes(userId: string): Promise<CandidateVolumesResponse> {
     return this.request(
       `/api/platform/candidate-volumes?userId=${encodeURIComponent(userId)}`,

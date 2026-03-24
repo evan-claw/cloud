@@ -946,6 +946,24 @@ platform.post('/start', async c => {
   }
 });
 
+// POST /api/platform/force-retry-recovery
+platform.post('/force-retry-recovery', async c => {
+  const result = await parseBody(c, UserIdRequestSchema);
+  if ('error' in result) return result.error;
+
+  try {
+    const { ok } = await withDORetry(
+      instanceStubFactory(c.env, result.data.userId),
+      stub => stub.forceRetryRecovery(),
+      'forceRetryRecovery'
+    );
+    return c.json({ ok });
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'forceRetryRecovery');
+    return jsonError(message, status);
+  }
+});
+
 // POST /api/platform/stop
 platform.post('/stop', async c => {
   const result = await parseBody(c, UserIdRequestSchema);
