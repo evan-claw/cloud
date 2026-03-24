@@ -45,14 +45,14 @@ const MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   [MINIMAX_CURRENT_MODEL_ID]: MINIMAX_CURRENT_MODEL_NAME,
 };
 
-function describeRouting(modeToModel: Map<string, ResolvedAutoModel>): string {
-  const modelToModes = new Map<string, string[]>();
-  for (const [mode, { model }] of modeToModel) {
-    const modes = modelToModes.get(model) ?? [];
+function describeRouting(modeToModel: Record<string, ResolvedAutoModel>): string {
+  const modelToModes: Record<string, string[]> = {};
+  for (const [mode, { model }] of Object.entries(modeToModel)) {
+    const modes = modelToModes[model] ?? [];
     modes.push(mode);
-    modelToModes.set(model, modes);
+    modelToModes[model] = modes;
   }
-  const parts = [...modelToModes.entries()].map(
+  const parts = Object.entries(modelToModes).map(
     ([model, modes]) => `${MODEL_DISPLAY_NAMES[model] ?? model} for ${modes.join(', ')}`
   );
   return `Uses ${parts.join('; ')}.`;
@@ -64,60 +64,53 @@ const FRONTIER_CODE_MODEL: ResolvedAutoModel = {
   verbosity: 'low',
 };
 
-// Mode → model mappings for kilo-auto/frontier routing.
-// Add/remove/modify entries here to change routing behavior.
-const FRONTIER_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
-  // Opus modes (planning, reasoning, orchestration, debugging)
-  [
-    'plan',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
-  ],
-  [
-    'general',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'medium' },
-  ],
-  [
-    'architect',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
-  ],
-  [
-    'orchestrator',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
-  ],
-  ['ask', { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' }],
-  [
-    'debug',
-    { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
-  ],
-  // Sonnet modes (implementation, exploration)
-  [
-    'build',
-    { model: CLAUDE_SONNET_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'medium' },
-  ],
-  [
-    'explore',
-    { model: CLAUDE_SONNET_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'medium' },
-  ],
-  ['code', FRONTIER_CODE_MODEL],
-]);
+const FRONTIER_MODE_TO_MODEL: Record<string, ResolvedAutoModel> = {
+  plan: { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
+  general: {
+    model: CLAUDE_OPUS_CURRENT_MODEL_ID,
+    reasoning: { enabled: true },
+    verbosity: 'medium',
+  },
+  architect: {
+    model: CLAUDE_OPUS_CURRENT_MODEL_ID,
+    reasoning: { enabled: true },
+    verbosity: 'high',
+  },
+  orchestrator: {
+    model: CLAUDE_OPUS_CURRENT_MODEL_ID,
+    reasoning: { enabled: true },
+    verbosity: 'high',
+  },
+  ask: { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
+  debug: { model: CLAUDE_OPUS_CURRENT_MODEL_ID, reasoning: { enabled: true }, verbosity: 'high' },
+  build: {
+    model: CLAUDE_SONNET_CURRENT_MODEL_ID,
+    reasoning: { enabled: true },
+    verbosity: 'medium',
+  },
+  explore: {
+    model: CLAUDE_SONNET_CURRENT_MODEL_ID,
+    reasoning: { enabled: true },
+    verbosity: 'medium',
+  },
+  code: FRONTIER_CODE_MODEL,
+};
 
 const BALANCED_CODE_MODEL: ResolvedAutoModel = {
   model: MINIMAX_CURRENT_MODEL_ID,
 };
 
-// Mode → model mappings for kilo-auto/balanced routing.
-// Uses Kimi K2.5 where Frontier uses Opus, Minimax M2.7 where Frontier uses Sonnet.
-const BALANCED_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
-  ['plan', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['general', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['architect', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['orchestrator', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['ask', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['debug', { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } }],
-  ['build', { model: KIMI_CURRENT_MODEL_ID }],
-  ['explore', { model: KIMI_CURRENT_MODEL_ID }],
-  ['code', BALANCED_CODE_MODEL],
-]);
+const BALANCED_MODE_TO_MODEL: Record<string, ResolvedAutoModel> = {
+  plan: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  general: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  architect: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  orchestrator: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  ask: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  debug: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
+  build: { model: KIMI_CURRENT_MODEL_ID },
+  explore: { model: KIMI_CURRENT_MODEL_ID },
+  code: BALANCED_CODE_MODEL,
+};
 
 export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
   id: 'kilo-auto/frontier',
@@ -212,9 +205,9 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
   if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
-    return BALANCED_MODE_TO_MODEL.get(mode) ?? BALANCED_CODE_MODEL;
+    return BALANCED_MODE_TO_MODEL[mode] ?? BALANCED_CODE_MODEL;
   }
-  return FRONTIER_MODE_TO_MODEL.get(mode) ?? FRONTIER_CODE_MODEL;
+  return FRONTIER_MODE_TO_MODEL[mode] ?? FRONTIER_CODE_MODEL;
 }
 
 export function applyResolvedAutoModel(
