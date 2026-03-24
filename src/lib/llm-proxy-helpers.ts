@@ -558,6 +558,10 @@ export function countAndStoreFimUsage(
         return;
       }
 
+      if (usageContext.user_byok) {
+        usageStats.cost_mUsd = 0;
+      }
+
       // Use the same logMicrodollarUsage as OpenRouter!
       return logMicrodollarUsage(usageStats, usageContext);
     })
