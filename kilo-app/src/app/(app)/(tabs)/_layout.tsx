@@ -5,6 +5,10 @@ import { toast } from 'sonner-native';
 
 import { useThemeColors } from '@/lib/hooks/use-theme-colors';
 
+export const unstable_settings = {
+  initialRouteName: '(kiloclaw)',
+};
+
 export default function TabsLayout() {
   const colors = useThemeColors();
 
