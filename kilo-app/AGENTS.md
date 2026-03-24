@@ -72,3 +72,4 @@ pnpm format && pnpm typecheck && pnpm lint && pnpm check:unused
 
 - Do not suppress lint rules without justification.
 - Keep route files in `src/app/` thin — extract logic into `src/components/` or `src/hooks/`.
+- Never commit plans, specs, design docs, or other non-code markdown files to this repo.
