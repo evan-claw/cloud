@@ -93,7 +93,7 @@
       "id": "kilo-auto/free",
       "name": "Kilo Auto Free",
       "created": 0,
-      "description": "Free with limited capability. No credits required.",
+      "description": "Free with limited capability. No credits required. Uses MiniMax M2.5.",
       "architecture": {
         "input_modalities": [
           "text"

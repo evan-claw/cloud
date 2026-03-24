@@ -19,6 +19,12 @@ import type {
 import type { ModelSettings, OpenCodeSettings, Verbosity } from '@kilocode/db/schema-types';
 import type OpenAI from 'openai';
 
+function stripDisplayName(displayName: string): string {
+  const start = displayName.indexOf(': ');
+  const end = displayName.indexOf(' (');
+  return displayName.substring(start < 0 ? 0 : start + 2, end < 0 ? undefined : end);
+}
+
 type AutoModel = {
   id: string;
   name: string;
@@ -131,7 +137,7 @@ export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
 export const KILO_AUTO_FREE_MODEL: AutoModel = {
   id: 'kilo-auto/free',
   name: 'Kilo Auto Free',
-  description: 'Free with limited capability. No credits required.',
+  description: `Free with limited capability. No credits required. Uses ${stripDisplayName(minimax_m25_free_model.display_name)}.`,
   context_length: minimax_m25_free_model.context_length,
   max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
   prompt_price: '0',
