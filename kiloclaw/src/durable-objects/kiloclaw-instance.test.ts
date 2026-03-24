@@ -4073,12 +4073,7 @@ describe('manual and crash recovery analytics events', () => {
     const failureEvents = analyticsEventsByName(env, 'instance.crash_recovery_failed');
     expect(failureEvents).toHaveLength(1);
     expect(failureEvents[0].blobs).toEqual(
-      expect.arrayContaining([
-        'instance.crash_recovery_failed',
-        'user-1',
-        'http',
-        'restart failed',
-      ])
+      expect.arrayContaining(['instance.crash_recovery_failed', 'user-1', 'http', 'restart failed'])
     );
   });
 });
