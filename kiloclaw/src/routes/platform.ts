@@ -621,6 +621,8 @@ platform.get('/gateway/status', async c => {
 });
 
 // GET /api/platform/gateway/ready?userId=...
+// Non-fatal polling endpoint — always returns 200 so the frontend poll
+// doesn't generate a wall of errors during startup.
 platform.get('/gateway/ready', async c => {
   const userId = setValidatedQueryUserId(c);
   if (!userId) {
@@ -635,12 +637,14 @@ platform.get('/gateway/ready', async c => {
     );
     return c.json(result ?? { ready: false, error: 'controller too old' }, 200);
   } catch (err) {
-    const { message, status } = sanitizeError(err, 'gateway ready');
-    return jsonError(message, status);
+    const raw = err instanceof Error ? err.message : String(err);
+    return c.json({ ready: false, error: raw }, 200);
   }
 });
 
 // GET /api/platform/controller-health?userId=...
+// Non-fatal polling endpoint — always returns 200 so the frontend poll
+// doesn't generate a wall of errors during startup.
 platform.get('/controller-health', async c => {
   const userId = setValidatedQueryUserId(c);
   if (!userId) {
@@ -655,8 +659,8 @@ platform.get('/controller-health', async c => {
     );
     return c.json(result ?? { status: 'ok', state: 'starting' }, 200);
   } catch (err) {
-    const { message, status } = sanitizeError(err, 'controller health');
-    return jsonError(message, status);
+    const raw = err instanceof Error ? err.message : String(err);
+    return c.json({ status: 'ok', state: 'starting', error: raw }, 200);
   }
 });
 

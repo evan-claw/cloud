@@ -278,6 +278,12 @@ export async function getGatewayReady(
     if (isErrorUnknownRoute(error)) {
       return null;
     }
+    // During startup the gateway process may not be running yet, producing
+    // a 503 from the controller. Return a descriptive object instead of
+    // throwing so the frontend poll doesn't see a wall of 500s.
+    if (error instanceof GatewayControllerError) {
+      return { ready: false, error: error.message, status: error.status };
+    }
     throw error;
   }
 }

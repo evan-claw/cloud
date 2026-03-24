@@ -664,6 +664,7 @@ export const kiloclawRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.getGatewayReady(ctx.user.id);
     } catch (err) {
+      console.error('[gatewayReady] error for user:', ctx.user.id, err);
       if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -682,6 +683,7 @@ export const kiloclawRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
       return await client.getControllerHealth(ctx.user.id);
     } catch (err) {
+      console.error('[controllerHealth] error for user:', ctx.user.id, err);
       if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
         throw new TRPCError({
           code: 'NOT_FOUND',
