@@ -4,7 +4,7 @@ import { PortalHost } from '@rn-primitives/portal';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Toaster } from 'sonner-native';
@@ -25,7 +25,6 @@ function RootLayoutNav() {
   const isLoading = authLoading || contextLoading;
   const inAuthGroup = segments[0] === '(auth)';
   const inContextGroup = segments[0] === '(context)';
-  const hasInitialized = useRef(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -43,13 +42,9 @@ function RootLayoutNav() {
         router.replace('/(context)/select');
       }
     } else if (inAuthGroup || inContextGroup) {
-      router.replace('/(app)/(tabs)/(kiloclaw)');
-    } else if (hasInitialized.current) {
-      void SplashScreen.hideAsync();
+      router.replace('/(app)');
     } else {
-      hasInitialized.current = true;
       void SplashScreen.hideAsync();
-      router.replace('/(app)/(tabs)/(kiloclaw)');
     }
   }, [token, context, isLoading, inAuthGroup, inContextGroup, router]);
 
@@ -57,9 +52,7 @@ function RootLayoutNav() {
     !isLoading &&
     ((!token && !inAuthGroup) ||
       (token !== undefined && !context && !inContextGroup) ||
-      (token !== undefined &&
-        context !== undefined &&
-        (inAuthGroup || inContextGroup || !hasInitialized.current)));
+      (token !== undefined && context !== undefined && (inAuthGroup || inContextGroup)));
 
   if (isLoading || needsRedirect) {
     return;
