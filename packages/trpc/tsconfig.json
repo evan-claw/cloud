@@ -9,7 +9,7 @@
     "declaration": true,
     "declarationMap": true,
     "emitDeclarationOnly": true,
-    "outDir": "dist",
+    "outDir": "dist/tsc",
     "isolatedModules": true,
     "esModuleInterop": true,
     "jsx": "react-jsx",

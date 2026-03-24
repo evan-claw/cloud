@@ -101,5 +101,5 @@ supabase/.temp
 
 .kilo/plans
 
-# @kilocode/trpc declaration output
-packages/trpc/dist/
+# @kilocode/trpc intermediate tsc output (bundled index.d.ts is committed)
+packages/trpc/dist/tsc/
