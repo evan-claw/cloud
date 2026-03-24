@@ -5,6 +5,7 @@ import { timingSafeEqual } from '@kilocode/encryption';
 import type { AppEnv } from '../types';
 import { userIdFromSandboxId } from '../auth/sandbox-id';
 import { deriveGatewayToken } from '../auth/gateway-token';
+import { waitUntil } from 'cloudflare:workers';
 import { getWorkerDb, findEmailByUserId } from '../db';
 import { capturePostHogEvent } from '../lib/posthog';
 
@@ -108,30 +109,38 @@ controller.post('/checkin', async (c: Context<AppEnv>) => {
   }
 
   // Forward product telemetry to PostHog (~every 24h). Skip in development.
+  // Runs in background via waitUntil so it never delays the checkin response.
   if (data.productTelemetry && c.env.NEXT_PUBLIC_POSTHOG_KEY && c.env.WORKER_ENV === 'production') {
-    try {
-      let distinctId = userId;
-      const connectionString = c.env.HYPERDRIVE?.connectionString;
-      if (connectionString) {
-        const email = await findEmailByUserId(getWorkerDb(connectionString), userId);
-        if (email) distinctId = email;
-      }
+    const posthogKey = c.env.NEXT_PUBLIC_POSTHOG_KEY;
+    const connectionString = c.env.HYPERDRIVE?.connectionString;
+    const telemetryPayload = data.productTelemetry;
+    const telemetryMeta = {
+      sandboxId: data.sandboxId,
+      machineId: data.machineId ?? '',
+      flyRegion: c.req.header('fly-region') ?? '',
+      userId,
+    };
 
-      await capturePostHogEvent({
-        apiKey: c.env.NEXT_PUBLIC_POSTHOG_KEY,
-        distinctId,
-        event: 'kc_instance_product_telemetry',
-        properties: {
-          ...data.productTelemetry,
-          sandboxId: data.sandboxId,
-          machineId: data.machineId ?? '',
-          flyRegion: c.req.header('fly-region') ?? '',
-          userId,
-        },
-      });
-    } catch (err) {
-      console.warn('[controller] PostHog capture failed (non-fatal):', err);
-    }
+    const telemetryPromise = (async () => {
+      try {
+        let distinctId = userId;
+        if (connectionString) {
+          const email = await findEmailByUserId(getWorkerDb(connectionString), userId);
+          if (email) distinctId = email;
+        }
+
+        await capturePostHogEvent({
+          apiKey: posthogKey,
+          distinctId,
+          event: 'kc_instance_product_telemetry',
+          properties: { ...telemetryPayload, ...telemetryMeta },
+        });
+      } catch (err) {
+        console.warn('[controller] PostHog capture failed (non-fatal):', err);
+      }
+    })();
+
+    waitUntil(telemetryPromise);
   }
 
   return c.body(null, 204);

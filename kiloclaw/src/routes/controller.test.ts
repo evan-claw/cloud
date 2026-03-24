@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { controller } from './controller';
 import { deriveGatewayToken } from '../auth/gateway-token';
 
+vi.mock('cloudflare:workers', () => ({
+  waitUntil: (p: Promise<unknown>) => p,
+}));
+
 vi.mock('../db', () => ({
   getWorkerDb: () => ({}),
   findEmailByUserId: vi.fn().mockResolvedValue('user@example.com'),

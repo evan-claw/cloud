@@ -1,4 +1,5 @@
 const POSTHOG_CAPTURE_URL = 'https://us.i.posthog.com/i/v0/e/';
+const POSTHOG_TIMEOUT_MS = 5_000;
 
 type CaptureEvent = {
   apiKey: string;
@@ -10,8 +11,8 @@ type CaptureEvent = {
 /**
  * Send a single event to PostHog's capture API.
  *
- * Direct fetch — no SDK, no timers, no queues. Ideal for Cloudflare Workers
- * where we need exactly one synchronous HTTP call.
+ * Direct fetch with a 5s timeout — no SDK, no timers, no queues.
+ * Designed for fire-and-forget use inside `waitUntil`.
  */
 export async function capturePostHogEvent({
   apiKey,
@@ -22,6 +23,7 @@ export async function capturePostHogEvent({
   const response = await fetch(POSTHOG_CAPTURE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(POSTHOG_TIMEOUT_MS),
     body: JSON.stringify({
       api_key: apiKey,
       distinct_id: distinctId,
