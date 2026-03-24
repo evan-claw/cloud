@@ -366,10 +366,7 @@ async function generateLiteLLMSecurityNotification(
   try {
     const litellmUsers = await cachedPosthogQuery(
       z.array(z.tuple([z.string()]).transform(([userId]) => userId))
-    )(
-      'litellm-security-incident-users',
-      'select id from notification_litellm_mar_24 limit 5e5'
-    );
+    )('litellm-security-incident-users', 'select id from notification_litellm_mar_24 limit 5e5');
 
     if (!litellmUsers.includes(user.id)) {
       console.debug('[generateLiteLLMSecurityNotification] user is not using LiteLLM provider');
