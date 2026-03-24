@@ -170,6 +170,12 @@ export async function parseMessagesMicrodollarUsageFromStream(
       if (json.type === 'message_delta') {
         finish_reason = json.delta.stop_reason;
         usage ??= json.usage;
+        // Vercel AI Gateway sends provider_metadata on message_delta (not message_start)
+        const meta = (json as MaybeHasVercelProviderMetadata).provider_metadata;
+        if (meta) {
+          providerMetadata = meta;
+          inference_provider = meta.gateway?.routing?.finalProvider ?? inference_provider;
+        }
       }
     },
   });

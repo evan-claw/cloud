@@ -11,10 +11,11 @@
   "generation_time": null,
   "streamed": true,
   "cancelled": null,
-  "inputTokens": 0,
+  "inputTokens": 25,
   "outputTokens": 6,
   "cacheHitTokens": 0,
   "cacheWriteTokens": 0,
   "cost_mUsd": 375,
   "is_byok": null
 }
+
