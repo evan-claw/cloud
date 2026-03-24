@@ -45,6 +45,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await SecureStore.deleteItemAsync('app-context');
     queryClient.clear();
     setToken(undefined);
   }, []);
