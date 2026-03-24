@@ -25,88 +25,35 @@ type AutoModel = {
   opencode_settings: OpenCodeSettings | undefined;
 };
 
-export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
-  id: 'kilo-auto/frontier',
-  name: 'Kilo Auto Frontier',
-  description:
-    'Highest performance and capability for any task. Uses Claude Opus for planning and reasoning, Claude Sonnet for implementation and exploration.',
-  context_length: 1_000_000,
-  max_completion_tokens: 128_000,
-  prompt_price: '0.000005',
-  completion_price: '0.000025',
-  supports_images: true,
-  roocode_settings: undefined,
-  opencode_settings: {
-    family: 'claude',
-    prompt: 'anthropic',
-  },
-};
-
-export const KILO_AUTO_FREE_MODEL: AutoModel = {
-  id: 'kilo-auto/free',
-  name: 'Kilo Auto Free',
-  description: 'Free with limited capability. No credits required.',
-  context_length: minimax_m25_free_model.context_length,
-  max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
-  prompt_price: '0',
-  completion_price: '0',
-  supports_images: false,
-  roocode_settings: {
-    included_tools: ['search_and_replace'],
-    excluded_tools: ['apply_diff', 'edit_file'],
-  },
-  opencode_settings: undefined,
-};
-
-export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
-  id: 'kilo-auto/balanced',
-  name: 'Kilo Auto Balanced',
-  description:
-    'Great balance of price and capability. Uses Kimi K2.5 for planning and reasoning, Minimax M2.7 for implementation.',
-  context_length: 204800,
-  max_completion_tokens: 131072,
-  prompt_price: '0.0000006',
-  completion_price: '0.000003',
-  supports_images: false,
-  roocode_settings: {
-    included_tools: ['edit_file'],
-    excluded_tools: ['apply_diff'],
-  },
-  opencode_settings: undefined,
-};
-
-export const KILO_AUTO_SMALL_MODEL: AutoModel = {
-  id: 'kilo-auto/small',
-  name: 'Kilo Auto Small',
-  description: 'Automatically routes your request to a small model.',
-  context_length: 400_000,
-  max_completion_tokens: 128_000,
-  prompt_price: '0.00000005',
-  completion_price: '0.0000004',
-  supports_images: true,
-  roocode_settings: undefined,
-  opencode_settings: {
-    family: 'gpt',
-    prompt: 'codex',
-  },
-};
-
-export const AUTO_MODELS = [
-  KILO_AUTO_FRONTIER_MODEL,
-  KILO_AUTO_BALANCED_MODEL,
-  KILO_AUTO_FREE_MODEL,
-  KILO_AUTO_SMALL_MODEL,
-];
-
-export function isKiloAutoModel(model: string) {
-  return AUTO_MODELS.some(m => m.id === model) || legacyMapping[model] !== undefined;
-}
-
 type ResolvedAutoModel = {
   model: string;
   reasoning?: OpenRouterReasoningConfig;
   verbosity?: Verbosity;
 };
+
+const KIMI_K25_MODEL_ID = 'moonshotai/kimi-k2.5';
+
+const MINIMAX_M27_MODEL_ID = 'minimax/minimax-m2.7';
+
+const MODEL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  [CLAUDE_OPUS_CURRENT_MODEL_ID]: 'Claude Opus',
+  [CLAUDE_SONNET_CURRENT_MODEL_ID]: 'Claude Sonnet',
+  [KIMI_K25_MODEL_ID]: 'Kimi K2.5',
+  [MINIMAX_M27_MODEL_ID]: 'Minimax M2.7',
+};
+
+function describeRouting(modeToModel: Map<string, ResolvedAutoModel>): string {
+  const modelToModes = new Map<string, string[]>();
+  for (const [mode, { model }] of modeToModel) {
+    const modes = modelToModes.get(model) ?? [];
+    modes.push(mode);
+    modelToModes.set(model, modes);
+  }
+  const parts = [...modelToModes.entries()].map(
+    ([model, modes]) => `${MODEL_DISPLAY_NAMES[model] ?? model} for ${modes.join(', ')}`,
+  );
+  return `Uses ${parts.join('; ')}.`;
+}
 
 const FRONTIER_CODE_MODEL: ResolvedAutoModel = {
   model: CLAUDE_SONNET_CURRENT_MODEL_ID,
@@ -151,10 +98,6 @@ const FRONTIER_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   ['code', FRONTIER_CODE_MODEL],
 ]);
 
-const KIMI_K25_MODEL_ID = 'moonshotai/kimi-k2.5';
-
-const MINIMAX_M27_MODEL_ID = 'minimax/minimax-m2.7';
-
 const BALANCED_CODE_MODEL: ResolvedAutoModel = {
   model: MINIMAX_M27_MODEL_ID,
 };
@@ -172,6 +115,81 @@ const BALANCED_MODE_TO_MODEL = new Map<string, ResolvedAutoModel>([
   ['explore', { model: MINIMAX_M27_MODEL_ID }],
   ['code', BALANCED_CODE_MODEL],
 ]);
+
+export const KILO_AUTO_FRONTIER_MODEL: AutoModel = {
+  id: 'kilo-auto/frontier',
+  name: 'Kilo Auto Frontier',
+  description: `Highest performance and capability for any task. ${describeRouting(FRONTIER_MODE_TO_MODEL)}`,
+  context_length: 1_000_000,
+  max_completion_tokens: 128_000,
+  prompt_price: '0.000005',
+  completion_price: '0.000025',
+  supports_images: true,
+  roocode_settings: undefined,
+  opencode_settings: {
+    family: 'claude',
+    prompt: 'anthropic',
+  },
+};
+
+export const KILO_AUTO_FREE_MODEL: AutoModel = {
+  id: 'kilo-auto/free',
+  name: 'Kilo Auto Free',
+  description: 'Free with limited capability. No credits required.',
+  context_length: minimax_m25_free_model.context_length,
+  max_completion_tokens: minimax_m25_free_model.max_completion_tokens,
+  prompt_price: '0',
+  completion_price: '0',
+  supports_images: false,
+  roocode_settings: {
+    included_tools: ['search_and_replace'],
+    excluded_tools: ['apply_diff', 'edit_file'],
+  },
+  opencode_settings: undefined,
+};
+
+export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
+  id: 'kilo-auto/balanced',
+  name: 'Kilo Auto Balanced',
+  description: `Great balance of price and capability. ${describeRouting(BALANCED_MODE_TO_MODEL)}`,
+  context_length: 204800,
+  max_completion_tokens: 131072,
+  prompt_price: '0.0000006',
+  completion_price: '0.000003',
+  supports_images: false,
+  roocode_settings: {
+    included_tools: ['edit_file'],
+    excluded_tools: ['apply_diff'],
+  },
+  opencode_settings: undefined,
+};
+
+export const KILO_AUTO_SMALL_MODEL: AutoModel = {
+  id: 'kilo-auto/small',
+  name: 'Kilo Auto Small',
+  description: 'Automatically routes your request to a small model.',
+  context_length: 400_000,
+  max_completion_tokens: 128_000,
+  prompt_price: '0.00000005',
+  completion_price: '0.0000004',
+  supports_images: true,
+  roocode_settings: undefined,
+  opencode_settings: {
+    family: 'gpt',
+    prompt: 'codex',
+  },
+};
+
+export const AUTO_MODELS = [
+  KILO_AUTO_FRONTIER_MODEL,
+  KILO_AUTO_BALANCED_MODEL,
+  KILO_AUTO_FREE_MODEL,
+  KILO_AUTO_SMALL_MODEL,
+];
+
+export function isKiloAutoModel(model: string) {
+  return AUTO_MODELS.some(m => m.id === model) || legacyMapping[model] !== undefined;
+}
 
 export const KILO_AUTO_FREE_MODEL_DEPRECATED = 'kilo/auto-free';
 
