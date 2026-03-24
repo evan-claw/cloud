@@ -1,0 +1,20 @@
+{
+  "messageId": "msg_01XFDUDYJgAACzvnptvVoYEL",
+  "hasError": false,
+  "model": "claude-opus-4-5",
+  "responseContent": "Hello!",
+  "inference_provider": "anthropic",
+  "upstream_id": null,
+  "finish_reason": "end_turn",
+  "latency": null,
+  "moderation_latency": null,
+  "generation_time": null,
+  "streamed": false,
+  "cancelled": null,
+  "inputTokens": 25,
+  "outputTokens": 6,
+  "cacheHitTokens": 0,
+  "cacheWriteTokens": 0,
+  "cost_mUsd": 375,
+  "is_byok": null
+}
