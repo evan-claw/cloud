@@ -23,6 +23,7 @@ import { registerVersionIfNeeded } from './lib/image-version';
 import { startingUpPage } from './pages/starting-up';
 import { buildForwardHeaders } from './utils/proxy-headers';
 import { timingMiddleware } from './middleware/analytics';
+import { writeEvent } from './utils/analytics';
 
 // Export DOs (match wrangler.jsonc class_name bindings)
 export { KiloClawInstance } from './durable-objects/kiloclaw-instance';
@@ -173,6 +174,7 @@ app.route('/api/platform', platform);
 async function attemptCrashRecovery(c: Context<AppEnv>): Promise<boolean> {
   const userId = c.get('userId');
   if (!userId) return false;
+  const startedAt = performance.now();
 
   try {
     const stub = c.env.KILOCLAW_INSTANCE.get(c.env.KILOCLAW_INSTANCE.idFromName(userId));
@@ -184,9 +186,30 @@ async function attemptCrashRecovery(c: Context<AppEnv>): Promise<boolean> {
 
     // Machine dead despite running status -- restart
     console.log('[PROXY] Instance status is running but machine unreachable, restarting');
-    await stub.start(userId);
+    const { started } = await stub.start(userId);
+    if (started) {
+      const freshStatus = await stub.getStatus();
+      writeEvent(c.env, {
+        event: 'instance.crash_recovery_succeeded',
+        delivery: 'http',
+        userId,
+        sandboxId: c.get('sandboxId') ?? undefined,
+        flyMachineId: freshStatus.flyMachineId ?? undefined,
+        flyAppName: freshStatus.flyAppName ?? undefined,
+        status: freshStatus.status ?? undefined,
+        durationMs: performance.now() - startedAt,
+      });
+    }
     return true;
   } catch (err) {
+    writeEvent(c.env, {
+      event: 'instance.crash_recovery_failed',
+      delivery: 'http',
+      userId,
+      sandboxId: c.get('sandboxId') ?? undefined,
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: performance.now() - startedAt,
+    });
     console.error('[PROXY] Crash recovery failed:', err);
   }
   return false;

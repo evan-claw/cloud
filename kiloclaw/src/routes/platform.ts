@@ -914,16 +914,34 @@ platform.post('/doctor', async c => {
 platform.post('/start', async c => {
   const result = await parseBody(c, UserIdRequestSchema);
   if ('error' in result) return result.error;
+  const startedAt = performance.now();
 
   try {
-    await withDORetry(
+    const { started } = await withDORetry(
       instanceStubFactory(c.env, result.data.userId),
       stub => stub.start(result.data.userId),
       'start'
     );
+    if (started) {
+      writeEvent(c.env, {
+        event: 'instance.manual_start_succeeded',
+        delivery: 'http',
+        route: '/api/platform/start',
+        userId: result.data.userId,
+        durationMs: performance.now() - startedAt,
+      });
+    }
     return c.json({ ok: true });
   } catch (err) {
     const { message, status } = sanitizeError(err, 'start');
+    writeEvent(c.env, {
+      event: 'instance.manual_start_failed',
+      delivery: 'http',
+      route: '/api/platform/start',
+      userId: result.data.userId,
+      error: message,
+      durationMs: performance.now() - startedAt,
+    });
     return jsonError(message, status);
   }
 });
