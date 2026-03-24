@@ -1,0 +1,142 @@
+import * as Clipboard from 'expo-clipboard';
+import { Globe, Mail, Unplug } from 'lucide-react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, View } from 'react-native';
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
+
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { Text } from '@/components/ui/text';
+import { useThemeColors } from '@/lib/hooks/use-theme-colors';
+import {
+  useKiloClawStatus,
+  useKiloClawGoogleSetup,
+  useKiloClawMutations,
+} from '@/lib/hooks/use-kiloclaw';
+
+export default function GoogleScreen() {
+  const colors = useThemeColors();
+  const statusQuery = useKiloClawStatus();
+  const mutations = useKiloClawMutations();
+
+  const [copied, setCopied] = useState(false);
+
+  const isConnected = statusQuery.data?.googleConnected ?? false;
+  const gmailEnabled = statusQuery.data?.gmailNotificationsEnabled ?? false;
+
+  const setupQuery = useKiloClawGoogleSetup(!isConnected);
+
+  if (statusQuery.isPending) {
+    return (
+      <Animated.View layout={LinearTransition} className="flex-1 bg-background px-4 pt-4 gap-3">
+        <Animated.View exiting={FadeOut.duration(150)}>
+          <Skeleton className="h-16 w-full rounded-lg" />
+        </Animated.View>
+      </Animated.View>
+    );
+  }
+
+  async function handleCopy() {
+    const command = setupQuery.data?.command;
+    if (!command) return;
+    await Clipboard.setStringAsync(command);
+    setCopied(true);
+    setTimeout(() => {
+      setCopied(false);
+    }, 2000);
+  }
+
+  function handleToggleGmail() {
+    mutations.setGmailNotifications.mutate({ enabled: !gmailEnabled });
+  }
+
+  function handleDisconnect() {
+    Alert.alert(
+      'Disconnect Google',
+      'Remove your Google account from this instance? This will disable Gmail notifications.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: () => {
+            mutations.disconnectGoogle.mutate(undefined);
+          },
+        },
+      ]
+    );
+  }
+
+  return (
+    <Animated.View layout={LinearTransition} className="flex-1 bg-background">
+      <ScrollView
+        contentContainerClassName="px-4 py-4 gap-4"
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View entering={FadeIn.duration(200)} className="gap-4">
+          {/* Connection status card */}
+          <View className="rounded-lg bg-secondary p-4 gap-3">
+            <View className="flex-row items-center gap-3">
+              <Globe size={20} color={colors.foreground} />
+              <Text className="flex-1 text-base font-semibold">Google Account</Text>
+              <View
+                className={`px-2 py-1 rounded-full ${isConnected ? 'bg-green-500/20' : 'bg-muted'}`}
+              >
+                <Text
+                  className={`text-xs font-medium ${isConnected ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'}`}
+                >
+                  {isConnected ? 'Connected' : 'Not connected'}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {!isConnected && (
+            <Animated.View entering={FadeIn.duration(200)} className="gap-3">
+              <Text className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Setup Command
+              </Text>
+              <View className="rounded-lg bg-muted p-3 gap-2">
+                <Text className="font-mono text-xs text-foreground">
+                  {setupQuery.data?.command ?? 'Loading...'}
+                </Text>
+              </View>
+              <Button
+                variant="outline"
+                onPress={() => {
+                  void handleCopy();
+                }}
+              >
+                <Text>{copied ? 'Copied!' : 'Copy Command'}</Text>
+              </Button>
+            </Animated.View>
+          )}
+
+          {isConnected && (
+            <Animated.View entering={FadeIn.duration(200)} className="gap-3">
+              <View className="rounded-lg bg-secondary overflow-hidden">
+                <View className="flex-row items-center gap-3 px-4 py-3">
+                  <Mail size={18} color={colors.foreground} />
+                  <Text className="flex-1 text-sm font-medium">Gmail Notifications</Text>
+                  <Button
+                    size="sm"
+                    variant={gmailEnabled ? 'default' : 'outline'}
+                    onPress={handleToggleGmail}
+                    disabled={mutations.setGmailNotifications.isPending}
+                  >
+                    <Text>{gmailEnabled ? 'Enabled' : 'Disabled'}</Text>
+                  </Button>
+                </View>
+              </View>
+
+              <Button variant="outline" onPress={handleDisconnect} className="flex-row gap-2">
+                <Unplug size={16} color={colors.foreground} />
+                <Text className="text-destructive">Disconnect Google Account</Text>
+              </Button>
+            </Animated.View>
+          )}
+        </Animated.View>
+      </ScrollView>
+    </Animated.View>
+  );
+}
