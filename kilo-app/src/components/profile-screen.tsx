@@ -37,7 +37,7 @@ function CreditsCard({ hasOrgs }: Readonly<{ hasOrgs: boolean }>) {
   const earliestExpiry = expiringBlocks
     .map(b => b.expiry_date)
     .filter((d): d is string => d !== null)
-    .toSorted((a, b) => a.localeCompare(b))[0];
+    .sort((a, b) => a.localeCompare(b))[0];
 
   return (
     <View className="gap-3">
