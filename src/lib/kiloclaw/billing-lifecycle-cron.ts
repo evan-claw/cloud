@@ -76,7 +76,30 @@ async function trySendEmail(
     return false;
   }
   try {
-    await sendEmail({ to: userEmail, templateName, templateVars, subjectOverride });
+    const emailResult = await sendEmail({
+      to: userEmail,
+      templateName,
+      templateVars,
+      subjectOverride,
+    });
+
+    if (!emailResult.sent) {
+      if (emailResult.reason === 'provider_not_configured') {
+        // Transient — credentials may be added later; remove idempotency guard so the next cron run can retry
+        await database
+          .delete(kiloclaw_email_log)
+          .where(
+            and(
+              eq(kiloclaw_email_log.user_id, userId),
+              eq(kiloclaw_email_log.email_type, emailType)
+            )
+          );
+      }
+      // For neverbounce_rejected the address is permanently invalid — keep the
+      // idempotency row so we don't re-verify on every sweep.
+      summary.emails_skipped++;
+      return false;
+    }
   } catch (error) {
     try {
       await database
