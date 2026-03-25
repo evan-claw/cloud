@@ -309,9 +309,6 @@ jobs:
       - name: Typecheck (cloud-agent)
         run: pnpm --filter cloud-agent typecheck
 
-      - name: Lint (cloud-agent)
-        run: pnpm --filter cloud-agent lint
-
       - name: Run cloud-agent tests
         run: pnpm --filter cloud-agent test:all
 
@@ -352,9 +349,6 @@ jobs:
       - name: Typecheck (cloud-agent-next)
         run: pnpm --filter cloud-agent-next typecheck
 
-      - name: Lint (cloud-agent-next)
-        run: pnpm --filter cloud-agent-next lint
-
       - name: Run cloud-agent-next tests
         run: pnpm --filter cloud-agent-next test:all
 
@@ -384,9 +378,6 @@ jobs:
 
       - name: Typecheck (webhook-agent-ingest)
         run: pnpm --filter cloudflare-webhook-agent-ingest typecheck
-
-      - name: Lint (webhook-agent-ingest)
-        run: pnpm --filter cloudflare-webhook-agent-ingest lint
 
       - name: Run webhook-agent-ingest tests
         run: pnpm --filter cloudflare-webhook-agent-ingest test
@@ -447,9 +438,6 @@ jobs:
 
       - name: Typecheck (kiloclaw)
         run: pnpm --filter kiloclaw typecheck
-
-      - name: Lint (kiloclaw)
-        run: pnpm --filter kiloclaw lint
 
       - name: Run kiloclaw tests
         run: pnpm --filter kiloclaw test

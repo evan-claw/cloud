@@ -1,9 +1,7 @@
 {
   "$schema": "../node_modules/oxlint/configuration_schema.json",
   "plugins": ["oxc", "typescript", "unicorn", "react", "import", "promise"],
-  "jsPlugins": [
-    { "name": "react-native", "specifier": "oxlint-plugin-react-native" }
-  ],
+  "jsPlugins": [{ "name": "react-native", "specifier": "oxlint-plugin-react-native" }],
   "options": {
     "typeAware": true
   },
