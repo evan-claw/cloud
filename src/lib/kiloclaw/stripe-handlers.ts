@@ -127,7 +127,6 @@ async function autoResumeIfSuspended(kiloUserId: string): Promise<void> {
     'claw_suspended_payment',
     'claw_destruction_warning',
     'claw_instance_destroyed',
-    'claw_instance_ready',
   ];
   await db
     .delete(kiloclaw_email_log)
@@ -135,6 +134,16 @@ async function autoResumeIfSuspended(kiloUserId: string): Promise<void> {
       and(
         eq(kiloclaw_email_log.user_id, kiloUserId),
         inArray(kiloclaw_email_log.email_type, resettableEmailTypes)
+      )
+    );
+  // Also clear per-instance ready emails (claw_instance_ready:{sandboxId})
+  // so a re-provision after reactivation triggers the notification again.
+  await db
+    .delete(kiloclaw_email_log)
+    .where(
+      and(
+        eq(kiloclaw_email_log.user_id, kiloUserId),
+        sql`${kiloclaw_email_log.email_type} LIKE 'claw_instance_ready:%'`
       )
     );
 

@@ -526,12 +526,14 @@ export async function runKiloClawBillingLifecycleCron(
       );
 
       // Clear instance-ready email log so a future re-provision can trigger it again.
+      // The email_type is scoped per-instance (claw_instance_ready:{sandboxId}),
+      // so we use a prefix match to clear all variants for this user.
       await database
         .delete(kiloclaw_email_log)
         .where(
           and(
             eq(kiloclaw_email_log.user_id, row.user_id),
-            eq(kiloclaw_email_log.email_type, 'claw_instance_ready')
+            sql`${kiloclaw_email_log.email_type} LIKE 'claw_instance_ready:%'`
           )
         );
     } catch (error) {

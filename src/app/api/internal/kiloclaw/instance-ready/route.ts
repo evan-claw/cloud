@@ -21,9 +21,13 @@ import { kiloclaw_email_log } from '@kilocode/db/schema';
 
 const BodySchema = z.object({
   userId: z.string().min(1),
+  sandboxId: z.string().min(1),
 });
 
-const EMAIL_TYPE = 'claw_instance_ready';
+/** Per-instance email type key. Includes sandboxId to support future multi-instance. */
+function emailTypeKey(sandboxId: string): string {
+  return `claw_instance_ready:${sandboxId}`;
+}
 
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('X-Internal-Secret');
@@ -37,7 +41,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
   }
 
-  const { userId } = parsed.data;
+  const { userId, sandboxId } = parsed.data;
+  const emailType = emailTypeKey(sandboxId);
 
   const user = await findUserById(userId);
   if (!user) {
@@ -47,11 +52,11 @@ export async function POST(req: NextRequest) {
   // Idempotent: insert-before-send with rollback on failure (matches billing cron pattern).
   const result = await db
     .insert(kiloclaw_email_log)
-    .values({ user_id: userId, email_type: EMAIL_TYPE })
+    .values({ user_id: userId, email_type: emailType })
     .onConflictDoNothing();
 
   if (result.rowCount === 0) {
-    // Already sent for this user — skip.
+    // Already sent for this instance — skip.
     return NextResponse.json({ sent: false, reason: 'already_sent' });
   }
 
@@ -67,7 +72,7 @@ export async function POST(req: NextRequest) {
       await db
         .delete(kiloclaw_email_log)
         .where(
-          and(eq(kiloclaw_email_log.user_id, userId), eq(kiloclaw_email_log.email_type, EMAIL_TYPE))
+          and(eq(kiloclaw_email_log.user_id, userId), eq(kiloclaw_email_log.email_type, emailType))
         );
     } catch (deleteError) {
       console.error(

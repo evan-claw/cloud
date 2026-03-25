@@ -32,7 +32,8 @@ const CheckinSchema = z.object({
 async function notifyInstanceReady(
   nextApiUrl: string,
   internalSecret: string,
-  userId: string
+  userId: string,
+  sandboxId: string
 ): Promise<void> {
   const res = await fetch(`${nextApiUrl}/api/internal/kiloclaw/instance-ready`, {
     method: 'POST',
@@ -40,7 +41,7 @@ async function notifyInstanceReady(
       'Content-Type': 'application/json',
       'X-Internal-Secret': internalSecret,
     },
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify({ userId, sandboxId }),
   });
   if (!res.ok) {
     console.error('[controller] instance-ready notification failed:', res.status, await res.text());
@@ -125,7 +126,12 @@ controller.post('/checkin', async (c: Context<AppEnv>) => {
       const { shouldNotify } = await stub.tryMarkInstanceReady();
       if (shouldNotify && c.env.NEXT_INTERNAL_API_URL && c.env.INTERNAL_API_SECRET) {
         c.executionCtx.waitUntil(
-          notifyInstanceReady(c.env.NEXT_INTERNAL_API_URL, c.env.INTERNAL_API_SECRET, userId).catch(
+          notifyInstanceReady(
+            c.env.NEXT_INTERNAL_API_URL,
+            c.env.INTERNAL_API_SECRET,
+            userId,
+            data.sandboxId
+          ).catch(
             err => {
               console.error('[controller] instance-ready notification error:', err);
             }
