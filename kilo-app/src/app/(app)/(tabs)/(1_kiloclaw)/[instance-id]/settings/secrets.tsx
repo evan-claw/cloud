@@ -150,7 +150,7 @@ function SecretCard({
               <View key={field.key} className="gap-1.5">
                 <Text className="text-xs font-medium text-muted-foreground">{field.label}</Text>
                 <TextInput
-                  className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+                  className="rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-5 text-foreground"
                   placeholder={secret.configured ? field.placeholderConfigured : field.placeholder}
                   placeholderTextColor={colors.mutedForeground}
                   value={fieldValues[field.key] ?? ''}
