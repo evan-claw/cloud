@@ -1,6 +1,7 @@
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { AlertTriangle, CreditCard, Newspaper } from 'lucide-react-native';
-import { Alert, Linking, Pressable, ScrollView, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Alert, Linking, Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { BillingBanner } from '@/components/kiloclaw/billing-banner';
@@ -9,6 +10,7 @@ import { SettingsList } from '@/components/kiloclaw/settings-list';
 import { StatusCard } from '@/components/kiloclaw/status-card';
 import { QueryError } from '@/components/query-error';
 import { ScreenHeader } from '@/components/screen-header';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import {
@@ -40,25 +42,20 @@ export default function DashboardScreen() {
   const isServiceDegraded = serviceDegradedQuery.data === true;
   const isLoading = statusQuery.isPending || billingQuery.isPending;
 
+  const [renameVisible, setRenameVisible] = useState(false);
+  const renameRef = useRef('');
+
   const handleRename = () => {
-    Alert.prompt(
-      'Rename Instance',
-      'Enter a new name (max 50 characters)',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Save',
-          onPress: (value?: string) => {
-            const trimmed = value?.trim();
-            if (trimmed) {
-              mutations.renameInstance.mutate({ name: trimmed });
-            }
-          },
-        },
-      ],
-      'plain-text',
-      status?.name ?? ''
-    );
+    renameRef.current = status?.name ?? '';
+    setRenameVisible(true);
+  };
+
+  const submitRename = () => {
+    const trimmed = renameRef.current.trim();
+    if (trimmed) {
+      mutations.renameInstance.mutate({ name: trimmed });
+    }
+    setRenameVisible(false);
   };
 
   if (isLoading) {
@@ -161,6 +158,33 @@ export default function DashboardScreen() {
           </View>
         </Animated.View>
       </ScrollView>
+
+      <Modal visible={renameVisible} transparent animationType="fade">
+        <Pressable className="flex-1 justify-center bg-black/50 px-6" onPress={() => setRenameVisible(false)}>
+          <Pressable className="rounded-xl bg-card p-5 gap-4" onPress={e => e.stopPropagation()}>
+            <Text className="text-base font-semibold">Rename Instance</Text>
+            <TextInput
+              className="rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-5 text-foreground"
+              placeholder="Enter a new name (max 50 characters)"
+              placeholderTextColor={colors.mutedForeground}
+              defaultValue={status?.name ?? ''}
+              onChangeText={val => {
+                renameRef.current = val;
+              }}
+              autoFocus
+              maxLength={50}
+            />
+            <View className="flex-row justify-end gap-3">
+              <Button variant="outline" onPress={() => setRenameVisible(false)}>
+                <Text>Cancel</Text>
+              </Button>
+              <Button onPress={submitRename}>
+                <Text className="text-primary-foreground">Save</Text>
+              </Button>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Animated.View>
   );
 }
