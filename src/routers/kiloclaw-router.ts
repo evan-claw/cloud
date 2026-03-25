@@ -33,7 +33,9 @@ import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
   ensureActiveInstance,
+  getActiveInstance,
   markActiveInstanceDestroyed,
+  renameInstance,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
 import { client as stripe } from '@/lib/stripe-client';
@@ -420,8 +422,27 @@ export const kiloclawRouter = createTRPCRouter({
     const status = await client.getStatus(ctx.user.id);
     const workerUrl = KILOCLAW_API_URL || 'https://claw.kilo.ai';
 
-    return { ...status, workerUrl } satisfies KiloClawDashboardStatus;
+    const instance = await getActiveInstance(ctx.user.id);
+
+    return {
+      ...status,
+      name: instance?.name ?? null,
+      workerUrl,
+    } satisfies KiloClawDashboardStatus;
   }),
+
+  renameInstance: baseProcedure
+    .input(z.object({ name: z.string().min(1).max(50).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await renameInstance(ctx.user.id, input.name);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: error instanceof Error ? error.message : 'Failed to rename instance',
+        });
+      }
+    }),
 
   // Instance lifecycle
   start: clawAccessProcedure.mutation(async ({ ctx }) => {

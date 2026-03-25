@@ -297,4 +297,5 @@ export type UpdateRegionsResponse = {
 export type KiloClawDashboardStatus = PlatformStatusResponse & {
   /** Worker base URL for constructing the "Open" link. Falls back to claw.kilo.ai. */
   workerUrl: string;
+  name: string | null;
 };
