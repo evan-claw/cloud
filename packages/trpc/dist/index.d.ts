@@ -8,6 +8,15 @@ import { SecretFieldKey } from '@kilocode/kiloclaw-secret-catalog';
 import * as _workos_inc_node from '@workos-inc/node';
 import * as stripe from 'stripe';
 
+type ChangelogCategory = 'feature' | 'bugfix';
+type ChangelogDeployHint = 'redeploy_suggested' | 'redeploy_required' | 'upgrade_required' | null;
+type ChangelogEntry = {
+    date: string;
+    description: string;
+    category: ChangelogCategory;
+    deployHint: ChangelogDeployHint;
+};
+
 declare enum KiloPassTier {
     Tier19 = "tier_19",
     Tier49 = "tier_49",
@@ -3291,6 +3300,8 @@ type PlatformStatusResponse = {
     trackedImageDigest: string | null;
     googleConnected: boolean;
     gmailNotificationsEnabled: boolean;
+    execSecurity: string | null;
+    execAsk: string | null;
 };
 /** Response from GET /api/platform/debug-status (internal/admin only). */
 type PlatformDebugStatusResponse = PlatformStatusResponse & {
@@ -7621,6 +7632,14 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
                 totalBalance_mUsd: number;
                 isFirstPurchase: boolean;
                 autoTopUpEnabled: boolean;
+            };
+            meta: object;
+        }>;
+        getBalance: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: {
+                balance: number;
+                isDepleted: boolean;
             };
             meta: object;
         }>;
@@ -15403,6 +15422,11 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
         };
         transformer: false;
     }, _trpc_server.TRPCDecorateCreateRouterOptions<{
+        getChangelog: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: ChangelogEntry[];
+            meta: object;
+        }>;
         serviceDegraded: _trpc_server.TRPCQueryProcedure<{
             input: void;
             output: boolean;
@@ -15438,6 +15462,8 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
                 trackedImageDigest: string | null;
                 googleConnected: boolean;
                 gmailNotificationsEnabled: boolean;
+                execSecurity: string | null;
+                execAsk: string | null;
             };
             meta: object;
         }>;
@@ -15554,6 +15580,46 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
         getConfig: _trpc_server.TRPCQueryProcedure<{
             input: void;
             output: UserConfigResponse;
+            meta: object;
+        }>;
+        getChannelCatalog: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: {
+                id: string;
+                label: string;
+                configured: boolean;
+                fields: {
+                    key: string;
+                    label: string;
+                    placeholder: string;
+                    placeholderConfigured: string;
+                    validationPattern: string | undefined;
+                    validationMessage: string | undefined;
+                }[];
+                helpText: string | undefined;
+                helpUrl: string | undefined;
+                allFieldsRequired: boolean;
+            }[];
+            meta: object;
+        }>;
+        getSecretCatalog: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: {
+                id: string;
+                label: string;
+                configured: boolean;
+                fields: {
+                    key: string;
+                    label: string;
+                    placeholder: string;
+                    placeholderConfigured: string;
+                    validationPattern: string | undefined;
+                    validationMessage: string | undefined;
+                }[];
+                helpText: string | undefined;
+                helpUrl: string | undefined;
+                allFieldsRequired: boolean;
+            }[];
             meta: object;
         }>;
         restartMachine: _trpc_server.TRPCMutationProcedure<{
