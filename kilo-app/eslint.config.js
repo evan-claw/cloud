@@ -130,10 +130,7 @@ module.exports = defineConfig([
       '@typescript-eslint/no-require-imports': 'error',
       '@typescript-eslint/no-empty-object-type': 'error',
       '@typescript-eslint/no-wrapper-object-types': 'error',
-      '@typescript-eslint/restrict-template-expressions': [
-        'error',
-        { allowNumber: true },
-      ],
+      '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
       '@typescript-eslint/consistent-type-assertions': [
         'error',
         {
