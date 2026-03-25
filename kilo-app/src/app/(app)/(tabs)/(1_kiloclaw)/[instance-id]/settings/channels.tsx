@@ -1,8 +1,9 @@
-import { MessageSquare } from 'lucide-react-native';
+import { Link, MessageSquare } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Alert, Keyboard, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 
+import { EmptyState } from '@/components/empty-state';
 import { SettingsCard } from '@/components/kiloclaw/settings-card';
 import { ScreenHeader } from '@/components/screen-header';
 import { Button } from '@/components/ui/button';
@@ -96,11 +97,11 @@ export default function ChannelsScreen() {
           )}
 
           {/* Pairing requests */}
-          {pairingRequests.length > 0 && (
-            <View className="gap-3 px-4">
-              <Text className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Pending Pairing Requests
-              </Text>
+          <View className="gap-3 px-4">
+            <Text className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Pending Pairing Requests
+            </Text>
+            {pairingRequests.length > 0 ? (
               <View className="overflow-hidden rounded-lg bg-secondary">
                 {pairingRequests.map((request, index) => (
                   <View key={`${request.channel}-${request.code}`}>
@@ -127,8 +128,15 @@ export default function ChannelsScreen() {
                   </View>
                 ))}
               </View>
-            </View>
-          )}
+            ) : (
+              <EmptyState
+                icon={Link}
+                title="No Pairing Requests"
+                description="Pairing requests from channels will appear here for approval."
+                className="py-8"
+              />
+            )}
+          </View>
         </ScrollView>
       </View>
     </View>
