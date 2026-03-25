@@ -1433,40 +1433,38 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     const previousVolumeId = this.s.flyVolumeId;
 
-    // Transition to restoring immediately — blocks all lifecycle methods
+    // Transition to restoring immediately — blocks all lifecycle methods.
+    // Set restoreStartedAt now so the alarm's stuck-restore detection has a timestamp
+    // to measure against even if the queue worker never picks up the message.
+    const now = new Date().toISOString();
     this.s.status = 'restoring';
-    this.s.restoreStartedAt = null; // null = queued, set by queue worker when it picks up the job
-    await this.persist({ status: 'restoring', restoreStartedAt: null });
+    this.s.restoreStartedAt = now;
+    await this.persist({ status: 'restoring', restoreStartedAt: now });
     await this.scheduleAlarm();
 
-    // Enqueue the restore job for async processing
+    // Enqueue the restore job for async processing.
+    // If the send fails, reset status so the instance isn't stuck in 'restoring'.
     if (!this.env.SNAPSHOT_RESTORE_QUEUE) {
+      await this.failSnapshotRestore();
       throw new Error('Cannot restore: SNAPSHOT_RESTORE_QUEUE binding not configured');
     }
-    await this.env.SNAPSHOT_RESTORE_QUEUE.send({
-      userId: this.s.userId,
-      snapshotId,
-      previousVolumeId,
-      region: this.s.flyRegion,
-    });
+    try {
+      await this.env.SNAPSHOT_RESTORE_QUEUE.send({
+        userId: this.s.userId,
+        snapshotId,
+        previousVolumeId,
+        region: this.s.flyRegion,
+      });
+    } catch (err) {
+      await this.failSnapshotRestore();
+      throw err;
+    }
 
     console.log(
       `[DO] Snapshot restore enqueued: snapshot=${snapshotId} previousVolume=${previousVolumeId}`
     );
 
     return { acknowledged: true, previousVolumeId };
-  }
-
-  /**
-   * Called by the queue worker when it picks up the restore job.
-   * Sets restoreStartedAt so the admin UI can show "Restoring..." instead of "Queued".
-   */
-  async markRestoreStarted(): Promise<void> {
-    await this.loadState();
-    if (this.s.status !== 'restoring') return;
-    const now = new Date().toISOString();
-    this.s.restoreStartedAt = now;
-    await this.persist({ restoreStartedAt: now });
   }
 
   /**

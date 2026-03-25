@@ -1949,9 +1949,9 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 <Alert className="mb-4 border-purple-500/30 bg-purple-500/10">
                   <Loader2 className="h-4 w-4 animate-spin text-purple-400" />
                   <AlertDescription className="text-purple-300">
-                    {data.workerStatus.restoreStartedAt
-                      ? `Restoring from snapshot... (started ${formatRelativeTime(data.workerStatus.restoreStartedAt)})`
-                      : 'Queued for restore...'}
+                    Restoring from snapshot...
+                    {data.workerStatus.restoreStartedAt &&
+                      ` (started ${formatRelativeTime(data.workerStatus.restoreStartedAt)})`}
                   </AlertDescription>
                 </Alert>
               )}
@@ -2019,7 +2019,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                               variant="outline"
                               size="sm"
                               disabled={
-                                snap.status !== 'created' ||
+                                (snap.status !== 'created' && snap.status !== 'complete') ||
                                 data?.workerStatus?.status === 'restoring' ||
                                 data?.workerStatus?.status === 'destroying'
                               }

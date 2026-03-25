@@ -47,11 +47,9 @@ export async function handleSnapshotRestoreQueue(
         continue;
       }
 
-      // Step 1: Mark restore as started (UI shows "Restoring..." instead of "Queued")
-      await stub.markRestoreStarted();
       console.log(`[queue] Restore started for user=${userId} snapshot=${snapshotId}`);
 
-      // Step 2: Stop the machine if running
+      // Step 1: Stop the machine if running
       try {
         await stub.stop();
       } catch (err) {
@@ -59,39 +57,57 @@ export async function handleSnapshotRestoreQueue(
         console.warn('[queue] Stop during restore (non-fatal):', err);
       }
 
-      // Step 3: Destroy the machine to release the old volume's attachment.
+      // Step 2: Destroy the machine to release the old volume's attachment.
       // Fly only clears attached_machine_id when the machine is destroyed.
       // start() will create a fresh machine with the new volume mount.
       await stub.destroyMachineForRestore();
 
-      // Step 4: Create new volume from snapshot via Fly API
+      // Step 3: Create new volume from snapshot via Fly API
       const flyAppName = status.flyAppName ?? env.FLY_APP_NAME;
       if (!flyAppName || !env.FLY_API_TOKEN) {
         throw new Error('Missing Fly app name or API token');
       }
 
       const flyConfig = { apiToken: env.FLY_API_TOKEN, appName: flyAppName };
-
-      // Reuse the existing volume's name so the new volume is identifiable
       const existingVolume = await fly.getVolume(flyConfig, previousVolumeId);
       const volumeName = existingVolume.name;
 
-      const newVolume = await fly.createVolume(flyConfig, {
-        name: volumeName,
-        region,
-        snapshot_id: snapshotId,
-        size_gb: existingVolume.size_gb,
-        snapshot_retention: 5,
-      });
-
-      console.log(
-        `[queue] New volume created: id=${newVolume.id} region=${newVolume.region} from snapshot=${snapshotId}`
+      // Guard against volume leak on retry: if a prior attempt created a volume but
+      // completeSnapshotRestore() failed, there's an orphaned volume in the app.
+      // Check for a recently created volume with the same name in the same region
+      // that isn't the previous volume — if found, reuse it instead of creating another.
+      let newVolume: Awaited<ReturnType<typeof fly.createVolume>>;
+      const allVolumes = await fly.listVolumes(flyConfig);
+      const candidateFromPriorAttempt = allVolumes.find(
+        v =>
+          v.id !== previousVolumeId &&
+          v.name === volumeName &&
+          v.region === region &&
+          v.state !== 'destroyed' &&
+          v.state !== 'destroying' &&
+          !v.attached_machine_id
       );
 
-      // Step 5: Swap volume in DO state (also persists previousVolumeId for revert path)
+      if (candidateFromPriorAttempt) {
+        console.log(`[queue] Reusing volume from prior attempt: ${candidateFromPriorAttempt.id}`);
+        newVolume = candidateFromPriorAttempt;
+      } else {
+        newVolume = await fly.createVolume(flyConfig, {
+          name: volumeName,
+          region,
+          snapshot_id: snapshotId,
+          size_gb: existingVolume.size_gb,
+          snapshot_retention: 5,
+        });
+        console.log(
+          `[queue] New volume created: id=${newVolume.id} region=${newVolume.region} from snapshot=${snapshotId}`
+        );
+      }
+
+      // Step 4: Swap volume in DO state (also persists previousVolumeId for revert path)
       await stub.completeSnapshotRestore(newVolume.id, newVolume.region);
 
-      // Step 6: Start the machine with the restored volume (creates a fresh machine)
+      // Step 5: Start the machine with the restored volume (creates a fresh machine)
       try {
         await stub.start(userId);
         console.log(`[queue] Machine started after restore for user=${userId}`);
