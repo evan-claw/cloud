@@ -40,14 +40,9 @@ export function StatusBadge({
   const label = STATUS_LABELS[status ?? ''] ?? 'Unknown';
 
   return (
-    <View
-      className={cn(
-        'flex-row items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1',
-        className
-      )}
-    >
+    <View className={cn('flex-row items-center gap-1.5', className)}>
       <View className={cn('h-2 w-2 rounded-full', dotColor)} />
-      <Text className="text-xs font-medium">{label}</Text>
+      <Text className="text-xs font-medium text-muted-foreground">{label}</Text>
     </View>
   );
 }
