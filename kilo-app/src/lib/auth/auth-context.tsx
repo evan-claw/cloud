@@ -14,12 +14,12 @@ import { queryClient } from '@/lib/query-client';
 
 const TOKEN_KEY = 'auth-token';
 
-interface AuthContextValue {
+type AuthContextValue = {
   token: string | undefined;
   isLoading: boolean;
   signIn: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
-}
+};
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
