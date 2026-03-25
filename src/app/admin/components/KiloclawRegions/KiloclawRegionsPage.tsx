@@ -38,8 +38,9 @@ export function RegionsTab() {
 
   const updateMutation = useMutation(
     trpc.admin.kiloclawRegions.updateRegions.mutationOptions({
-      onSuccess: () => {
+      onSuccess: result => {
         toast.success('Regions updated');
+        setInputValue(result.raw);
         setDirty(false);
         void queryClient.invalidateQueries({
           queryKey: trpc.admin.kiloclawRegions.getRegions.queryKey(),
