@@ -1,9 +1,10 @@
 import * as Clipboard from 'expo-clipboard';
-import { Globe, Mail, Unplug } from 'lucide-react-native';
+import { Unplug } from 'lucide-react-native';
 import { useState } from 'react';
 import { Alert, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
+import { GmailIcon, GoogleIcon } from '@/components/icons';
 import { ScreenHeader } from '@/components/screen-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -77,7 +78,7 @@ export default function GoogleScreen() {
           {/* Connection status card */}
           <View className="rounded-lg bg-secondary p-4 min-h-[60px] justify-center">
             <View className="flex-row items-center gap-3">
-              <Globe size={20} color="#ef4444" />
+              <GoogleIcon size={20} />
               <Text className="flex-1 text-base font-semibold">Google Account</Text>
               <View
                 className={cn(
@@ -126,7 +127,7 @@ export default function GoogleScreen() {
             <Animated.View entering={FadeIn.duration(200)} className="gap-4">
               <View className="rounded-lg bg-secondary p-4 min-h-[60px] justify-center">
                 <View className="flex-row items-center gap-3">
-                  <Mail size={20} color="#10b981" />
+                  <GmailIcon size={20} />
                   <Text className="flex-1 text-base font-semibold">Gmail Notifications</Text>
                   <Button
                     size="sm"

@@ -1,21 +1,15 @@
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
-import {
-  ChevronRight,
-  Globe,
-  Lock,
-  MessageSquare,
-  Monitor,
-  Pin,
-  Shield,
-} from 'lucide-react-native';
+import { ChevronRight, Lock, MessageSquare, Monitor, Pin, Shield } from 'lucide-react-native';
 import { type LucideIcon } from 'lucide-react-native';
+import type React from 'react';
 import { Pressable, View } from 'react-native';
 
+import { GoogleIcon } from '@/components/icons';
 import { Text } from '@/components/ui/text';
 import { useThemeColors } from '@/lib/hooks/use-theme-colors';
 
 interface SettingsItem {
-  icon: LucideIcon;
+  icon: LucideIcon | React.ComponentType<{ size?: number; color?: string }>;
   iconColor: string;
   label: string;
   description: string;
@@ -59,7 +53,7 @@ const SETTINGS_ITEMS: SettingsItem[] = [
     path: 'settings/version-pin',
   },
   {
-    icon: Globe,
+    icon: GoogleIcon,
     iconColor: '#ef4444',
     label: 'Google Account',
     description: 'Gmail, Calendar, Docs',

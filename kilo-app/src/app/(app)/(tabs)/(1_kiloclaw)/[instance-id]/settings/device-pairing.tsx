@@ -4,6 +4,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { EmptyState } from '@/components/empty-state';
+import { CHANNEL_ICONS } from '@/components/icons';
 import { ScreenHeader } from '@/components/screen-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -127,35 +128,42 @@ export default function DevicePairingScreen() {
               Channel Requests
             </Text>
             <View className="rounded-lg bg-secondary overflow-hidden">
-              {channelRequests.map((request, index) => (
-                <View key={`${request.channel}-${request.code}`}>
-                  {index > 0 && <View className="ml-4 h-px bg-border" />}
-                  <View className="flex-row items-center gap-3 px-4 py-3">
-                    <MessageSquare size={18} color={colors.foreground} />
-                    <View className="flex-1 gap-0.5">
-                      <Text className="text-sm font-medium">
-                        {CHANNEL_LABELS[request.channel] ??
-                          request.channel.charAt(0).toUpperCase() + request.channel.slice(1)}
-                      </Text>
-                      <View className="flex-row items-center gap-1.5">
-                        <View className="rounded bg-muted px-1.5 py-0.5">
-                          <Text className="text-xs font-mono text-muted-foreground">
-                            {request.code}
-                          </Text>
+              {channelRequests.map((request, index) => {
+                const ChannelIcon = CHANNEL_ICONS[request.channel];
+                return (
+                  <View key={`${request.channel}-${request.code}`}>
+                    {index > 0 && <View className="ml-4 h-px bg-border" />}
+                    <View className="flex-row items-center gap-3 px-4 py-3">
+                      {ChannelIcon ? (
+                        <ChannelIcon size={18} />
+                      ) : (
+                        <MessageSquare size={18} color={colors.foreground} />
+                      )}
+                      <View className="flex-1 gap-0.5">
+                        <Text className="text-sm font-medium">
+                          {CHANNEL_LABELS[request.channel] ??
+                            request.channel.charAt(0).toUpperCase() + request.channel.slice(1)}
+                        </Text>
+                        <View className="flex-row items-center gap-1.5">
+                          <View className="rounded bg-muted px-1.5 py-0.5">
+                            <Text className="text-xs font-mono text-muted-foreground">
+                              {request.code}
+                            </Text>
+                          </View>
                         </View>
                       </View>
+                      <Button
+                        size="sm"
+                        onPress={() => {
+                          handleApproveChannel(request.channel, request.code);
+                        }}
+                      >
+                        <Text>Approve</Text>
+                      </Button>
                     </View>
-                    <Button
-                      size="sm"
-                      onPress={() => {
-                        handleApproveChannel(request.channel, request.code);
-                      }}
-                    >
-                      <Text>Approve</Text>
-                    </Button>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </Animated.View>
         )}
