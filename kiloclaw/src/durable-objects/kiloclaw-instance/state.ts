@@ -72,7 +72,9 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.gmailPushOidcEmail = d.gmailPushOidcEmail;
     s.execSecurity = d.execSecurity;
     s.execAsk = d.execAsk;
-    s.instanceReadyEmailSent = d.instanceReadyEmailSent;
+    // Legacy instances pre-dating this field treat absence as already-sent
+    // to avoid spurious emails after deploy.
+    s.instanceReadyEmailSent = 'instanceReadyEmailSent' in raw ? d.instanceReadyEmailSent : true;
   } else {
     const hasAnyData = entries.size > 0;
     if (hasAnyData) {
