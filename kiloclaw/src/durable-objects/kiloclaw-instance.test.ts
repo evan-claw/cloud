@@ -5795,9 +5795,22 @@ describe('tryMarkInstanceReady', () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
-  it('defaults to false for legacy instances without the field', async () => {
+  it('suppresses email for legacy instances without the field (migration)', async () => {
     const { instance, storage } = createInstance();
+    // Seed a provisioned instance WITHOUT instanceReadyEmailSent in storage.
+    // The migration in loadState treats this as already-sent to prevent
+    // spurious emails to pre-existing instances after deploy.
     await seedProvisioned(storage);
+
+    const result = await instance.tryMarkInstanceReady();
+
+    expect(result).toEqual({ shouldNotify: false, userId: 'user-1' });
+  });
+
+  it('allows email for newly provisioned instances with the field explicitly set', async () => {
+    const { instance, storage } = createInstance();
+    // New instances created after deploy will have the field explicitly in storage.
+    await seedProvisioned(storage, { instanceReadyEmailSent: false });
 
     const result = await instance.tryMarkInstanceReady();
 

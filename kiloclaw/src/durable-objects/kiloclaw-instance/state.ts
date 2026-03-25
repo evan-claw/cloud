@@ -72,7 +72,15 @@ export async function loadState(ctx: DurableObjectState, s: InstanceMutableState
     s.gmailPushOidcEmail = d.gmailPushOidcEmail;
     s.execSecurity = d.execSecurity;
     s.execAsk = d.execAsk;
-    s.instanceReadyEmailSent = d.instanceReadyEmailSent;
+    // Migration: pre-existing instances (provisioned before this field existed) don't
+    // have instanceReadyEmailSent in storage. Without this guard, the Zod default
+    // (false) would cause them to send a spurious "instance ready" email on the
+    // first low-load checkin after deploy. Treat missing-in-storage as already-sent.
+    s.instanceReadyEmailSent = entries.has('instanceReadyEmailSent')
+      ? d.instanceReadyEmailSent
+      : d.userId
+        ? true
+        : false;
   } else {
     const hasAnyData = entries.size > 0;
     if (hasAnyData) {
