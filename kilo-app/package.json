@@ -9,7 +9,7 @@
     "build": "eas build --profile development",
     "build:ios": "eas build -p ios --profile development",
     "build:android": "eas build -p android --profile development",
-    "typecheck": "tsgo --noEmit --incremental false",
+    "typecheck": "tsgo --noEmit",
     "lint": "pnpm -w exec oxlint --config kilo-app/.oxlintrc.json kilo-app/src",
     "format": "oxfmt src",
     "format:check": "oxfmt --list-different src",

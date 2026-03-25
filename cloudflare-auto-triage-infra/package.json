@@ -7,9 +7,8 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "tail": "wrangler tail",
-    "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "pnpm run lint:oxlint",
-    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-auto-triage-infra/src"
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-auto-triage-infra/src"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

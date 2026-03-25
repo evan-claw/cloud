@@ -11,9 +11,8 @@
     "test-deploy": "tsx test-deploy.ts",
     "deploy:local": "tsx scripts/deploy-local.ts",
     "types": "wrangler types",
-    "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "pnpm run lint:oxlint",
-    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-deploy-infra/builder/src",
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-deploy-infra/builder/src",
     "sentry:sourcemaps": "_SENTRY_RELEASE=$(sentry-cli releases propose-version) && sentry-cli releases new $_SENTRY_RELEASE --org=kilo-code --project=kilocode-cloudflare-deploy && sentry-cli sourcemaps upload --org=kilo-code --project=kilocode-cloudflare-deploy --release=$_SENTRY_RELEASE --strip-prefix 'dist/..' dist",
     "postdeploy": "pnpm sentry:sourcemaps"
   },

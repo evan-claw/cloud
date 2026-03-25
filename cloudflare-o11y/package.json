@@ -8,9 +8,8 @@
     "start": "wrangler dev",
     "test": "vitest",
     "cf-typegen": "wrangler types",
-    "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "pnpm run lint:oxlint",
-    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-o11y/src"
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-o11y/src"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.12.21",

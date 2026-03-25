@@ -6,9 +6,8 @@
     "dev": "wrangler dev --env dev",
     "deploy:prod": "wrangler deploy",
     "deploy:dev": "wrangler deploy --env dev",
-    "lint": "pnpm run lint:oxlint",
-    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-security-sync/src",
-    "typecheck": "tsgo --noEmit --incremental false",
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-security-sync/src",
     "types": "wrangler types --env-interface CloudflareEnv worker-configuration.d.ts"
   },
   "dependencies": {

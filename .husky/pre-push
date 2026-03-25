@@ -1,10 +1,10 @@
 pnpm format:check &
 pid_format=$!
 
-pnpm lint &
+scripts/lint-all.sh &
 pid_lint=$!
 
-pnpm typecheck &
+scripts/typecheck-all.sh --changes-only &
 pid_typecheck=$!
 
 failed=""

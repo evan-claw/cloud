@@ -5,9 +5,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",
-    "typecheck": "tsgo --noEmit --incremental false",
-    "lint": "pnpm run lint:oxlint",
-    "lint:oxlint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-gmail-push/src",
+    "typecheck": "tsgo --noEmit",
+    "lint": "pnpm -w exec oxlint --config .oxlintrc.json cloudflare-gmail-push/src",
     "cf-typegen": "wrangler types --env-file /dev/null"
   },
   "dependencies": {

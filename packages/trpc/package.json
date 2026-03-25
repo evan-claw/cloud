@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && rollup -c rollup.config.mjs",
-    "typecheck": "tsgo --noEmit --incremental false"
+    "typecheck": "tsgo --noEmit"
   },
   "exports": {
     ".": {
