@@ -22,12 +22,12 @@ type AppContext =
       organizationId: string;
     };
 
-type ContextValue = {
+interface ContextValue {
   context: AppContext | undefined;
   isLoading: boolean;
   setContext: (ctx: AppContext) => Promise<void>;
   clearContext: () => Promise<void>;
-};
+}
 
 const AppContextContext = createContext<ContextValue | undefined>(undefined);
 
