@@ -1,4 +1,3 @@
-import type { KiloFreeModel } from '@/lib/providers/kilo-free-model';
 import type { GatewayRequest } from '@/lib/providers/openrouter/types';
 
 export function isMoonshotModel(model: string) {
