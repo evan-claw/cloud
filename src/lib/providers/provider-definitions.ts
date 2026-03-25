@@ -12,6 +12,11 @@ export default {
     apiUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
     apiKey: getEnvVariable('ALIBABA_API_KEY'),
   },
+  BYTEDANCE: {
+    id: 'bytedance',
+    apiUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    apiKey: getEnvVariable('BYTEDANCE_API_KEY'),
+  },
   CORETHINK: {
     id: 'corethink',
     apiUrl: 'https://api.corethink.ai/v1/code',

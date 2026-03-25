@@ -45,6 +45,7 @@ import { isMinimaxModel } from '@/lib/providers/minimax';
 import { isXiaomiModel } from '@/lib/providers/xiaomi';
 import type { Provider } from '@/lib/providers/types';
 import PROVIDERS from '@/lib/providers/provider-definitions';
+import { applyByteDanceProviderSettings } from '@/lib/providers/bytedance';
 
 async function checkBYOK(
   user: User | AnonymousUserContext,
@@ -267,6 +268,10 @@ export function applyProviderSpecificLogic(
 
   if (provider.id === 'alibaba') {
     applyAlibabaProviderSettings(requestToMutate);
+  }
+
+  if (provider.id === 'bytedance') {
+    applyByteDanceProviderSettings(requestToMutate);
   }
 
   if (provider.id === 'corethink') {

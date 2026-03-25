@@ -1,9 +1,16 @@
+import { seed_20_pro_free_model } from '@/lib/providers/bytedance';
 import { isGemini3Model, isGeminiModel } from '@/lib/providers/google';
 import { isMinimaxModel } from '@/lib/providers/minimax';
 import { isMoonshotModel } from '@/lib/providers/moonshotai';
 import { isOpenAiModel } from '@/lib/providers/openai';
+import { qwen35_plus_free_model } from '@/lib/providers/qwen';
 import { isZaiModel } from '@/lib/providers/zai';
-import type { ModelSettings, OpenCodeSettings, VersionedSettings } from '@kilocode/db/schema-types';
+import type {
+  CustomLlmProvider,
+  ModelSettings,
+  OpenCodeSettings,
+  VersionedSettings,
+} from '@kilocode/db/schema-types';
 import { ReasoningEffortSchema } from '@kilocode/db/schema-types';
 
 export function getModelSettings(model: string): ModelSettings | undefined {
@@ -76,10 +83,20 @@ export function getModelVariants(model: string): OpenCodeSettings['variants'] {
   return undefined;
 }
 
-export function getOpenCodeSettings(model: string): OpenCodeSettings | undefined {
-  const variants = getModelVariants(model);
-  if (variants) {
-    return { variants };
+function getAiSdkProvider(model: string): CustomLlmProvider | undefined {
+  if (qwen35_plus_free_model.public_id === model) {
+    // with 'openai' prompt caching doesn't seem to work
+    return 'openai-compatible';
+  }
+  if (qwen35_plus_free_model.public_id === model || seed_20_pro_free_model.public_id === model) {
+    // with 'openai' a bunch of bugs in vercel ai sdk v5 get triggered
+    return 'openai-compatible';
   }
   return undefined;
+}
+
+export function getOpenCodeSettings(model: string): OpenCodeSettings | undefined {
+  const ai_sdk_provider = getAiSdkProvider(model);
+  const variants = getModelVariants(model);
+  return { ai_sdk_provider, variants };
 }
