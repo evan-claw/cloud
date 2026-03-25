@@ -162,7 +162,7 @@ export function OrganizationUsageDetails({ organizationId }: { organizationId: s
       },
       {
         key: 'avgCost',
-        title: 'Avg Cost per Request',
+        title: 'Avg Cost/Req',
         value: (
           <FormattedMicrodollars
             microdollars={metricsTotals.avg_cost_per_req}
