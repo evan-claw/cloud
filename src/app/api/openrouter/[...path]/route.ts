@@ -74,7 +74,11 @@ import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplic
 import type { MicrodollarUsageContext, PromptInfo } from '@/lib/processUsage.types';
 import { extractResponsesPromptInfo } from '@/lib/processUsage.responses';
 import { extractMessagesPromptInfo } from '@/lib/processUsage.messages';
-import { getMaxTokens, hasMiddleOutTransform } from '@/lib/providers/openrouter/request-helpers';
+import {
+  fixResponsesRequest,
+  getMaxTokens,
+  hasMiddleOutTransform,
+} from '@/lib/providers/openrouter/request-helpers';
 
 export const maxDuration = 800;
 
@@ -430,6 +434,10 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       // Workaround for bugs in the chat completions client.
       fixOpenCodeDuplicateReasoning(originalModelIdLowerCased, requestBodyParsed.body, taskId);
     }
+  }
+
+  if (requestBodyParsed.kind === 'responses') {
+    fixResponsesRequest(requestBodyParsed.body);
   }
 
   const toolsAvailable = getToolsAvailable(requestBodyParsed);
