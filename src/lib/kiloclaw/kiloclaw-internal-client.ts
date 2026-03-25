@@ -28,6 +28,8 @@ import type {
   GmailNotificationsResponse,
   CandidateVolumesResponse,
   ReassociateVolumeResponse,
+  RegionsResponse,
+  UpdateRegionsResponse,
 } from './types';
 
 /** Keep in sync with: kiloclaw/controller/src/routes/files.ts, kiloclaw/src/.../gateway.ts (Zod) */
@@ -483,5 +485,16 @@ export class KiloClawInternalClient {
       },
       { userId }
     );
+  }
+
+  async getRegions(): Promise<RegionsResponse> {
+    return this.request('/api/platform/regions');
+  }
+
+  async updateRegions(regions: string[]): Promise<UpdateRegionsResponse> {
+    return this.request('/api/platform/regions', {
+      method: 'PUT',
+      body: JSON.stringify({ regions }),
+    });
   }
 }

@@ -276,6 +276,20 @@ export type ReassociateVolumeResponse = {
   newRegion: string;
 };
 
+/** Response from GET /api/platform/regions */
+export type RegionsResponse = {
+  regions: string[];
+  source: 'kv' | 'env' | 'default';
+  raw: string;
+};
+
+/** Response from PUT /api/platform/regions */
+export type UpdateRegionsResponse = {
+  ok: true;
+  regions: string[];
+  raw: string;
+};
+
 /** Combined status returned by tRPC getStatus */
 export type KiloClawDashboardStatus = PlatformStatusResponse & {
   /** Worker base URL for constructing the "Open" link. Falls back to claw.kilo.ai. */
