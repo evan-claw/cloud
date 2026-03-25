@@ -24,7 +24,7 @@ type ClawLockReason =
   | 'no_access'
   | undefined;
 
-export type { ClawBillingStatus, ClawBannerState, ClawLockReason };
+export type { ClawBillingStatus };
 
 function deriveSubscriptionBannerState(
   subscription: NonNullable<ClawBillingStatus['subscription']>

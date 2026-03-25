@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": ["src/app/**/*.{ts,tsx}"],
   "project": ["src/**/*.{ts,tsx}"],
-  "ignoreDependencies": ["react-native-worklets", "expo-updates", "expo-system-ui", "postcss"],
+  "ignoreDependencies": ["expo-updates", "expo-system-ui", "postcss"],
   "ignoreBinaries": ["oxfmt"],
   "ignore": ["src/components/ui/**"],
   "eslint": {
