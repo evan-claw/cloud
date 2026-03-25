@@ -30,5 +30,7 @@ export async function modelSupportsImages(modelId: string): Promise<boolean> {
     return false;
   }
 
-  return row.inputModalities?.includes('image') ?? false;
+  return (
+    row.inputModalities?.some(modality => modality === 'image' || modality === 'image_url') ?? false
+  );
 }
