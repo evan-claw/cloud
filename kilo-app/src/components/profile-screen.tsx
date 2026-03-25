@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeftRight, Building2, DollarSign, KeyRound, LogOut, User } from 'lucide-react-native';
+import { ArrowLeftRight, Building2, KeyRound, LogOut, User } from 'lucide-react-native';
 import { Alert, Pressable, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
@@ -17,21 +17,24 @@ function providerIcon(_provider: string) {
   return KeyRound;
 }
 
-function CreditsCard({ hasOrgs }: Readonly<{ hasOrgs: boolean }>) {
+function CreditsCard() {
   const trpc = useTRPC();
-  const colors = useThemeColors();
+  const { context } = useAppContext();
+  const organizationId = context?.type === 'organization' ? context.organizationId : undefined;
+
   const {
     data: balance,
     isLoading: balanceLoading,
     isError: balanceError,
     refetch: refetchBalance,
-  } = useQuery(trpc.user.getBalance.queryOptions());
-  const { data: creditData, isLoading: creditsLoading } = useQuery(
-    trpc.user.getCreditBlocks.queryOptions({})
-  );
+  } = useQuery(trpc.user.getContextBalance.queryOptions({ organizationId }));
 
-  const label = hasOrgs ? 'Remaining Personal Credits' : 'Remaining Credits';
+  const { data: creditData, isLoading: creditsLoading } = useQuery({
+    ...trpc.user.getCreditBlocks.queryOptions({}),
+    enabled: !organizationId,
+  });
 
+  const balanceDollars = balance?.balance ?? 0;
   const expiringBlocks = creditData?.creditBlocks.filter(b => b.expiry_date !== null) ?? [];
   const expiringTotal = expiringBlocks.reduce((sum, b) => sum + b.balance_mUsd, 0) / 1_000_000;
   const earliestExpiry = expiringBlocks
@@ -43,25 +46,20 @@ function CreditsCard({ hasOrgs }: Readonly<{ hasOrgs: boolean }>) {
   return (
     <View className="gap-3">
       <Text variant="small" className="uppercase tracking-wide text-muted-foreground">
-        {label}
+        Remaining Credits
       </Text>
       {balanceLoading && <Skeleton className="h-12 w-32 rounded-lg" />}
       {balanceError && (
         <Pressable
           className="rounded-lg bg-secondary p-3 active:opacity-70"
-          onPress={() => {
-            void refetchBalance();
-          }}
+          onPress={() => void refetchBalance()}
         >
           <Text className="text-sm text-destructive">Failed to load balance. Tap to retry.</Text>
         </Pressable>
       )}
       {!balanceLoading && !balanceError && (
         <View className="rounded-lg bg-secondary p-3">
-          <View className="flex-row items-center gap-2">
-            <DollarSign size={18} color={colors.secondaryForeground} />
-            <Text className="text-2xl font-bold">${balance?.balance.toFixed(2) ?? '0.00'}</Text>
-          </View>
+          <Text className="text-2xl font-bold">${balanceDollars.toFixed(2)}</Text>
           {creditsLoading ? (
             <Skeleton className="mt-1 h-3 w-48 rounded" />
           ) : (
@@ -135,7 +133,7 @@ export function ProfileScreen() {
 
         {/* Credits */}
         <View className="mt-6">
-          <CreditsCard hasOrgs={(orgs?.length ?? 0) > 0} />
+          <CreditsCard />
         </View>
 
         {/* Linked accounts */}
