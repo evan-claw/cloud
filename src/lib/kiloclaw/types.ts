@@ -137,6 +137,8 @@ export type PlatformStatusResponse = {
   trackedImageDigest: string | null;
   googleConnected: boolean;
   gmailNotificationsEnabled: boolean;
+  execSecurity: string | null;
+  execAsk: string | null;
 };
 
 /** Response from GET /api/platform/debug-status (internal/admin only). */

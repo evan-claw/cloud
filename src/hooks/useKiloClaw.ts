@@ -232,7 +232,9 @@ export function useKiloClawMutations() {
         },
       })
     ),
-    patchExecPreset: useMutation(trpc.kiloclaw.patchExecPreset.mutationOptions()),
+    patchExecPreset: useMutation(
+      trpc.kiloclaw.patchExecPreset.mutationOptions({ onSuccess: invalidateStatus })
+    ),
     patchOpenclawConfig: useMutation(trpc.kiloclaw.patchOpenclawConfig.mutationOptions()),
     disconnectGoogle: useMutation(
       trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus })

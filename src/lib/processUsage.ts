@@ -9,7 +9,8 @@ import type {
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
 } from './providers/openrouter/types';
-import { fetchGeneration, PROVIDERS } from './providers';
+import { fetchGeneration } from './providers';
+import PROVIDERS from './providers/provider-definitions';
 import { toMicrodollars } from './utils';
 import { captureException, captureMessage, startSpan, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
@@ -19,7 +20,7 @@ import type { SQL } from 'drizzle-orm';
 import { eq, sql } from 'drizzle-orm';
 import { sentryRootSpan } from './getRootSpan';
 import { ingestOrganizationTokenUsage } from '@/lib/organizations/organization-usage';
-import type { ProviderId } from '@/lib/providers/provider-id';
+import type { ProviderId } from '@/lib/providers/types';
 import { isFreeModel, isKiloStealthModel } from '@/lib/models';
 import { sentryLogger } from '@/lib/utils.server';
 import { maybeIssueKiloPassBonusFromUsageThreshold } from '@/lib/kilo-pass/usage-triggered-bonus';
@@ -787,7 +788,8 @@ async function processTokenData(
   const timer = createTimer();
   const provider = Object.values(PROVIDERS).find(p => p.id === usageContext.provider);
   const generation =
-    provider?.hasGenerationEndpoint &&
+    provider &&
+    useGenerationLookup(provider.id, usageStats) &&
     usageStats.messageId &&
     (await fetchGeneration(usageStats.messageId, provider));
   if (usageStats.messageId) {
@@ -855,6 +857,14 @@ async function processTokenData(
 function useAnthropicStyleTokenCounting(requestedModel: string, provider: ProviderId) {
   return (
     provider === 'vercel' && (isAnthropicModel(requestedModel) || isMinimaxModel(requestedModel))
+  );
+}
+
+function useGenerationLookup(provider: ProviderId, usageStats: MicrodollarUsageStats | null) {
+  // vercel has requested to not hammer their generation endpoint,
+  // so only do it when we didn't get the usage data inline
+  return (
+    provider === 'openrouter' || (provider === 'vercel' && (usageStats?.inputTokens ?? 0) === 0)
   );
 }
 

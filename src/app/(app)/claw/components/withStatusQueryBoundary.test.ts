@@ -26,6 +26,8 @@ const baseStatus: KiloClawDashboardStatus = {
   trackedImageDigest: null,
   googleConnected: false,
   gmailNotificationsEnabled: false,
+  execSecurity: null,
+  execAsk: null,
   workerUrl: 'https://claw.kilo.ai',
 };
 

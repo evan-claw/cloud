@@ -199,8 +199,8 @@ export function modelDoesNotExistResponse() {
   );
 }
 
-export function previousResponseIdIsNotSupported() {
-  const error = 'The previous_response_id field is not supported.';
+export function storeAndPreviousResponseIdIsNotSupported() {
+  const error = 'The store and previous_response_id fields are not supported.';
   return NextResponse.json({ error, message: error }, { status: 400 });
 }
 

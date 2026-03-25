@@ -2,7 +2,7 @@ import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { captureException, captureMessage, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
 import { sentryRootSpan } from './getRootSpan';
-import type { ProviderId } from '@/lib/providers/provider-id';
+import type { ProviderId } from '@/lib/providers/types';
 import type {
   JustTheCostsUsageStats,
   MicrodollarUsageStats,
