@@ -1,18 +1,26 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
 import { captureException, captureMessage, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
-import { toMicrodollars } from './utils';
 import { sentryRootSpan } from './getRootSpan';
-import type { ProviderId } from '@/lib/providers/provider-id';
+import type { ProviderId } from '@/lib/providers/types';
 import type {
   JustTheCostsUsageStats,
   MicrodollarUsageStats,
   NotYetCostedUsageStats,
   PromptInfo,
+  VercelProviderMetaData,
 } from '@/lib/processUsage.types';
 import type { GatewayMessagesRequest } from '@/lib/providers/openrouter/types';
-import { OPENROUTER_BYOK_COST_MULTIPLIER } from '@/lib/processUsage.constants';
+import {
+  computeOpenRouterCostFields,
+  computeVercelCostMicrodollars,
+  drainSseStream,
+} from '@/lib/processUsage.shared';
 import type Anthropic from '@anthropic-ai/sdk';
+
+type MaybeHasVercelProviderMetadata = {
+  provider_metadata?: VercelProviderMetaData;
+};
 
 // Anthropic usage combined with OpenRouter cost fields
 // ref: https://docs.anthropic.com/en/api/messages
@@ -23,8 +31,9 @@ type MessagesApiUsage = Anthropic.Messages.MessageDeltaUsage & {
   cost_details?: { upstream_inference_cost: number };
 };
 
-function processMessagesApiUsage(
+export function processMessagesApiUsage(
   usage: MessagesApiUsage | null | undefined,
+  providerMetadata: VercelProviderMetaData | null | undefined,
   coreProps: NotYetCostedUsageStats
 ): JustTheCostsUsageStats {
   const cacheHitTokens = usage?.cache_read_input_tokens ?? 0;
@@ -34,32 +43,26 @@ function processMessagesApiUsage(
 
   // OpenRouter path: cost fields are present directly in usage
   if (usage?.cost != null || usage?.is_byok != null) {
-    const is_byok = usage.is_byok ?? null;
-    const openrouterCost_USD = usage.cost ?? 0;
-    const upstream_inference_cost_USD = usage.cost_details?.upstream_inference_cost ?? 0;
-    const cost_mUsd = toMicrodollars(is_byok ? upstream_inference_cost_USD : openrouterCost_USD);
-    const inferredUpstream_USD = openrouterCost_USD * OPENROUTER_BYOK_COST_MULTIPLIER;
-    const microdollar_error = (inferredUpstream_USD - upstream_inference_cost_USD) * 1000000;
-    if (
-      (is_byok == null && (openrouterCost_USD || upstream_inference_cost_USD)) ||
-      (is_byok && usage.cost !== 0 && 1.1 < Math.abs(microdollar_error))
-    ) {
-      const { responseContent: _ignore, ...corePropsCopy } = coreProps;
-      captureMessage("SUSPICIOUS: openrouters cost accounting doesn't make sense", {
-        level: 'error',
-        tags: { source: 'messages_sse_processing' },
-        extra: {
-          ...corePropsCopy,
-          cost_mUsd,
-          is_byok,
-          openrouterCost_USD,
-          upstream_inference_cost_USD,
-          inferredUpstream_USD,
-          microdollar_error,
-        },
-      });
-    }
+    const { cost_mUsd, is_byok } = computeOpenRouterCostFields(
+      usage,
+      coreProps,
+      'messages_sse_processing'
+    );
     return { inputTokens, outputTokens, cacheHitTokens, cacheWriteTokens, cost_mUsd, is_byok };
+  }
+
+  // Vercel path: cost is in provider_metadata.gateway
+  const vercelGateway = providerMetadata?.gateway;
+  if (vercelGateway?.marketCost != null || vercelGateway?.cost != null) {
+    const cost_mUsd = computeVercelCostMicrodollars(vercelGateway);
+    return {
+      inputTokens,
+      outputTokens,
+      cacheHitTokens,
+      cacheWriteTokens,
+      cost_mUsd,
+      is_byok: null,
+    };
   }
 
   // No cost info available
@@ -98,9 +101,8 @@ export async function parseMessagesMicrodollarUsageFromStream(
   let firstTokenReceived = false;
   let usage: MessagesApiUsage | null = null;
   let finish_reason: string | null = null;
-
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
+  let providerMetadata: VercelProviderMetaData | null = null;
+  let inference_provider: string | null = null;
 
   const sseStreamParser = createParser({
     onEvent(event: EventSourceMessage) {
@@ -141,28 +143,21 @@ export async function parseMessagesMicrodollarUsageFromStream(
 
       if (json.type === 'message_delta') {
         finish_reason = json.delta.stop_reason;
-        usage ??= json.usage;
+        usage = json.usage ?? usage;
+        const meta = (json as MaybeHasVercelProviderMetadata).provider_metadata;
+        if (meta) {
+          providerMetadata = meta;
+          inference_provider = meta.gateway?.routing?.finalProvider ?? inference_provider;
+        }
       }
     },
   });
 
-  let wasAborted = false;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      sseStreamParser.feed(decoder.decode(value, { stream: true }));
-    }
-  } catch (error) {
-    if (error instanceof Error && error.name === 'ResponseAborted') {
-      wasAborted = true;
-    } else {
-      throw error;
-    }
-  } finally {
-    reader.releaseLock();
-    streamProcessingSpan.end();
-  }
+  const wasAborted = await drainSseStream(
+    stream,
+    chunk => sseStreamParser.feed(chunk),
+    streamProcessingSpan
+  );
 
   if (!reportedError && !usage) {
     captureMessage('SUSPICIOUS: No usage in Messages API stream', {
@@ -177,7 +172,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
     hasError: reportedError || wasAborted,
     model,
     responseContent,
-    inference_provider: null,
+    inference_provider,
     finish_reason,
     upstream_id: null,
     latency: null,
@@ -187,7 +182,7 @@ export async function parseMessagesMicrodollarUsageFromStream(
     cancelled: null,
   } satisfies NotYetCostedUsageStats;
 
-  const costs = processMessagesApiUsage(usage, coreProps);
+  const costs = processMessagesApiUsage(usage, providerMetadata, coreProps);
   return { ...coreProps, ...costs };
 }
 
@@ -195,9 +190,13 @@ export function parseMessagesMicrodollarUsageFromString(
   fullResponse: string,
   statusCode: number
 ): MicrodollarUsageStats {
-  const responseJson = JSON.parse(fullResponse) as Anthropic.Messages.Message | null;
+  const responseJson = JSON.parse(fullResponse) as
+    | (Anthropic.Messages.Message & MaybeHasVercelProviderMetadata)
+    | null;
 
   const usage = responseJson?.usage;
+  const providerMetadata = responseJson?.provider_metadata ?? null;
+  const inference_provider = providerMetadata?.gateway?.routing?.finalProvider ?? null;
 
   const responseContent =
     responseJson?.content
@@ -210,7 +209,7 @@ export function parseMessagesMicrodollarUsageFromString(
     hasError: !responseJson?.model || statusCode >= 400,
     model: responseJson?.model ?? null,
     responseContent,
-    inference_provider: null,
+    inference_provider,
     upstream_id: null,
     finish_reason: responseJson?.stop_reason ?? null,
     latency: null,
@@ -220,7 +219,7 @@ export function parseMessagesMicrodollarUsageFromString(
     cancelled: null,
   } satisfies NotYetCostedUsageStats;
 
-  const costs = processMessagesApiUsage(usage, coreProps);
+  const costs = processMessagesApiUsage(usage, providerMetadata, coreProps);
   return { ...coreProps, ...costs };
 }
 

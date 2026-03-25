@@ -10,8 +10,6 @@ import * as z from 'zod';
 import { subDays } from 'date-fns';
 import { hasReceivedPromotion } from '@/lib/promotionalCredits';
 
-import { getKiloPassStateForUser } from '@/lib/kilo-pass/state';
-import { db } from '@/lib/drizzle';
 import { fromMicrodollars } from '@/lib/utils';
 import { KILO_AUTO_FREE_MODEL } from '@/lib/kilo-auto-model';
 
@@ -115,6 +113,7 @@ export async function generateUserNotifications(user: User): Promise<KiloNotific
     generateMiniMaxNoLongerFreeNotification,
     generateFirstDayWelcomeNotification,
     generateKiloPassNotification,
+    generateLiteLLMSecurityNotification,
   ];
 
   const resolvedConditionalNotifications = (
@@ -240,7 +239,7 @@ async function generateMiniMaxNoLongerFreeNotification(
       z.array(z.tuple([z.string()]).transform(([userId]) => userId))
     )(
       'minimax-no-longer-free-users',
-      'select id from notification_mar_23_minimax_no_longer_free limit 5e5'
+      'select kilo_user_id from notification_mar_23_minimax_no_longer_free limit 5e5'
     );
 
     if (!users.includes(user.id)) {
@@ -358,16 +357,40 @@ async function generateFirstDayWelcomeNotification(
   ];
 }
 
+async function generateLiteLLMSecurityNotification(
+  user: User,
+  _ctx: NotificationContext
+): Promise<KiloNotification[]> {
+  try {
+    const litellmUsers = await cachedPosthogQuery(
+      z.array(z.tuple([z.string()]).transform(([userId]) => userId))
+    )('litellm-security-incident-users', 'select id from notification_litellm_mar_24 limit 5e5');
+
+    if (!litellmUsers.includes(user.id)) {
+      console.debug('[generateLiteLLMSecurityNotification] user is not using LiteLLM provider');
+      return [];
+    }
+
+    console.debug('[generateLiteLLMSecurityNotification] user is using LiteLLM provider');
+    return [
+      {
+        id: 'litellm-security-mar-24',
+        title: 'LiteLLM Security Advisory',
+        message:
+          'Following a recent security incident with LiteLLM, we recommend reviewing your configuration and rotating credentials; if helpful, our gateway offers a more secure, managed alternative.',
+        showIn: ['extension'],
+      },
+    ];
+  } catch (e) {
+    console.error('[generateLiteLLMSecurityNotification]', e);
+    return [];
+  }
+}
+
 async function generateKiloPassNotification(
   user: User,
   ctx: NotificationContext
 ): Promise<KiloNotification[]> {
-  // Exclude users who already have a Kilo Pass
-  const kiloPassState = await getKiloPassStateForUser(db, user.id);
-  if (kiloPassState) {
-    return [];
-  }
-
   // Check if user belongs to an organization with balance > $5
   const hasHighBalanceOrg = ctx.userOrganizations.some(org => fromMicrodollars(org.balance) > 5);
   if (hasHighBalanceOrg) {

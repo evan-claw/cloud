@@ -183,11 +183,10 @@ export async function rewriteFreeModelResponse_Messages(response: Response, mode
         return;
       }
 
-      let doneReceived = false;
       const parser = createParser({
         onEvent(event: EventSourceMessage) {
           if (event.data === '[DONE]') {
-            doneReceived = true;
+            // OpenRouter sends [DONE], but this is not standard for Anthropic-style APIs
             return;
           }
           const json = JSON.parse(event.data) as
@@ -224,9 +223,6 @@ export async function rewriteFreeModelResponse_Messages(response: Response, mode
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
-          if (doneReceived) {
-            controller.enqueue('data: [DONE]\n\n');
-          }
           controller.close();
           break;
         }

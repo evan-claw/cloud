@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { controller } from './controller';
 import { deriveGatewayToken } from '../auth/gateway-token';
 
@@ -34,17 +34,23 @@ function makeEnv(options?: {
   posthogKey?: string;
   hyperdriveConnectionString?: string;
   workerEnv?: string;
+  tryMarkInstanceReady?: Mock;
+  internalApiSecret?: string;
 }) {
   const getConfig = vi.fn().mockResolvedValue({
     kilocodeApiKey: options?.kilocodeApiKey ?? 'kilo-key-1',
   });
+  const tryMarkInstanceReady =
+    options?.tryMarkInstanceReady ??
+    vi.fn().mockResolvedValue({ shouldNotify: false, userId: null });
 
   return {
     GATEWAY_TOKEN_SECRET: options?.gatewayTokenSecret ?? 'gateway-secret',
     WORKER_ENV: options?.workerEnv ?? 'production',
+    INTERNAL_API_SECRET: options?.internalApiSecret,
     KILOCLAW_INSTANCE: {
       idFromName: (userId: string) => userId,
-      get: () => ({ getConfig }),
+      get: () => ({ getConfig, tryMarkInstanceReady }),
     },
     KILOCLAW_CONTROLLER_AE: options?.writeDataPoint
       ? {
@@ -58,7 +64,7 @@ function makeEnv(options?: {
   } as never;
 }
 
-function makeBody(productTelemetry?: Record<string, unknown>) {
+function makeBody(overrides?: Record<string, unknown>) {
   return {
     sandboxId,
     machineId: 'machine-1',
@@ -73,7 +79,7 @@ function makeBody(productTelemetry?: Record<string, unknown>) {
     loadAvg5m: 0.42,
     bandwidthBytesIn: 1024,
     bandwidthBytesOut: 2048,
-    ...(productTelemetry !== undefined ? { productTelemetry } : {}),
+    ...overrides,
   };
 }
 
@@ -169,7 +175,7 @@ describe('POST /checkin', () => {
 
     const response = await controller.request(
       '/checkin',
-      { method: 'POST', headers, body: JSON.stringify(makeBody(makeProductTelemetry())) },
+      { method: 'POST', headers, body: JSON.stringify(makeBody({ productTelemetry: makeProductTelemetry() })) },
       env
     );
 
@@ -184,7 +190,7 @@ describe('POST /checkin', () => {
 
     const response = await controller.request(
       '/checkin',
-      { method: 'POST', headers, body: JSON.stringify(makeBody(makeProductTelemetry())) },
+      { method: 'POST', headers, body: JSON.stringify(makeBody({ productTelemetry: makeProductTelemetry() })) },
       env
     );
 
@@ -202,7 +208,7 @@ describe('POST /checkin', () => {
 
     const response = await controller.request(
       '/checkin',
-      { method: 'POST', headers, body: JSON.stringify(makeBody(makeProductTelemetry())) },
+      { method: 'POST', headers, body: JSON.stringify(makeBody({ productTelemetry: makeProductTelemetry() })) },
       env
     );
 
@@ -228,7 +234,7 @@ describe('POST /checkin', () => {
 
     const response = await controller.request(
       '/checkin',
-      { method: 'POST', headers, body: JSON.stringify(makeBody(makeProductTelemetry())) },
+      { method: 'POST', headers, body: JSON.stringify(makeBody({ productTelemetry: makeProductTelemetry() })) },
       env
     );
 
@@ -248,7 +254,63 @@ describe('POST /checkin', () => {
 
     const response = await controller.request(
       '/checkin',
-      { method: 'POST', headers, body: JSON.stringify(makeBody(makeProductTelemetry())) },
+      { method: 'POST', headers, body: JSON.stringify(makeBody({ productTelemetry: makeProductTelemetry() })) },
+      env
+    );
+
+    expect(response.status).toBe(204);
+  });
+
+  it('calls tryMarkInstanceReady when loadAvg5m is below threshold', async () => {
+    const tryMarkInstanceReady = vi.fn().mockResolvedValue({ shouldNotify: false, userId: null });
+    const env = makeEnv({ tryMarkInstanceReady });
+    const headers = await makeAuthHeaders();
+
+    const response = await controller.request(
+      '/checkin',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(makeBody({ loadAvg5m: 0.05 })),
+      },
+      env
+    );
+
+    expect(response.status).toBe(204);
+    expect(tryMarkInstanceReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call tryMarkInstanceReady when loadAvg5m is above threshold', async () => {
+    const tryMarkInstanceReady = vi.fn();
+    const env = makeEnv({ tryMarkInstanceReady });
+    const headers = await makeAuthHeaders();
+
+    const response = await controller.request(
+      '/checkin',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(makeBody({ loadAvg5m: 0.5 })),
+      },
+      env
+    );
+
+    expect(response.status).toBe(204);
+    expect(tryMarkInstanceReady).not.toHaveBeenCalled();
+  });
+
+  it('does not fail checkin when tryMarkInstanceReady throws', async () => {
+    const tryMarkInstanceReady = vi.fn().mockRejectedValue(new Error('DO error'));
+    const env = makeEnv({ tryMarkInstanceReady });
+    const headers = await makeAuthHeaders();
+
+    const response = await controller.request(
+      '/checkin',
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(makeBody({ loadAvg5m: 0.05 })),
+      },
       env
     );
 

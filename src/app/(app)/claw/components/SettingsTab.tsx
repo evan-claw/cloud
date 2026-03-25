@@ -55,6 +55,8 @@ import { ConfirmActionDialog } from './ConfirmActionDialog';
 import { PairingSection } from './PairingSection';
 import { VersionPinCard } from './VersionPinCard';
 import { WorkspaceFileEditor } from './WorkspaceFileEditor';
+import { PermissionPresetCards } from './PermissionPresetCards';
+import { type ExecPreset, configToExecPreset, execPresetToConfig } from './claw.types';
 
 type ClawMutations = ReturnType<typeof useKiloClawMutations>;
 
@@ -237,10 +239,12 @@ function GoogleAccountCard({
   connected,
   gmailNotificationsEnabled,
   mutations,
+  onRedeploy,
 }: {
   connected: boolean;
   gmailNotificationsEnabled: boolean;
   mutations: ClawMutations;
+  onRedeploy?: () => void;
 }) {
   const trpc = useTRPC();
   const { data: setupData } = useQuery(
@@ -415,7 +419,12 @@ function GoogleAccountCard({
         onConfirm={() => {
           mutations.disconnectGoogle.mutate(undefined, {
             onSuccess: () => {
-              toast.success('Google account disconnected. Redeploy to apply.');
+              toast.success('Google account disconnected. Redeploy to apply.', {
+                duration: 8000,
+                ...(onRedeploy && {
+                  action: { label: 'Redeploy', onClick: onRedeploy },
+                }),
+              });
               setConfirmDisconnect(false);
             },
             onError: err => toast.error(`Failed to disconnect: ${err.message}`),
@@ -423,6 +432,86 @@ function GoogleAccountCard({
         }}
       />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Default Permissions section
+// ---------------------------------------------------------------------------
+
+function PermissionPresetSection({
+  isRunning,
+  status,
+  mutations,
+  onRedeploy,
+}: {
+  isRunning: boolean;
+  status: KiloClawDashboardStatus;
+  mutations: ClawMutations;
+  onRedeploy?: () => void;
+}) {
+  const currentPreset = configToExecPreset(status.execSecurity, status.execAsk);
+  const [selected, setSelected] = useState<ExecPreset | null>(currentPreset);
+  const saving = mutations.patchExecPreset.isPending || mutations.patchOpenclawConfig.isPending;
+  const dirty = selected !== null && selected !== currentPreset;
+
+  function handleSave() {
+    if (!selected) return;
+    const { security, ask } = execPresetToConfig(selected);
+
+    // Persist to durable storage (survives redeploys)
+    mutations.patchExecPreset.mutate(
+      { security, ask },
+      {
+        onError: (err: { message: string }) => toast.error(`Failed to save: ${err.message}`),
+      }
+    );
+
+    // Apply to the live openclaw.json if the instance is running
+    if (isRunning) {
+      mutations.patchOpenclawConfig.mutate(
+        { patch: { tools: { exec: { security, ask } } } },
+        {
+          onSuccess: () => {
+            toast.success('Default permissions saved. Redeploy to ensure the change persists.', {
+              duration: 8000,
+              ...(onRedeploy && {
+                action: { label: 'Redeploy', onClick: onRedeploy },
+              }),
+            });
+          },
+          onError: (err: { message: string }) =>
+            toast.error(`Saved to storage but failed to apply live: ${err.message}`),
+        }
+      );
+    } else {
+      toast.success(
+        'Default permissions saved. Start your instance and redeploy for the change to take effect.'
+      );
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-foreground mb-3 text-base font-semibold">Default Permissions</h2>
+      <div className="rounded-lg border p-5">
+        <p className="text-muted-foreground mb-1 text-sm">
+          Choose how your bot handles actions by default. This sets the{' '}
+          <strong className="text-foreground">default permission level</strong> for all tool
+          executions.
+        </p>
+        <p className="mb-4 text-xs text-amber-400">
+          You must redeploy your instance for this change to take effect.
+        </p>
+        <PermissionPresetCards selected={selected} onSelect={setSelected} />
+        <div className="mt-4 flex justify-end">
+          <Button size="sm" disabled={!dirty || saving} onClick={handleSave}>
+            <Save className="h-4 w-4" />
+            {saving ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -435,12 +524,18 @@ export function SettingsTab({
   mutations,
   onSecretsChanged,
   dirtySecrets,
+  onRedeploy,
+  onUpgrade,
   onRequestUpgrade,
 }: {
   status: KiloClawDashboardStatus;
   mutations: ClawMutations;
   onSecretsChanged?: (entryId: string) => void;
   dirtySecrets: Set<string>;
+  onRedeploy?: () => void;
+  /** Callback that triggers an image upgrade (pull latest) instead of a plain restart. */
+  onUpgrade?: () => void;
+  /** Callback that requests an upgrade via the InstanceControls dialog. */
   onRequestUpgrade?: () => void;
 }) {
   const posthog = usePostHog();
@@ -714,6 +809,14 @@ export function SettingsTab({
         </div>
       </div>
 
+      {/* ── Default Permissions ── */}
+      <PermissionPresetSection
+        isRunning={isRunning}
+        status={status}
+        mutations={mutations}
+        onRedeploy={onRedeploy}
+      />
+
       {/* ── Messaging Channels ── */}
       <div>
         <h2 className="text-foreground mb-3 text-base font-semibold">Messaging Channels</h2>
@@ -726,6 +829,7 @@ export function SettingsTab({
               mutations={mutations}
               onSecretsChanged={onSecretsChanged}
               isDirty={dirtySecrets.has(entry.id)}
+              onRedeploy={onRedeploy}
             />
           ))}
         </div>
@@ -767,6 +871,7 @@ export function SettingsTab({
                   mutations={mutations}
                   onSecretsChanged={onSecretsChanged}
                   isDirty={dirtySecrets.has(entry.id)}
+                  onRedeploy={onRedeploy}
                   actionRowExtra={
                     <span className="text-muted-foreground flex items-center gap-1 text-xs">
                       <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
@@ -812,6 +917,8 @@ export function SettingsTab({
                   mutations={mutations}
                   onSecretsChanged={onSecretsChanged}
                   isDirty={dirtySecrets.has(entry.id)}
+                  onRedeploy={onUpgrade ?? onRedeploy}
+                  redeployLabel="Upgrade"
                   actionRowExtra={<AgentCardSetupGuide />}
                 />
               ))}
@@ -849,6 +956,7 @@ export function SettingsTab({
             connected={status.googleConnected}
             gmailNotificationsEnabled={status.gmailNotificationsEnabled}
             mutations={mutations}
+            onRedeploy={onRedeploy}
           />
         </div>
       </div>

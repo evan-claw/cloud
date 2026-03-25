@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { toast } from 'sonner';
 import { Check, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import {
@@ -20,6 +21,7 @@ import { InstanceTab } from './InstanceTab';
 import { OpenClawButton } from './OpenClawButton';
 import { SettingsTab } from './SettingsTab';
 import { ChangelogTab } from './ChangelogTab';
+import { ChannelPairingStep } from './ChannelPairingStep';
 import { ChannelSelectionStepView } from './ChannelSelectionStep';
 import { PermissionStep } from './PermissionStep';
 import { ProvisioningStep } from './ProvisioningStep';
@@ -65,10 +67,12 @@ export function ClawDashboard({
   const configServiceNudgeVisible = !instanceStatus || instanceYoung;
 
   const [onboardingStep, setOnboardingStep] = useState<
-    'permissions' | 'channels' | 'provisioning' | 'done'
+    'permissions' | 'channels' | 'provisioning' | 'pairing' | 'done'
   >('permissions');
   const [selectedPreset, setSelectedPreset] = useState<ExecPreset | null>(null);
   const [channelTokens, setChannelTokens] = useState<Record<string, string> | null>(null);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const hasPairingStep = selectedChannelId === 'telegram' || selectedChannelId === 'discord';
 
   const [dirtySecrets, setDirtySecrets] = useState<Set<string>>(new Set());
 
@@ -82,6 +86,33 @@ export function ClawDashboard({
   const onRedeploySuccess = useCallback(() => {
     setDirtySecrets(new Set());
   }, []);
+
+  const onRedeploy = useCallback(() => {
+    mutations.restartMachine.mutate(undefined, {
+      onSuccess: () => {
+        toast.success('Redeploying');
+        onRedeploySuccess();
+      },
+      onError: err => {
+        toast.error(err.message, { duration: 10000 });
+      },
+    });
+  }, [mutations.restartMachine, onRedeploySuccess]);
+
+  const onUpgrade = useCallback(() => {
+    mutations.restartMachine.mutate(
+      { imageTag: 'latest' },
+      {
+        onSuccess: () => {
+          toast.success('Upgrading to latest image');
+          onRedeploySuccess();
+        },
+        onError: err => {
+          toast.error(err.message, { duration: 10000 });
+        },
+      }
+    );
+  }, [mutations.restartMachine, onRedeploySuccess]);
 
   // Billing gating (welcome page for new users, loading spinner) is handled
   // by page.tsx before this component mounts. ClawDashboard always renders
@@ -160,11 +191,13 @@ export function ClawDashboard({
         ) : isNewSetup && onboardingStep === 'channels' ? (
           <ChannelSelectionStepView
             instanceRunning={isRunning && gatewayStatus?.state === 'running'}
-            onSelect={(_channelId, tokens) => {
+            onSelect={(channelId, tokens) => {
+              setSelectedChannelId(channelId);
               setChannelTokens(tokens);
               setOnboardingStep('provisioning');
             }}
             onSkip={() => {
+              setSelectedChannelId(null);
               setChannelTokens(null);
               setOnboardingStep('provisioning');
             }}
@@ -175,7 +208,17 @@ export function ClawDashboard({
             channelTokens={channelTokens}
             instanceRunning={isRunning && gatewayStatus?.state === 'running'}
             mutations={mutations}
+            totalSteps={hasPairingStep ? 5 : 4}
+            onComplete={() => setOnboardingStep(hasPairingStep ? 'pairing' : 'done')}
+          />
+        ) : isNewSetup &&
+          onboardingStep === 'pairing' &&
+          (selectedChannelId === 'telegram' || selectedChannelId === 'discord') ? (
+          <ChannelPairingStep
+            channelId={selectedChannelId}
+            mutations={mutations}
             onComplete={() => setOnboardingStep('done')}
+            onSkip={() => setOnboardingStep('done')}
           />
         ) : isNewSetup ? (
           <Card className="mt-6 overflow-hidden">
@@ -282,6 +325,8 @@ export function ClawDashboard({
                     mutations={mutations}
                     onSecretsChanged={onSecretsChanged}
                     dirtySecrets={dirtySecrets}
+                    onRedeploy={onRedeploy}
+                    onUpgrade={onUpgrade}
                     onRequestUpgrade={onRequestUpgrade}
                   />
                 </TabsContent>

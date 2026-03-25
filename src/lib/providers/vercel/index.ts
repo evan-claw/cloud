@@ -65,13 +65,6 @@ export async function shouldRouteToVercel(
   request: GatewayRequest,
   randomSeed: string
 ) {
-  if (request.kind === 'responses' || request.kind === 'messages') {
-    console.debug(
-      `[shouldRouteToVercel] not routing this API to Vercel, cost parsing (OpenRouter-incompatible) is not implemented`
-    );
-    return false;
-  }
-
   if (request.body.provider?.data_collection === 'deny') {
     console.debug(
       `[shouldRouteToVercel] not routing to Vercel because data_collection=deny is not supported`
