@@ -434,7 +434,14 @@ export const kiloclawRouter = createTRPCRouter({
   renameInstance: baseProcedure
     .input(z.object({ name: z.string().min(1).max(50).nullable() }))
     .mutation(async ({ ctx, input }) => {
-      await renameInstance(ctx.user.id, input.name);
+      try {
+        await renameInstance(ctx.user.id, input.name);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: error instanceof Error ? error.message : 'Failed to rename instance',
+        });
+      }
     }),
 
   // Instance lifecycle

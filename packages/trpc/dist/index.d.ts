@@ -3273,7 +3273,6 @@ type MachineSize = {
 type PlatformStatusResponse = {
     userId: string | null;
     sandboxId: string | null;
-    name?: string | null;
     status: 'provisioned' | 'starting' | 'restarting' | 'running' | 'stopped' | 'destroying' | null;
     provisionedAt: number | null;
     lastStartedAt: number | null;

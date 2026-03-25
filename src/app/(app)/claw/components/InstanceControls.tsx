@@ -68,7 +68,7 @@ export function InstanceControls({
   // Auto-start runs only on fresh provision (status=provisioned), not re-provision
   const isAutoStarting = isProvisioned && mutations.provision.isPending;
   const [isEditingName, setIsEditingName] = useState(false);
-  const [nameValue, setNameValue] = useState(status.name ?? '');
+  const [nameValue, setNameValue] = useState('');
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmRedeploy, setConfirmRedeploy] = useState(false);
