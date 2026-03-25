@@ -637,8 +637,8 @@ platform.get('/gateway/ready', async c => {
     );
     return c.json(result ?? { ready: false, error: 'controller too old' }, 200);
   } catch (err) {
-    const raw = err instanceof Error ? err.message : String(err);
-    return c.json({ ready: false, error: raw }, 200);
+    const { message } = sanitizeError(err, 'gateway ready');
+    return c.json({ ready: false, error: message }, 200);
   }
 });
 
