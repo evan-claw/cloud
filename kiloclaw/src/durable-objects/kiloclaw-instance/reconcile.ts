@@ -641,11 +641,13 @@ export async function attemptMetadataRecovery(
   flyConfig: FlyClientConfig,
   ctx: DurableObjectState,
   state: InstanceMutableState,
-  rctx: ReconcileContext
+  rctx: ReconcileContext,
+  skipCooldown?: boolean
 ): Promise<boolean> {
   if (!state.userId) return false;
 
   if (
+    !skipCooldown &&
     state.lastMetadataRecoveryAt &&
     Date.now() - state.lastMetadataRecoveryAt < METADATA_RECOVERY_COOLDOWN_MS
   ) {
