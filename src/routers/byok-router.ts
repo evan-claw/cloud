@@ -30,7 +30,7 @@ import {
 import { unstable_cache } from 'next/cache';
 import { StoredModelSchema } from '@/lib/providers/vercel/types';
 import { createGateway, generateText } from 'ai';
-import { PROVIDERS } from '@/lib/providers';
+import PROVIDERS from '@/lib/providers/provider-definitions';
 import { getVercelInferenceProviderConfigForUserByok } from '@/lib/providers/vercel';
 import { decryptByokRow } from '@/lib/byok';
 import type { GatewayProviderOptions } from '@ai-sdk/gateway';

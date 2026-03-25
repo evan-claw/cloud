@@ -9,7 +9,8 @@ import type {
   OpenRouterChatCompletionRequest,
   OpenRouterGeneration,
 } from './providers/openrouter/types';
-import { fetchGeneration, PROVIDERS } from './providers';
+import { fetchGeneration } from './providers';
+import PROVIDERS from './providers/provider-definitions';
 import { toMicrodollars } from './utils';
 import { captureException, captureMessage, startSpan, startInactiveSpan } from '@sentry/nextjs';
 import type { Span } from '@sentry/nextjs';
@@ -19,7 +20,7 @@ import type { SQL } from 'drizzle-orm';
 import { eq, sql } from 'drizzle-orm';
 import { sentryRootSpan } from './getRootSpan';
 import { ingestOrganizationTokenUsage } from '@/lib/organizations/organization-usage';
-import type { ProviderId } from '@/lib/providers/provider-id';
+import type { ProviderId } from '@/lib/providers/types';
 import { isFreeModel, isKiloStealthModel } from '@/lib/models';
 import { sentryLogger } from '@/lib/utils.server';
 import { maybeIssueKiloPassBonusFromUsageThreshold } from '@/lib/kilo-pass/usage-triggered-bonus';
