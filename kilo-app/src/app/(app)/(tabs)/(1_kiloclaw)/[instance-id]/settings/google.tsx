@@ -25,7 +25,7 @@ export default function GoogleScreen() {
   const isConnected = statusQuery.data?.googleConnected ?? false;
   const gmailEnabled = statusQuery.data?.gmailNotificationsEnabled ?? false;
 
-  const setupQuery = useKiloClawGoogleSetup(!isConnected);
+  const setupQuery = useKiloClawGoogleSetup(!statusQuery.isPending && !isConnected);
 
   if (statusQuery.isPending) {
     return (
