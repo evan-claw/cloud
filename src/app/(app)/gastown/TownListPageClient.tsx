@@ -42,10 +42,9 @@ export function TownListPageClient() {
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <SetPageTitle title="Gas Town" />
-              <div className="flex items-center gap-3">
+              <SetPageTitle title="Gas Town">
                 <Badge variant="beta">beta</Badge>
-              </div>
+              </SetPageTitle>
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/60">
                 A chat-first orchestration console for towns, rigs, beads, and agents. Built for
                 radical transparency: every object is clickable; every outcome is attributable.

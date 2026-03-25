@@ -4,16 +4,22 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 
 type PageTitleContextValue = {
   title: string;
+  extras: ReactNode;
   setTitle: (title: string) => void;
+  setExtras: (extras: ReactNode) => void;
 };
 
 const PageTitleContext = createContext<PageTitleContextValue | undefined>(undefined);
 
 export function PageTitleProvider({ children }: { children: ReactNode }) {
   const [title, setTitleState] = useState('');
+  const [extras, setExtrasState] = useState<ReactNode>(null);
   const setTitle = useCallback((next: string) => setTitleState(next), []);
+  const setExtras = useCallback((next: ReactNode) => setExtrasState(next), []);
   return (
-    <PageTitleContext.Provider value={{ title, setTitle }}>{children}</PageTitleContext.Provider>
+    <PageTitleContext.Provider value={{ title, extras, setTitle, setExtras }}>
+      {children}
+    </PageTitleContext.Provider>
   );
 }
 

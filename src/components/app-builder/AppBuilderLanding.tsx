@@ -774,14 +774,10 @@ export function AppBuilderLanding({ organizationId, onProjectCreated }: AppBuild
     <div className="flex h-dvh w-full flex-col items-center overflow-y-auto p-4 md:p-8">
       <div className="my-auto w-full max-w-3xl">
         {/* Header */}
-        <div className="mb-8 text-center">
-          <div className="bg-primary/10 mx-auto mb-4 w-fit rounded-full p-4">
-            <Sparkles className="text-primary h-8 w-8" />
-          </div>
-          <SetPageTitle title="App Builder" />
-          <div className="flex items-center justify-center gap-3">
+         <div className="mb-8 text-center">
+          <SetPageTitle title="App Builder">
             <Badge variant="new">new</Badge>
-          </div>
+          </SetPageTitle>
           <p className="text-muted-foreground mt-2 text-sm md:text-base">
             Describe the app you want to build, and we'll create it for you
           </p>

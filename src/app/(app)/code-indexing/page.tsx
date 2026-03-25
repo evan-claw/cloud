@@ -15,10 +15,9 @@ export default async function UserCodeIndexingPage() {
     <PageContainer>
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-2">
-          <SetPageTitle title="Managed Indexing" />
-          <div className="flex items-center gap-3">
+          <SetPageTitle title="Managed Indexing">
             <Badge variant="new">new</Badge>
-          </div>
+          </SetPageTitle>
           <p className="text-muted-foreground">View and manage your indexed code</p>
           <a
             href="https://kilo.ai/docs/advanced-usage/managed-indexing"

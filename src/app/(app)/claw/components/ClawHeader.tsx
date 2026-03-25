@@ -29,15 +29,15 @@ export function ClawHeader({
           <KiloCrabIcon className="text-muted-foreground h-5 w-5" />
         </div>
         <div>
-          <SetPageTitle title="KiloClaw" />
-          <div className="flex items-center gap-2.5">
+          <SetPageTitle title="KiloClaw">
+            <KiloCrabIcon className="text-muted-foreground h-4 w-4" />
             <Badge variant="beta">Beta</Badge>
             {statusInfo && (
               <Badge variant="outline" className={statusInfo.className}>
                 {statusInfo.label}
               </Badge>
             )}
-          </div>
+          </SetPageTitle>
           {!isSetupWizard && region && (
             <p className="text-muted-foreground font-mono text-sm">
               {region.toUpperCase()} {sandboxId ? `- ${sandboxId}` : ''}

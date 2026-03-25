@@ -44,10 +44,9 @@ export function DeployPageClient({ initialDeploymentId }: DeployPageClientProps)
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
-              <SetPageTitle title="Deployments" />
-              <div className="flex items-center gap-3">
+              <SetPageTitle title="Deployments">
                 <Badge variant="new">new</Badge>
-              </div>
+              </SetPageTitle>
               <p className="text-gray-400">Deploy your web project</p>
               <a
                 href="https://kilo.ai/docs/advanced-usage/deploy"

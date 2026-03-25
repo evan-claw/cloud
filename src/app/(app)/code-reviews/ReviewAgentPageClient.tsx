@@ -77,12 +77,11 @@ export function ReviewAgentPageClient({
 
   return (
     <PageContainer>
-      <SetPageTitle title="Code Reviewer" />
+      <SetPageTitle title="Code Reviewer">
+        <Badge variant="new">new</Badge>
+      </SetPageTitle>
       {/* Header */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="new">new</Badge>
-        </div>
         <p className="text-muted-foreground">
           Automate code reviews with AI-powered analysis for your personal repositories
         </p>

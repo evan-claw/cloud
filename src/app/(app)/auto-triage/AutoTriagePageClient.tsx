@@ -50,12 +50,11 @@ export function AutoTriagePageClient({
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">
-      <SetPageTitle title="Auto Triage" />
+      <SetPageTitle title="Auto Triage">
+        <Badge variant="beta">beta</Badge>
+      </SetPageTitle>
       {/* Header */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="beta">beta</Badge>
-        </div>
         <p className="text-muted-foreground">
           Automatically triage GitHub issues with Al-powered analysis
         </p>

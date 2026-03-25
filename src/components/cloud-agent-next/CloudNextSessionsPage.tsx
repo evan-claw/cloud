@@ -463,10 +463,9 @@ export function CloudNextSessionsPage({ organizationId }: CloudNextSessionsPageP
     !hasInsufficientBalance;
 
   const titleContent = (
-    <div className="flex items-center gap-3">
-      <SetPageTitle title="Cloud Agent" />
+    <SetPageTitle title="Cloud Agent">
       <Badge variant="new">new</Badge>
-    </div>
+    </SetPageTitle>
   );
 
   const subtitleContent = (

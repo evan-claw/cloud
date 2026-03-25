@@ -48,12 +48,11 @@ export function AutoFixPageClient({
 
   return (
     <div className="container mx-auto space-y-6 px-4 py-8">
-      <SetPageTitle title="Auto Fix" />
+      <SetPageTitle title="Auto Fix">
+        <Badge variant="new">new</Badge>
+      </SetPageTitle>
       {/* Header */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="new">new</Badge>
-        </div>
         <p className="text-muted-foreground">
           Automatically create pull requests to fix issues labeled with kilo-auto-fix
         </p>

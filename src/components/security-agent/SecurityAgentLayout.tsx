@@ -79,12 +79,11 @@ export function SecurityAgentLayout({ children }: SecurityAgentLayoutProps) {
 
   return (
     <div className="space-y-6">
-      <SetPageTitle title="Security Agent" />
+      <SetPageTitle title="Security Agent">
+        <Badge variant="beta">Beta</Badge>
+      </SetPageTitle>
       {/* Header */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="beta">Beta</Badge>
-        </div>
         <p className="text-muted-foreground">
           Monitor and manage Dependabot security alerts for your repositories
         </p>
