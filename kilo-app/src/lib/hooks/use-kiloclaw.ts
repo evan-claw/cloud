@@ -144,6 +144,10 @@ export function useKiloClawSecretCatalog() {
 
 // ── Mutations ────────────────────────────────────────────────────────
 
+const onMutationError = (error: { message: string }) => {
+  toast.error(error.message || 'Something went wrong');
+};
+
 export function useKiloClawMutations() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -155,15 +159,13 @@ export function useKiloClawMutations() {
     });
   };
 
-  const onError = (error: Error) => {
-    toast.error(error.message || 'Something went wrong');
-  };
-
   return {
     start: useMutation(
-      trpc.kiloclaw.start.mutationOptions({ onSuccess: invalidateStatus, onError })
+      trpc.kiloclaw.start.mutationOptions({ onSuccess: invalidateStatus, onError: onMutationError })
     ),
-    stop: useMutation(trpc.kiloclaw.stop.mutationOptions({ onSuccess: invalidateStatus, onError })),
+    stop: useMutation(
+      trpc.kiloclaw.stop.mutationOptions({ onSuccess: invalidateStatus, onError: onMutationError })
+    ),
     restartMachine: useMutation(
       trpc.kiloclaw.restartMachine.mutationOptions({
         onSuccess: async () => {
@@ -172,7 +174,7 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.gatewayStatus.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     restartOpenClaw: useMutation(
@@ -183,7 +185,7 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.gatewayStatus.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     patchSecrets: useMutation(
@@ -192,12 +194,12 @@ export function useKiloClawMutations() {
           await invalidateStatus();
           await queryClient.invalidateQueries({ queryKey: trpc.kiloclaw.getConfig.queryKey() });
           // Small delay to let the worker process the secret before refetching catalog
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await queryClient.invalidateQueries({
             queryKey: trpc.kiloclaw.getSecretCatalog.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     patchChannels: useMutation(
@@ -205,15 +207,17 @@ export function useKiloClawMutations() {
         onSuccess: async () => {
           await invalidateStatus();
           await queryClient.invalidateQueries({ queryKey: trpc.kiloclaw.getConfig.queryKey() });
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await queryClient.invalidateQueries({
             queryKey: trpc.kiloclaw.getChannelCatalog.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
-    patchExecPreset: useMutation(trpc.kiloclaw.patchExecPreset.mutationOptions({ onError })),
+    patchExecPreset: useMutation(
+      trpc.kiloclaw.patchExecPreset.mutationOptions({ onError: onMutationError })
+    ),
     setMyPin: useMutation(
       trpc.kiloclaw.setMyPin.mutationOptions({
         onSuccess: async () => {
@@ -222,7 +226,7 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.getMyPin.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     removeMyPin: useMutation(
@@ -233,7 +237,7 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.getMyPin.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     approvePairingRequest: useMutation(
@@ -243,7 +247,7 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.listPairingRequests.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     approveDevicePairingRequest: useMutation(
@@ -253,17 +257,26 @@ export function useKiloClawMutations() {
             queryKey: trpc.kiloclaw.listDevicePairingRequests.queryKey(),
           });
         },
-        onError,
+        onError: onMutationError,
       })
     ),
     disconnectGoogle: useMutation(
-      trpc.kiloclaw.disconnectGoogle.mutationOptions({ onSuccess: invalidateStatus, onError })
+      trpc.kiloclaw.disconnectGoogle.mutationOptions({
+        onSuccess: invalidateStatus,
+        onError: onMutationError,
+      })
     ),
     setGmailNotifications: useMutation(
-      trpc.kiloclaw.setGmailNotifications.mutationOptions({ onSuccess: invalidateStatus, onError })
+      trpc.kiloclaw.setGmailNotifications.mutationOptions({
+        onSuccess: invalidateStatus,
+        onError: onMutationError,
+      })
     ),
     renameInstance: useMutation(
-      trpc.kiloclaw.renameInstance.mutationOptions({ onSuccess: invalidateStatus, onError })
+      trpc.kiloclaw.renameInstance.mutationOptions({
+        onSuccess: invalidateStatus,
+        onError: onMutationError,
+      })
     ),
   };
 }
