@@ -29,6 +29,7 @@ export const subjects = {
   clawInstanceDestroyed: 'Your KiloClaw Instance Has Been Deleted',
   clawEarlybirdEndingSoon: 'Your KiloClaw Earlybird Access Ends Soon',
   clawEarlybirdExpiresTomorrow: 'Your KiloClaw Earlybird Access Expires Tomorrow',
+  clawInstanceReady: 'Your KiloClaw Instance Is Ready',
 } as const;
 
 export type TemplateName = keyof typeof subjects;

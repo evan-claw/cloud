@@ -8,9 +8,6 @@ import { deriveGatewayToken } from '../auth/gateway-token';
 
 const INSTANCE_READY_LOAD_THRESHOLD = 0.1;
 
-/** Production default for the Next.js app URL. */
-const DEFAULT_NEXT_API_ORIGIN = 'https://kilo.ai';
-
 const CheckinSchema = z.object({
   sandboxId: z.string().min(1),
   machineId: z.string().optional(),
@@ -34,14 +31,10 @@ const CheckinSchema = z.object({
  * in production it's unset and we fall back to the hardcoded default.
  */
 function nextApiOrigin(kilocodeApiBaseUrl: string | undefined): string {
-  if (kilocodeApiBaseUrl) {
-    try {
-      return new URL(kilocodeApiBaseUrl).origin;
-    } catch {
-      // Malformed URL — fall through to default.
-    }
+  if (!kilocodeApiBaseUrl) {
+    throw new Error('KILOCODE_API_BASE_URL not defined');
   }
-  return DEFAULT_NEXT_API_ORIGIN;
+  return new URL(kilocodeApiBaseUrl).origin;
 }
 
 /**
