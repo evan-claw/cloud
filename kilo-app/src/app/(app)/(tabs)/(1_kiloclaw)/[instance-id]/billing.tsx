@@ -108,7 +108,7 @@ export default function BillingScreen() {
     );
   }
 
-  if (!billing) {
+  if (billingQuery.isError || !billing) {
     return (
       <View className="flex-1 bg-background">
         <ScreenHeader title="Billing" />
