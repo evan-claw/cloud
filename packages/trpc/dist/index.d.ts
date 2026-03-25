@@ -3538,6 +3538,7 @@ type ExternalOpenPullRequest = {
     number: number;
     title: string;
     url: string;
+    repo: string;
     authorLogin: string;
     createdAt: string;
     ageDays: number;
@@ -3562,6 +3563,7 @@ type ExternalClosedPullRequest = {
     number: number;
     title: string;
     url: string;
+    repo: string;
     authorLogin: string;
     closedAt: string;
     mergedAt: string | null;
@@ -7896,6 +7898,7 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
             getKilocodeOpenPullRequestsSummary: _trpc_server.TRPCQueryProcedure<{
                 input: {
                     includeDrafts?: boolean | undefined;
+                    repos?: ("cloud" | "kilocode" | "kilo-marketplace" | "kilocode-legacy")[] | undefined;
                 } | undefined;
                 output: OpenPullRequestsSummary;
                 meta: object;
@@ -7906,7 +7909,9 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
                 meta: object;
             }>;
             getKilocodeRecentlyClosedExternalPRs: _trpc_server.TRPCQueryProcedure<{
-                input: void;
+                input: {
+                    repos?: ("cloud" | "kilocode" | "kilo-marketplace" | "kilocode-legacy")[] | undefined;
+                } | undefined;
                 output: ExternalClosedPullRequestsWithWeekStats;
                 meta: object;
             }>;
