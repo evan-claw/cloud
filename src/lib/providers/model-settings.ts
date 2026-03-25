@@ -89,7 +89,7 @@ function getAiSdkProvider(model: string): CustomLlmProvider | undefined {
     // with 'openai' prompt caching doesn't seem to work
     return 'openai-compatible';
   }
-  if (qwen35_plus_free_model.public_id === model || seed_20_pro_free_model.public_id === model) {
+  if (seed_20_pro_free_model.public_id === model) {
     // with 'openai' a bunch of bugs in vercel ai sdk v5 get triggered
     return 'openai-compatible';
   }
