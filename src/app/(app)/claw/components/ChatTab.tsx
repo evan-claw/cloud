@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { Channel as StreamChannel } from 'stream-chat';
+import { useCallback, useEffect, useState } from 'react';
+import type { Channel as StreamChannel, Event } from 'stream-chat';
 import {
   Chat,
   Channel,
@@ -10,6 +10,8 @@ import {
   MessageInput,
   Thread,
   useCreateChatClient,
+  useChatContext,
+  useChannelStateContext,
 } from 'stream-chat-react';
 import { useStreamChatCredentials } from '@/hooks/useKiloClaw';
 
@@ -21,7 +23,9 @@ type ChatTabProps = {
 export function ChatTab({ enabled }: ChatTabProps) {
   const { data: creds, isLoading, error } = useStreamChatCredentials(enabled);
 
-  if (!enabled) return null;
+  if (!enabled) {
+    return <ChatPlaceholder message="Chat is available when the machine is running." />;
+  }
 
   if (isLoading) {
     return <ChatPlaceholder message="Connecting to chat…" />;
@@ -64,8 +68,13 @@ function StreamChatUI({
   useEffect(() => {
     if (!client) return;
     const ch = client.channel('messaging', channelId);
+    ch.watch({ presence: true });
     setChannel(ch);
   }, [client, channelId]);
+
+  // channelId is "default-{sandboxId}", bot user is "bot-{sandboxId}"
+  const sandboxId = channelId.replace(/^default-/, '');
+  const botUserId = `bot-${sandboxId}`;
 
   if (!client || !channel) {
     return <ChatPlaceholder message="Connecting to chat…" />;
@@ -76,12 +85,57 @@ function StreamChatUI({
       <Chat client={client} theme="str-chat__theme-dark">
         <Channel channel={channel}>
           <Window>
+            <BotStatusBar botUserId={botUserId} />
             <MessageList />
             <MessageInput />
           </Window>
           <Thread />
         </Channel>
       </Chat>
+    </div>
+  );
+}
+
+function useBotOnlineStatus(botUserId: string): boolean {
+  const { client } = useChatContext();
+  const { channel } = useChannelStateContext();
+
+  const getBotOnline = useCallback((): boolean => {
+    const member = channel.state.members[botUserId];
+    return !!member?.user?.online;
+  }, [channel, botUserId]);
+
+  const [online, setOnline] = useState(getBotOnline);
+
+  useEffect(() => {
+    setOnline(getBotOnline());
+
+    const handlePresenceChange = (event: Event) => {
+      if (event.user?.id === botUserId) {
+        setOnline(!!event.user.online);
+      }
+    };
+
+    client.on('user.presence.changed', handlePresenceChange);
+    return () => {
+      client.off('user.presence.changed', handlePresenceChange);
+    };
+  }, [client, botUserId, getBotOnline]);
+
+  return online;
+}
+
+function BotStatusBar({ botUserId }: { botUserId: string }) {
+  const online = useBotOnlineStatus(botUserId);
+
+  return (
+    <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
+      <span
+        className={`size-2 rounded-full ${online ? 'bg-emerald-400' : 'bg-white/20'}`}
+      />
+      <span className="text-xs text-white/50">
+        KiloClaw {online ? 'Online' : 'Offline'}
+      </span>
     </div>
   );
 }
