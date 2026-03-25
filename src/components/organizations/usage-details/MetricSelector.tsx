@@ -44,13 +44,13 @@ export function MetricSelector({ metrics, selectedMetric, onSelectedMetricChange
                 isSelected ? 'opacity-100' : 'opacity-80'
               )}
             />
-            <CardHeader className="relative z-[1] flex flex-row items-center space-y-0 px-3 pt-3 pb-1">
+            <CardHeader className="relative z-[1] flex flex-row items-center space-y-0 px-3 pt-2 pb-0.5">
               {IconComponent && <IconComponent className="mr-2 h-4 w-4" />}
               <CardTitle className="text-sm font-medium whitespace-nowrap">
                 {metric.title}
               </CardTitle>
             </CardHeader>
-            <CardContent className="relative z-[1] px-3">
+            <CardContent className="relative z-[1] px-3 pb-2">
               <div
                 className={cn(
                   'text-xl font-bold transition-colors duration-200',
