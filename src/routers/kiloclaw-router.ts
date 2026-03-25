@@ -12,6 +12,7 @@ import {
   FIELD_KEY_TO_ENTRY,
   MAX_SECRET_FIELD_LENGTH,
   validateFieldValue,
+  getEntriesByCategory,
   type SecretFieldKey,
 } from '@kilocode/kiloclaw-secret-catalog';
 import {
@@ -33,7 +34,9 @@ import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
   ensureActiveInstance,
+  getActiveInstance,
   markActiveInstanceDestroyed,
+  renameInstance,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
 import { client as stripe } from '@/lib/stripe-client';
@@ -50,6 +53,8 @@ import {
   KILOCLAW_TRIAL_DURATION_DAYS,
 } from '@/lib/kiloclaw/constants';
 import type { ClawBillingStatus } from '@/app/(app)/claw/components/billing/billing-types';
+import PostHogClient from '@/lib/posthog';
+import { CHANGELOG_ENTRIES } from '@/app/(app)/claw/components/changelog-data';
 
 /**
  * Error codes whose messages may contain raw internal details (e.g. filesystem
@@ -340,7 +345,7 @@ async function fetchKiloClawServiceDegraded(): Promise<boolean> {
  * Earlybird is checked first so earlybird purchasers never get an accidental
  * trial row, and expired earlybird users cannot regain access by provisioning.
  */
-async function ensureProvisionAccess(userId: string): Promise<void> {
+async function ensureProvisionAccess(userId: string, userEmail: string): Promise<void> {
   // Check earlybird before anything else — active earlybird grants access,
   // expired earlybird must not fall through to the trial bootstrap.
   const [earlybird] = await db
@@ -370,7 +375,7 @@ async function ensureProvisionAccess(userId: string): Promise<void> {
     // don't fail on the unique user_id constraint.
     const now = new Date();
     const trialEndsAt = new Date(now.getTime() + KILOCLAW_TRIAL_DURATION_DAYS * 86_400_000);
-    await db
+    const [inserted] = await db
       .insert(kiloclaw_subscriptions)
       .values({
         user_id: userId,
@@ -379,7 +384,20 @@ async function ensureProvisionAccess(userId: string): Promise<void> {
         trial_started_at: now.toISOString(),
         trial_ends_at: trialEndsAt.toISOString(),
       })
-      .onConflictDoNothing({ target: kiloclaw_subscriptions.user_id });
+      .onConflictDoNothing({ target: kiloclaw_subscriptions.user_id })
+      .returning({ id: kiloclaw_subscriptions.id });
+
+    if (inserted) {
+      PostHogClient().capture({
+        distinctId: userEmail,
+        event: 'claw_trial_started',
+        properties: {
+          user_id: userId,
+          plan: 'trial',
+          trial_ends_at: trialEndsAt.toISOString(),
+        },
+      });
+    }
     return;
   }
 
@@ -406,6 +424,10 @@ async function ensureProvisionAccess(userId: string): Promise<void> {
 }
 
 export const kiloclawRouter = createTRPCRouter({
+  getChangelog: baseProcedure.query(() => {
+    return CHANGELOG_ENTRIES;
+  }),
+
   serviceDegraded: baseProcedure.query(async () => {
     return fetchKiloClawServiceDegraded();
   }),
@@ -420,8 +442,27 @@ export const kiloclawRouter = createTRPCRouter({
     const status = await client.getStatus(ctx.user.id);
     const workerUrl = KILOCLAW_API_URL || 'https://claw.kilo.ai';
 
-    return { ...status, workerUrl } satisfies KiloClawDashboardStatus;
+    const instance = await getActiveInstance(ctx.user.id);
+
+    return {
+      ...status,
+      name: instance?.name ?? null,
+      workerUrl,
+    } satisfies KiloClawDashboardStatus;
   }),
+
+  renameInstance: baseProcedure
+    .input(z.object({ name: z.string().min(1).max(50).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await renameInstance(ctx.user.id, input.name);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: error instanceof Error ? error.message : 'Failed to rename instance',
+        });
+      }
+    }),
 
   // Instance lifecycle
   start: clawAccessProcedure.mutation(async ({ ctx }) => {
@@ -469,7 +510,7 @@ export const kiloclawRouter = createTRPCRouter({
 
   // Explicit lifecycle APIs
   provision: baseProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
-    await ensureProvisionAccess(ctx.user.id);
+    await ensureProvisionAccess(ctx.user.id, ctx.user.google_user_email);
     return provisionInstance(ctx.user, input);
   }),
 
@@ -482,7 +523,7 @@ export const kiloclawRouter = createTRPCRouter({
   // Backward-compatible alias — uses the same trial-bootstrap flow as provision
   // so first-time callers can create a trial row (clawAccessProcedure would reject them).
   updateConfig: baseProcedure.input(updateConfigSchema).mutation(async ({ ctx, input }) => {
-    await ensureProvisionAccess(ctx.user.id);
+    await ensureProvisionAccess(ctx.user.id, ctx.user.google_user_email);
     return provisionInstance(ctx.user, input);
   }),
 
@@ -588,6 +629,56 @@ export const kiloclawRouter = createTRPCRouter({
     return client.getConfig({ userId: ctx.user.id });
   }),
 
+  getChannelCatalog: baseProcedure.query(async ({ ctx }) => {
+    const client = new KiloClawUserClient(
+      generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
+    );
+    const config = await client.getConfig({ userId: ctx.user.id });
+    const channels = getEntriesByCategory('channel');
+
+    return channels.map(entry => ({
+      id: entry.id,
+      label: entry.label,
+      configured: config.configuredSecrets[entry.id] ?? false,
+      fields: entry.fields.map(f => ({
+        key: f.key,
+        label: f.label,
+        placeholder: f.placeholder,
+        placeholderConfigured: f.placeholderConfigured,
+        validationPattern: f.validationPattern,
+        validationMessage: f.validationMessage,
+      })),
+      helpText: entry.helpText,
+      helpUrl: entry.helpUrl,
+      allFieldsRequired: entry.allFieldsRequired ?? false,
+    }));
+  }),
+
+  getSecretCatalog: baseProcedure.query(async ({ ctx }) => {
+    const client = new KiloClawUserClient(
+      generateApiToken(ctx.user, undefined, { expiresIn: TOKEN_EXPIRY.fiveMinutes })
+    );
+    const config = await client.getConfig({ userId: ctx.user.id });
+    const tools = getEntriesByCategory('tool');
+
+    return tools.map(entry => ({
+      id: entry.id,
+      label: entry.label,
+      configured: config.configuredSecrets[entry.id] ?? false,
+      fields: entry.fields.map(f => ({
+        key: f.key,
+        label: f.label,
+        placeholder: f.placeholder,
+        placeholderConfigured: f.placeholderConfigured,
+        validationPattern: f.validationPattern,
+        validationMessage: f.validationMessage,
+      })),
+      helpText: entry.helpText,
+      helpUrl: entry.helpUrl,
+      allFieldsRequired: entry.allFieldsRequired ?? false,
+    }));
+  }),
+
   restartMachine: clawAccessProcedure
     .input(
       z
@@ -655,6 +746,25 @@ export const kiloclawRouter = createTRPCRouter({
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to fetch gateway status',
+      });
+    }
+  }),
+
+  gatewayReady: baseProcedure.query(async ({ ctx }) => {
+    try {
+      const client = new KiloClawInternalClient();
+      return await client.getGatewayReady(ctx.user.id);
+    } catch (err) {
+      console.error('[gatewayReady] error for user:', ctx.user.id, err);
+      if (err instanceof KiloClawApiError && (err.statusCode === 404 || err.statusCode === 409)) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Gateway ready check unavailable',
+        });
+      }
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to fetch gateway ready state',
       });
     }
   }),

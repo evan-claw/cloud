@@ -11,6 +11,7 @@ import {
   minimax_m25_free_model,
 } from '@/lib/providers/minimax';
 import { KIMI_CURRENT_MODEL_ID, KIMI_CURRENT_MODEL_NAME } from '@/lib/providers/moonshotai';
+import { gpt_oss_20b_free_model, GPT_5_NANO_ID, GPT_5_NANO_NAME } from '@/lib/providers/openai';
 import type {
   GatewayRequest,
   OpenRouterChatCompletionRequest,
@@ -169,17 +170,14 @@ export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
 export const KILO_AUTO_SMALL_MODEL: AutoModel = {
   id: 'kilo-auto/small',
   name: 'Kilo Auto Small',
-  description: 'Automatically routes your request to a small model.',
-  context_length: 400_000,
-  max_completion_tokens: 128_000,
+  description: `Automatically routes your request to a small model. Uses ${GPT_5_NANO_NAME} (default) or ${stripDisplayName(gpt_oss_20b_free_model.display_name)} (free fallback).`,
+  context_length: 131072,
+  max_completion_tokens: 32768,
   prompt_price: '0.00000005',
   completion_price: '0.0000004',
-  supports_images: true,
+  supports_images: false,
   roocode_settings: undefined,
-  opencode_settings: {
-    family: 'gpt',
-    prompt: 'codex',
-  },
+  opencode_settings: undefined,
 };
 
 export const AUTO_MODELS = [
@@ -204,14 +202,20 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
   'kilo/auto-small': KILO_AUTO_SMALL_MODEL,
 };
 
-export function resolveAutoModel(model: string, modeHeader: string | null): ResolvedAutoModel {
+export async function resolveAutoModel(
+  model: string,
+  modeHeader: string | null,
+  balancePromise: Promise<number>
+): Promise<ResolvedAutoModel> {
   const mappedModel =
     (Object.hasOwn(legacyMapping, model) ? legacyMapping[model] : null)?.id ?? model;
   if (mappedModel === KILO_AUTO_FREE_MODEL.id) {
     return { model: minimax_m25_free_model.public_id };
   }
   if (mappedModel === KILO_AUTO_SMALL_MODEL.id) {
-    return { model: 'openai/gpt-5-nano' };
+    return {
+      model: (await balancePromise) > 0 ? GPT_5_NANO_ID : gpt_oss_20b_free_model.public_id,
+    };
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
   if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
@@ -226,13 +230,18 @@ export function resolveAutoModel(model: string, modeHeader: string | null): Reso
   );
 }
 
-export function applyResolvedAutoModel(
+export async function applyResolvedAutoModel(
   model: string,
   request: GatewayRequest,
   modeHeader: string | null,
-  featureHeader: FeatureValue | null
+  featureHeader: FeatureValue | null,
+  balancePromise: Promise<number>
 ) {
-  const resolved = resolveAutoModel(model, featureHeader === 'kiloclaw' ? 'plan' : modeHeader);
+  const resolved = await resolveAutoModel(
+    model,
+    featureHeader === 'kiloclaw' ? 'plan' : modeHeader,
+    balancePromise
+  );
   request.body.model = resolved.model;
   if (resolved.reasoning) {
     if (request.kind === 'messages') {

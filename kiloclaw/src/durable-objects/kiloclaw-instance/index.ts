@@ -27,7 +27,6 @@ import { ImageVariantSchema } from '../../schemas/image-version';
 import {
   STARTUP_TIMEOUT_SECONDS,
   DEFAULT_VOLUME_SIZE_GB,
-  DEFAULT_FLY_REGION,
   LIVE_CHECK_THROTTLE_MS,
   OPENCLAW_BUILTIN_DEFAULT_MODEL,
 } from '../../config';
@@ -38,7 +37,7 @@ import {
   ALL_SECRET_FIELD_KEYS,
   type SecretFieldKey,
 } from '@kilocode/kiloclaw-secret-catalog';
-import { parseRegions } from '../regions';
+import { parseRegions, prepareRegions, resolveRegions } from '../regions';
 import { buildMachineConfig, guestFromSize, volumeNameFromSandboxId } from '../machine-config';
 import type { GatewayProcessStatus } from '../gateway-controller-types';
 
@@ -66,7 +65,14 @@ import { writeEvent } from '../../utils/analytics';
 import type { KiloClawEventData, KiloClawEventName } from '../../utils/analytics';
 
 // Re-export extracted helpers so existing consumers don't break.
-export { parseRegions, shuffleRegions, deprioritizeRegion } from '../regions';
+export {
+  parseRegions,
+  shuffleRegions,
+  deprioritizeRegion,
+  isMetaRegion,
+  prepareRegions,
+  resolveRegions,
+} from '../regions';
 export { selectRecoveryCandidate } from '../machine-recovery';
 export { METADATA_KEY_USER_ID } from '../machine-config';
 
@@ -209,7 +215,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // Create Fly Volume on first provision.
     if (isNew && !this.s.flyVolumeId) {
       const flyConfig = getFlyConfig(this.env, this.s);
-      const regions = parseRegions(config.region ?? this.env.FLY_REGION ?? DEFAULT_FLY_REGION);
+      const regions = config.region
+        ? prepareRegions(parseRegions(config.region))
+        : await resolveRegions(this.env.KV_CLAW_CACHE, this.env.FLY_REGION);
       const guest = guestFromSize(config.machineSize ?? null);
       const volume = await fly.createVolumeWithFallback(
         flyConfig,
@@ -701,7 +709,36 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
   // ── Lifecycle ───────────────────────────────────────────────────────
 
-  async start(userId?: string): Promise<{ started: boolean }> {
+  async forceRetryRecovery(): Promise<{ ok: true }> {
+    await this.loadState();
+
+    if (this.s.status === 'destroying') {
+      throw Object.assign(new Error('Cannot retry recovery: instance is being destroyed'), {
+        status: 409,
+      });
+    }
+    if (!this.s.status) {
+      throw Object.assign(new Error('Cannot retry recovery: instance has no status'), {
+        status: 404,
+      });
+    }
+
+    doWarn(this.s, 'forceRetryRecovery: admin-initiated cooldown reset', {
+      previousLastRecoveryAt: this.s.lastMetadataRecoveryAt,
+      status: this.s.status,
+    });
+
+    this.s.lastMetadataRecoveryAt = null;
+    await this.persist({ lastMetadataRecoveryAt: null });
+    await this.ctx.storage.setAlarm(Date.now());
+
+    return { ok: true };
+  }
+
+  async start(
+    userId?: string,
+    options?: { skipCooldown?: boolean }
+  ): Promise<{ started: boolean }> {
     // Guard against concurrent start() calls — two overlapping invocations
     // (e.g. startAsync via waitUntil + a direct RPC start) can both see
     // flyMachineId as null and each create a Fly machine, orphaning one.
@@ -712,13 +749,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     this.startInProgress = true;
 
     try {
-      return await this._startInner(userId);
+      return await this._startInner(userId, options);
     } finally {
       this.startInProgress = false;
     }
   }
 
-  private async _startInner(userId?: string): Promise<{ started: boolean }> {
+  private async _startInner(
+    userId?: string,
+    options?: { skipCooldown?: boolean }
+  ): Promise<{ started: boolean }> {
     await this.loadState();
 
     if (this.s.status === 'destroying') {
@@ -750,7 +790,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         flyConfig,
         this.ctx,
         this.s,
-        createReconcileContext(this.s, this.env, 'start_recovery')
+        createReconcileContext(this.s, this.env, 'start_recovery'),
+        options?.skipCooldown
       );
       if (!recovered && !this.s.flyMachineId) {
         throw new Error(
@@ -1112,6 +1153,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     trackedImageDigest: string | null;
     googleConnected: boolean;
     gmailNotificationsEnabled: boolean;
+    execSecurity: string | null;
+    execAsk: string | null;
   }> {
     await this.loadState();
 
@@ -1148,6 +1191,8 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       trackedImageDigest: this.s.trackedImageDigest,
       googleConnected: this.s.googleCredentials !== null,
       gmailNotificationsEnabled: this.s.gmailNotificationsEnabled,
+      execSecurity: this.s.execSecurity,
+      execAsk: this.s.execAsk,
     };
   }
 
@@ -1356,6 +1401,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
   } | null> {
     await this.loadState();
     return gateway.getControllerVersion(this.s, this.env);
+  }
+
+  async getGatewayReady(): Promise<Record<string, unknown> | null> {
+    await this.loadState();
+    return gateway.getGatewayReady(this.s, this.env);
   }
 
   async patchConfigOnMachine(patch: Record<string, unknown>): Promise<void> {

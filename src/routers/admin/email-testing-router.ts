@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { adminProcedure, createTRPCRouter } from '@/lib/trpc/init';
 import { NEXTAUTH_URL } from '@/lib/config.server';
 import { sendViaMailgun } from '@/lib/email-mailgun';
+import { verifyEmail } from '@/lib/email-neverbounce';
 import {
   subjects,
   creditsVars,
@@ -131,6 +132,15 @@ export const emailTestingRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
+      const isSafeToSend = await verifyEmail(input.recipient);
+      if (!isSafeToSend) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'Email blocked by NeverBounce verification. This address is invalid or disposable.',
+        });
+      }
+
       const vars = fixtureTemplateVars(input.template);
       const subject = subjects[input.template];
       const html = renderTemplate(input.template, {
