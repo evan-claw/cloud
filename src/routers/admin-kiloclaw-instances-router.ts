@@ -630,6 +630,50 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       }
     }),
 
+  destroyFlyMachine: adminProcedure
+    .input(
+      z.object({
+        userId: z.string().min(1),
+        appName: z.string().min(1),
+        machineId: z.string().min(1),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      console.log(
+        `[admin-kiloclaw] destroyFlyMachine triggered by admin ${ctx.user.id} (${ctx.user.google_user_email}) app=${input.appName} machine=${input.machineId}`
+      );
+      const fallbackMessage = 'Failed to destroy Fly machine';
+      try {
+        const client = new KiloClawInternalClient();
+        const result = await client.destroyFlyMachine(input.userId, input.appName, input.machineId);
+
+        try {
+          await createKiloClawAdminAuditLog({
+            action: 'kiloclaw.machine.destroy_fly',
+            actor_id: ctx.user.id,
+            actor_email: ctx.user.google_user_email,
+            actor_name: ctx.user.google_user_name,
+            target_user_id: input.userId,
+            message: `Fly machine force-destroyed: app=${input.appName} machine=${input.machineId}`,
+            metadata: {
+              appName: input.appName,
+              machineId: input.machineId,
+            },
+          });
+        } catch (auditErr) {
+          console.error('Failed to write audit log for destroyFlyMachine:', auditErr);
+        }
+
+        return result;
+      } catch (err) {
+        console.error(
+          `Failed to destroy Fly machine app=${input.appName} machine=${input.machineId}:`,
+          err
+        );
+        throwKiloclawAdminError(err, fallbackMessage);
+      }
+    }),
+
   destroy: adminProcedure.input(DestroyInstanceSchema).mutation(async ({ input, ctx }) => {
     const [instance] = await db
       .select({

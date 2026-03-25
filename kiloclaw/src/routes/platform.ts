@@ -1358,4 +1358,60 @@ platform.put('/regions', async c => {
   return c.json({ ok: true, regions: result.data.regions, raw });
 });
 
+// POST /api/platform/destroy-fly-machine
+// Directly destroys a Fly machine via the Machines API (force=true).
+// This bypasses the DO's normal destroy flow — use for admin cleanup.
+const DestroyFlyMachineSchema = z.object({
+  userId: z.string().min(1),
+  appName: z.string().min(1),
+  machineId: z.string().min(1),
+});
+
+platform.post('/destroy-fly-machine', async c => {
+  const result = await parseBody(c, DestroyFlyMachineSchema);
+  if ('error' in result) return result.error;
+
+  const { userId, appName, machineId } = result.data;
+  const apiToken = c.env.FLY_API_TOKEN;
+  if (!apiToken) {
+    return jsonError('FLY_API_TOKEN is not configured', 500);
+  }
+
+  const url = `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}?force=true`;
+  try {
+    const resp = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiToken}` },
+    });
+
+    if (!resp.ok) {
+      const body = await resp.text();
+      console.error(
+        `[platform] destroy-fly-machine failed (${resp.status}) app=${appName} machine=${machineId}:`,
+        body
+      );
+      return jsonError(`Fly API error (${resp.status}): ${body}`, resp.status);
+    }
+
+    console.log(`[platform] destroy-fly-machine ok: app=${appName} machine=${machineId}`);
+
+    // Trigger immediate reconcile so the DO discovers the machine is gone.
+    try {
+      await withDORetry(
+        instanceStubFactory(c.env, userId),
+        stub => stub.forceRetryRecovery(),
+        'forceRetryRecovery'
+      );
+    } catch (err) {
+      console.warn(`[platform] destroy-fly-machine: forceRetryRecovery failed for user=${userId}:`, err);
+    }
+
+    return c.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error(`[platform] destroy-fly-machine error app=${appName} machine=${machineId}:`, err);
+    return jsonError(`Failed to destroy machine: ${message}`, 500);
+  }
+});
+
 export { platform };
