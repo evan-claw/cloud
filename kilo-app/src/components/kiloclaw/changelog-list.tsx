@@ -28,14 +28,14 @@ const DEPLOY_HINTS: Record<string, { label: string; bgClass: string; textClass: 
 export function ChangelogList({ entries }: Readonly<{ entries: ChangelogEntry[] }>) {
   return (
     <View className="gap-3">
-      {entries.map((entry, index) => {
+      {entries.map(entry => {
         const isBugfix = entry.category === 'bugfix';
         const Icon = isBugfix ? Bug : Sparkles;
         const iconColor = isBugfix ? '#f97316' : '#8b5cf6';
         const deployHint = entry.deployHint ? DEPLOY_HINTS[entry.deployHint] : undefined;
 
         return (
-          <View key={index} className="rounded-lg bg-secondary p-3 gap-2">
+          <View key={`${entry.date}-${entry.description.slice(0, 20)}`} className="rounded-lg bg-secondary p-3 gap-2">
             <View className="flex-row items-center gap-2">
               <Icon size={14} color={iconColor} />
               <Text variant="muted" className="text-xs">
