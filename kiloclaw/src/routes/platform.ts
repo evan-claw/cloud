@@ -1372,6 +1372,7 @@ platform.post('/destroy-fly-machine', async c => {
   if ('error' in result) return result.error;
 
   const { userId, appName, machineId } = result.data;
+  const startedAt = performance.now();
   const apiToken = c.env.FLY_API_TOKEN;
   if (!apiToken) {
     return jsonError('FLY_API_TOKEN is not configured', 500);
@@ -1390,6 +1391,14 @@ platform.post('/destroy-fly-machine', async c => {
         `[platform] destroy-fly-machine failed (${resp.status}) app=${appName} machine=${machineId}:`,
         body
       );
+      writeEvent(c.env, {
+        event: 'instance.destroy_fly_machine_failed',
+        delivery: 'http',
+        route: '/api/platform/destroy-fly-machine',
+        userId,
+        error: `Fly API error (${resp.status})`,
+        durationMs: performance.now() - startedAt,
+      });
       return jsonError(`Fly API error (${resp.status}): ${body}`, resp.status);
     }
 
@@ -1406,10 +1415,25 @@ platform.post('/destroy-fly-machine', async c => {
       console.warn(`[platform] destroy-fly-machine: forceRetryRecovery failed for user=${userId}:`, err);
     }
 
+    writeEvent(c.env, {
+      event: 'instance.destroy_fly_machine_succeeded',
+      delivery: 'http',
+      route: '/api/platform/destroy-fly-machine',
+      userId,
+      durationMs: performance.now() - startedAt,
+    });
     return c.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error(`[platform] destroy-fly-machine error app=${appName} machine=${machineId}:`, err);
+    writeEvent(c.env, {
+      event: 'instance.destroy_fly_machine_failed',
+      delivery: 'http',
+      route: '/api/platform/destroy-fly-machine',
+      userId,
+      error: message,
+      durationMs: performance.now() - startedAt,
+    });
     return jsonError(`Failed to destroy machine: ${message}`, 500);
   }
 });
