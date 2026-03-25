@@ -1,6 +1,11 @@
 import { adminProcedure, createTRPCRouter, UpstreamApiError } from '@/lib/trpc/init';
 import { db } from '@/lib/drizzle';
-import { kiloclaw_instances, kiloclaw_subscriptions, kilocode_users } from '@kilocode/db/schema';
+import {
+  kiloclaw_instances,
+  kiloclaw_subscriptions,
+  kiloclaw_email_log,
+  kilocode_users,
+} from '@kilocode/db/schema';
 import { KiloClawInternalClient, KiloClawApiError } from '@/lib/kiloclaw/kiloclaw-internal-client';
 import { KiloClawUserClient } from '@/lib/kiloclaw/kiloclaw-user-client';
 import {
@@ -21,7 +26,20 @@ import type {
 import { generateApiToken, TOKEN_EXPIRY } from '@/lib/tokens';
 import { TRPCError } from '@trpc/server';
 import * as z from 'zod';
-import { eq, and, or, desc, asc, ilike, isNull, isNotNull, sql, gte, type SQL } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  or,
+  desc,
+  asc,
+  ilike,
+  isNull,
+  isNotNull,
+  inArray,
+  sql,
+  gte,
+  type SQL,
+} from 'drizzle-orm';
 
 const ListInstancesSchema = z.object({
   offset: z.number().min(0).default(0),
@@ -643,6 +661,38 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
         await restoreDestroyedInstance(destroyedRow.id);
       }
       throw error;
+    }
+
+    // Post-destroy cleanup: best-effort DB tidying that must not report
+    // failure after a successful destroy.
+    try {
+      // Clear lifecycle emails so they can fire again if the user re-provisions.
+      const resettableEmailTypes = [
+        'claw_suspended_trial',
+        'claw_suspended_subscription',
+        'claw_suspended_payment',
+        'claw_destruction_warning',
+        'claw_instance_destroyed',
+      ];
+      await db
+        .delete(kiloclaw_email_log)
+        .where(
+          and(
+            eq(kiloclaw_email_log.user_id, instance.user_id),
+            inArray(kiloclaw_email_log.email_type, resettableEmailTypes)
+          )
+        );
+      // Clear per-instance ready emails so a future re-provision triggers the notification.
+      await db
+        .delete(kiloclaw_email_log)
+        .where(
+          and(
+            eq(kiloclaw_email_log.user_id, instance.user_id),
+            sql`${kiloclaw_email_log.email_type} LIKE 'claw_instance_ready:%'`
+          )
+        );
+    } catch (cleanupError) {
+      console.error('[admin-kiloclaw] Post-destroy cleanup failed:', cleanupError);
     }
 
     return { success: true };

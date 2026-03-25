@@ -28,8 +28,9 @@ import {
   kiloclaw_earlybird_purchases,
   kiloclaw_subscriptions,
   kiloclaw_instances,
+  kiloclaw_email_log,
 } from '@kilocode/db/schema';
-import { and, eq, desc, isNull, sql } from 'drizzle-orm';
+import { and, eq, desc, isNull, inArray, sql } from 'drizzle-orm';
 import { sentryLogger } from '@/lib/utils.server';
 import type { KiloClawDashboardStatus, KiloCodeConfigResponse } from '@/lib/kiloclaw/types';
 import {
@@ -478,8 +479,19 @@ export const kiloclawRouter = createTRPCRouter({
   destroy: baseProcedure.mutation(async ({ ctx }) => {
     const destroyedRow = await markActiveInstanceDestroyed(ctx.user.id);
     const client = new KiloClawInternalClient();
+    let result;
     try {
-      const result = await client.destroy(ctx.user.id);
+      result = await client.destroy(ctx.user.id);
+    } catch (error) {
+      if (destroyedRow) {
+        await restoreDestroyedInstance(destroyedRow.id);
+      }
+      throw error;
+    }
+
+    // Post-destroy cleanup: best-effort DB tidying that must not undo a
+    // successful destroy. If any of these fail, log and move on.
+    try {
       // Clear the destruction lifecycle so the billing cron doesn't
       // send warning emails or attempt a redundant destroy.
       // Only clear suspended_at for non-past_due subscriptions — nulling it
@@ -499,13 +511,37 @@ export const kiloclawRouter = createTRPCRouter({
         .update(kiloclaw_subscriptions)
         .set(clearFields)
         .where(eq(kiloclaw_subscriptions.user_id, ctx.user.id));
-      return result;
-    } catch (error) {
-      if (destroyedRow) {
-        await restoreDestroyedInstance(destroyedRow.id);
-      }
-      throw error;
+
+      // Clear lifecycle emails so they can fire again if the user re-provisions.
+      const resettableEmailTypes = [
+        'claw_suspended_trial',
+        'claw_suspended_subscription',
+        'claw_suspended_payment',
+        'claw_destruction_warning',
+        'claw_instance_destroyed',
+      ];
+      await db
+        .delete(kiloclaw_email_log)
+        .where(
+          and(
+            eq(kiloclaw_email_log.user_id, ctx.user.id),
+            inArray(kiloclaw_email_log.email_type, resettableEmailTypes)
+          )
+        );
+      // Clear per-instance ready emails so a future re-provision triggers the notification.
+      await db
+        .delete(kiloclaw_email_log)
+        .where(
+          and(
+            eq(kiloclaw_email_log.user_id, ctx.user.id),
+            sql`${kiloclaw_email_log.email_type} LIKE 'claw_instance_ready:%'`
+          )
+        );
+    } catch (cleanupError) {
+      console.error('[kiloclaw] Post-destroy cleanup failed:', cleanupError);
     }
+
+    return result;
   }),
 
   // Explicit lifecycle APIs

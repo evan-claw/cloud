@@ -376,6 +376,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       this.s.pendingDestroyMachineId = null;
       this.s.pendingDestroyVolumeId = null;
       this.s.pendingPostgresMarkOnFinalize = false;
+      this.s.instanceReadyEmailSent = false;
     }
     this.s.loaded = true;
 
@@ -1286,6 +1287,28 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       channels: this.s.channels ?? undefined,
       machineSize: this.s.machineSize ?? undefined,
     };
+  }
+
+  /**
+   * Atomically check-and-set the instance ready flag. Returns shouldNotify: true
+   * on the first call per provision lifecycle, false on all subsequent calls.
+   * Used by the controller checkin handler to trigger a one-time "instance ready" email.
+   */
+  async tryMarkInstanceReady(): Promise<{ shouldNotify: boolean; userId: string | null }> {
+    await this.loadState();
+    if (this.s.instanceReadyEmailSent) {
+      return { shouldNotify: false, userId: this.s.userId };
+    }
+
+    this.s.instanceReadyEmailSent = true;
+    await this.persist({ instanceReadyEmailSent: true });
+
+    // If the instance was provisioned more than 6 hours ago, don't send the email
+    if (this.s.provisionedAt && this.s.provisionedAt < Date.now() - 1000 * 60 * 60 * 6) {
+      return { shouldNotify: false, userId: this.s.userId };
+    }
+
+    return { shouldNotify: true, userId: this.s.userId };
   }
 
   async listVolumeSnapshots(): Promise<FlyVolumeSnapshot[]> {
