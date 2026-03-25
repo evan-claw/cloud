@@ -109,7 +109,7 @@ function SecretCard({
       </View>
 
       {/* Action buttons */}
-      <View className={`flex-row gap-2 px-4 ${expanded ? 'pb-2' : 'pb-3'}`}>
+      <View className="flex-row gap-2 px-4 pb-3">
         {secret.configured ? (
           <>
             <Button
@@ -160,7 +160,7 @@ function SecretCard({
       {/* Expandable token input area */}
       {expanded && (
         <Animated.View entering={FadeIn.duration(150)}>
-          <View className="px-4 pb-3 gap-3">
+          <View className="border-t border-border px-4 pb-3 pt-3 gap-3">
             {secret.allFieldsRequired && secret.fields.length > 1 && (
               <Text className="text-xs text-muted-foreground">
                 All fields are required to connect {secret.label}.
