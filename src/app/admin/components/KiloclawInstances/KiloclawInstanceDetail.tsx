@@ -1179,9 +1179,12 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
   };
 
   const machineControlsEnabled =
+    data?.destroyed_at === null && data?.workerStatus?.status !== 'restoring';
+  const hasMachine = !!data?.workerStatus?.flyMachineId;
+  const canRetryRecovery =
     data?.destroyed_at === null &&
-    !!data?.workerStatus?.flyMachineId &&
-    data?.workerStatus?.status !== 'restoring';
+    !data?.workerStatus?.flyMachineId &&
+    data?.workerStatus?.status === 'stopped';
 
   const invalidateMachineQueries = () => {
     void queryClient.invalidateQueries({ queryKey: trpc.admin.kiloclawInstances.get.queryKey() });
@@ -1235,6 +1238,18 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       },
       onError: err => {
         toast.error(`Failed to upgrade: ${err.message}`);
+      },
+    })
+  );
+
+  const { mutateAsync: forceRetryRecovery, isPending: isRetryingRecovery } = useMutation(
+    trpc.admin.kiloclawInstances.forceRetryRecovery.mutationOptions({
+      onSuccess: () => {
+        toast.success('Recovery retry requested');
+        invalidateMachineQueries();
+      },
+      onError: err => {
+        toast.error(`Failed to retry recovery: ${err.message}`);
       },
     })
   );
@@ -1346,7 +1361,11 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     machineStatus === 'starting' ||
     machineStatus === 'restarting';
   const machineActionPending =
-    isMachineStarting || isMachineStopping || isMachineRedeploying || isMachineUpgrading;
+    isMachineStarting ||
+    isMachineStopping ||
+    isMachineRedeploying ||
+    isMachineUpgrading ||
+    isRetryingRecovery;
   const gatewayActionPending =
     isGatewayStarting ||
     isGatewayStopping ||
@@ -1389,7 +1408,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
               <User className="text-muted-foreground h-4 w-4 shrink-0" />
               <DetailField label="User">
                 <Link
-                  href={`/admin/users/${data.user_id}`}
+                  href={`/admin/users/${encodeURIComponent(data.user_id)}`}
                   className="text-blue-600 hover:underline"
                 >
                   {data.user_email ?? data.user_id}
@@ -1457,8 +1476,27 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
 
         <Card>
           <CardHeader>
-            <CardTitle>Live Worker Status</CardTitle>
-            <CardDescription>Real-time status from the KiloClaw Durable Object</CardDescription>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle>Live Worker Status</CardTitle>
+                <CardDescription>Real-time status from the KiloClaw Durable Object</CardDescription>
+              </div>
+              {canRetryRecovery && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={machineActionPending}
+                  onClick={() => void forceRetryRecovery({ userId: data.user_id })}
+                >
+                  {isRetryingRecovery ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="mr-1 h-4 w-4" />
+                  )}
+                  Retry Recovery
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {data.workerStatusError && (
@@ -1676,7 +1714,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={machineActionPending}
+                  disabled={machineActionPending || !hasMachine}
                   onClick={() => void machineStop({ userId: data.user_id })}
                 >
                   {isMachineStopping ? (
@@ -1689,7 +1727,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={machineActionPending || machineRestartBlocked}
+                  disabled={machineActionPending || machineRestartBlocked || !hasMachine}
                   onClick={() => void machineRedeploy({ instanceId: data.id, imageTag: undefined })}
                 >
                   {isMachineRedeploying ? (
@@ -1702,7 +1740,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={machineActionPending || machineRestartBlocked}
+                  disabled={machineActionPending || machineRestartBlocked || !hasMachine}
                   onClick={() => void machineUpgrade({ instanceId: data.id, imageTag: 'latest' })}
                 >
                   {isMachineUpgrading ? (

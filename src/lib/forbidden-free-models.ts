@@ -19,7 +19,7 @@ const forbiddenFreeModelIds: ReadonlySet<string> = new Set([
   'nvidia/nemotron-nano-12b-v2-vl:free',
   'nvidia/nemotron-nano-9b-v2:free',
   'openai/gpt-oss-120b:free',
-  'openai/gpt-oss-20b:free',
+  'openai/gpt-oss-20b:free', // usable through kilo-auto
   'qwen/qwen3-4b:free',
   'qwen/qwen3-coder:free',
   'qwen/qwen3-next-80b-a3b-instruct:free',

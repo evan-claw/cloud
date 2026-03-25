@@ -11,6 +11,7 @@ export const NEXTAUTH_URL = APP_URL;
 export const CUSTOMERIO_EMAIL_API_KEY = getEnvVariable('CUSTOMERIO_EMAIL_API_KEY');
 export const MAILGUN_API_KEY = getEnvVariable('MAILGUN_API_KEY');
 export const MAILGUN_DOMAIN = getEnvVariable('MAILGUN_DOMAIN');
+export const NEVERBOUNCE_API_KEY = getEnvVariable('NEVERBOUNCE_API_KEY');
 // Which email backend to use: 'customerio' (default) or 'mailgun'
 const emailProviderRaw = getEnvVariable('EMAIL_PROVIDER') || 'customerio';
 if (emailProviderRaw !== 'customerio' && emailProviderRaw !== 'mailgun') {
