@@ -38,6 +38,13 @@ const SETTINGS_ITEMS: SettingsItem[] = [
     path: 'settings/channels',
   },
   {
+    icon: Monitor,
+    iconColor: '#06b6d4',
+    label: 'Device Pairing',
+    description: 'Approve device requests',
+    path: 'settings/device-pairing',
+  },
+  {
     icon: Shield,
     iconColor: '#10b981',
     label: 'Execution Policy',
@@ -50,13 +57,6 @@ const SETTINGS_ITEMS: SettingsItem[] = [
     label: 'Version Pinning',
     description: 'Pin to a specific version',
     path: 'settings/version-pin',
-  },
-  {
-    icon: Monitor,
-    iconColor: '#06b6d4',
-    label: 'Device Pairing',
-    description: 'Approve device requests',
-    path: 'settings/device-pairing',
   },
   {
     icon: Globe,
