@@ -13,10 +13,7 @@ import {
   useKiloClawGoogleSetup,
   useKiloClawMutations,
 } from '@/lib/hooks/use-kiloclaw';
-import { useThemeColors } from '@/lib/hooks/use-theme-colors';
-
 export default function GoogleScreen() {
-  const colors = useThemeColors();
   const statusQuery = useKiloClawStatus();
   const mutations = useKiloClawMutations();
 
@@ -79,7 +76,7 @@ export default function GoogleScreen() {
           {/* Connection status card */}
           <View className="rounded-lg bg-secondary p-4 gap-3">
             <View className="flex-row items-center gap-3">
-              <Globe size={20} color={colors.foreground} />
+              <Globe size={20} color="#ef4444" />
               <Text className="flex-1 text-base font-semibold">Google Account</Text>
               <View
                 className={`px-2 py-1 rounded-full ${isConnected ? 'bg-green-500/20' : 'bg-muted'}`}
@@ -122,7 +119,7 @@ export default function GoogleScreen() {
             <Animated.View entering={FadeIn.duration(200)} className="gap-3">
               <View className="rounded-lg bg-secondary overflow-hidden">
                 <View className="flex-row items-center gap-3 px-4 py-3">
-                  <Mail size={18} color={colors.foreground} />
+                  <Mail size={18} color="#10b981" />
                   <Text className="flex-1 text-sm font-medium">Gmail Notifications</Text>
                   <Button
                     size="sm"
@@ -136,7 +133,7 @@ export default function GoogleScreen() {
               </View>
 
               <Button variant="outline" onPress={handleDisconnect} className="flex-row gap-2">
-                <Unplug size={16} color={colors.foreground} />
+                <Unplug size={16} color="#ef4444" />
                 <Text className="text-destructive">Disconnect Google Account</Text>
               </Button>
             </Animated.View>
