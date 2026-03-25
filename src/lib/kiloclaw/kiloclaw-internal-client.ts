@@ -511,7 +511,11 @@ export class KiloClawInternalClient {
     );
   }
 
-  async destroyFlyMachine(userId: string, appName: string, machineId: string): Promise<{ ok: true }> {
+  async destroyFlyMachine(
+    userId: string,
+    appName: string,
+    machineId: string
+  ): Promise<{ ok: true }> {
     return this.request('/api/platform/destroy-fly-machine', {
       method: 'POST',
       body: JSON.stringify({ userId, appName, machineId }),

@@ -1412,7 +1412,10 @@ platform.post('/destroy-fly-machine', async c => {
         'forceRetryRecovery'
       );
     } catch (err) {
-      console.warn(`[platform] destroy-fly-machine: forceRetryRecovery failed for user=${userId}:`, err);
+      console.warn(
+        `[platform] destroy-fly-machine: forceRetryRecovery failed for user=${userId}:`,
+        err
+      );
     }
 
     writeEvent(c.env, {
