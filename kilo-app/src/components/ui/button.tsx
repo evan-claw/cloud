@@ -9,7 +9,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary active:bg-primary/90 shadow-sm shadow-black/5',
+        default: 'bg-primary active:opacity-80 shadow-sm shadow-black/5',
         destructive:
           'bg-destructive active:bg-destructive/90 dark:bg-destructive/60 shadow-sm shadow-black/5',
         outline:

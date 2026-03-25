@@ -1,6 +1,6 @@
 import { Check, ChevronDown, ChevronUp, Trash2 } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Alert, Keyboard, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, ScrollView, TextInput, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { toast } from 'sonner-native';
 
@@ -95,7 +95,7 @@ function SecretCard({
       </View>
 
       {/* Action buttons */}
-      <View className={`flex-row gap-2 px-4 ${expanded ? '' : 'pb-3'}`}>
+      <View className={`flex-row gap-2 px-4 ${expanded ? 'pb-2' : 'pb-3'}`}>
         {secret.configured ? (
           <>
             <Button
@@ -153,7 +153,7 @@ function SecretCard({
                   className="rounded-md border border-input bg-background px-3 py-2.5 text-sm leading-5 text-foreground"
                   placeholder={secret.configured ? field.placeholderConfigured : field.placeholder}
                   placeholderTextColor={colors.mutedForeground}
-                  value={fieldValues[field.key] ?? ''}
+                  defaultValue={fieldValues[field.key] ?? ''}
                   onChangeText={val => {
                     setFieldValues(prev => ({ ...prev, [field.key]: val }));
                   }}
@@ -165,8 +165,14 @@ function SecretCard({
               </View>
             ))}
             <Button size="sm" disabled={!canSave || isSaving} onPress={handleSave}>
-              <Check size={14} color={colors.primaryForeground} />
-              <Text className="text-xs text-primary-foreground">Save</Text>
+              {isSaving ? (
+                <ActivityIndicator size="small" color={colors.primaryForeground} />
+              ) : (
+                <Check size={14} color={colors.primaryForeground} />
+              )}
+              <Text className="text-xs text-primary-foreground">
+                {isSaving ? 'Saving…' : 'Save'}
+              </Text>
             </Button>
           </View>
         </Animated.View>
