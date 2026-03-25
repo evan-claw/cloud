@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, TextInput, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { toast } from 'sonner-native';
 
-import { CHANNEL_ICONS } from '@/components/icons';
+import { CATALOG_ICONS } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { type useKiloClawMutations, type useKiloClawSecretCatalog } from '@/lib/hooks/use-kiloclaw';
@@ -98,7 +98,7 @@ export function SettingsCard({
   const fieldValuesRef = useRef<Record<string, string>>({});
 
   const isSaving = mutations.patchSecrets.isPending && !isRemoving;
-  const ChannelIcon = CHANNEL_ICONS[item.id];
+  const ItemIcon = CATALOG_ICONS[item.id];
 
   const updateCanSave = useCallback(() => {
     const vals = fieldValuesRef.current;
@@ -161,7 +161,7 @@ export function SettingsCard({
     <View className="mx-4 overflow-hidden rounded-lg bg-secondary">
       {/* Header row */}
       <View className="flex-row items-center gap-3 px-4 py-3">
-        {ChannelIcon && <ChannelIcon size={18} />}
+        {ItemIcon && <ItemIcon size={18} />}
         <View className="flex-1 gap-0.5">
           <Text className="text-sm font-medium">{item.label}</Text>
           {item.helpText && <Text className="text-xs text-muted-foreground">{item.helpText}</Text>}

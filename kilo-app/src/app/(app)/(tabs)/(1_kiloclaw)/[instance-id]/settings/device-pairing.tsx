@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { EmptyState } from '@/components/empty-state';
-import { CHANNEL_ICONS } from '@/components/icons';
+import { CATALOG_ICONS } from '@/components/icons';
 import { ScreenHeader } from '@/components/screen-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -129,7 +129,7 @@ export default function DevicePairingScreen() {
             </Text>
             <View className="rounded-lg bg-secondary overflow-hidden">
               {channelRequests.map((request, index) => {
-                const ChannelIcon = CHANNEL_ICONS[request.channel];
+                const ChannelIcon = CATALOG_ICONS[request.channel];
                 return (
                   <View key={`${request.channel}-${request.code}`}>
                     {index > 0 && <View className="ml-4 h-px bg-border" />}
