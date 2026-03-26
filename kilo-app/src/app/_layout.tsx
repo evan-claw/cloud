@@ -1,8 +1,10 @@
 import '../global.css';
 
 import { PortalHost } from '@rn-primitives/portal';
+import * as Sentry from '@sentry/react-native';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { isRunningInExpoGo } from 'expo';
+import { Slot, useNavigationContainerRef, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -13,6 +15,18 @@ import { AuthProvider, useAuth } from '@/lib/auth/auth-context';
 import { ContextProvider, useAppContext } from '@/lib/context/context-context';
 import { queryClient } from '@/lib/query-client';
 import { trpcClient, TRPCProvider } from '@/lib/trpc';
+
+const navigationIntegration = Sentry.reactNavigationIntegration({
+  enableTimeToInitialDisplay: !isRunningInExpoGo(),
+});
+
+Sentry.init({
+  dsn: 'https://618cf025f1c6bdea8043fcd80668fe6b@o4509356317474816.ingest.us.sentry.io/4511110711279616',
+  enabled: !__DEV__,
+  tracesSampleRate: 1,
+  integrations: [navigationIntegration],
+  enableNativeFramesTracking: !isRunningInExpoGo(),
+});
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -67,7 +81,15 @@ function RootLayoutNav() {
   );
 }
 
-export default function RootLayout() {
+function RootLayout() {
+  const ref = useNavigationContainerRef();
+
+  useEffect(() => {
+    if (ref.current) {
+      navigationIntegration.registerNavigationContainer(ref);
+    }
+  }, [ref]);
+
   return (
     <GestureHandlerRootView className="flex-1">
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
@@ -84,3 +106,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default Sentry.wrap(RootLayout);
