@@ -5,15 +5,16 @@ import { getBYOKforOrganization, getBYOKforUser } from '@/lib/byok';
 import { readDb } from '@/lib/drizzle';
 import { preferredModels } from '@/lib/models';
 
-function formatId(provider: CodingPlanProvider, model: CodingPlanModel) {
+export function formatCodingPlanModelId(provider: CodingPlanProvider, model: CodingPlanModel) {
   return provider.id + '/' + model.id;
 }
+
 function convertModel(
   provider: CodingPlanProvider,
   model: CodingPlanModel,
   preferredIndex: number
 ) {
-  const id = formatId(provider, model);
+  const id = formatCodingPlanModelId(provider, model);
   const name = provider.name + ': ' + model.name;
   return {
     id,
@@ -63,7 +64,9 @@ export function getCodingPlanModel(requestedModel: string): {
   model: CodingPlanModel | null;
 } {
   for (const provider of CODING_PLANS) {
-    const model = provider?.models.find(model => formatId(provider, model) === requestedModel);
+    const model = provider?.models.find(
+      model => formatCodingPlanModelId(provider, model) === requestedModel
+    );
     if (model) {
       return { provider, model };
     }

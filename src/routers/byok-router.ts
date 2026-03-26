@@ -37,6 +37,7 @@ import type { GatewayProviderOptions } from '@ai-sdk/gateway';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
 import CODING_PLANS from '@/lib/providers/coding-plans/coding-plan-definitions';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { formatCodingPlanModelId } from '@/lib/providers/coding-plans';
 
 const fetchSupportedModels = unstable_cache(
   async (): Promise<Record<string, string[]>> => {
@@ -77,10 +78,10 @@ const fetchSupportedModels = unstable_cache(
 
     const result: Record<string, string[]> = {};
 
-    result['codestral'] = ['Mistral AI: Codestral'];
+    result['codestral'] = ['Codestral (mistralai/codestral-2508)'];
 
-    for (const model of Object.values(openRouterModelMetadata.data)) {
-      const vercelModel = vercelModelMetadata.data[mapModelIdToVercel(model.id)];
+    for (const openRouterModel of Object.values(openRouterModelMetadata.data)) {
+      const vercelModel = vercelModelMetadata.data[mapModelIdToVercel(openRouterModel.id)];
       if (!vercelModel) continue;
       if (vercelModel.id.includes('codestral')) continue;
       if (vercelModel.type !== 'language') continue;
@@ -89,7 +90,16 @@ const fetchSupportedModels = unstable_cache(
         if (!providerParsed.success) continue;
         const providerId = providerParsed.data;
         if (!result[providerId]) result[providerId] = [];
-        result[providerId].push(model.name);
+        result[providerId].push(openRouterModel.name + ' (' + openRouterModel.id + ')');
+      }
+    }
+
+    for (const provider of CODING_PLANS) {
+      for (const model of provider.models) {
+        if (!result[provider.id]) result[provider.id] = [];
+        result[provider.id].push(
+          model.name + ' (' + formatCodingPlanModelId(provider, model) + ')'
+        );
       }
     }
 
