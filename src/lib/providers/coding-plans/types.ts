@@ -1,5 +1,6 @@
 import type { DirectUserByokInferenceProviderId } from '@/lib/providers/openrouter/inference-provider-id';
-import type { CustomLlmExtraBody, CustomLlmProvider } from '@kilocode/db';
+import type { SharedGatewayRequestProperties } from '@/lib/providers/openrouter/types';
+import type { CustomLlmProvider } from '@kilocode/db';
 
 export type CodingPlanModelFlag = 'recommended' | 'vision';
 
@@ -10,7 +11,7 @@ export type CodingPlanModel = {
   description: string;
   context_length: number;
   max_completion_tokens: number;
-  extra_body: CustomLlmExtraBody;
+  extra_body: Partial<SharedGatewayRequestProperties>;
 };
 
 export type CodingPlanProvider = {
