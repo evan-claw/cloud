@@ -6,7 +6,7 @@ import * as z from 'zod';
 
 export const cloudAgentEventSchema = z.object({
   eventId: z.number(),
-  executionId: z.string(),
+  executionId: z.string().nullable(),
   sessionId: z.string(),
   streamEventType: z.string(),
   timestamp: z.string(),

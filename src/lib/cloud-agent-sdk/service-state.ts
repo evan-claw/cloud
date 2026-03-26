@@ -245,7 +245,12 @@ function createServiceState(config: ServiceStateConfig): ServiceState {
     // transport connected, so we're at least no longer in the 'connecting' phase.
     const sessionStatus = event.sessionStatus;
     if (sessionStatus === undefined) {
-      activity = { type: 'idle' };
+      // Only default to idle on initial connect (activity === 'connecting').
+      // On reconnect, preserve existing activity — the server will send a
+      // separate session.status event with the authoritative state.
+      if (activity.type === 'connecting') {
+        activity = { type: 'idle' };
+      }
     } else if (sessionStatus.type === 'busy') {
       activity = { type: 'busy' };
     } else if (sessionStatus.type === 'idle') {
