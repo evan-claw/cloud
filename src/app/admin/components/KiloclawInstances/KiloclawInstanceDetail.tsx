@@ -1247,6 +1247,7 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
     mutateAsync: destroyFlyMachine,
     isPending: isDestroyingFlyMachine,
     isSuccess: isFlyMachineDestroyed,
+    reset: resetDestroyFlyMachine,
   } = useMutation(
     trpc.admin.kiloclawInstances.destroyFlyMachine.mutationOptions({
       onSuccess: () => {
@@ -1259,6 +1260,12 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
       },
     })
   );
+
+  // Reset the destroyed success state when the machine ID changes (e.g. new machine created)
+  const flyMachineId = data?.workerStatus?.flyMachineId;
+  useEffect(() => {
+    resetDestroyFlyMachine();
+  }, [flyMachineId, resetDestroyFlyMachine]);
 
   const { mutateAsync: forceRetryRecovery, isPending: isRetryingRecovery } = useMutation(
     trpc.admin.kiloclawInstances.forceRetryRecovery.mutationOptions({
