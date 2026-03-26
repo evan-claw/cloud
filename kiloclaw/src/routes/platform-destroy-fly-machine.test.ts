@@ -77,22 +77,37 @@ describe('POST /destroy-fly-machine', () => {
     );
   });
 
-  it('builds Fly API URL with literal appName and machineId (no URI encoding needed)', async () => {
+  it('returns 400 for appName containing URI-special characters, proving the schema is the guard against URL injection', async () => {
+    // encodeURIComponent is not needed on the URL construction because the Zod schema
+    // never admits any character that would be percent-encoded. This test proves that
+    // boundary: a value containing a URI-special character (space, %, +) is rejected
+    // at the schema layer and never reaches the Fly API call.
     const { env } = makeEnv();
-    const appNameWithHyphen = 'acct-abc-123';
-    const { path, init } = postJson('/destroy-fly-machine', {
-      userId: testUserId,
-      appName: appNameWithHyphen,
-      machineId: testMachineId,
-    });
-    await platform.request(path, init, env);
+    for (const badAppName of ['acct abc', 'acct%20abc', 'acct+abc', 'ACCT-ABC']) {
+      const { path, init } = postJson('/destroy-fly-machine', {
+        userId: testUserId,
+        appName: badAppName,
+        machineId: testMachineId,
+      });
+      const resp = await platform.request(path, init, env);
+      expect(resp.status).toBe(400);
+    }
+    // None of the bad inputs reached the Fly API
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 
-    // Zod schema restricts appName to /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/ and machineId to
-    // /^[a-z0-9]+$/ — characters that never need URL-encoding, so no encodeURIComponent is needed.
-    expect(fetchSpy).toHaveBeenCalledWith(
-      `https://api.machines.dev/v1/apps/${appNameWithHyphen}/machines/${testMachineId}?force=true`,
-      expect.objectContaining({ method: 'DELETE' })
-    );
+  it('returns 400 for machineId containing URI-special characters, proving the schema is the guard against URL injection', async () => {
+    const { env } = makeEnv();
+    for (const badMachineId of ['d890 abc', 'd890%abc', 'd890+abc', 'D890ABC']) {
+      const { path, init } = postJson('/destroy-fly-machine', {
+        userId: testUserId,
+        appName: testAppName,
+        machineId: badMachineId,
+      });
+      const resp = await platform.request(path, init, env);
+      expect(resp.status).toBe(400);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('triggers forceRetryRecovery after successful destroy', async () => {
