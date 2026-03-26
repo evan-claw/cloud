@@ -3,7 +3,7 @@ import type { CodingPlanProvider } from '@/lib/providers/coding-plans/types';
 export default [
   {
     id: 'bytelabs-coding',
-    name: 'ByteLabs Coding',
+    name: 'ByteLabs Coding Plan',
     base_url: 'https://ark.ap-southeast.bytepluses.com/api/coding/v3',
     ai_sdk_provider: 'openai-compatible',
     models: [
@@ -22,7 +22,7 @@ export default [
   },
   {
     id: 'zai-coding',
-    name: 'Z.ai Coding',
+    name: 'Z.ai Coding Plan',
     base_url: 'https://api.z.ai/api/coding/paas/v4',
     ai_sdk_provider: 'openai-compatible',
     models: [
