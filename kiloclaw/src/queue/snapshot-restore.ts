@@ -19,6 +19,7 @@
 import type { KiloClawEnv } from '../types';
 import type { SnapshotRestoreMessage } from '../schemas/snapshot-restore';
 import { SnapshotRestoreMessageSchema } from '../schemas/snapshot-restore';
+import { writeEvent } from '../utils/analytics';
 import * as fly from '../fly/client';
 
 async function createRestoreVolume(
@@ -67,7 +68,24 @@ export async function handleSnapshotRestoreQueue(
         continue;
       }
 
-      console.log(`[queue] Restore started for user=${userId} snapshot=${snapshotId}`);
+      console.log(
+        JSON.stringify({
+          tag: 'kiloclaw_queue',
+          level: 'info',
+          message: 'instance.restore_started',
+          userId,
+          snapshotId,
+          attempt: message.attempts,
+        })
+      );
+      writeEvent(env, {
+        event: 'instance.restore_started',
+        delivery: 'queue',
+        userId,
+        status: 'restoring',
+        label: `attempt_${message.attempts}`,
+        value: message.attempts,
+      });
 
       // Step 1: Stop the machine if running
       try {
@@ -131,23 +149,46 @@ export async function handleSnapshotRestoreQueue(
         `[queue] Snapshot restore completed: user=${userId} snapshot=${snapshotId} oldVolume=${previousVolumeId} newVolume=${newVolume.id}`
       );
     } catch (err) {
+      const errMessage = err instanceof Error ? err.message : String(err);
       console.error(
-        `[queue] Snapshot restore failed for user=${userId} snapshot=${snapshotId}:`,
-        err
+        JSON.stringify({
+          tag: 'kiloclaw_queue',
+          level: 'error',
+          message: 'instance.restore_failed',
+          userId,
+          snapshotId,
+          attempt: message.attempts,
+          error: errMessage,
+        })
       );
 
       // If this is the last retry, reset status so the instance isn't stuck.
       // CF Queues: message.attempts starts at 1 and increments. max_retries=2 means
       // up to 3 total attempts (1 initial + 2 retries).
       if (message.attempts >= 3) {
-        console.error(
-          `[queue] All retries exhausted for user=${userId}, resetting to stopped. Message will go to DLQ.`
-        );
+        writeEvent(env, {
+          event: 'instance.restore_failed',
+          delivery: 'queue',
+          userId,
+          status: 'restoring',
+          label: 'queue_retries_exhausted',
+          error: errMessage,
+          value: message.attempts,
+        });
         try {
           await stub.failSnapshotRestore();
         } catch (failErr) {
           console.error('[queue] Failed to reset restore status:', failErr);
         }
+      } else {
+        writeEvent(env, {
+          event: 'instance.restore_retry_scheduled',
+          delivery: 'queue',
+          userId,
+          status: 'restoring',
+          label: errMessage,
+          value: message.attempts,
+        });
       }
 
       message.retry();

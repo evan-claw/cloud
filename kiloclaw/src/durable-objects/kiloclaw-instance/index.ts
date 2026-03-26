@@ -1509,9 +1509,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       throw err;
     }
 
-    console.log(
-      `[DO] Snapshot restore enqueued: snapshot=${snapshotId} previousVolume=${previousVolumeId}`
-    );
+    this.emitEvent({
+      event: 'instance.restore_enqueued',
+      status: 'restoring',
+      label: 'admin_snapshot_restore',
+    });
 
     return { acknowledged: true, previousVolumeId };
   }
@@ -1565,6 +1567,9 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     }
 
     const previousVolumeId = this.s.flyVolumeId;
+    const durationMs = this.s.restoreStartedAt
+      ? Date.now() - new Date(this.s.restoreStartedAt).getTime()
+      : undefined;
     this.s.previousVolumeId = previousVolumeId;
     this.s.flyVolumeId = newVolumeId;
     this.s.flyRegion = newRegion;
@@ -1582,9 +1587,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       pendingRestoreVolumeId: null,
     });
 
-    console.log(
-      `[DO] Snapshot restore completed: previousVolume=${previousVolumeId} newVolume=${newVolumeId} region=${newRegion}`
-    );
+    this.emitEvent({
+      event: 'instance.restore_completed',
+      status: 'stopped',
+      durationMs,
+    });
   }
 
   /**
@@ -1943,7 +1950,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       if (this.s.restoreStartedAt) {
         const elapsed = Date.now() - new Date(this.s.restoreStartedAt).getTime();
         if (elapsed > 30 * 60 * 1000) {
-          console.error('[DO] Restore stuck for >30 min, resetting to stopped');
+          this.emitEvent({
+            event: 'instance.restore_failed',
+            status: 'restoring',
+            label: 'alarm_timeout',
+            durationMs: elapsed,
+          });
           await this.failSnapshotRestore();
           return;
         }
