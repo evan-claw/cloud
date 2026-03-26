@@ -107,6 +107,11 @@ const BALANCED_CODE_MODEL: ResolvedAutoModel = {
   model: MINIMAX_CURRENT_MODEL_ID,
 };
 
+const BALANCED_IMAGE_MODEL: ResolvedAutoModel = {
+  model: KIMI_CURRENT_MODEL_ID,
+  reasoning: { enabled: true },
+};
+
 const BALANCED_MODE_TO_MODEL: Record<string, ResolvedAutoModel> = {
   plan: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
   general: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
@@ -159,7 +164,7 @@ export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
   max_completion_tokens: 131072,
   prompt_price: '0.0000006',
   completion_price: '0.000003',
-  supports_images: false,
+  supports_images: true,
   roocode_settings: {
     included_tools: ['edit_file'],
     excluded_tools: ['apply_diff'],
@@ -202,10 +207,40 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
   'kilo/auto-small': KILO_AUTO_SMALL_MODEL,
 };
 
+function requestContainsImages(request: GatewayRequest): boolean {
+  switch (request.kind) {
+    case 'chat_completions':
+      return request.body.messages.some(
+        msg =>
+          msg.role === 'user' &&
+          Array.isArray(msg.content) &&
+          msg.content.some(part => part.type === 'image_url')
+      );
+    case 'responses': {
+      if (!Array.isArray(request.body.input)) return false;
+      return request.body.input.some(
+        item =>
+          typeof item !== 'string' &&
+          item.type === 'message' &&
+          Array.isArray(item.content) &&
+          item.content.some(part => part.type === 'input_image')
+      );
+    }
+    case 'messages':
+      return request.body.messages.some(
+        msg =>
+          msg.role === 'user' &&
+          Array.isArray(msg.content) &&
+          msg.content.some(block => block.type === 'image')
+      );
+  }
+}
+
 export async function resolveAutoModel(
   model: string,
   modeHeader: string | null,
-  balancePromise: Promise<number>
+  balancePromise: Promise<number>,
+  hasImages: boolean
 ): Promise<ResolvedAutoModel> {
   const mappedModel =
     (Object.hasOwn(legacyMapping, model) ? legacyMapping[model] : null)?.id ?? model;
@@ -219,10 +254,13 @@ export async function resolveAutoModel(
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
   if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
-    return (
+    const resolved =
       (Object.hasOwn(BALANCED_MODE_TO_MODEL, mode) ? BALANCED_MODE_TO_MODEL[mode] : null) ??
-      BALANCED_CODE_MODEL
-    );
+      BALANCED_CODE_MODEL;
+    if (hasImages && resolved.model === MINIMAX_CURRENT_MODEL_ID) {
+      return BALANCED_IMAGE_MODEL;
+    }
+    return resolved;
   }
   return (
     (Object.hasOwn(FRONTIER_MODE_TO_MODEL, mode) ? FRONTIER_MODE_TO_MODEL[mode] : null) ??
@@ -237,10 +275,12 @@ export async function applyResolvedAutoModel(
   featureHeader: FeatureValue | null,
   balancePromise: Promise<number>
 ) {
+  const hasImages = requestContainsImages(request);
   const resolved = await resolveAutoModel(
     model,
     featureHeader === 'kiloclaw' ? 'plan' : modeHeader,
-    balancePromise
+    balancePromise,
+    hasImages
   );
   request.body.model = resolved.model;
   if (resolved.reasoning) {

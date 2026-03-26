@@ -50,7 +50,8 @@
       "description": "Great balance of price and capability. Uses Kimi K2.5 for plan, general, architect, orchestrator, ask, debug; MiniMax M2.7 for build, explore, code.",
       "architecture": {
         "input_modalities": [
-          "text"
+          "text",
+          "image"
         ],
         "output_modalities": [
           "text"
