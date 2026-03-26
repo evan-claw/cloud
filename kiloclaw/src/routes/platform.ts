@@ -1363,8 +1363,8 @@ platform.put('/regions', async c => {
 // This bypasses the DO's normal destroy flow — use for admin cleanup.
 const DestroyFlyMachineSchema = z.object({
   userId: z.string().min(1),
-  appName: z.string().min(1),
-  machineId: z.string().min(1),
+  appName: z.string().min(1).max(63).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Invalid Fly app name'),
+  machineId: z.string().min(1).regex(/^[a-z0-9]+$/, 'Invalid Fly machine ID'),
 });
 
 platform.post('/destroy-fly-machine', async c => {
@@ -1372,13 +1372,12 @@ platform.post('/destroy-fly-machine', async c => {
   if ('error' in result) return result.error;
 
   const { userId, appName, machineId } = result.data;
-  const startedAt = performance.now();
   const apiToken = c.env.FLY_API_TOKEN;
   if (!apiToken) {
     return c.json({ error: 'FLY_API_TOKEN is not configured' }, 503);
   }
 
-  const url = `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}?force=true`;
+  const url = `https://api.machines.dev/v1/apps/${encodeURIComponent(appName)}/machines/${encodeURIComponent(machineId)}?force=true`;
   try {
     const resp = await fetch(url, {
       method: 'DELETE',
@@ -1391,17 +1390,9 @@ platform.post('/destroy-fly-machine', async c => {
         `[platform] destroy-fly-machine failed (${resp.status}) app=${appName} machine=${machineId}:`,
         body
       );
-      writeEvent(c.env, {
-        event: 'instance.destroy_fly_machine_failed',
-        delivery: 'http',
-        route: '/api/platform/destroy-fly-machine',
-        userId,
-        error: `Fly API error (${resp.status})`,
-        durationMs: performance.now() - startedAt,
-      });
       return jsonError(
         `Fly API error (${resp.status}): ${body}`,
-        resp.status >= 500 ? 502 : resp.status
+        resp.status
       );
     }
 
@@ -1421,24 +1412,9 @@ platform.post('/destroy-fly-machine', async c => {
       );
     }
 
-    writeEvent(c.env, {
-      event: 'instance.destroy_fly_machine_succeeded',
-      delivery: 'http',
-      route: '/api/platform/destroy-fly-machine',
-      userId,
-      durationMs: performance.now() - startedAt,
-    });
     return c.json({ ok: true });
   } catch (err) {
     const { message, status } = sanitizeError(err, 'destroy-fly-machine');
-    writeEvent(c.env, {
-      event: 'instance.destroy_fly_machine_failed',
-      delivery: 'http',
-      route: '/api/platform/destroy-fly-machine',
-      userId,
-      error: message,
-      durationMs: performance.now() - startedAt,
-    });
     return jsonError(message, status);
   }
 });
