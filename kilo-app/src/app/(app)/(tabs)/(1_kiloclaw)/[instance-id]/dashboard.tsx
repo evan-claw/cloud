@@ -1,7 +1,7 @@
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
-import { AlertTriangle, CreditCard, Newspaper } from 'lucide-react-native';
+import { AlertTriangle, CreditCard, Newspaper, Trash2 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { BillingBanner } from '@/components/kiloclaw/billing-banner';
@@ -142,6 +142,40 @@ export default function DashboardScreen() {
             >
               <Newspaper size={18} color={colors.foreground} />
               <Text className="flex-1 text-sm font-medium">What's New</Text>
+            </Pressable>
+          </View>
+
+          <View className="rounded-lg bg-red-100 dark:bg-red-950 overflow-hidden">
+            <Text className="px-4 pt-3 pb-1 text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">
+              Danger Zone
+            </Text>
+            <Pressable
+              className="flex-row items-center gap-3 px-4 py-3 active:opacity-70"
+              onPress={() => {
+                Alert.alert(
+                  'Destroy Instance',
+                  'This will permanently destroy your KiloClaw instance and all its data. This action cannot be undone.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Destroy',
+                      style: 'destructive',
+                      onPress: () => {
+                        mutations.destroy.mutate(undefined, {
+                          onSuccess: () => {
+                            router.dismissAll();
+                          },
+                        });
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Trash2 size={18} color="#dc2626" />
+              <Text className="flex-1 text-sm font-medium text-red-600 dark:text-red-400">
+                Destroy Instance
+              </Text>
             </Pressable>
           </View>
         </Animated.View>

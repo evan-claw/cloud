@@ -280,5 +280,11 @@ export function useKiloClawMutations() {
         onError: onMutationError,
       })
     ),
+    destroy: useMutation(
+      trpc.kiloclaw.destroy.mutationOptions({
+        onSuccess: invalidateStatus,
+        onError: onMutationError,
+      })
+    ),
   };
 }
