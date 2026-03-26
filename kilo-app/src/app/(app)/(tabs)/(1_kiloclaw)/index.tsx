@@ -91,7 +91,7 @@ export default function KiloClawInstanceList() {
               <Button
                 variant="outline"
                 onPress={() => {
-                  void WebBrowser.openBrowserAsync('https://kilo.ai/claw');
+                  void WebBrowser.openBrowserAsync('https://app.kilo.ai/claw');
                 }}
               >
                 <Plus size={16} color={colors.foreground} />
