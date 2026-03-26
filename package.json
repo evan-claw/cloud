@@ -6,11 +6,11 @@
     "node": "^22"
   },
   "scripts": {
-    "dev": "next dev",
-    "dev:prod-db": "USE_PRODUCTION_DB=true next dev",
+    "dev": "bash scripts/dev.sh",
+    "dev:prod-db": "USE_PRODUCTION_DB=true bash scripts/dev.sh",
     "build": "next build",
     "start": "next start",
-    "stripe": "stripe listen --forward-to http://localhost:3000/api/stripe/webhook",
+    "stripe": "stripe listen --forward-to http://localhost:$(cat .dev-port 2>/dev/null || echo 3000)/api/stripe/webhook",
     "lint": "oxlint --config .oxlintrc.json src",
     "format": "oxfmt .",
     "format:check": "oxfmt --list-different .",

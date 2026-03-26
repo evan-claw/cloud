@@ -31,6 +31,9 @@ node_modules/
 # production
 /build
 
+# dev server port (written by scripts/dev.sh for multi-worktree support)
+.dev-port
+
 # debug
 npm-debug.log*
 yarn-debug.log*

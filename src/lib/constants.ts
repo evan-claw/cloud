@@ -23,11 +23,12 @@ export const ORGANIZATION_ID_HEADER = 'x-kilocode-organizationid'; // We pass X-
 export const LANDING_URL =
   process.env.NODE_ENV === 'production' ? 'https://kilo.ai' : 'http://localhost:3001';
 
-// Make sure to also update NEXTAUTH_URL in the .env.* files
+// In development, APP_URL derives from the PORT env var (set by scripts/dev.sh).
+// APP_URL_OVERRIDE takes precedence for tunnels (e.g. ngrok).
 export const APP_URL =
   process.env.NODE_ENV === 'production'
     ? 'https://app.kilo.ai'
-    : (process.env.APP_URL_OVERRIDE ?? 'http://localhost:3000');
+    : (process.env.APP_URL_OVERRIDE ?? `http://localhost:${process.env.PORT || '3000'}`);
 
 export const TRIAL_DURATION_DAYS = 14;
 
