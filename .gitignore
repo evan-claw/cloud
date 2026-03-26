@@ -60,6 +60,7 @@ dev-debug-request-logs/*
 
 # misc
 .DS_Store
+.eslintcache
 *.pem
 TMP_CI_commit_msg.txt
 *.csv
