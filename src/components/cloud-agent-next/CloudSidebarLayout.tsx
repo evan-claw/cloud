@@ -1,6 +1,14 @@
 'use client';
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useSetAtom } from 'jotai';
@@ -13,6 +21,7 @@ import { useActiveSessions } from './hooks/useActiveSessions';
 import { isNewSession } from '@/lib/cloud-agent/session-type';
 import { deleteSessionFromStoreAtom } from './store/db-session-atoms';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { usePageTitle } from '@/contexts/PageTitleContext';
 
 // Context for children to toggle the mobile sidebar sheet
 type SidebarLayoutContextValue = {
@@ -41,6 +50,13 @@ export function CloudSidebarLayout({ organizationId, children }: CloudSidebarLay
   const [platformFilter, setPlatformFilter] = useState<string | undefined>('cloud-agent');
   const [projectFilter, setProjectFilter] = useState<string | undefined>(undefined);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+
+  // Hide the app-level topbar — cloud agent pages have their own ChatHeader
+  const { setHidden } = usePageTitle();
+  useEffect(() => {
+    setHidden(true);
+    return () => setHidden(false);
+  }, [setHidden]);
 
   const { sessions, refetchSessions, renameSessionLocally } = useSidebarSessions({
     organizationId: organizationId ?? null,
