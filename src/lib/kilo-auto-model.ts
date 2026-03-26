@@ -14,6 +14,7 @@ import type {
   OpenRouterChatCompletionRequest,
   OpenRouterReasoningConfig,
 } from '@/lib/providers/openrouter/types';
+import { requestContainsImages } from '@/lib/providers/openrouter/request-helpers';
 import type { ModelSettings, OpenCodeSettings, Verbosity } from '@kilocode/db/schema-types';
 import type OpenAI from 'openai';
 
@@ -203,47 +204,6 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
   [KILO_AUTO_FREE_MODEL_DEPRECATED]: KILO_AUTO_FREE_MODEL,
   'kilo/auto-small': KILO_AUTO_SMALL_MODEL,
 };
-
-function requestContainsImages(request: GatewayRequest): boolean {
-  switch (request.kind) {
-    case 'chat_completions':
-      return request.body.messages.some(
-        msg =>
-          (msg.role === 'user' || msg.role === 'tool') &&
-          Array.isArray(msg.content) &&
-          msg.content.some(part => part.type === 'image_url')
-      );
-    case 'responses': {
-      if (!Array.isArray(request.body.input)) return false;
-      return request.body.input.some(item => {
-        if (typeof item === 'string') return false;
-        if (item.type === 'message') {
-          return (
-            Array.isArray(item.content) && item.content.some(part => part.type === 'input_image')
-          );
-        }
-        if (item.type === 'function_call_output') {
-          return (
-            Array.isArray(item.output) && item.output.some(part => part.type === 'input_image')
-          );
-        }
-        return false;
-      });
-    }
-    case 'messages':
-      return request.body.messages.some(
-        msg =>
-          Array.isArray(msg.content) &&
-          msg.content.some(
-            block =>
-              block.type === 'image' ||
-              (block.type === 'tool_result' &&
-                Array.isArray(block.content) &&
-                block.content.some(inner => inner.type === 'image'))
-          )
-      );
-  }
-}
 
 export async function resolveAutoModel(
   model: string,
