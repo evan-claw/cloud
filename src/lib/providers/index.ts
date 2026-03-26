@@ -253,13 +253,6 @@ export function applyProviderSpecificLogic(
 
   applyPreferredProvider(requestedModel, requestToMutate.body);
 
-  provider.transformRequest({
-    model: requestedModel,
-    request: requestToMutate,
-    extraHeaders,
-    userByok,
-  });
-
   if (isXaiModel(requestedModel)) {
     applyXaiModelSettings(requestedModel, requestToMutate, extraHeaders);
   }
@@ -275,6 +268,13 @@ export function applyProviderSpecificLogic(
   if (isMistralModel(requestedModel)) {
     applyMistralModelSettings(requestToMutate);
   }
+
+  provider.transformRequest({
+    model: requestedModel,
+    request: requestToMutate,
+    extraHeaders,
+    userByok,
+  });
 }
 
 export async function openRouterRequest({
