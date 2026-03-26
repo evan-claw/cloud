@@ -178,11 +178,15 @@ controller.post('/checkin', async (c: Context<AppEnv>) => {
     waitUntil(telemetryPromise);
   }
 
+  console.info(`[controller] checkin ${data.sandboxId}, load: ${data.loadAvg5m}`);
+
   // Instance readiness detection: when load drops below threshold, send a
   // one-time "instance ready" email to the user via the Next.js internal API.
   if (data.loadAvg5m <= INSTANCE_READY_LOAD_THRESHOLD) {
     try {
       const { shouldNotify } = await stub.tryMarkInstanceReady();
+
+      console.info(`[controller] checkin ${data.sandboxId}, shouldNotify=${shouldNotify}`);
 
       if (shouldNotify && c.env.INTERNAL_API_SECRET) {
         const apiOrigin = nextApiOrigin(c.env.KILOCODE_API_BASE_URL);
