@@ -54,9 +54,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# eslint cache
-.eslintcache
-
 # kdiff3
 *.orig
 dev-debug-request-logs/*

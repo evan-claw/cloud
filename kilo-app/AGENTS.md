@@ -11,7 +11,7 @@ Kilo App is an Expo (React Native) mobile application using Expo Router for file
 - **Language**: TypeScript (strict mode, `tsgo`)
 - **Styling**: NativeWind v5 (Tailwind CSS v4) — docs: https://www.nativewind.dev/v5/llms-full.txt
 - **UI Components**: [React Native Reusables](https://reactnativereusables.com/) (shadcn/ui for React Native) in `src/components/ui/`
-- **Linting**: ESLint 9 flat config with strict type-checked rules, unicorn, sonarjs, import-x, promise, react-native
+- **Linting**: oxlint with type-aware rules, unicorn, react-native (jsPlugin), import, promise
 - **Formatting**: oxfmt
 
 ## Environment Setup
@@ -24,7 +24,7 @@ The dev server (`pnpm start`) is always started by the user — do not start it 
 
 ```bash
 pnpm typecheck       # tsgo --noEmit
-pnpm lint            # expo lint (eslint)
+pnpm lint            # oxlint
 pnpm format          # oxfmt src
 pnpm format:check    # oxfmt --list-different src
 pnpm check:unused    # knip (unused exports/deps)
@@ -54,10 +54,10 @@ npx expo install --dev <package-name>   # devDependencies
 
 ## Fixing Lint Errors
 
-When resolving lint errors, always try the autofix first before editing manually:
+When resolving lint errors, try the autofix first before editing manually:
 
 ```bash
-npx eslint --fix <file-or-directory>
+pnpm -w exec oxlint --config kilo-app/.oxlintrc.json --fix kilo-app/src
 ```
 
 Only hand-fix errors that `--fix` cannot resolve.
