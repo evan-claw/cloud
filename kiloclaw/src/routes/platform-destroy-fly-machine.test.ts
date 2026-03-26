@@ -103,7 +103,7 @@ describe('POST /destroy-fly-machine', () => {
     expect(json.error).toContain('FLY_API_TOKEN');
   });
 
-  it('forwards Fly API error status and body', async () => {
+  it('wraps Fly API error status and body in error message', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('machine not found', { status: 404 }));
     const { env } = makeEnv();
     const { path, init } = postJson('/destroy-fly-machine', {
@@ -115,7 +115,8 @@ describe('POST /destroy-fly-machine', () => {
 
     expect(resp.status).toBe(404);
     const json = await resp.json();
-    expect(json.error).toContain('machine not found');
+    // Implementation wraps the Fly response body: "Fly API error (${status}): ${body}"
+    expect(json.error).toBe('Fly API error (404): machine not found');
   });
 
   it('returns 400 for invalid appName format', async () => {

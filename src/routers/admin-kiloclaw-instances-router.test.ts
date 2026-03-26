@@ -167,9 +167,10 @@ describe('admin.kiloclawInstances.destroyFlyMachine', () => {
     expect(logs[0].actor_email).toBe(adminUser.google_user_email);
     expect(logs[0].message).toContain(testAppName);
     expect(logs[0].message).toContain(testMachineId);
+    expect(logs[0].metadata).toEqual({ appName: testAppName, machineId: testMachineId });
   });
 
-  it('propagates errors from the internal client as INTERNAL_SERVER_ERROR', async () => {
+  it('wraps generic errors as INTERNAL_SERVER_ERROR', async () => {
     mockGetDebugStatus.mockResolvedValue({
       flyAppName: testAppName,
       flyMachineId: testMachineId,
@@ -184,7 +185,32 @@ describe('admin.kiloclawInstances.destroyFlyMachine', () => {
         appName: testAppName,
         machineId: testMachineId,
       })
-    ).rejects.toThrow('Failed to destroy Fly machine');
+    ).rejects.toThrow('Failed to destroy Fly machine: Fly API timeout');
+  });
+
+  it('maps KiloClawApiError 404 to NOT_FOUND', async () => {
+    const { KiloClawApiError } = jest.requireMock<{
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      KiloClawApiError: new (statusCode: number, responseBody: string) => any;
+    }>('@/lib/kiloclaw/kiloclaw-internal-client');
+
+    mockGetDebugStatus.mockResolvedValue({
+      flyAppName: testAppName,
+      flyMachineId: testMachineId,
+      status: 'running',
+    });
+    mockDestroyFlyMachine.mockRejectedValue(
+      new KiloClawApiError(404, JSON.stringify({ error: 'machine not found' }))
+    );
+
+    const caller = await createCallerForUser(adminUser.id);
+    await expect(
+      caller.admin.kiloclawInstances.destroyFlyMachine({
+        userId: testUserId,
+        appName: testAppName,
+        machineId: testMachineId,
+      })
+    ).rejects.toThrow('machine not found');
   });
 
   it('rejects invalid appName format', async () => {
@@ -195,7 +221,7 @@ describe('admin.kiloclawInstances.destroyFlyMachine', () => {
         appName: 'INVALID_APP_NAME',
         machineId: testMachineId,
       })
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid Fly app name');
 
     expect(mockGetDebugStatus).not.toHaveBeenCalled();
   });
@@ -208,7 +234,7 @@ describe('admin.kiloclawInstances.destroyFlyMachine', () => {
         appName: testAppName,
         machineId: 'INVALID-MACHINE-ID',
       })
-    ).rejects.toThrow();
+    ).rejects.toThrow('Invalid Fly machine ID');
 
     expect(mockGetDebugStatus).not.toHaveBeenCalled();
   });
