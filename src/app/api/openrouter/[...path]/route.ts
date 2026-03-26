@@ -530,10 +530,10 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       verdict: classifyResult.verdict,
       risk_score: classifyResult.risk_score,
       signals: classifyResult.signals,
-      identity_key: classifyResult.context.identity_key,
+      identity_key: classifyResult.context?.identity_key,
       kilo_user_id: user.id,
       requested_model: originalModelIdLowerCased,
-      rps: classifyResult.context.requests_per_second,
+      rps: classifyResult.context?.requests_per_second,
       request_id: classifyResult.request_id,
     });
     usageContext.abuse_request_id = classifyResult.request_id;
