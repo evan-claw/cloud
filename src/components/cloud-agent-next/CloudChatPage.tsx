@@ -140,21 +140,31 @@ export default function CloudChatPage({ organizationId }: CloudChatPageProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const chatUI = useAtomValue(manager.atoms.chatUI);
+  const setChatUI = useSetAtom(manager.atoms.chatUI);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
-  }, [dynamicMessages]);
+    if (!chatUI.shouldAutoScroll) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'instant' });
+  }, [dynamicMessages, chatUI.shouldAutoScroll]);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setShowScrollButton(distanceFromBottom > 200);
-  }, []);
+    const isNearBottom = distanceFromBottom < 100;
+    setShowScrollButton(!isNearBottom);
+    setChatUI({ shouldAutoScroll: isNearBottom });
+  }, [setChatUI]);
 
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+    setChatUI({ shouldAutoScroll: true });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [setChatUI]);
 
   // -- Handlers -------------------------------------------------------------
   const handleSendMessage = useCallback(

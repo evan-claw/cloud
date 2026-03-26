@@ -457,6 +457,31 @@ export function NewSessionPanel({ organizationId }: NewSessionPanelProps) {
   const isIntegrationMissing = githubIntegrationMissing && gitlabIntegrationMissing;
 
   // ---------------------------------------------------------------------------
+  // Repo popover state (must be declared before early returns to satisfy Rules of Hooks)
+  // ---------------------------------------------------------------------------
+  const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
+
+  const recentFullNames = useMemo(() => new Set(recentRepos.map(r => r.fullName)), [recentRepos]);
+  const githubRepos = unifiedRepositories.filter(
+    r => r.platform === 'github' && !recentFullNames.has(r.fullName)
+  );
+  const gitlabRepos = unifiedRepositories.filter(
+    r => r.platform === 'gitlab' && !recentFullNames.has(r.fullName)
+  );
+  const otherRepos = unifiedRepositories.filter(
+    r => !r.platform && !recentFullNames.has(r.fullName)
+  );
+  const filteredUnifiedRepos = unifiedRepositories.filter(r => !recentFullNames.has(r.fullName));
+
+  const handleRepoPillSelect = useCallback(
+    (fullName: string) => {
+      handleRepoSelect(fullName);
+      setRepoPopoverOpen(false);
+    },
+    [handleRepoSelect]
+  );
+
+  // ---------------------------------------------------------------------------
   // Submit
   // ---------------------------------------------------------------------------
   const isFormValid =
@@ -611,32 +636,6 @@ export function NewSessionPanel({ organizationId }: NewSessionPanelProps) {
       </div>
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Repo pill data
-  // ---------------------------------------------------------------------------
-  const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
-
-  // Group repos by platform for the Command list, excluding recently used
-  const recentFullNames = useMemo(() => new Set(recentRepos.map(r => r.fullName)), [recentRepos]);
-  const githubRepos = unifiedRepositories.filter(
-    r => r.platform === 'github' && !recentFullNames.has(r.fullName)
-  );
-  const gitlabRepos = unifiedRepositories.filter(
-    r => r.platform === 'gitlab' && !recentFullNames.has(r.fullName)
-  );
-  const otherRepos = unifiedRepositories.filter(
-    r => !r.platform && !recentFullNames.has(r.fullName)
-  );
-  const filteredUnifiedRepos = unifiedRepositories.filter(r => !recentFullNames.has(r.fullName));
-
-  const handleRepoPillSelect = useCallback(
-    (fullName: string) => {
-      handleRepoSelect(fullName);
-      setRepoPopoverOpen(false);
-    },
-    [handleRepoSelect]
-  );
 
   // ---------------------------------------------------------------------------
   // Render
