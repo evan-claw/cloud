@@ -37,6 +37,7 @@ import {
   ensureActiveInstance,
   getActiveInstance,
   markActiveInstanceDestroyed,
+  markInstanceDestroyedById,
   renameInstance,
   restoreDestroyedInstance,
 } from '@/lib/kiloclaw/instance-registry';
@@ -222,10 +223,8 @@ async function provisionInstance(
   user: Parameters<typeof generateApiToken>[0],
   input: z.infer<typeof updateConfigSchema>
 ) {
-  // Check whether this user already had an active row before we create one.
-  // ensureActiveInstance is idempotent: it may return a pre-existing row.
-  // On provision failure we only clean up a *freshly-created* row to avoid
-  // soft-deleting a legitimate pre-existing instance.
+  // Remember which row existed before so we can detect whether
+  // ensureActiveInstance created a new one for this attempt.
   const preExistingRow = await getActiveInstance(user.id);
   const instanceRow = await ensureActiveInstance(user.id);
   const rowIsNew = !preExistingRow || preExistingRow.id !== instanceRow.id;
@@ -262,11 +261,10 @@ async function provisionInstance(
       pinnedImageTag,
     });
   } catch (error) {
-    // Only clean up the row if ensureActiveInstance created it for this
-    // attempt. Pre-existing rows belong to a prior successful provision
-    // and must not be destroyed.
+    // Only clean up the exact row this attempt created. Target by primary
+    // key so a concurrent request's row is never affected.
     if (rowIsNew) {
-      await markActiveInstanceDestroyed(user.id).catch(cleanupErr => {
+      await markInstanceDestroyedById(instanceRow.id).catch(cleanupErr => {
         console.error(
           '[kiloclaw] Failed to clean up instance row after provision error:',
           cleanupErr
