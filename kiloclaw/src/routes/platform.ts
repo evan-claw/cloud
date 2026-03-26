@@ -1359,8 +1359,9 @@ platform.put('/regions', async c => {
 });
 
 // POST /api/platform/destroy-fly-machine
-// Directly destroys a Fly machine via the Machines API (force=true).
-// This bypasses the DO's normal destroy flow — use for admin cleanup.
+// This is for admin cleanup only.
+// It directly destroys a Fly machine via the Machines API (force=true).
+// It does not destroy the Fly app or volume.
 const DestroyFlyMachineSchema = z.object({
   userId: z.string().min(1),
   appName: z
@@ -1384,7 +1385,7 @@ platform.post('/destroy-fly-machine', async c => {
     return c.json({ error: 'FLY_API_TOKEN is not configured' }, 503);
   }
 
-  const url = `https://api.machines.dev/v1/apps/${encodeURIComponent(appName)}/machines/${encodeURIComponent(machineId)}?force=true`;
+  const url = `https://api.machines.dev/v1/apps/${appName}/machines/${machineId}?force=true`;
   try {
     const resp = await fetch(url, {
       method: 'DELETE',

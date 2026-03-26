@@ -77,6 +77,24 @@ describe('POST /destroy-fly-machine', () => {
     );
   });
 
+  it('builds Fly API URL with literal appName and machineId (no URI encoding needed)', async () => {
+    const { env } = makeEnv();
+    const appNameWithHyphen = 'acct-abc-123';
+    const { path, init } = postJson('/destroy-fly-machine', {
+      userId: testUserId,
+      appName: appNameWithHyphen,
+      machineId: testMachineId,
+    });
+    await platform.request(path, init, env);
+
+    // Zod schema restricts appName to /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/ and machineId to
+    // /^[a-z0-9]+$/ — characters that never need URL-encoding, so no encodeURIComponent is needed.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://api.machines.dev/v1/apps/${appNameWithHyphen}/machines/${testMachineId}?force=true`,
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
   it('triggers forceRetryRecovery after successful destroy', async () => {
     const { env, forceRetryRecovery } = makeEnv();
     const { path, init } = postJson('/destroy-fly-machine', {
