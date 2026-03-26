@@ -21,6 +21,7 @@ const config = {
     backgroundColor: '#FAF74F',
   },
   android: {
+    package: 'com.kilocode.kiloapp',
     adaptiveIcon: {
       backgroundColor: '#FAF74F',
       foregroundImage: './assets/images/android-icon-foreground.png',
