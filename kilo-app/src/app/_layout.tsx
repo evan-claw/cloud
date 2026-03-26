@@ -32,9 +32,15 @@ Sentry.init({
   // Enable Logs
   enableLogs: true,
 
+  tracesSampleRate: 1,
+
   // Configure Session Replay
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1,
+
+  // Capture a screenshot and view hierarchy on every error
+  attachScreenshot: true,
+  attachViewHierarchy: true,
 
   integrations: [Sentry.mobileReplayIntegration(), navigationIntegration],
   enableNativeFramesTracking: !isRunningInExpoGo(),
