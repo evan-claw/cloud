@@ -1399,7 +1399,10 @@ platform.post('/destroy-fly-machine', async c => {
         error: `Fly API error (${resp.status})`,
         durationMs: performance.now() - startedAt,
       });
-      return jsonError(`Fly API error (${resp.status}): ${body}`, resp.status >= 500 ? 502 : resp.status);
+      return jsonError(
+        `Fly API error (${resp.status}): ${body}`,
+        resp.status >= 500 ? 502 : resp.status
+      );
     }
 
     console.log(`[platform] destroy-fly-machine ok: app=${appName} machine=${machineId}`);
