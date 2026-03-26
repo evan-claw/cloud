@@ -44,3 +44,5 @@ app-example
 
 # superpowers brainstorming
 .superpowers/
+
+.env.local

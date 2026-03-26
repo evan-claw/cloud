@@ -22,10 +22,25 @@ const navigationIntegration = Sentry.reactNavigationIntegration({
 
 Sentry.init({
   dsn: 'https://618cf025f1c6bdea8043fcd80668fe6b@o4509356317474816.ingest.us.sentry.io/4511110711279616',
+
   enabled: !__DEV__,
-  tracesSampleRate: 1,
-  integrations: [navigationIntegration],
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // Configure Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1,
+
+  integrations: [Sentry.mobileReplayIntegration(), navigationIntegration],
   enableNativeFramesTracking: !isRunningInExpoGo(),
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  spotlight: __DEV__,
 });
 
 void SplashScreen.preventAutoHideAsync();
