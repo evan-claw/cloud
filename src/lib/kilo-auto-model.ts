@@ -209,26 +209,38 @@ function requestContainsImages(request: GatewayRequest): boolean {
     case 'chat_completions':
       return request.body.messages.some(
         msg =>
-          msg.role === 'user' &&
+          (msg.role === 'user' || msg.role === 'tool') &&
           Array.isArray(msg.content) &&
           msg.content.some(part => part.type === 'image_url')
       );
     case 'responses': {
       if (!Array.isArray(request.body.input)) return false;
-      return request.body.input.some(
-        item =>
-          typeof item !== 'string' &&
-          item.type === 'message' &&
-          Array.isArray(item.content) &&
-          item.content.some(part => part.type === 'input_image')
-      );
+      return request.body.input.some(item => {
+        if (typeof item === 'string') return false;
+        if (item.type === 'message') {
+          return (
+            Array.isArray(item.content) && item.content.some(part => part.type === 'input_image')
+          );
+        }
+        if (item.type === 'function_call_output') {
+          return (
+            Array.isArray(item.output) && item.output.some(part => part.type === 'input_image')
+          );
+        }
+        return false;
+      });
     }
     case 'messages':
       return request.body.messages.some(
         msg =>
-          msg.role === 'user' &&
           Array.isArray(msg.content) &&
-          msg.content.some(block => block.type === 'image')
+          msg.content.some(
+            block =>
+              block.type === 'image' ||
+              (block.type === 'tool_result' &&
+                Array.isArray(block.content) &&
+                block.content.some(inner => inner.type === 'image'))
+          )
       );
   }
 }
