@@ -35,6 +35,14 @@ const config = {
     'expo-secure-store',
     'expo-web-browser',
     [
+      '@sentry/react-native/expo',
+      {
+        url: 'https://sentry.io/',
+        project: 'kilo-app',
+        organization: 'kilo-code',
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         image: './assets/images/logo.png',
