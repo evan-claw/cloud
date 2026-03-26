@@ -64,7 +64,9 @@ const CODING_PLAN_PROVIDERS = CODING_PLANS.map(plan => ({
   name: plan.name,
 }));
 
-const BYOK_PROVIDERS = [...CODING_PLAN_PROVIDERS, ...VERCEL_BYOK_PROVIDERS];
+const BYOK_PROVIDERS = [...CODING_PLAN_PROVIDERS, ...VERCEL_BYOK_PROVIDERS].toSorted((a, b) =>
+  a.name.localeCompare(b.name)
+);
 
 function BYOKDescription() {
   return (

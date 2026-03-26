@@ -9,7 +9,7 @@ export default [
     models: [
       {
         id: 'bytedance-seed-code',
-        name: 'Seed Code',
+        name: 'Seed-Code',
         description:
           "ByteDance's latest code model has been deeply optimized for agentic programming tasks.",
         flags: ['recommended', 'vision'],
