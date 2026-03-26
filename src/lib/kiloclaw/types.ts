@@ -155,6 +155,7 @@ export type PlatformDebugStatusResponse = PlatformStatusResponse & {
   lastDestroyErrorAt: number | null;
   lastRestartErrorMessage: string | null;
   lastRestartErrorAt: number | null;
+  instanceReadyEmailSent: boolean;
 };
 
 /** A Fly volume snapshot. */

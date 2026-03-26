@@ -1233,6 +1233,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     lastStartErrorAt: number | null;
     lastRestartErrorMessage: string | null;
     lastRestartErrorAt: number | null;
+    instanceReadyEmailSent: boolean;
   }> {
     await this.loadState();
     const alarmScheduledAt = await this.ctx.storage.getAlarm();
@@ -1274,6 +1275,7 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       lastStartErrorAt: this.s.lastStartErrorAt,
       lastRestartErrorMessage: this.s.lastRestartErrorMessage,
       lastRestartErrorAt: this.s.lastRestartErrorAt,
+      instanceReadyEmailSent: this.s.instanceReadyEmailSent,
     };
   }
 

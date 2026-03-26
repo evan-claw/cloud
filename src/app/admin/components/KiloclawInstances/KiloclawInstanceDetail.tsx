@@ -1593,6 +1593,10 @@ export function KiloclawInstanceDetail({ instanceId }: { instanceId: string }) {
                   )}
                 </DetailField>
 
+                <DetailField label="Instance Ready Email Sent">
+                  {data.workerStatus.instanceReadyEmailSent ? 'true' : 'false'}
+                </DetailField>
+
                 <DetailField label="Last Metadata Recovery Attempt">
                   {formatEpochTime(data.workerStatus.lastMetadataRecoveryAt)}
                 </DetailField>
