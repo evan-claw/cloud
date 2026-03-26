@@ -2,7 +2,6 @@
 
 import { usePageTitle } from '@/contexts/PageTitleContext';
 import { SidebarTrigger } from '@/components/ui/sidebar';
-import { Separator } from '@/components/ui/separator';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -16,17 +15,14 @@ export function AppTopbar() {
   if (hidden) return null;
 
   return (
-    <header className="@container bg-background sticky top-0 z-10 h-14 shrink-0 border-b flex flex-row">
-      <div className="flex flex-row">
-        <div className="flex h-14 items-center gap-2 aspect-square justify-center">
-          <SidebarTrigger className="-ml-1" />
-        </div>
-        <Separator orientation="vertical" className="h-4 @min-[1224]:hidden" />
+    <header className="bg-background sticky top-0 z-10 h-14 shrink-0 border-b">
+      <div className="float-left flex h-14 aspect-square items-center justify-center">
+        <SidebarTrigger className="-ml-1" />
       </div>
 
-      <div className="absolute w-full h-full">
-        {title && (
-          <div className="mx-auto flex h-full w-full max-w-285 items-center gap-2 pl-18 @min-[1224]:pl-6">
+      {title && (
+        <div className="mx-auto h-full max-w-285 px-4 md:px-6">
+          <div className="inline-flex h-full items-center gap-2">
             {icon}
             <Breadcrumb>
               <BreadcrumbList>
@@ -37,8 +33,8 @@ export function AppTopbar() {
             </Breadcrumb>
             {extras}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   );
 }
