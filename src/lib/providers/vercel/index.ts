@@ -20,6 +20,7 @@ import type {
   VercelProviderConfig,
 } from '@/lib/providers/openrouter/types';
 import { mapModelIdToVercel } from '@/lib/providers/vercel/mapModelIdToVercel';
+import { isXaiModel } from '@/lib/providers/xai';
 import { isZaiModel } from '@/lib/providers/zai';
 import * as crypto from 'crypto';
 
@@ -49,7 +50,7 @@ async function getVercelRoutingPercentage() {
     console.error(`[getVercelRoutingPercentage] Vercel error rate is high: ${errorRate.vercel}`);
     return 10;
   }
-  return 10;
+  return 30;
 }
 
 function isLikelyAvailableOnAllGateways(requestedModel: string) {
@@ -96,6 +97,7 @@ export async function shouldRouteToVercel(
     !isMinimaxModel(requestedModel) &&
     !isMoonshotModel(requestedModel) &&
     !isOpenAiOssModel(requestedModel) &&
+    !isXaiModel(requestedModel) &&
     !isZaiModel(requestedModel)
   ) {
     console.debug(`[shouldRouteToVercel] model family not allowed for randomized Vercel routing`);

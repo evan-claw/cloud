@@ -54,9 +54,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# eslint cache
-.eslintcache
-
 # kdiff3
 *.orig
 dev-debug-request-logs/*
@@ -101,5 +98,5 @@ supabase/.temp
 
 .kilo/plans
 
-# @kilocode/trpc intermediate tsc output (bundled index.d.ts is committed)
-packages/trpc/dist/tsc/
+# @kilocode/trpc build output (rebuilt by: pnpm --filter @kilocode/trpc run build)
+packages/trpc/dist/

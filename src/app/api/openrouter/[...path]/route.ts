@@ -74,7 +74,11 @@ import { fixOpenCodeDuplicateReasoning } from '@/lib/providers/fixOpenCodeDuplic
 import type { MicrodollarUsageContext, PromptInfo } from '@/lib/processUsage.types';
 import { extractResponsesPromptInfo } from '@/lib/processUsage.responses';
 import { extractMessagesPromptInfo } from '@/lib/processUsage.messages';
-import { getMaxTokens, hasMiddleOutTransform } from '@/lib/providers/openrouter/request-helpers';
+import {
+  fixResponsesRequest,
+  getMaxTokens,
+  hasMiddleOutTransform,
+} from '@/lib/providers/openrouter/request-helpers';
 
 export const maxDuration = 800;
 
@@ -432,6 +436,10 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     }
   }
 
+  if (requestBodyParsed.kind === 'responses') {
+    fixResponsesRequest(requestBodyParsed.body);
+  }
+
   const toolsAvailable = getToolsAvailable(requestBodyParsed);
   const toolsUsed = getToolsUsed(requestBodyParsed);
 
@@ -530,10 +538,10 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
       verdict: classifyResult.verdict,
       risk_score: classifyResult.risk_score,
       signals: classifyResult.signals,
-      identity_key: classifyResult.context.identity_key,
+      identity_key: classifyResult.context?.identity_key,
       kilo_user_id: user.id,
       requested_model: originalModelIdLowerCased,
-      rps: classifyResult.context.requests_per_second,
+      rps: classifyResult.context?.requests_per_second,
       request_id: classifyResult.request_id,
     });
     usageContext.abuse_request_id = classifyResult.request_id;

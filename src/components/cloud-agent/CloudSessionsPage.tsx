@@ -22,6 +22,7 @@ import { AlertCircle, ExternalLink, Loader2, RefreshCw, Rocket, Sparkles } from 
 import { toast } from 'sonner';
 import { formatDistanceToNow } from 'date-fns';
 import { PageLayout } from '@/components/PageLayout';
+import { SetPageTitle } from '@/components/SetPageTitle';
 import { DemoSessionCTA } from './DemoSessionCTA';
 import { DemoSessionModal } from './DemoSessionModal';
 import {
@@ -595,10 +596,9 @@ export function CloudSessionsPage({ organizationId }: CloudSessionsPageProps) {
     !hasInsufficientBalance;
 
   const titleContent = (
-    <div className="flex items-center gap-3">
-      <h1 className="text-foreground text-3xl font-bold">Cloud Agent</h1>
+    <SetPageTitle title="Cloud Agent">
       <Badge variant="new">new</Badge>
-    </div>
+    </SetPageTitle>
   );
 
   const subtitleContent = (

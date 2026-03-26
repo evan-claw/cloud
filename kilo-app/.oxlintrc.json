@@ -1,0 +1,111 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": ["oxc", "typescript", "unicorn", "react", "import", "promise"],
+  "jsPlugins": [{ "name": "react-native", "specifier": "oxlint-plugin-react-native" }],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "ignorePatterns": ["dist/*", "node_modules/**"],
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "react-native",
+            "importNames": ["Image"],
+            "message": "Import Image from @/components/ui/image instead."
+          },
+          {
+            "name": "expo-image",
+            "message": "Import Image from @/components/ui/image instead."
+          }
+        ]
+      }
+    ],
+    "import/no-default-export": "error",
+    "import/no-cycle": "error",
+    "import/no-self-import": "error",
+    "import/no-duplicates": "error",
+    "import/no-mutable-exports": "error",
+    "import/consistent-type-specifier-style": ["error", "prefer-inline"],
+    "promise/always-return": "error",
+    "promise/catch-or-return": "error",
+    "promise/no-nesting": "error",
+    "promise/no-promise-in-callback": "error",
+    "promise/no-callback-in-promise": "error",
+    "promise/prefer-await-to-then": "error",
+    "promise/prefer-await-to-callbacks": "error",
+    "promise/no-return-wrap": "error",
+    "react-native/no-unused-styles": "error",
+    "react-native/no-inline-styles": "error",
+    "react-native/no-raw-text": "error",
+    "react-native/no-single-element-style-arrays": "error",
+    "react-native/no-color-literals": "error",
+    "@typescript-eslint/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "as",
+        "objectLiteralTypeAssertions": "never"
+      }
+    ],
+    "@typescript-eslint/consistent-type-imports": "error",
+    "@typescript-eslint/no-empty-object-type": "error",
+    "@typescript-eslint/no-require-imports": "error",
+    "@typescript-eslint/no-wrapper-object-types": "error",
+    "@typescript-eslint/no-unsafe-type-assertion": "off",
+    "@typescript-eslint/no-unnecessary-condition": "error",
+    "@typescript-eslint/no-confusing-void-expression": "error",
+    "@typescript-eslint/await-thenable": "error",
+    "@typescript-eslint/no-base-to-string": "error",
+    "@typescript-eslint/no-duplicate-type-constituents": "error",
+    "@typescript-eslint/no-for-in-array": "error",
+    "@typescript-eslint/no-implied-eval": "error",
+    "@typescript-eslint/no-redundant-type-constituents": "error",
+    "@typescript-eslint/no-unnecessary-type-assertion": "error",
+    "@typescript-eslint/no-unsafe-argument": "error",
+    "@typescript-eslint/no-unsafe-assignment": "error",
+    "@typescript-eslint/no-unsafe-call": "error",
+    "@typescript-eslint/no-unsafe-enum-comparison": "error",
+    "@typescript-eslint/no-unsafe-member-access": "error",
+    "@typescript-eslint/no-unsafe-return": "error",
+    "@typescript-eslint/no-unsafe-unary-minus": "error",
+    "@typescript-eslint/restrict-plus-operands": "error",
+    "@typescript-eslint/restrict-template-expressions": "error",
+    "@typescript-eslint/unbound-method": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "vars": "all",
+        "args": "all",
+        "argsIgnorePattern": "^_",
+        "ignoreRestSiblings": true,
+        "caughtErrors": "all"
+      }
+    ],
+    "react/no-is-mounted": "off",
+    "react/jsx-no-useless-fragment": "off",
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    "react/react-in-jsx-scope": "off",
+    "import/no-unassigned-import": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/components/ui/image.tsx"],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    },
+    {
+      "files": ["src/app/**/_layout.tsx", "src/app/**/*.tsx"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ]
+}

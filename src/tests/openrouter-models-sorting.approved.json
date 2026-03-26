@@ -86,6 +86,7 @@
           "apply_diff"
         ]
       },
+      "opencode": {},
       "preferredIndex": 1,
       "isFree": false
     },
@@ -133,6 +134,7 @@
           "edit_file"
         ]
       },
+      "opencode": {},
       "preferredIndex": 2,
       "isFree": true
     },
@@ -180,7 +182,8 @@
       ],
       "default_parameters": {},
       "preferredIndex": 3,
-      "isFree": true
+      "isFree": true,
+      "opencode": {}
     },
     {
       "id": "anthropic/claude-sonnet-4",
@@ -355,7 +358,8 @@
             "apply_diff"
           ]
         }
-      }
+      },
+      "opencode": {}
     },
     {
       "id": "openai/gpt-4.1",
@@ -460,7 +464,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 32000,
-      "isFree": false
+      "isFree": false,
+      "opencode": {}
     },
     {
       "id": "qwen/qwen3-coder",
@@ -490,7 +495,8 @@
         "internal_reasoning": "0"
       },
       "context_length": 32000,
-      "isFree": false
+      "isFree": false,
+      "opencode": {}
     },
     {
       "id": "corethink:free",
@@ -531,7 +537,8 @@
         "tools"
       ],
       "default_parameters": {},
-      "isFree": true
+      "isFree": true,
+      "opencode": {}
     },
     {
       "id": "minimax/minimax-m2.5:free",
@@ -584,7 +591,8 @@
           "apply_diff",
           "edit_file"
         ]
-      }
+      },
+      "opencode": {}
     },
     {
       "id": "xiaomi/mimo-v2-omni:free",
@@ -629,7 +637,8 @@
         "include_reasoning"
       ],
       "default_parameters": {},
-      "isFree": true
+      "isFree": true,
+      "opencode": {}
     },
     {
       "id": "x-ai/grok-code-fast-1:optimized:free",
@@ -673,7 +682,10 @@
         "include_reasoning"
       ],
       "default_parameters": {},
-      "isFree": true
+      "isFree": true,
+      "opencode": {
+        "ai_sdk_provider": "openai"
+      }
     },
     {
       "id": "kilo-auto/small",
@@ -710,6 +722,7 @@
         "reasoning",
         "include_reasoning"
       ],
+      "opencode": {},
       "isFree": false
     }
   ]

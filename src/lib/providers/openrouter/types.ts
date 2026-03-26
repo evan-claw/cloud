@@ -57,7 +57,9 @@ export type SharedGatewayRequestProperties = {
   // https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request#request.body.models
   models?: string[];
 
-  thinking?: { type?: 'enabled' | 'adaptive' | 'disabled' };
+  // Non-standard reasoning configuration
+  enable_thinking?: boolean; // Alibaba
+  thinking?: { type?: 'enabled' | 'adaptive' | 'disabled' }; // ByteDance
 };
 
 export type GatewayResponsesRequest = SharedGatewayRequestProperties &
