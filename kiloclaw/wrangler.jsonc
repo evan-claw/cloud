@@ -98,6 +98,7 @@
     "FLY_ORG_SLUG": "kilo-679", // Org for creating per-user Fly apps
     "FLY_IMAGE_TAG": "latest",
     "FLY_REGION": "eu,us",
+    "BACKEND_API_URL": "https://app.kilo.ai",
     "OPENCLAW_ALLOWED_ORIGINS": "https://claw.kilosessions.ai,https://kilo.ai,https://www.kilo.ai",
     "KILOCLAW_CHECKIN_URL": "https://claw.kilosessions.ai/api/controller/checkin",
     "REQUIRE_PROXY_TOKEN": "true",

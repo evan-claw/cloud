@@ -14,6 +14,9 @@ export type KiloClawEnv = {
   KV_CLAW_CACHE: KVNamespace;
   SNAPSHOT_RESTORE_QUEUE?: Queue<SnapshotRestoreMessage>;
 
+  // Backend app origin for internal API calls (e.g. instance-ready email)
+  BACKEND_API_URL?: string;
+
   // Auth secrets
   NEXTAUTH_SECRET?: string;
   INTERNAL_API_SECRET?: string;
