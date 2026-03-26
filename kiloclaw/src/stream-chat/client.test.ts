@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createServerToken,
   createUserToken,
+  createShortLivedUserToken,
   upsertStreamChatUsers,
   getOrCreateStreamChatChannel,
   setupDefaultStreamChatChannel,
@@ -38,6 +39,33 @@ describe('createUserToken', () => {
   it('produces different tokens for different user IDs', async () => {
     const t1 = await createUserToken('secret', 'user-a');
     const t2 = await createUserToken('secret', 'user-b');
+    expect(t1).not.toBe(t2);
+  });
+});
+
+describe('createShortLivedUserToken', () => {
+  it('produces a JWT with user_id, iat, and exp in the payload', async () => {
+    const token = await createShortLivedUserToken('test-secret', 'user-456');
+    const payload = decodeJwtPayload(token);
+    expect(payload.user_id).toBe('user-456');
+    expect(payload.iat).toEqual(expect.any(Number));
+    expect(payload.exp).toEqual(expect.any(Number));
+  });
+
+  it('sets exp roughly 6 hours after iat', async () => {
+    const token = await createShortLivedUserToken('test-secret', 'user-ttl');
+    const payload = decodeJwtPayload(token);
+    const iat = payload.iat as number;
+    const exp = payload.exp as number;
+    const sixHoursInSeconds = 6 * 60 * 60;
+    // Allow 5 seconds of tolerance for test execution time
+    expect(exp - iat).toBeGreaterThanOrEqual(sixHoursInSeconds - 5);
+    expect(exp - iat).toBeLessThanOrEqual(sixHoursInSeconds + 5);
+  });
+
+  it('produces different tokens for different user IDs', async () => {
+    const t1 = await createShortLivedUserToken('secret', 'user-a');
+    const t2 = await createShortLivedUserToken('secret', 'user-b');
     expect(t1).not.toBe(t2);
   });
 });
@@ -159,7 +187,7 @@ describe('setupDefaultStreamChatChannel', () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200 });
   }
 
-  it('makes upsertUsers and getOrCreateChannel calls, returns correct IDs and tokens', async () => {
+  it('makes upsertUsers and getOrCreateChannel calls, returns correct IDs and bot token', async () => {
     mockOk();
     const result = await setupDefaultStreamChatChannel('api-key', 'api-secret', 'sandbox-abc');
 
@@ -170,12 +198,10 @@ describe('setupDefaultStreamChatChannel', () => {
     expect(result.botUserId).toBe('bot-sandbox-abc');
     expect(result.channelId).toBe('default-sandbox-abc');
 
-    // Tokens should be valid JWTs
+    // Bot token should be a valid JWT; human user token is no longer returned
     const botPayload = decodeJwtPayload(result.botUserToken);
     expect(botPayload.user_id).toBe('bot-sandbox-abc');
-
-    const userPayload = decodeJwtPayload(result.userToken);
-    expect(userPayload.user_id).toBe('sandbox-abc');
+    expect(result).not.toHaveProperty('userToken');
   });
 
   it('uses correct channel type (messaging)', async () => {

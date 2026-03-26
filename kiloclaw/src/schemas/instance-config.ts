@@ -195,7 +195,6 @@ export const PersistedStateSchema = z.object({
   streamChatBotUserId: z.string().nullable().default(null),
   streamChatBotUserToken: z.string().nullable().default(null),
   streamChatChannelId: z.string().nullable().default(null),
-  streamChatUserToken: z.string().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;

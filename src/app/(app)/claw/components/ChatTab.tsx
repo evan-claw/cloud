@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { Channel as StreamChannel, Event } from 'stream-chat';
+import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, RotateCw } from 'lucide-react';
 import {
   Chat,
@@ -15,6 +16,7 @@ import {
   useChannelStateContext,
 } from 'stream-chat-react';
 import { useStreamChatCredentials } from '@/hooks/useKiloClaw';
+import { useTRPC } from '@/lib/trpc/utils';
 
 type ChatTabProps = {
   /** Only fetch credentials and connect when true (tab is active + instance running). */
@@ -57,7 +59,7 @@ export function ChatTab({ enabled }: ChatTabProps) {
     );
   }
 
-  return <StreamChatUI {...creds} />;
+  return <StreamChatUI apiKey={creds.apiKey} userId={creds.userId} channelId={creds.channelId} />;
 }
 
 // ─── Internal components ────────────────────────────────────────────────────
@@ -65,17 +67,35 @@ export function ChatTab({ enabled }: ChatTabProps) {
 function StreamChatUI({
   apiKey,
   userId,
-  userToken,
   channelId,
 }: {
   apiKey: string;
   userId: string;
-  userToken: string;
   channelId: string;
 }) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  // Stable token provider that fetches a fresh short-lived token on every call.
+  // stream-chat-react calls this when the current token expires (via `exp` claim).
+  const tokenProvider = useCallback(
+    async () => {
+      const creds = await queryClient.fetchQuery(
+        trpc.kiloclaw.getStreamChatCredentials.queryOptions(undefined, {
+          staleTime: 0,
+        })
+      );
+      if (!creds?.userToken) {
+        throw new Error('Failed to fetch Stream Chat credentials');
+      }
+      return creds.userToken;
+    },
+    [queryClient, trpc]
+  );
+
   const client = useCreateChatClient({
     apiKey,
-    tokenOrProvider: userToken,
+    tokenOrProvider: tokenProvider,
     userData: { id: userId },
   });
 

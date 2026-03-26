@@ -61,7 +61,10 @@ import {
   markRestartSuccessful,
 } from './reconcile';
 import { restoreFromPostgres, markDestroyedInPostgresHelper } from './postgres';
-import { setupDefaultStreamChatChannel } from '../../stream-chat/client';
+import {
+  setupDefaultStreamChatChannel,
+  createShortLivedUserToken,
+} from '../../stream-chat/client';
 import { writeEvent } from '../../utils/analytics';
 import type { KiloClawEventData, KiloClawEventName } from '../../utils/analytics';
 
@@ -396,13 +399,11 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
         this.s.streamChatBotUserId = streamChat.botUserId;
         this.s.streamChatBotUserToken = streamChat.botUserToken;
         this.s.streamChatChannelId = streamChat.channelId;
-        this.s.streamChatUserToken = streamChat.userToken;
         await this.persist({
           streamChatApiKey: streamChat.apiKey,
           streamChatBotUserId: streamChat.botUserId,
           streamChatBotUserToken: streamChat.botUserToken,
           streamChatChannelId: streamChat.channelId,
-          streamChatUserToken: streamChat.userToken,
         });
         console.log('[DO] Stream Chat default channel provisioned:', streamChat.channelId);
       } catch (err) {
@@ -1239,17 +1240,24 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
     if (
       !this.s.streamChatApiKey ||
-      !this.s.streamChatUserToken ||
+      !this.env.STREAM_CHAT_API_SECRET ||
       !this.s.streamChatChannelId ||
       !this.s.sandboxId
     ) {
       return null;
     }
 
+    // Mint a short-lived token on every request so that revoked users lose
+    // access when the token expires, without requiring an app-secret rotation.
+    const userToken = await createShortLivedUserToken(
+      this.env.STREAM_CHAT_API_SECRET,
+      this.s.sandboxId
+    );
+
     return {
       apiKey: this.s.streamChatApiKey,
       userId: this.s.sandboxId,
-      userToken: this.s.streamChatUserToken,
+      userToken,
       channelId: this.s.streamChatChannelId,
     };
   }

@@ -90,7 +90,6 @@ export type InstanceMutableState = {
   streamChatBotUserId: string | null;
   streamChatBotUserToken: string | null;
   streamChatChannelId: string | null;
-  streamChatUserToken: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };

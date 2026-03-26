@@ -13,6 +13,8 @@ const STREAM_CHAT_API_BASE = 'https://chat.stream-io-api.com';
 
 /**
  * Result of provisioning a Stream Chat default channel for a new KiloClaw instance.
+ * Does NOT include a human user token — those are minted on demand with a short TTL
+ * via {@link createShortLivedUserToken}.
  */
 export type StreamChatSetup = {
   apiKey: string;
@@ -22,8 +24,6 @@ export type StreamChatSetup = {
   botUserToken: string;
   /** Default channel ID: `default-{sandboxId}` */
   channelId: string;
-  /** Permanent JWT for the human user (for future client-side use) */
-  userToken: string;
 };
 
 /**
@@ -37,13 +37,34 @@ export async function createServerToken(apiSecret: string): Promise<string> {
 }
 
 /**
- * Generate a Stream Chat user JWT for client-side or bot authentication.
- * Payload: `{ user_id: userId }` — scoped to a single user.
- * No expiry (permanent) for bot tokens; expiry can be added later for human user tokens.
+ * Generate a permanent Stream Chat user JWT for bot authentication.
+ * Payload: `{ user_id: userId }` — scoped to a single user, no expiry.
+ * For human/browser tokens use {@link createShortLivedUserToken} instead.
  */
 export async function createUserToken(apiSecret: string, userId: string): Promise<string> {
   const secretBytes = new TextEncoder().encode(apiSecret);
   return new SignJWT({ user_id: userId }).setProtectedHeader({ alg: 'HS256' }).sign(secretBytes);
+}
+
+/** Default TTL for browser-facing Stream Chat user tokens. */
+export const USER_TOKEN_TTL = '6h';
+
+/**
+ * Generate a short-lived Stream Chat user JWT for browser authentication.
+ * Payload: `{ user_id: userId }` with `iat` and `exp` claims.
+ * The token expires after {@link USER_TOKEN_TTL} so that revoked users lose
+ * access without requiring an app-secret rotation.
+ */
+export async function createShortLivedUserToken(
+  apiSecret: string,
+  userId: string
+): Promise<string> {
+  const secretBytes = new TextEncoder().encode(apiSecret);
+  return new SignJWT({ user_id: userId })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(USER_TOKEN_TTL)
+    .sign(secretBytes);
 }
 
 /**
@@ -140,11 +161,9 @@ export async function setupDefaultStreamChatChannel(
     name: 'KiloClaw',
   });
 
-  // Generate tokens for both users
-  const [botUserToken, userToken] = await Promise.all([
-    createUserToken(apiSecret, botUserId),
-    createUserToken(apiSecret, humanUserId),
-  ]);
+  // Generate a permanent token for the bot user only.
+  // Human user tokens are minted on demand with a short TTL (see createShortLivedUserToken).
+  const botUserToken = await createUserToken(apiSecret, botUserId);
 
-  return { apiKey, botUserId, botUserToken, channelId, userToken };
+  return { apiKey, botUserId, botUserToken, channelId };
 }

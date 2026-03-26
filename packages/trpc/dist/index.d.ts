@@ -15484,6 +15484,16 @@ declare const rootRouter: _trpc_server.TRPCBuiltRouter<{
             output: void;
             meta: object;
         }>;
+        getStreamChatCredentials: _trpc_server.TRPCQueryProcedure<{
+            input: void;
+            output: {
+                apiKey: string;
+                userId: string;
+                userToken: string;
+                channelId: string;
+            } | null;
+            meta: object;
+        }>;
         start: _trpc_server.TRPCMutationProcedure<{
             input: void;
             output: {
