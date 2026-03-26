@@ -31,6 +31,14 @@ const config = {
     predictiveBackGestureEnabled: false,
   },
   plugins: [
+    [
+      'expo-build-properties',
+      {
+        android: {
+          enableProguardInReleaseBuilds: true,
+        },
+      },
+    ],
     'expo-router',
     'expo-image',
     'expo-secure-store',
