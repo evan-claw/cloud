@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
-import { Server } from 'lucide-react-native';
-import { Linking, View } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { Plus, Server } from 'lucide-react-native';
+import { View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { EmptyState } from '@/components/empty-state';
@@ -14,9 +15,11 @@ import { Text } from '@/components/ui/text';
 import { useAppContext } from '@/lib/context/context-context';
 import { useKiloClawBillingStatus, useKiloClawStatus } from '@/lib/hooks/use-kiloclaw';
 import { deriveLockReason } from '@/lib/hooks/use-kiloclaw-billing';
+import { useThemeColors } from '@/lib/hooks/use-theme-colors';
 
 export default function KiloClawInstanceList() {
   const router = useRouter();
+  const colors = useThemeColors();
   const { context, clearContext } = useAppContext();
   const isPersonal = context?.type === 'personal' || context == null;
 
@@ -88,10 +91,11 @@ export default function KiloClawInstanceList() {
               <Button
                 variant="outline"
                 onPress={() => {
-                  void Linking.openURL('https://kilo.ai/claw');
+                  void WebBrowser.openBrowserAsync('https://kilo.ai/claw');
                 }}
               >
-                <Text>Create on Web</Text>
+                <Plus size={16} color={colors.foreground} />
+                <Text>Create</Text>
               </Button>
             }
           />
