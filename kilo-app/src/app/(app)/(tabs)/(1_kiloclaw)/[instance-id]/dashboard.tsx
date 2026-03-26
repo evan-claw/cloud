@@ -1,7 +1,7 @@
 import { type Href, useLocalSearchParams, useRouter } from 'expo-router';
 import { AlertTriangle, CreditCard, Newspaper, Trash2 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import { BillingBanner } from '@/components/kiloclaw/billing-banner';
@@ -150,7 +150,8 @@ export default function DashboardScreen() {
               Danger Zone
             </Text>
             <Pressable
-              className="flex-row items-center justify-center gap-2 rounded-md bg-red-600 dark:bg-red-700 py-2.5 px-4 active:opacity-70"
+              disabled={mutations.destroy.isPending}
+              className="flex-row items-center justify-center gap-2 rounded-md bg-red-600 dark:bg-red-700 py-2.5 px-4 active:opacity-70 disabled:opacity-50"
               onPress={() => {
                 Alert.alert(
                   'Destroy Instance',
@@ -172,8 +173,14 @@ export default function DashboardScreen() {
                 );
               }}
             >
-              <Trash2 size={16} color="#ffffff" />
-              <Text className="text-sm font-semibold text-white">Destroy Instance</Text>
+              {mutations.destroy.isPending ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Trash2 size={16} color="#ffffff" />
+              )}
+              <Text className="text-sm font-semibold text-white">
+                {mutations.destroy.isPending ? 'Destroying…' : 'Destroy Instance'}
+              </Text>
             </Pressable>
           </View>
         </Animated.View>
