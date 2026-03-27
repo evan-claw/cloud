@@ -39,6 +39,7 @@ import {
   wrapInSafeNextResponse,
   forbiddenFreeModelResponse,
   storeAndPreviousResponseIdIsNotSupported,
+  apiKindNotSupportedResponse,
 } from '@/lib/llm-proxy-helpers';
 import { getBalanceAndOrgSettings } from '@/lib/organizations/organization-usage';
 import { ENABLE_TOOL_REPAIR, repairTools } from '@/lib/tool-calling';
@@ -302,13 +303,16 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   // Use new shared helper for fraud & project headers
   const { fraudHeaders, projectId } = extractFraudAndProjectHeaders(request);
   const taskId = extractHeaderAndLimitLength(request, 'x-kilocode-taskid') ?? undefined;
-  const { provider, userByok, customLlm } = await getProvider(
+  const { provider, userByok, bypassAccessCheck } = await getProvider(
     originalModelIdLowerCased,
     requestBodyParsed,
     user,
     organizationId,
     taskId
   );
+  if (!provider.supportedChatApis.includes(requestBodyParsed.kind)) {
+    return apiKindNotSupportedResponse(requestBodyParsed.kind, provider.supportedChatApis);
+  }
 
   console.debug(`Routing request to ${provider.id}`);
 
@@ -377,9 +381,7 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
   setTag('ui.ai_model', requestBodyParsed.body.model);
 
   // Skip balance/org checks for anonymous users - they can only use free models
-  const bypassAccessCheckForCustomLlm =
-    !!customLlm && !!organizationId && customLlm.organization_ids.includes(organizationId);
-  if (!isAnonymousContext(user) && !bypassAccessCheckForCustomLlm) {
+  if (!isAnonymousContext(user) && !bypassAccessCheck) {
     const { balance, settings, plan } = await balanceAndSettingsPromise;
 
     if (
