@@ -656,6 +656,14 @@ export function countAndStoreEmbeddingUsage(
         });
         return;
       }
+
+      // Preserve the real upstream cost for analytics before zeroing for BYOK
+      usageStats.market_cost = usageStats.cost_mUsd;
+
+      if (usageContext.user_byok) {
+        usageStats.cost_mUsd = 0;
+      }
+
       return logMicrodollarUsage(usageStats, usageContext);
     })
   );
