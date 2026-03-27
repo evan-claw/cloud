@@ -5,6 +5,8 @@ import {
   createShortLivedUserToken,
   upsertStreamChatUsers,
   getOrCreateStreamChatChannel,
+  deactivateStreamChatUsers,
+  reactivateStreamChatUsers,
   setupDefaultStreamChatChannel,
 } from './client';
 
@@ -171,6 +173,114 @@ describe('getOrCreateStreamChatChannel', () => {
   });
 });
 
+describe('deactivateStreamChatUsers', () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    mockFetch.mockReset();
+  });
+
+  it('POSTs to /api/v2/users/{id}/deactivate for each user', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await deactivateStreamChatUsers('my-key', 'my-secret', ['user-1', 'bot-user-1']);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [url1, opts1] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit & { headers: Record<string, string> },
+    ];
+    expect(url1).toBe(
+      'https://chat.stream-io-api.com/api/v2/users/user-1/deactivate?api_key=my-key'
+    );
+    expect(opts1.method).toBe('POST');
+    expect(opts1.headers['Stream-Auth-Type']).toBe('jwt');
+
+    const [url2] = mockFetch.mock.calls[1] as [string, unknown];
+    expect(url2).toBe(
+      'https://chat.stream-io-api.com/api/v2/users/bot-user-1/deactivate?api_key=my-key'
+    );
+  });
+
+  it('silently ignores 404 responses', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 404, text: async () => 'Not Found' });
+
+    await expect(
+      deactivateStreamChatUsers('key', 'secret', ['nonexistent'])
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws on non-404 HTTP errors', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'Internal Server Error',
+    });
+
+    await expect(deactivateStreamChatUsers('key', 'secret', ['user-1'])).rejects.toThrow('500');
+  });
+});
+
+describe('reactivateStreamChatUsers', () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    mockFetch.mockReset();
+  });
+
+  it('POSTs to /api/v2/users/{id}/reactivate for each user', async () => {
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await reactivateStreamChatUsers('my-key', 'my-secret', ['user-1', 'bot-user-1']);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [url1, opts1] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit & { headers: Record<string, string> },
+    ];
+    expect(url1).toBe(
+      'https://chat.stream-io-api.com/api/v2/users/user-1/reactivate?api_key=my-key'
+    );
+    expect(opts1.method).toBe('POST');
+    expect(opts1.headers['Stream-Auth-Type']).toBe('jwt');
+
+    const [url2] = mockFetch.mock.calls[1] as [string, unknown];
+    expect(url2).toBe(
+      'https://chat.stream-io-api.com/api/v2/users/bot-user-1/reactivate?api_key=my-key'
+    );
+  });
+
+  it('silently ignores 404 responses', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 404, text: async () => 'Not Found' });
+
+    await expect(
+      reactivateStreamChatUsers('key', 'secret', ['nonexistent'])
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws on non-404 HTTP errors', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => 'Internal Server Error',
+    });
+
+    await expect(reactivateStreamChatUsers('key', 'secret', ['user-1'])).rejects.toThrow('500');
+  });
+});
+
 describe('setupDefaultStreamChatChannel', () => {
   const mockFetch = vi.fn();
 
@@ -187,12 +297,18 @@ describe('setupDefaultStreamChatChannel', () => {
     mockFetch.mockResolvedValue({ ok: true, status: 200 });
   }
 
-  it('makes upsertUsers and getOrCreateChannel calls, returns correct IDs and bot token', async () => {
+  it('reactivates, upserts, creates channel, and returns correct IDs and bot token', async () => {
     mockOk();
     const result = await setupDefaultStreamChatChannel('api-key', 'api-secret', 'sandbox-abc');
 
-    // 2 fetch calls: upsertUsers + getOrCreateChannel
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // 4 fetch calls: 2x reactivate + upsertUsers + getOrCreateChannel
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+
+    // First two calls are reactivate (human + bot)
+    const [reactivateUrl1] = mockFetch.mock.calls[0] as [string, unknown];
+    expect(reactivateUrl1).toContain('/api/v2/users/sandbox-abc/reactivate');
+    const [reactivateUrl2] = mockFetch.mock.calls[1] as [string, unknown];
+    expect(reactivateUrl2).toContain('/api/v2/users/bot-sandbox-abc/reactivate');
 
     expect(result.apiKey).toBe('api-key');
     expect(result.botUserId).toBe('bot-sandbox-abc');
@@ -208,17 +324,22 @@ describe('setupDefaultStreamChatChannel', () => {
     mockOk();
     await setupDefaultStreamChatChannel('key', 'secret', 'sandbox-xyz');
 
-    const [channelUrl] = mockFetch.mock.calls[1] as [string, unknown];
+    // Channel creation is the 4th call (after 2 reactivate + 1 upsert)
+    const [channelUrl] = mockFetch.mock.calls[3] as [string, unknown];
     expect(channelUrl).toContain('/channels/messaging/');
     expect(channelUrl).toContain('default-sandbox-xyz');
   });
 
   it('throws if upsertUsers fails', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      text: async () => 'Internal Server Error',
-    });
+    // First two calls (reactivate) succeed, third (upsert) fails
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200 }) // reactivate human
+      .mockResolvedValueOnce({ ok: true, status: 200 }) // reactivate bot
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error',
+      });
 
     await expect(setupDefaultStreamChatChannel('key', 'secret', 'sandbox-fail')).rejects.toThrow(
       '500'
@@ -227,6 +348,8 @@ describe('setupDefaultStreamChatChannel', () => {
 
   it('throws if getOrCreateChannel fails', async () => {
     mockFetch
+      .mockResolvedValueOnce({ ok: true, status: 200 }) // reactivate human
+      .mockResolvedValueOnce({ ok: true, status: 200 }) // reactivate bot
       .mockResolvedValueOnce({ ok: true, status: 200 }) // upsertUsers succeeds
       .mockResolvedValueOnce({
         ok: false,
@@ -237,5 +360,18 @@ describe('setupDefaultStreamChatChannel', () => {
     await expect(setupDefaultStreamChatChannel('key', 'secret', 'sandbox-fail2')).rejects.toThrow(
       '503'
     );
+  });
+
+  it('tolerates reactivate 404 (first provision, users do not exist yet)', async () => {
+    // Reactivate returns 404, upsert and channel creation succeed
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'Not Found' }) // reactivate human
+      .mockResolvedValueOnce({ ok: false, status: 404, text: async () => 'Not Found' }) // reactivate bot
+      .mockResolvedValueOnce({ ok: true, status: 200 }) // upsertUsers
+      .mockResolvedValueOnce({ ok: true, status: 200 }); // getOrCreateChannel
+
+    const result = await setupDefaultStreamChatChannel('api-key', 'api-secret', 'sandbox-new');
+    expect(result.apiKey).toBe('api-key');
+    expect(result.botUserId).toBe('bot-sandbox-new');
   });
 });

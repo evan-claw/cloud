@@ -128,6 +128,73 @@ export async function getOrCreateStreamChatChannel(
 }
 
 /**
+ * Deactivate one or more Stream Chat users via the server API.
+ * Deactivated users cannot connect to Stream Chat or send/receive messages,
+ * making any previously issued tokens useless.
+ * Silently ignores 404 (user not found). Other errors are thrown.
+ */
+export async function deactivateStreamChatUsers(
+  apiKey: string,
+  apiSecret: string,
+  userIds: readonly string[]
+): Promise<void> {
+  const serverToken = await createServerToken(apiSecret);
+  for (const userId of userIds) {
+    const res = await fetch(
+      `${STREAM_CHAT_API_BASE}/api/v2/users/${encodeURIComponent(userId)}/deactivate?api_key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Stream-Auth-Type': 'jwt',
+          Authorization: serverToken,
+        },
+        body: JSON.stringify({}),
+      }
+    );
+    // 404 = user never existed, safe to ignore
+    if (!res.ok && res.status !== 404) {
+      const body = await res.text().catch(() => '(unreadable)');
+      throw new Error(`Stream Chat deactivateUser failed for ${userId} (${res.status}): ${body}`);
+    }
+  }
+}
+
+/**
+ * Reactivate one or more previously deactivated Stream Chat users.
+ * Called during re-provision to ensure users can connect again.
+ * Silently ignores 404 (user not found). Other errors are thrown.
+ */
+export async function reactivateStreamChatUsers(
+  apiKey: string,
+  apiSecret: string,
+  userIds: readonly string[]
+): Promise<void> {
+  const serverToken = await createServerToken(apiSecret);
+  for (const userId of userIds) {
+    const res = await fetch(
+      `${STREAM_CHAT_API_BASE}/api/v2/users/${encodeURIComponent(userId)}/reactivate?api_key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Stream-Auth-Type': 'jwt',
+          Authorization: serverToken,
+        },
+        body: JSON.stringify({}),
+      }
+    );
+    // 404 = user never existed, safe to ignore
+    if (!res.ok && res.status !== 404) {
+      const body = await res.text().catch(() => '(unreadable)');
+      throw new Error(
+        `Stream Chat reactivateUser failed for ${userId} (${res.status}): ${body}`
+      );
+    }
+  }
+}
+
+/**
  * Provision the default Stream Chat channel for a new KiloClaw instance.
  *
  * Creates (or re-uses if already existing):
@@ -147,6 +214,10 @@ export async function setupDefaultStreamChatChannel(
   const humanUserId = sandboxId;
   const botUserId = `bot-${sandboxId}`;
   const channelId = `default-${sandboxId}`;
+
+  // Reactivate users in case they were deactivated by a prior destroy.
+  // This is a no-op for first-time provisioning (404s are silently ignored).
+  await reactivateStreamChatUsers(apiKey, apiSecret, [humanUserId, botUserId]);
 
   // Create/upsert both users
   await upsertStreamChatUsers(apiKey, serverToken, [

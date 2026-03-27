@@ -64,6 +64,7 @@ import { restoreFromPostgres, markDestroyedInPostgresHelper } from './postgres';
 import {
   setupDefaultStreamChatChannel,
   createShortLivedUserToken,
+  deactivateStreamChatUsers,
 } from '../../stream-chat/client';
 import { writeEvent } from '../../utils/analytics';
 import type { KiloClawEventData, KiloClawEventName } from '../../utils/analytics';
@@ -1138,6 +1139,21 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
       status: 'destroying',
       value: machineUptimeMs,
     });
+
+    // Best-effort: deactivate Stream Chat users so any captured tokens become useless.
+    // Failure is non-fatal — worst case is the same as pre-deactivation behavior.
+    if (this.env.STREAM_CHAT_API_KEY && this.env.STREAM_CHAT_API_SECRET && this.s.sandboxId) {
+      try {
+        await deactivateStreamChatUsers(this.env.STREAM_CHAT_API_KEY, this.env.STREAM_CHAT_API_SECRET, [
+          this.s.sandboxId,
+          `bot-${this.s.sandboxId}`,
+        ]);
+      } catch (err) {
+        doWarn(this.s, 'Stream Chat user deactivation failed (non-fatal)', {
+          error: toLoggable(err),
+        });
+      }
+    }
 
     const flyConfig = getFlyConfig(this.env, this.s);
     const destroyRctx = createReconcileContext(this.s, this.env, 'destroy');
