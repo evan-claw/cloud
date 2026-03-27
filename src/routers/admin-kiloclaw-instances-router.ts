@@ -652,7 +652,12 @@ export const adminKiloclawInstancesRouter = createTRPCRouter({
       const client = new KiloClawInternalClient();
 
       // Verify the appName/machineId match the DO's actual state
-      const status = await client.getDebugStatus(input.userId);
+      let status: Awaited<ReturnType<KiloClawInternalClient['getDebugStatus']>>;
+      try {
+        status = await client.getDebugStatus(input.userId);
+      } catch (err) {
+        throwKiloclawAdminError(err, 'Failed to verify machine state before destroy');
+      }
       if (status.flyAppName !== input.appName || status.flyMachineId !== input.machineId) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
