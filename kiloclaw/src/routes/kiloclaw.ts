@@ -53,6 +53,18 @@ kiloclaw.get('/status', c =>
   })
 );
 
+// GET /api/kiloclaw/chat-credentials -- Stream Chat credentials for the user's channel
+kiloclaw.get('/chat-credentials', c =>
+  instrumented(c, 'GET /api/kiloclaw/chat-credentials', async () => {
+    const userId = c.get('userId');
+    const stub = c.env.KILOCLAW_INSTANCE.get(c.env.KILOCLAW_INSTANCE.idFromName(userId));
+
+    const creds = await stub.getStreamChatCredentials();
+
+    return c.json(creds);
+  })
+);
+
 /**
  * Derive per-entry configured status from the catalog.
  *

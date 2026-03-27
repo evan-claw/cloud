@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Check, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { Check, MessageSquare, Sparkles, TriangleAlert, X, Zap } from 'lucide-react';
 import type { KiloClawDashboardStatus } from '@/lib/kiloclaw/types';
 import {
   useKiloClawGatewayStatus,
@@ -27,6 +28,16 @@ import { PermissionStep } from './PermissionStep';
 import { ProvisioningStep } from './ProvisioningStep';
 import type { ExecPreset } from './claw.types';
 import { BillingWrapper } from './billing/BillingWrapper';
+
+// Lazy-load the Chat tab so the stream-chat-react bundle (~200KB) only loads
+// when the user opens that tab, not on every /claw page visit.
+const ChatTab = dynamic(() => import('./ChatTab').then(m => ({ default: m.ChatTab })), {
+  loading: () => (
+    <div className="flex h-96 items-center justify-center text-sm text-muted-foreground">
+      Loading chat…
+    </div>
+  ),
+});
 
 type PopulatedClawStatus = KiloClawDashboardStatus & {
   status: NonNullable<KiloClawDashboardStatus['status']>;
@@ -65,6 +76,8 @@ export function ClawDashboard({
     instanceStatus.provisionedAt !== null &&
     Date.now() - instanceStatus.provisionedAt < SEVEN_DAYS_MS;
   const configServiceNudgeVisible = !instanceStatus || instanceYoung;
+
+  const [activeTab, setActiveTab] = useState('instance');
 
   const [onboardingStep, setOnboardingStep] = useState<
     'permissions' | 'channels' | 'provisioning' | 'pairing' | 'done'
@@ -304,11 +317,15 @@ export function ClawDashboard({
                 onUpgradeHandled={onUpgradeHandled}
               />
             </CardContent>
-            <Tabs defaultValue="instance">
+            <Tabs defaultValue="instance" onValueChange={setActiveTab}>
               <div className="px-5">
                 <TabsList className="mt-4 h-auto w-full justify-start gap-2 rounded-none border-b bg-transparent p-0 pb-3">
                   <TabsTrigger value="instance" className={tabTriggerClass}>
                     Gateway Process
+                  </TabsTrigger>
+                  <TabsTrigger value="chat" className={tabTriggerClass}>
+                    <MessageSquare className="mr-1.5 inline h-3.5 w-3.5" />
+                    Chat
                   </TabsTrigger>
                   <TabsTrigger value="settings" className={tabTriggerClass}>
                     Settings
@@ -326,6 +343,9 @@ export function ClawDashboard({
                     gatewayLoading={gatewayLoading}
                     gatewayError={gatewayError}
                   />
+                </TabsContent>
+                <TabsContent value="chat" className="mt-0">
+                  <ChatTab enabled={activeTab === 'chat' && isRunning} />
                 </TabsContent>
                 <TabsContent value="settings" className="mt-0">
                   <SettingsTab

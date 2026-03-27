@@ -484,6 +484,11 @@ export const kiloclawRouter = createTRPCRouter({
       }
     }),
 
+  getStreamChatCredentials: clawAccessProcedure.query(async ({ ctx }) => {
+    const client = new KiloClawInternalClient();
+    return client.getStreamChatCredentials(ctx.user.id);
+  }),
+
   // Instance lifecycle
   start: clawAccessProcedure.mutation(async ({ ctx }) => {
     const client = new KiloClawInternalClient();

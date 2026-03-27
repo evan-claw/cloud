@@ -1062,6 +1062,26 @@ platform.get('/status', async c => {
   }
 });
 
+// GET /api/platform/stream-chat-credentials?userId=...
+platform.get('/stream-chat-credentials', async c => {
+  const userId = setValidatedQueryUserId(c);
+  if (!userId) {
+    return c.json({ error: 'userId query parameter is required' }, 400);
+  }
+
+  try {
+    const creds = await withDORetry(
+      instanceStubFactory(c.env, userId),
+      stub => stub.getStreamChatCredentials(),
+      'getStreamChatCredentials'
+    );
+    return c.json(creds);
+  } catch (err) {
+    const { message, status } = sanitizeError(err, 'stream-chat-credentials');
+    return jsonError(message, status);
+  }
+});
+
 // GET /api/platform/debug-status?userId=...
 // Internal/admin-only debug status that includes DO destroy internals.
 platform.get('/debug-status', async c => {

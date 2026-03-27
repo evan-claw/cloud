@@ -279,6 +279,30 @@ export function generateBaseConfig(
     config.plugins.entries.slack.enabled = true;
   }
 
+  // Stream Chat default channel (auto-provisioned at provision time)
+  if (env.STREAM_CHAT_API_KEY && env.STREAM_CHAT_BOT_USER_ID && env.STREAM_CHAT_BOT_USER_TOKEN) {
+    config.channels.streamchat = config.channels.streamchat ?? {};
+    config.channels.streamchat.apiKey = env.STREAM_CHAT_API_KEY;
+    config.channels.streamchat.botUserId = env.STREAM_CHAT_BOT_USER_ID;
+    config.channels.streamchat.botUserToken = env.STREAM_CHAT_BOT_USER_TOKEN;
+    config.channels.streamchat.botUserName = 'KiloClaw';
+    config.channels.streamchat.enabled = true;
+
+    config.plugins = config.plugins ?? {};
+    config.plugins.load = config.plugins.load ?? {};
+    config.plugins.load.paths = Array.isArray(config.plugins.load.paths)
+      ? config.plugins.load.paths
+      : [];
+    const pluginPath = '/usr/local/lib/node_modules/@wunderchat/openclaw-channel-streamchat';
+    if (!(config.plugins.load.paths as string[]).includes(pluginPath)) {
+      (config.plugins.load.paths as string[]).push(pluginPath);
+    }
+
+    config.plugins.entries = config.plugins.entries ?? {};
+    config.plugins.entries.streamchat = config.plugins.entries.streamchat ?? {};
+    config.plugins.entries.streamchat.enabled = true;
+  }
+
   // Webhook hooks configuration (required for Gmail push notifications via gog).
   // hooks.token authenticates incoming hook requests from gog's --hook-token.
   // The gmail preset maps gog's gmailHookPayload into OpenClaw's expected format.

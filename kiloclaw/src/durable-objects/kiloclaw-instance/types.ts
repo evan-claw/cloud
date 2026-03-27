@@ -90,6 +90,11 @@ export type InstanceMutableState = {
   preRestoreStatus: InstanceStatus | null;
   pendingRestoreVolumeId: string | null;
   instanceReadyEmailSent: boolean;
+  // Stream Chat default channel (auto-provisioned)
+  streamChatApiKey: string | null;
+  streamChatBotUserId: string | null;
+  streamChatBotUserToken: string | null;
+  streamChatChannelId: string | null;
   /** In-memory only — throttles live Fly checks in getStatus(). */
   lastLiveCheckAt: number | null;
 };

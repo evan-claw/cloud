@@ -154,6 +154,17 @@ export async function buildUserEnvVars(
     plainEnv.KILOCLAW_GMAIL_LAST_HISTORY_ID = state.gmailLastHistoryId;
   }
 
+  // Stream Chat default channel (auto-provisioned at first provision).
+  // API key and bot user ID are plaintext; bot user token is sensitive.
+  if (state.streamChatApiKey && state.streamChatBotUserId && state.streamChatBotUserToken) {
+    plainEnv.STREAM_CHAT_API_KEY = state.streamChatApiKey;
+    plainEnv.STREAM_CHAT_BOT_USER_ID = state.streamChatBotUserId;
+    sensitive.STREAM_CHAT_BOT_USER_TOKEN = state.streamChatBotUserToken;
+    if (state.streamChatChannelId) {
+      plainEnv.STREAM_CHAT_DEFAULT_CHANNEL_ID = state.streamChatChannelId;
+    }
+  }
+
   // Get the env encryption key from the App DO, creating it if needed.
   const appStub = env.KILOCLAW_APP.get(env.KILOCLAW_APP.idFromName(state.userId));
   const { key: envKey, secretsVersion } = await appStub.ensureEnvKey(state.userId);

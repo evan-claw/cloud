@@ -11,6 +11,13 @@ export type ChangelogEntry = {
 // Newest entries first. Developers add new entries to the top of this array.
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    date: '2026-03-26',
+    description:
+      'Added real-time Chat tab — talk to your KiloClaw bot directly from the dashboard.',
+    category: 'feature',
+    deployHint: 'upgrade_required',
+  },
+  {
     date: '2026-03-24',
     description:
       'Fixed Kilo CLI discovery — OpenClaw now knows about the kilo CLI on all instances. Previously, instances provisioned before the CLI was added did not advertise it in TOOLS.md, so the agent could not find it.',

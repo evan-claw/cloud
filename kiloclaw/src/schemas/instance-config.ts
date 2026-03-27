@@ -221,6 +221,12 @@ export const PersistedStateSchema = z.object({
   // Tracks whether the "instance ready" email has been sent for this provision lifecycle.
   // Set to true on first low-load checkin; reset on DO wipe (destroy + re-provision).
   instanceReadyEmailSent: z.boolean().default(false),
+  // Stream Chat default channel (auto-provisioned on first instance creation).
+  // Null on existing instances (pre-Stream Chat) and when STREAM_CHAT_API_KEY is not set.
+  streamChatApiKey: z.string().nullable().default(null),
+  streamChatBotUserId: z.string().nullable().default(null),
+  streamChatBotUserToken: z.string().nullable().default(null),
+  streamChatChannelId: z.string().nullable().default(null),
 });
 
 export type PersistedState = z.infer<typeof PersistedStateSchema>;
