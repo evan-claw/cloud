@@ -36,11 +36,6 @@ export async function GET(): Promise<NextResponse> {
         costPerRequest: 0.0800828164797871,
       },
       {
-        model: 'z-ai/glm-5.1',
-        cost: 0.544525793287878,
-        costPerRequest: 0.0291657886637883,
-      },
-      {
         model: 'z-ai/glm-5',
         cost: 0.544525793287878,
         costPerRequest: 0.0291657886637883,

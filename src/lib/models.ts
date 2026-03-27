@@ -40,7 +40,6 @@ export const preferredModels = [
   'google/gemini-3.1-pro-preview',
   MINIMAX_CURRENT_MODEL_ID,
   KIMI_CURRENT_MODEL_ID,
-  'z-ai/glm-5.1',
   'z-ai/glm-5',
   'x-ai/grok-code-fast-1',
 ].filter(m => m !== null);

@@ -27,7 +27,6 @@ const forbiddenFreeModelIds: ReadonlySet<string> = new Set([
   'qwen/qwen3-next-80b-a3b-instruct:free',
   'upstage/solar-pro-3:free',
   'z-ai/glm-4.5-air:free',
-  'z-ai/glm-5.1:free',
   'z-ai/glm-5:free',
 ]);
 
