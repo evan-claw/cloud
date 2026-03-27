@@ -152,3 +152,44 @@ export function scrubOpenCodeSpecificProperties(request: OpenRouterChatCompletio
   delete body.usage;
   delete body.reasoningEffort;
 }
+
+export function requestContainsImages(request: GatewayRequest): boolean {
+  switch (request.kind) {
+    case 'chat_completions':
+      return request.body.messages.some(
+        msg =>
+          (msg.role === 'user' || msg.role === 'tool') &&
+          Array.isArray(msg.content) &&
+          msg.content.some(part => part.type === 'image_url')
+      );
+    case 'responses': {
+      if (!Array.isArray(request.body.input)) return false;
+      return request.body.input.some(item => {
+        if (typeof item === 'string') return false;
+        if (item.type === 'message') {
+          return (
+            Array.isArray(item.content) && item.content.some(part => part.type === 'input_image')
+          );
+        }
+        if (item.type === 'function_call_output') {
+          return (
+            Array.isArray(item.output) && item.output.some(part => part.type === 'input_image')
+          );
+        }
+        return false;
+      });
+    }
+    case 'messages':
+      return request.body.messages.some(
+        msg =>
+          Array.isArray(msg.content) &&
+          msg.content.some(
+            block =>
+              block.type === 'image' ||
+              (block.type === 'tool_result' &&
+                Array.isArray(block.content) &&
+                block.content.some(inner => inner.type === 'image'))
+          )
+      );
+  }
+}

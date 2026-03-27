@@ -14,6 +14,7 @@ import type {
   OpenRouterChatCompletionRequest,
   OpenRouterReasoningConfig,
 } from '@/lib/providers/openrouter/types';
+import { requestContainsImages } from '@/lib/providers/openrouter/request-helpers';
 import type { ModelSettings, OpenCodeSettings, Verbosity } from '@kilocode/db/schema-types';
 import type OpenAI from 'openai';
 
@@ -106,6 +107,11 @@ const BALANCED_CODE_MODEL: ResolvedAutoModel = {
   model: MINIMAX_CURRENT_MODEL_ID,
 };
 
+const BALANCED_IMAGE_MODEL: ResolvedAutoModel = {
+  model: KIMI_CURRENT_MODEL_ID,
+  reasoning: { enabled: true },
+};
+
 const BALANCED_MODE_TO_MODEL: Record<string, ResolvedAutoModel> = {
   plan: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
   general: { model: KIMI_CURRENT_MODEL_ID, reasoning: { enabled: true } },
@@ -164,7 +170,7 @@ export const KILO_AUTO_BALANCED_MODEL: AutoModel = {
   completion_price: '0.000003',
   input_cache_read_price: '0.000000225',
   input_cache_write_price: undefined,
-  supports_images: false,
+  supports_images: true,
   roocode_settings: {
     included_tools: ['edit_file'],
     excluded_tools: ['apply_diff'],
@@ -212,7 +218,8 @@ const legacyMapping: Record<string, AutoModel | undefined> = {
 export async function resolveAutoModel(
   model: string,
   modeHeader: string | null,
-  balancePromise: Promise<number>
+  balancePromise: Promise<number>,
+  hasImages: boolean
 ): Promise<ResolvedAutoModel> {
   const mappedModel =
     (Object.hasOwn(legacyMapping, model) ? legacyMapping[model] : null)?.id ?? model;
@@ -226,6 +233,9 @@ export async function resolveAutoModel(
   }
   const mode = modeHeader?.trim().toLowerCase() ?? '';
   if (mappedModel === KILO_AUTO_BALANCED_MODEL.id) {
+    if (hasImages) {
+      return BALANCED_IMAGE_MODEL;
+    }
     return (
       (Object.hasOwn(BALANCED_MODE_TO_MODEL, mode) ? BALANCED_MODE_TO_MODEL[mode] : null) ??
       BALANCED_CODE_MODEL
@@ -244,10 +254,12 @@ export async function applyResolvedAutoModel(
   featureHeader: FeatureValue | null,
   balancePromise: Promise<number>
 ) {
+  const hasImages = requestContainsImages(request);
   const resolved = await resolveAutoModel(
     model,
     featureHeader === 'kiloclaw' ? 'plan' : modeHeader,
-    balancePromise
+    balancePromise,
+    hasImages
   );
   request.body.model = resolved.model;
   if (resolved.reasoning) {
