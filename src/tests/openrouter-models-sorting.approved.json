@@ -189,7 +189,20 @@
       "default_parameters": {},
       "preferredIndex": 3,
       "isFree": true,
-      "opencode": {}
+      "opencode": {
+        "variants": {
+          "instant": {
+            "reasoning": {
+              "enabled": false
+            }
+          },
+          "thinking": {
+            "reasoning": {
+              "enabled": true
+            }
+          }
+        }
+      }
     },
     {
       "id": "anthropic/claude-sonnet-4",
@@ -644,7 +657,20 @@
       ],
       "default_parameters": {},
       "isFree": true,
-      "opencode": {}
+      "opencode": {
+        "variants": {
+          "instant": {
+            "reasoning": {
+              "enabled": false
+            }
+          },
+          "thinking": {
+            "reasoning": {
+              "enabled": true
+            }
+          }
+        }
+      }
     },
     {
       "id": "x-ai/grok-code-fast-1:optimized:free",
