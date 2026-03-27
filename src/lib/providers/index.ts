@@ -57,8 +57,8 @@ async function checkCodingPlanBYOK(
       apiUrl: codingPlan.base_url,
       apiKey: userByok[0].decryptedAPIKey,
       transformRequest(context) {
-        Object.assign(context.request.body, codingPlanModel.extra_body);
         context.request.body.model = codingPlanModel.id;
+        codingPlan.transformRequest(context);
       },
     } satisfies Provider,
     userByok,

@@ -1,4 +1,5 @@
 import type { CodingPlanProvider } from '@/lib/providers/coding-plans/types';
+import { isReasoningExplicitlyDisabled } from '@/lib/providers/openrouter/request-helpers';
 
 export default [
   {
@@ -6,6 +7,11 @@ export default [
     name: 'BytePlus Coding Plan',
     base_url: 'https://ark.ap-southeast.bytepluses.com/api/coding/v3',
     ai_sdk_provider: 'openai-compatible',
+    transformRequest(context) {
+      context.request.body.thinking = {
+        type: isReasoningExplicitlyDisabled(context.request) ? 'disabled' : 'enabled',
+      };
+    },
     models: [
       {
         id: 'bytedance-seed-code',
@@ -15,9 +21,6 @@ export default [
         flags: ['recommended', 'vision'],
         context_length: 262144,
         max_completion_tokens: 32768,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'kimi-k2.5',
@@ -27,9 +30,6 @@ export default [
         flags: ['recommended'],
         context_length: 262144,
         max_completion_tokens: 32768,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.7',
@@ -39,9 +39,6 @@ export default [
         flags: ['recommended'],
         context_length: 204800,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'deepseek-v3.2',
@@ -51,9 +48,6 @@ export default [
         flags: [],
         context_length: 131072,
         max_completion_tokens: 32768,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'gpt-oss-120b',
@@ -63,9 +57,6 @@ export default [
         flags: [],
         context_length: 131072,
         max_completion_tokens: 65536,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'dola-seed-2.0-pro',
@@ -75,9 +66,6 @@ export default [
         flags: ['vision'],
         context_length: 262144,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'dola-seed-2.0-lite',
@@ -87,9 +75,6 @@ export default [
         flags: ['vision'],
         context_length: 262144,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
     ],
   },
@@ -98,6 +83,11 @@ export default [
     name: 'Z.ai Coding Plan',
     base_url: 'https://api.z.ai/api/coding/paas/v4',
     ai_sdk_provider: 'openai-compatible',
+    transformRequest(context) {
+      context.request.body.thinking = {
+        type: isReasoningExplicitlyDisabled(context.request) ? 'disabled' : 'enabled',
+      };
+    },
     models: [
       {
         id: 'glm-5-turbo',
@@ -107,9 +97,6 @@ export default [
         flags: ['recommended'],
         context_length: 202752,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-5',
@@ -119,9 +106,6 @@ export default [
         flags: ['recommended'],
         context_length: 204800,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.7',
@@ -131,9 +115,6 @@ export default [
         flags: ['recommended'],
         context_length: 204800,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.7-flash',
@@ -143,9 +124,6 @@ export default [
         flags: [],
         context_length: 200000,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.7-flashx',
@@ -155,9 +133,6 @@ export default [
         flags: [],
         context_length: 200000,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.6',
@@ -167,9 +142,6 @@ export default [
         flags: [],
         context_length: 204800,
         max_completion_tokens: 131072,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.6v',
@@ -179,9 +151,6 @@ export default [
         flags: ['vision'],
         context_length: 128000,
         max_completion_tokens: 32768,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.5',
@@ -191,9 +160,6 @@ export default [
         flags: [],
         context_length: 131072,
         max_completion_tokens: 98304,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.5-air',
@@ -203,9 +169,6 @@ export default [
         flags: [],
         context_length: 131072,
         max_completion_tokens: 98304,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.5-flash',
@@ -215,9 +178,6 @@ export default [
         flags: [],
         context_length: 131072,
         max_completion_tokens: 98304,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
       {
         id: 'glm-4.5v',
@@ -227,9 +187,6 @@ export default [
         flags: ['vision'],
         context_length: 64000,
         max_completion_tokens: 16384,
-        extra_body: {
-          thinking: { type: 'enabled' },
-        },
       },
     ],
   },

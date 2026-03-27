@@ -152,3 +152,16 @@ export function scrubOpenCodeSpecificProperties(request: OpenRouterChatCompletio
   delete body.usage;
   delete body.reasoningEffort;
 }
+
+export function isReasoningExplicitlyDisabled(request: GatewayRequest) {
+  if (request.kind === 'messages') {
+    return request.body.thinking?.type === 'disabled';
+  }
+  if (request.kind === 'responses') {
+    return request.body.reasoning?.effort === 'none';
+  }
+  if (request.body.reasoning?.enabled === true) {
+    return false;
+  }
+  return (request.body.reasoning?.effort ?? request.body.reasoning_effort) === 'none';
+}
