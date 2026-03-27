@@ -23,6 +23,8 @@
       "pricing": {
         "prompt": "0.000005",
         "completion": "0.000025",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
         "request": "0",
         "image": "0",
         "web_search": "0",
@@ -65,6 +67,7 @@
       "pricing": {
         "prompt": "0.0000006",
         "completion": "0.000003",
+        "input_cache_read": "0.000000225",
         "request": "0",
         "image": "0",
         "web_search": "0",
@@ -112,6 +115,8 @@
       "pricing": {
         "prompt": "0",
         "completion": "0",
+        "input_cache_read": "0",
+        "input_cache_write": "0",
         "request": "0",
         "image": "0",
         "web_search": "0",
@@ -709,6 +714,7 @@
       "pricing": {
         "prompt": "0.00000005",
         "completion": "0.0000004",
+        "input_cache_read": "0.000000005",
         "request": "0",
         "image": "0",
         "web_search": "0",
