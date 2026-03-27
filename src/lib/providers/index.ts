@@ -34,6 +34,15 @@ import { isXiaomiModel } from '@/lib/providers/xiaomi';
 import type { BYOKResult, Provider } from '@/lib/providers/types';
 import PROVIDERS from '@/lib/providers/provider-definitions';
 import { getCodingPlanModel } from '@/lib/providers/coding-plans';
+import type { CustomLlmProvider } from '@kilocode/db';
+
+function inferSupportedChatApis(aiSdkProvider: CustomLlmProvider) {
+  return aiSdkProvider === 'anthropic'
+    ? (['messages'] as const)
+    : aiSdkProvider === 'openai'
+      ? (['responses'] as const)
+      : (['chat_completions'] as const);
+}
 
 async function checkCodingPlanBYOK(
   user: User | AnonymousUserContext,
@@ -55,6 +64,7 @@ async function checkCodingPlanBYOK(
       id: 'coding-plan',
       apiUrl: codingPlan.base_url,
       apiKey: userByok[0].decryptedAPIKey,
+      supportedChatApis: inferSupportedChatApis(codingPlan.ai_sdk_provider),
       transformRequest(context) {
         context.request.body.model = codingPlanModel.id;
         codingPlan.transformRequest(context);
@@ -110,6 +120,7 @@ export async function getProvider(
           id: 'custom',
           apiUrl: customLlm.base_url,
           apiKey: customLlm.api_key,
+          supportedChatApis: inferSupportedChatApis(customLlm.provider),
           transformRequest(context) {
             Object.assign(context.request.body, customLlm?.extra_body ?? {});
             for (const [key, value] of Object.entries(customLlm.extra_headers ?? {})) {

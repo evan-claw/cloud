@@ -39,6 +39,7 @@ import {
   wrapInSafeNextResponse,
   forbiddenFreeModelResponse,
   storeAndPreviousResponseIdIsNotSupported,
+  apiKindNotSupportedResponse,
 } from '@/lib/llm-proxy-helpers';
 import { getBalanceAndOrgSettings } from '@/lib/organizations/organization-usage';
 import { ENABLE_TOOL_REPAIR, repairTools } from '@/lib/tool-calling';
@@ -309,6 +310,9 @@ export async function POST(request: NextRequest): Promise<NextResponseType<unkno
     organizationId,
     taskId
   );
+  if (!provider.supportedChatApis.includes(requestBodyParsed.kind)) {
+    return apiKindNotSupportedResponse(requestBodyParsed.kind, provider.supportedChatApis);
+  }
 
   console.debug(`Routing request to ${provider.id}`);
 
