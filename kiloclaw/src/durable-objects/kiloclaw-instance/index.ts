@@ -393,7 +393,16 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
     // The bot and channel are created server-side here so the API secret never
     // reaches the Fly Machine. Failure is non-fatal: the instance will start
     // without the Stream Chat channel rather than blocking provisioning.
-    if (isNew && this.env.STREAM_CHAT_API_KEY && this.env.STREAM_CHAT_API_SECRET) {
+    // Set up or backfill the default Stream Chat channel (best-effort).
+    // On first provision (isNew) this creates the channel from scratch.
+    // On re-provision (!isNew) this backfills instances created before the
+    // feature was added. setupDefaultStreamChatChannel is idempotent
+    // (upsert users, getOrCreate channel). Failure is non-fatal.
+    if (
+      !this.s.streamChatApiKey &&
+      this.env.STREAM_CHAT_API_KEY &&
+      this.env.STREAM_CHAT_API_SECRET
+    ) {
       try {
         const streamChat = await setupDefaultStreamChatChannel(
           this.env.STREAM_CHAT_API_KEY,
@@ -410,9 +419,12 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
           streamChatBotUserToken: streamChat.botUserToken,
           streamChatChannelId: streamChat.channelId,
         });
-        console.log('[DO] Stream Chat default channel provisioned:', streamChat.channelId);
+        console.log(
+          `[DO] Stream Chat channel ${isNew ? 'provisioned' : 'backfilled'}:`,
+          streamChat.channelId
+        );
       } catch (err) {
-        doWarn(this.s, 'Stream Chat default channel setup failed (non-fatal)', {
+        doWarn(this.s, 'Stream Chat channel setup failed (non-fatal)', {
           error: toLoggable(err),
         });
       }
@@ -1911,6 +1923,40 @@ export class KiloClawInstance extends DurableObject<KiloClawEnv> {
 
       if (!this.s.flyMachineId) {
         throw new Error('No machine exists');
+      }
+
+      // Backfill Stream Chat for instances created before the feature was added.
+      // setupDefaultStreamChatChannel is idempotent (upsert users, getOrCreate channel).
+      if (
+        !this.s.streamChatApiKey &&
+        this.env.STREAM_CHAT_API_KEY &&
+        this.env.STREAM_CHAT_API_SECRET &&
+        this.s.sandboxId
+      ) {
+        try {
+          const streamChat = await setupDefaultStreamChatChannel(
+            this.env.STREAM_CHAT_API_KEY,
+            this.env.STREAM_CHAT_API_SECRET,
+            this.s.sandboxId
+          );
+          this.s.streamChatApiKey = streamChat.apiKey;
+          this.s.streamChatBotUserId = streamChat.botUserId;
+          this.s.streamChatBotUserToken = streamChat.botUserToken;
+          this.s.streamChatChannelId = streamChat.channelId;
+          await this.persist({
+            streamChatApiKey: streamChat.apiKey,
+            streamChatBotUserId: streamChat.botUserId,
+            streamChatBotUserToken: streamChat.botUserToken,
+            streamChatChannelId: streamChat.channelId,
+          });
+          doLog(this.s, 'Stream Chat backfilled on restart', {
+            channelId: streamChat.channelId,
+          });
+        } catch (err) {
+          doWarn(this.s, 'Stream Chat backfill failed on restart (non-fatal)', {
+            error: toLoggable(err),
+          });
+        }
       }
 
       const flyConfig = getFlyConfig(this.env, this.s);
